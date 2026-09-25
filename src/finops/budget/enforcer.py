@@ -6,15 +6,21 @@ from cost_snapshots / attributed_costs. Supports:
 
   - Total account budget
   - Per-provider budget (aws, azure, gcp, etc.)
+  - Per-account budget (the account_id on cost_snapshots)
   - Per-team budget (via attributed_costs)
   - Per-service budget
 
-Two-tier alerting (alerts only — nable never blocks your pipeline):
+Two-tier alerting:
   alert_at_pct    (default 80%)  → warning notification
-  critical_at_pct (default 100%) → critical notification
+  critical_at_pct (default 100%) → critical notification, and a breach
 
-Teams decide what to do when a budget is exceeded. nable surfaces the data,
-not the decision.
+What a breach stops is the team's choice, and off by default:
+  - `nable budget ci-gate --fail-on-breach` fails a pipeline step (exit 1)
+    when a budget is breached; without the flag it only reports.
+  - The guard hook asks before an agent's priced change that would take a
+    budget over its limit, or denies it when the policy says
+    `on_budget_breach: deny` (guard.budget_lens reads the summary that
+    check_all_budgets writes, budget/summary.py).
 
 budget.yml format (committed alongside infra code):
 ────────────────────────────────────────────────────
@@ -54,17 +60,22 @@ log = logging.getLogger(__name__)
 
 def create_budget(
     name: str,
-    scope_type: str,        # "total" | "provider" | "team" | "service"
+    scope_type: str,        # "total" | "provider" | "account" | "team" | "service"
     limit_usd: float,
     scope_value: str = "*",
     period: str = "monthly",
     alert_at_pct: float = 80.0,
     critical_at_pct: float = 100.0,
     created_by: str = "mcp",
+    block_at_pct: float | None = None,
 ) -> dict[str, Any]:
     from ..storage.db import budgets, get_engine
     from sqlalchemy import insert
 
+    # block_at_pct is the set_budget tool's name for critical_at_pct (and the
+    # old configs' one). Refusing it made that tool fail on every call.
+    if block_at_pct is not None:
+        critical_at_pct = float(block_at_pct)
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
         result = conn.execute(insert(budgets).values(
@@ -82,6 +93,7 @@ def create_budget(
         ))
         budget_id = result.inserted_primary_key[0]
 
+    refresh_summary()
     return {
         "id": budget_id,
         "name": name,
@@ -113,6 +125,7 @@ def delete_budget(budget_id: int) -> bool:
         result = conn.execute(
             update(budgets).where(budgets.c.id == budget_id).values(is_active=False)
         )
+    refresh_summary()
     return result.rowcount > 0
 
 
@@ -152,6 +165,12 @@ def _fetch_spend(budget: dict[str, Any], start: str, end: str, conn: Any) -> flo
             cost_snapshots.c.snapshot_date >= start,
             cost_snapshots.c.snapshot_date <= end,
             cost_snapshots.c.provider == scope_value,
+        )
+    elif scope_type == "account":
+        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
+            cost_snapshots.c.snapshot_date >= start,
+            cost_snapshots.c.snapshot_date <= end,
+            cost_snapshots.c.account_id == scope_value,
         )
     elif scope_type == "service":
         q = select(func.sum(cost_snapshots.c.amount_usd)).where(
@@ -224,20 +243,55 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
     }
 
 
+def _spend_through(conn: Any) -> str | None:
+    """The newest cost snapshot date up to today: how current the spend is."""
+    from sqlalchemy import func, select
+
+    from ..storage.db import cost_snapshots
+    today = datetime.now().astimezone().date()
+    q = select(func.max(cost_snapshots.c.snapshot_date)).where(
+        cost_snapshots.c.snapshot_date <= today.isoformat())
+    got = conn.execute(q).scalar()
+    return str(got) if got else None
+
+
 def check_all_budgets() -> list[dict[str, Any]]:
-    """Check all active budgets. Returns list sorted by % used descending."""
+    """Check all active budgets. Returns list sorted by % used descending.
+
+    Also writes the figures to the budget summary the guard hook reads
+    (budget/summary.py), so every budget check keeps the guard's spend
+    figure current."""
     from ..storage.db import get_engine
     budget_list = list_budgets(active_only=True)
-    if not budget_list:
-        return []
-    results = []
-    with get_engine().connect() as conn:
-        for b in budget_list:
+    results: list[dict[str, Any]] = []
+    through = None
+    if budget_list:
+        with get_engine().connect() as conn:
+            for b in budget_list:
+                try:
+                    results.append(check_budget(b, conn=conn))
+                except Exception as e:
+                    log.warning("Budget check failed for %s: %s", b.get("name"), e)
             try:
-                results.append(check_budget(b, conn=conn))
-            except Exception as e:
-                log.warning("Budget check failed for %s: %s", b.get("name"), e)
-    return sorted(results, key=lambda x: x["pct_used"], reverse=True)
+                through = _spend_through(conn)
+            except Exception:  # noqa: BLE001 - a missing date must not fail the check
+                through = None
+    results.sort(key=lambda x: x["pct_used"], reverse=True)
+    from .summary import write_summary
+    write_summary(results, spend_through=through)
+    return results
+
+
+def refresh_summary() -> dict[str, Any]:
+    """Recompute every budget and rewrite the guard's summary. Never raises:
+    {"ok": True, "budgets": n, "path": ...} or {"ok": False, "error": ...}."""
+    from .summary import summary_path
+    try:
+        results = check_all_budgets()
+    except Exception as e:  # noqa: BLE001 - callers are budget writes that already succeeded
+        log.warning("Budget summary refresh failed: %s", e)
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "budgets": len(results), "path": str(summary_path())}
 
 
 # ── budget.yml sync ───────────────────────────────────────────────────────────
@@ -326,6 +380,7 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
                 )
         updated_list = [name for _, name in to_update]
 
+    refresh_summary()
     return {
         "source": str(path),
         "created": created,
@@ -334,50 +389,104 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     }
 
 
-# ── CI report — informational only, never blocks ──────────────────────────────
+# ── CI gate: a report by default, a failing step when asked ────────────────────
 
 def ci_gate(
     budget_yaml: str | None = None,
     fail_on_exceeded: bool = False,
+    *,
+    fail_on_breach: bool = False,
+    as_json: bool = False,
 ) -> int:
     """
-    CI budget report: prints budget status to stdout. Always exits 0.
+    CI budget gate: prints budget status and returns the step's exit code.
 
-    nable surfaces cost data — it never blocks your pipeline. Your team
-    decides what action to take when a budget is exceeded.
+    By default it reports and returns 0, whatever the budgets say, as it
+    always has. With fail_on_breach (`nable budget ci-gate --fail-on-breach`)
+    it returns:
 
-    Returns exit code: always 0
+      0  no budget breached (warnings do not fail the step)
+      1  at least one budget breached: spend at or past its critical_at_pct
+      2  the budgets could not be checked (a gate that cannot see must not
+         pass); without fail_on_breach this is reported and returns 0
+
+    fail_on_exceeded is the old name for fail_on_breach and does the same.
+    as_json prints one JSON document on stdout instead of the report:
+    {ok, exit_code, fail_on_breach, breached, warnings, budgets, as_of,
+    spend_through, [sync], [error]}. The check also refreshes the spend
+    summary the guard hook reads.
     """
-    if budget_yaml and Path(budget_yaml).exists():
-        sync_from_yaml(budget_yaml)
+    import json
 
-    results = check_all_budgets()
-    if not results:
-        print("✅ No budgets configured")
-        return 0
+    fail = bool(fail_on_breach or fail_on_exceeded)
+    doc: dict[str, Any] = {"ok": True, "exit_code": 0, "fail_on_breach": fail,
+                           "breached": [], "warnings": [], "budgets": []}
 
+    def done(code: int) -> int:
+        doc["exit_code"] = code
+        doc["ok"] = code == 0 and not doc.get("error") and not doc["breached"]
+        if as_json:
+            print(json.dumps(doc, default=str))
+        return code
+
+    def failed(msg: str) -> int:
+        doc["error"] = msg
+        if not as_json:
+            print(f"Budget check failed: {msg}")
+            print("Failing the step (--fail-on-breach)." if fail
+                  else "Not failing the step; pass --fail-on-breach to fail it.")
+        return done(2 if fail else 0)
+
+    if budget_yaml:
+        if not Path(budget_yaml).exists():
+            return failed(f"File not found: {budget_yaml}")
+        synced = sync_from_yaml(budget_yaml)
+        doc["sync"] = synced
+        if synced.get("error"):
+            return failed(f"{budget_yaml}: {synced['error']}")
+
+    try:
+        results = check_all_budgets()
+    except Exception as e:  # noqa: BLE001 - reported, and fails the step when asked
+        return failed(str(e))
+
+    from .summary import freshness, read_summary
+    fresh = freshness(read_summary())
     exceeded = [b for b in results if b["status"] == "exceeded"]
-    warnings  = [b for b in results if b["status"] == "warning"]
-    ok        = [b for b in results if b["status"] == "ok"]
+    warnings = [b for b in results if b["status"] == "warning"]
+    doc.update(budgets=results, breached=[b["name"] for b in exceeded],
+               warnings=[b["name"] for b in warnings], as_of=fresh["as_of"],
+               spend_through=fresh["spend_through"])
+    code = 1 if (fail and exceeded) else 0
+    if as_json:
+        return done(code)
 
+    if not results:
+        print("No budgets configured.")
+        return done(code)
+
+    ok = len(results) - len(exceeded) - len(warnings)
     print(f"\n{'─'*60}")
-    print(f"  nable Budget Report — {date.today().isoformat()}")
+    print(f"  nable budget report, {date.today().isoformat()}")
     print(f"{'─'*60}")
     for b in results:
-        icon = "🔴" if b["status"] == "exceeded" else "🟡" if b["status"] == "warning" else "🟢"
-        print(f"  {icon} {b['name']}: ${b['spent']:,.0f} / ${b['limit']:,.0f} ({b['pct_used']:.0f}%)")
+        print(f"  [{b['status']}] {b['name']}: ${b['spent']:,.0f} / ${b['limit']:,.0f} "
+              f"({b['pct_used']:.0f}%)")
         if b["projected_overage"] > 0:
-            print(f"      ↳ projected overage: ${b['projected_overage']:,.0f} by end of period")
+            print(f"      projected overage: ${b['projected_overage']:,.0f} by end of period")
     print(f"{'─'*60}")
-    print(f"  {len(ok)} OK · {len(warnings)} warnings · {len(exceeded)} exceeded")
+    print(f"  {ok} OK · {len(warnings)} warnings · {len(exceeded)} exceeded")
     print(f"{'─'*60}\n")
 
     if exceeded:
-        print("🔴 Budget alert — the following budgets are exceeded:")
+        print("Budget exceeded:")
         for b in exceeded:
-            print(f"   • {b['name']}: ${b['spent']:,.0f} spent (${b['remaining']:,.0f} over limit)")
-        print("   nable does not block your pipeline. Your team decides the next step.\n")
+            print(f"   - {b['name']}: ${b['spent']:,.0f} spent, "
+                  f"${b['spent'] - b['limit']:,.0f} over its ${b['limit']:,.0f} limit")
+        if fail:
+            print("   Failing the step (--fail-on-breach).\n")
+        else:
+            print("   Not failing the step; pass --fail-on-breach to fail it.\n")
     elif warnings:
-        print("🟡 Budget warning — approaching limit on some budgets\n")
-
-    return 0  # never block
+        print("Budget warning: approaching the limit on some budgets.\n")
+    return done(code)

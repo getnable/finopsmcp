@@ -9,6 +9,7 @@ and is intentionally NOT implemented here, propose-only stays fully intact.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 GATE_ALLOW = "allow"        # reversible, allowlisted, in budget: a human can apply it
@@ -61,7 +62,16 @@ DEFAULT_POLICY: dict[str, Any] = {
     # rather than deciding, so the next one asks. Below 2 turns it off.
     "loop_repeat_count": 3,
     "loop_window_minutes": 10.0,
+    # What a change that would take a cloud budget over its limit gets: "ask"
+    # (escalate, a human confirms) or "deny" (block, a hard stop). Set it in
+    # nable.policy.yaml as `on_budget_breach: deny`, or with
+    # FINOPS_POLICY_ON_BUDGET_BREACH. The guard's FINOPS_GUARD_STOP_ON_BUDGET
+    # overrides it for one session or CI run, both ways.
+    "on_budget_breach": "ask",
 }
+
+BUDGET_BREACH_ACTIONS = ("ask", "deny")
+POLICY_FILE_NAME = "nable.policy.yaml"
 
 
 VELOCITY_CAP_MULTIPLE = 4.0
@@ -87,6 +97,51 @@ def is_one_way(action_type: str) -> bool:
     return action_type in ONE_WAY_DOORS
 
 
+def policy_file_path() -> Path:
+    """FINOPS_POLICY_FILE, else nable.policy.yaml in nable's data directory.
+
+    Never the working directory: agents and MCP clients run inside whatever
+    project is open, so a repo could ship a policy that loosens itself."""
+    raw = os.getenv("FINOPS_POLICY_FILE", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    from .guard_ledger import _data_dir  # storage.db's rule, without SQLAlchemy
+    return _data_dir() / POLICY_FILE_NAME
+
+
+# (path, mtime_ns, size) -> the keys load_policy takes from the file. The guard
+# asks for the policy several times per verdict; the file is parsed once.
+_FILE_CACHE: dict[str, Any] = {}
+
+
+def _policy_file_keys() -> dict[str, Any]:
+    """The policy keys set in the policy file, validated. Currently only
+    on_budget_breach. Empty when there is no file, it cannot be parsed, or a
+    value is not one this policy knows: a broken file never loosens the gate
+    and never breaks it."""
+    try:
+        path = policy_file_path()
+        st = path.stat()
+    except (OSError, ValueError):
+        return {}
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if _FILE_CACHE.get("key") == key:
+        return dict(_FILE_CACHE["keys"])
+    keys: dict[str, Any] = {}
+    try:
+        import yaml
+        with open(path) as f:
+            doc = yaml.safe_load(f)
+    except Exception:  # noqa: BLE001 - an unreadable file is no file
+        doc = None
+    if isinstance(doc, dict):
+        val = doc.get("on_budget_breach")
+        if isinstance(val, str) and val.strip().lower() in BUDGET_BREACH_ACTIONS:
+            keys["on_budget_breach"] = val.strip().lower()
+    _FILE_CACHE.update(key=key, keys=keys)
+    return dict(keys)
+
+
 def load_policy() -> dict[str, Any]:
     """The default policy with optional env overrides, so a human can author the
     policy without a config system:
@@ -96,9 +151,22 @@ def load_policy() -> dict[str, Any]:
       FINOPS_POLICY_VELOCITY_WINDOW_MIN  the window, in minutes (float, default 60)
       FINOPS_POLICY_LOOP_COUNT         identical creations that make a loop (int, 0 = off)
       FINOPS_POLICY_LOOP_WINDOW_MIN    ...within this many minutes (float, default 10)
+      FINOPS_POLICY_ON_BUDGET_BREACH   ask | deny, for a change over a cloud budget
+
+    on_budget_breach may also be set in the policy file (policy_file_path(),
+    nable.policy.yaml in nable's data directory):
+
+        on_budget_breach: deny     # a change over budget is blocked, not asked
+
+    The env var wins over the file.
     """
     pol: dict[str, Any] = dict(DEFAULT_POLICY)
     pol["allowed_action_types"] = list(DEFAULT_POLICY["allowed_action_types"])
+    pol.update(_policy_file_keys())
+
+    ob = os.getenv("FINOPS_POLICY_ON_BUDGET_BREACH", "").strip().lower()
+    if ob in BUDGET_BREACH_ACTIONS:
+        pol["on_budget_breach"] = ob
 
     for env, key in (("FINOPS_POLICY_MAX_AUTO_USD", "max_auto_monthly_usd"),
                      ("FINOPS_POLICY_VELOCITY_CAP_USD", "velocity_cap_monthly_usd"),
@@ -176,8 +244,10 @@ def evaluate_action_gate(
     cost_verdict: the preflight verdict ("ok"/"warn"/"over_budget"/"no_budget"), if known.
     signal: optional per-source learning signal; folded in caution-only (see _apply_learning).
 
-    Returns {gate, reason, action_type, door, monthly_delta_usd, [learned]}. nable
-    never executes; this advises a human. Pure, never raises on normal input.
+    Returns {gate, reason, rule, action_type, door, monthly_delta_usd, [learned]}.
+    `rule` names what decided: "one_way", "allowlist", "over_budget", "threshold"
+    or "allowed". nable never executes; this advises a human. Pure, never raises
+    on normal input.
     """
     pol = policy or load_policy()
     delta = float(monthly_delta_usd or 0.0)
@@ -189,11 +259,19 @@ def evaluate_action_gate(
     }
 
     # ---- Static policy (the floor of caution) ----
-    if door == "one_way" and pol.get("escalate_one_way_doors", True):
+    if cost_verdict == "over_budget" and pol.get("on_budget_breach") == "deny":
+        # The human chose a hard stop for over-budget changes. It comes first:
+        # a stop is stricter than the confirmation a one-way door gets.
+        out["gate"] = GATE_BLOCK
+        out["rule"] = "over_budget"
+        out["reason"] = ("This change would push you over budget, and your policy sets "
+                         "on_budget_breach: deny, so it is blocked.")
+    elif door == "one_way" and pol.get("escalate_one_way_doors", True):
         # One-way doors always escalate (irreversible or a financial commitment).
         # The reason is for a human: what the action does, in words, not the
         # policy's own vocabulary (action_type and door carry that).
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "one_way"
         what = _ONE_WAY_WHAT.get(action_type, "This action")
         out["reason"] = (f"{what} cannot be "
                          f"{'cancelled' if action_type == 'purchase_commitment' else 'undone'},"
@@ -201,22 +279,26 @@ def evaluate_action_gate(
     elif action_type not in set(pol.get("allowed_action_types", [])):
         # Not in the human's allowlist -> block.
         out["gate"] = GATE_BLOCK
+        out["rule"] = "allowlist"
         out["reason"] = (f"'{action_type}' is not in your allowlist of permitted actions; "
                          "nable will not propose applying it.")
     elif cost_verdict == "over_budget":
         # Over budget (per the cost preflight) -> escalate.
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "over_budget"
         out["reason"] = ("This change would push you over budget; a human should review it "
                          "before it is applied.")
     elif delta > float(pol.get("max_auto_monthly_usd", 500.0)):
         # Cost increase above the auto threshold -> escalate (savings are always fine).
         cap = float(pol.get("max_auto_monthly_usd", 500.0))
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "threshold"
         out["reason"] = (f"The +${delta:,.0f}/mo impact is over your ${cap:,.0f} auto threshold; "
                          "a human should review it.")
     else:
         # Reversible, allowlisted, within budget and threshold.
         out["gate"] = GATE_ALLOW
+        out["rule"] = "allowed"
         out["reason"] = (f"'{action_type}' is reversible, in your allowlist, and within budget; "
                          "a human can apply it within your policy.")
 

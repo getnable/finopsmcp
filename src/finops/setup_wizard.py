@@ -2739,6 +2739,7 @@ def _guard_doctor(parsed) -> None:
     print(f"  {bold('Not covered')}")
     for c in d["not_covered"]:
         print(f"    - {c}")
+    _guard_doctor_budgets(d.get("budgets") or {})
     led = d["ledger"]
     print()
     if led["ok"]:
@@ -2758,6 +2759,37 @@ def _guard_doctor(parsed) -> None:
     for fix in d["recommendations"]:
         print(f"    {cyan('->')} {fix}")
     print()
+
+
+def _guard_doctor_budgets(b: dict) -> None:
+    """The doctor's cloud budget section: what the guard enforces, and on how
+    fresh a figure."""
+    from .budget.summary import age_words
+    from .welcome import amber, bold, dim
+
+    print()
+    print(f"  {bold('Cloud budgets')} (checked on each priced change)")
+    for row in b.get("enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): ${row['spent'] or 0:,.0f} of "
+              f"${row['limit'] or 0:,.0f} ({row['pct_used'] or 0:.0f}%)")
+    for row in b.get("not_enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): {amber('not enforced')}, needs {row['needs']}")
+    if not (b.get("enforced") or b.get("not_enforced")):
+        print(f"    {dim('none')}")
+    state = b.get("state")
+    if state == "absent":
+        fresh = amber("no spend figure yet (nable budget refresh)")
+    elif state == "stale":
+        old = ("from last month" if b.get("previous_month")
+               else f"{age_words(b.get('age_hours'))} old")
+        fresh = amber(f"spend figure {old}, not used (nable budget refresh)")
+    else:
+        fresh = f"spend figure from {age_words(b.get('age_hours'))} ago"
+        if b.get("spend_through"):
+            fresh += f", cost data through {b['spend_through']}"
+    how = "stops it" if b.get("on_breach") == "deny" else "asks"
+    source = b.get("on_breach_source") or "default"
+    print(dim(f"    {fresh}; a change over budget {how} ({source})"))
 
 
 def _guard_report(parsed) -> None:
@@ -3198,7 +3230,7 @@ def main(args: list[str] | None = None) -> None:
         _GROUPS = [
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
-            ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs"]),
+            ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs", "budget"]),
             ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
@@ -3312,6 +3344,8 @@ def main(args: list[str] | None = None) -> None:
     _add_ai_costs_parser(sub)
     from .cli_why import add_parser as _add_why_parser
     _add_why_parser(sub)
+    from .budget.cli import add_parser as _add_budget_parser
+    _add_budget_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3504,7 +3538,7 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -3757,6 +3791,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "why":
         from .cli_why import run as _why_run
         raise SystemExit(_why_run(parsed))
+    elif parsed.cmd == "budget":
+        from .budget.cli import run as _budget_run
+        raise SystemExit(_budget_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
