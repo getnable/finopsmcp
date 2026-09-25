@@ -193,6 +193,6 @@ def render_dry_run(include_spend: bool = False) -> str:
         f"{len(iam_actions(include_spend))} IAM actions, every one a "
         "Describe/List/Get. The scan changes nothing.",
         "",
-        "Policy JSON:  nable scan --dry-run --json",
+        "Policy JSON:  nable scan --dry-run" + (" --spend" if include_spend else "") + " --json",
     ]
     return "\n".join(out)

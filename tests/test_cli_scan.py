@@ -215,15 +215,41 @@ def test_findings_ranked_and_floored(capsys):
 
 
 def test_proud_low_waste_state(capsys):
-    tiny = _report(findings=[{
-        "waste_type": "tiny", "description": "a $4 thing",
-        "region": "us-east-1", "estimated_monthly_savings": 4.0,
-    }])
-    code, _, _ = _run(_args(), _session(), report=tiny)
+    clean = _report(findings=[])
+    code, _, _ = _run(_args(), _session(), report=clean)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK
     assert "no material waste found, nice" in out
     assert "recoverable" not in out  # never an apologetic near-zero headline
+
+
+def test_findings_below_the_floor_are_counted_not_called_clean(capsys):
+    """A $20/mo account had $4.61/mo of findings and was told "no material
+    waste found, nice". Small is not none."""
+    tiny = _report(findings=[
+        {"waste_type": "tiny", "description": "a $4 thing",
+         "region": "us-east-1", "estimated_monthly_savings": 4.0},
+        {"waste_type": "unassociated_elastic_ip", "region": "us-east-1",
+         "estimated_monthly_savings": 0.61},
+    ])
+    code, _, _ = _run(_args(), _session(), report=tiny)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "nice" not in out
+    assert "2 small findings, $4.61/mo total" in out
+    assert "--json" in out
+
+
+def test_never_nice_when_a_check_could_not_run(capsys):
+    rep = _report(findings=[])
+    rep["checks_run"] = ["ebs", "eips"]
+    rep["checks_failed"] = [{"check": "lambda", "region": "us-east-1",
+                             "error_code": "AccessDenied"}]
+    _run(_args(), _session(), report=rep)
+    out = capsys.readouterr().out
+    assert "nice" not in out
+    assert "no waste found in what could be read" in out
+    assert "could not run and were not counted: lambda" in out
 
 
 def test_spend_flag_shows_headline_discloses_cost_and_weights_regions(capsys):
@@ -328,7 +354,7 @@ def test_spend_flag_ce_denied_degrades_and_still_scans(capsys):
     code, _, engine = _run(_args(spend=True), session)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK
-    assert "spend summary unavailable" in out and "iam-template" in out
+    assert "spend summary unavailable" in out and "--dry-run --spend --json" in out
     assert "recoverable" in out           # recoverable-led headline instead
     assert engine.called                  # the scan still ran
 
@@ -479,7 +505,10 @@ def test_accounts_yaml_without_credentials_is_not_a_clean_scan(tmp_path, monkeyp
     code, events, _ = _run(_args(json=True), _session(creds=False))
     cap = capsys.readouterr()
     assert code == cli_scan.EXIT_NO_CREDS, cap.out
-    assert cap.out == "", "a failed scan printed a result document"
+    # No result document; the one thing on stdout is the error document.
+    assert json.loads(cap.out) == {"error": {
+        "class": "no-creds", "exit_code": cli_scan.EXIT_NO_CREDS,
+        "message": "no AWS credentials found, and no other connected provider answered"}}
     assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["no-creds"]
 
 

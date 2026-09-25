@@ -76,15 +76,26 @@ def _get_boto3_session(role_arn: str | None = None):
     return boto3.Session()
 
 
+class _Regions(list):
+    """Region names, plus the error code when they are a fallback because
+    ec2:DescribeRegions failed. A list subclass so callers and test doubles
+    that expect a plain list keep working; the CLI reads `error_code` to say
+    that only the fallback was scanned instead of implying it saw them all."""
+
+    error_code: str | None = None
+
+
 def _discover_regions(session) -> list[str]:
     """List all opted-in EC2 regions for this account."""
     try:
         ec2 = session.client("ec2", region_name="us-east-1")
         resp = ec2.describe_regions(Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}])
-        return [r["RegionName"] for r in resp.get("Regions", [])]
+        return _Regions(r["RegionName"] for r in resp.get("Regions", []))
     except Exception as exc:
         log.warning("Could not discover regions: %s — defaulting to us-east-1", exc)
-        return _DEFAULT_REGIONS
+        out = _Regions(_DEFAULT_REGIONS)
+        out.error_code = _error_code(exc)
+        return out
 
 
 # ── Per-region audit runner ───────────────────────────────────────────────────
@@ -560,6 +571,7 @@ def run_deep_audit(
     max_workers: int = 8,
     progress_callback: Callable[[str, int, int, int], None] | None = None,
     deadline_seconds: float | None = None,
+    session=None,
 ) -> dict:
     """
     Run a full deep AWS waste audit and return a structured report.
@@ -584,6 +596,9 @@ def run_deep_audit(
                 calls cannot be interrupted; their threads finish in the
                 background and their results are discarded. None (default)
                 means no deadline, exactly the prior behavior.
+        session: Optional boto3 Session to scan with. The CLI passes the one
+                it built from `--profile`, so the audit reads the account the
+                identity check read, not whatever keys the environment holds.
 
     Returns:
         {
@@ -609,7 +624,8 @@ def run_deep_audit(
             role_arn = role_arns_env.split(",")[0].strip() or None
 
     try:
-        session = _get_boto3_session(role_arn)
+        if session is None:
+            session = _get_boto3_session(role_arn)
     except Exception as exc:
         # error_type alongside the message: the message carries a path or an
         # account id so it can never be sent anywhere, and formatting the
