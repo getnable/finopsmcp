@@ -2930,9 +2930,13 @@ def _guard_reconcile(parsed) -> None:
         print(f"  {amber('✗')} {region} not read: {err}")
     show("Denied by the guard, happened anyway", r["denied_but_happened"], mark=amber("✗"))
     show("No guard record", r["no_guard_record"], mark=amber("?"))
+    show("Made in the AWS console (no agent hook runs there)", r["console"], mark=amber("?"))
     show("Seen by the guard, and happened", r["seen_and_happened"], mark=green("✓"))
     if r["service_initiated"]:
         show("Done by an AWS service on someone's behalf", r["service_initiated"], mark="-")
+    if r["attempted_but_failed"]:
+        show("Attempted, and refused by AWS (nothing changed)", r["attempted_but_failed"],
+             mark="-")
     if r["guarded_without_event"]:
         print()
         print(f"  {bold('Let through by the guard, no matching event')} "

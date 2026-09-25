@@ -373,8 +373,12 @@ _PAST = {"allow": "allowed", "warn": "warned", "ask": "asked", "deny": "denied"}
 
 def guard_label(verdict: dict[str, Any] | None, event: dict[str, Any]) -> str:
     """"guard: allowed at $128k/mo, session s1", or why there is no verdict."""
+    if event.get("error_code"):
+        return f"failed ({event['error_code']}), nothing changed"
     if event.get("via") == "aws-service":
         return f"done by an AWS service ({event.get('invoked_by') or 'service'})"
+    if (verdict or {}).get("bucket") == "console" or event.get("via") == "console":
+        return "made in the console, where the guard does not run"
     if not verdict or verdict.get("bucket") == "no_guard_record" or not verdict.get("ledger"):
         return "guard: no record"
     led = verdict["ledger"]

@@ -199,7 +199,8 @@ def test_a_change_with_no_guard_record_says_so_and_a_console_change_is_read_as_o
         _raw("ModifyInstanceAttribute", when, identity=person, ua="console.amazonaws.com")]}))
     [change] = rows[0]["changes"]
     assert change["who"] == "arn:aws:iam::123456789012:user/alice"
-    assert change["via"] == "console" and change["guard"] == "guard: no record"
+    assert change["via"] == "console"
+    assert change["guard"] == "made in the console, where the guard does not run"
 
 
 def test_pages_are_followed_and_calls_paced():
@@ -318,6 +319,10 @@ def test_the_window_stops_at_now():
     ({"bucket": "no_guard_record", "ledger": None}, {}, "guard: no record"),
     (None, {"via": "aws-service", "invoked_by": "autoscaling.amazonaws.com"},
      "done by an AWS service (autoscaling.amazonaws.com)"),
+    ({"bucket": "console", "ledger": None}, {"via": "console"},
+     "made in the console, where the guard does not run"),
+    ({"bucket": "attempted_but_failed", "ledger": None}, {"error_code": "UnauthorizedOperation"},
+     "failed (UnauthorizedOperation), nothing changed"),
 ])
 def test_guard_label(verdict, event, text):
     assert ce.guard_label(verdict, event) == text
