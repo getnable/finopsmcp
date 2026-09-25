@@ -99,12 +99,28 @@ def _trend_explains_the_drop(series: list[float]) -> bool:
 
     intercept = y_mean - slope * x_mean
     predicted = intercept + slope * len(window)  # one step past the window == series[-1]
-    if predicted <= 0:
-        # The trend already extrapolates to zero/negative, so any real,
+    if predicted <= 1e-9:
+        # The trend already extrapolates to zero/negative (float noise in the
+        # fit can leave a true zero a hair above it), so any real,
         # non-negative value is consistent with (or milder than) the decline.
         return True
 
     return series[-1] >= predicted * _TREND_CONSISTENT_RATIO
+
+
+def _day_before_was_low_too(series: list[float]) -> bool:
+    """
+    True when series[-2] is itself under _PARTIAL_DAY_RATIO of its own
+    same-weekday median. A posting lag leaves only the newest day short; two
+    short days in a row is spend that stopped (a shutdown, a migration off
+    the account). Refilling the last of them with its weekday median would
+    fabricate a rebound and project spend that is no longer there.
+    """
+    history = _same_weekday_history(series[:-1])
+    if len(history) < _MIN_SAME_WEEKDAY_SAMPLES:
+        return False
+    baseline = statistics.median(history)
+    return baseline > 1.0 and series[-2] < baseline * _PARTIAL_DAY_RATIO
 
 
 def _clean_trailing_partial_day(series: list[float]) -> list[float]:
@@ -133,8 +149,14 @@ def _clean_trailing_partial_day(series: list[float]) -> list[float]:
     accounts, where series[-1] can legitimately sit far below its own
     same-weekday history because the account is winding down.
 
+    Nor is it touched when series[-2] was already short against its own
+    weekday (_day_before_was_low_too): that is spend that stopped, and a
+    refilled last day would project a rebound that is not coming.
+
     This only ever inspects/replaces series[-1] in a copy of the input; the
-    caller's list is never mutated. Every other point, including a genuine
+    caller's list is never mutated. The replacement is only ever fitted to:
+    Forecaster keeps the real series as its actuals and leaves the replaced
+    day out of the accuracy (MAPE) it reports. Every other point, including a genuine
     zero anywhere else in the series, is returned exactly as given, so a
     real drop to zero is never masked. Only this specific partial-tail-day
     artifact is handled, and only when there is enough same-weekday history
@@ -157,6 +179,9 @@ def _clean_trailing_partial_day(series: list[float]) -> list[float]:
 
     if _trend_explains_the_drop(series):
         return series  # a real, ongoing decline predicts a value this low
+
+    if _day_before_was_low_too(series):
+        return series  # a shutdown already under way, not a partial day
 
     cleaned = list(series)
     cleaned[-1] = round(weekday_baseline, 2)
@@ -369,9 +394,12 @@ class ForecastResult:
     upper: list[float]
     dates: list[str]
     params: dict                  # alpha/beta/gamma (or {})
+    # The newest day looked partly posted and was fitted as its weekday median
+    # (never reported as spend): see _clean_trailing_partial_day.
+    partial_day_adjusted: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "account_id":         self.account_id,
             "service":            self.service,
             "method":             self.method,
@@ -384,6 +412,10 @@ class ForecastResult:
             ],
             "params":             self.params,
         }
+        if self.partial_day_adjusted:
+            out["note"] = ("The newest day looked only partly posted, so the model was "
+                           "fitted to its weekday median instead; it is not reported as spend.")
+        return out
 
 
 class Forecaster:
@@ -399,7 +431,9 @@ class Forecaster:
     def __init__(self, account_id: str, service: str | None = None):
         self.account_id = account_id
         self.service    = service
-        self._series: list[float] = []
+        self._series: list[float] = []        # what the model is fitted to
+        self._actuals: list[float] = []       # what was observed, never cleaned
+        self._partial_day_adjusted = False
         self._params: dict = {}
         self._mape: float  = 0.0
         self._method: str  = "naive"
@@ -549,7 +583,9 @@ class Forecaster:
         _clean_trailing_partial_day) before any of the above ever sees it.
         """
         clamped = [max(0.0, x) for x in series]
+        self._actuals = clamped
         self._series = _clean_trailing_partial_day(clamped)
+        self._partial_day_adjusted = self._series is not clamped
         n = len(self._series)
 
         if n < 7:
@@ -563,7 +599,10 @@ class Forecaster:
         else:
             alpha, beta, gamma = _tune_parameters(self._series)
             fitted, _, _   = _holt_winters_fit(self._series, alpha, beta, gamma)
-            self._mape     = _mape(self._series, fitted)
+            # Accuracy is measured against what was observed only: a replaced
+            # trailing day is not an actual, so it is left out.
+            keep = n - 1 if self._partial_day_adjusted else n
+            self._mape     = _mape(self._actuals[:keep], fitted[:keep])
             self._method   = "holt_winters"
             self._params   = {"alpha": alpha, "beta": beta, "gamma": gamma}
             # Cache to DB so next call skips re-tuning if data unchanged
@@ -628,6 +667,7 @@ class Forecaster:
             upper=upper,
             dates=dates,
             params=self._params,
+            partial_day_adjusted=self._partial_day_adjusted,
         )
 
     # -- Convenience -----------------------------------------------------------

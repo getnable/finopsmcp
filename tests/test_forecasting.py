@@ -260,3 +260,38 @@ def test_clean_trailing_partial_day_skips_when_too_few_same_weekday_samples():
     cleaned = forecasting._clean_trailing_partial_day(series)
 
     assert cleaned == series
+
+
+# ── a real shutdown is not a partial day ──────────────────────────────────────
+
+@pytest.mark.parametrize("zero_days", [2, 3, 4])
+def test_a_shutdown_over_several_days_is_not_refilled(zero_days):
+    """Two or more short days in a row is spend that stopped, not a posting
+    lag: the last of them must not be refilled with its weekday median."""
+    series = [100.0] * 28 + [0.0] * zero_days
+    assert forecasting._clean_trailing_partial_day(series) == series
+
+
+@pytest.mark.parametrize("zero_days", [2, 3, 4, 5])
+def test_a_shutdown_never_projects_more_than_the_raw_series(monkeypatch, zero_days):
+    series = [100.0] * 28 + [0.0] * zero_days
+    guarded = Forecaster("1").fit(series).predict(30).monthly_projection
+    monkeypatch.setattr(forecasting, "_clean_trailing_partial_day", lambda s: s)
+    raw = Forecaster("1").fit(series).predict(30).monthly_projection
+    assert guarded <= raw
+
+
+def test_a_lone_partial_day_is_still_cleaned_after_a_normal_day():
+    series = [100.0] * 28 + [0.0]
+    assert forecasting._clean_trailing_partial_day(series)[-1] == 100.0
+
+
+def test_a_cleaned_day_is_never_reported_as_an_actual():
+    series = _steady_series(28)
+    series[-1] = 3.0
+    f = Forecaster("1").fit(series)
+    assert f._actuals[-1] == 3.0 and f._series[-1] != 3.0
+    doc = f.predict_dict(7)
+    assert "partly posted" in doc["note"] and "not reported as spend" in doc["note"]
+    steady = Forecaster("1").fit(_steady_series(28)).predict_dict(7)
+    assert "note" not in steady
