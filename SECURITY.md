@@ -11,7 +11,9 @@ Anthropic's API to generate an answer when you use it, never to a nable
 server, and `FINOPS_AIRGAP=1` disables it. Anonymous usage telemetry (tool
 names and a random install id, never cost figures, credentials, or account
 identifiers) is on by default and turns off with `NABLE_NO_TELEMETRY=1` or
-`FINOPS_AIRGAP=1`.
+`FINOPS_AIRGAP=1`. The version check asks PyPI's public JSON endpoint for the
+latest release and sends nothing else; `NABLE_NO_UPDATE_CHECK=1` (or
+`FINOPS_NO_UPDATE_CHECK=1`) turns it off.
 
 ## Reporting a vulnerability
 

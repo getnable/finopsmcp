@@ -2915,8 +2915,8 @@ def main(args: list[str] | None = None) -> None:
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
             ("editor & agents", ["claude", "guard", "agents"]),
-            ("account & billing", ["login", "logout", "license", "license-status", "credits",
-                                   "uninstall"]),
+            ("account & billing", ["login", "logout", "license", "license-status", "whoami",
+                                   "plan", "credits", "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
         ]
 
@@ -3068,6 +3068,8 @@ def main(args: list[str] | None = None) -> None:
     un_p.add_argument("--yes", "-y", action="store_true", help="Do not ask; for scripts")
     un_p.add_argument("--dry-run", action="store_true", help="Show what would change, change nothing")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
+    sub.add_parser("whoami",                help="Same as license-status: your plan, email and expiry")
+    sub.add_parser("plan",                  help="Same as license-status: your plan, email and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
@@ -3358,7 +3360,7 @@ def main(args: list[str] | None = None) -> None:
         raise SystemExit(_run_uninstall(getattr(parsed, "purge", False),
                                         getattr(parsed, "yes", False),
                                         getattr(parsed, "dry_run", False)))
-    elif parsed.cmd == "license-status":
+    elif parsed.cmd in ("license-status", "whoami", "plan"):
         _run_license_status()
         return
     elif parsed.cmd == "serve":
