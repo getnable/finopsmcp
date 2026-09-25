@@ -166,7 +166,14 @@ class _Pacer:
 def _via(user_agent: str, identity: dict[str, Any]) -> str:
     """A coarse, human-readable reading of who made the call."""
     ua = (user_agent or "").lower()
-    if "console" in ua or "signin.amazonaws.com" in ua:
+    # CloudTrail records a console action's user agent as the exact host
+    # "signin.amazonaws.com" (or a console.*.amazonaws.com host). Compare whole
+    # tokens, not substrings: "signin.amazonaws.com" inside some other string
+    # says nothing about who made the call.
+    tokens = set(ua.replace("/", " ").replace("[", " ").replace("]", " ").split())
+    if ("signin.amazonaws.com" in tokens
+            or any(t.startswith("console.") and t.endswith(".amazonaws.com") for t in tokens)
+            or ("aws-internal" in ua and "console" in ua)):
         return "console"
     if identity.get("type") == "AWSService" or str(identity.get("invokedBy") or "").endswith(
             ".amazonaws.com"):

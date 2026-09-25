@@ -341,3 +341,17 @@ def test_cli_arguments_parse():
     assert seen["guard_action"] == "reconcile" and seen["guard_hours"] == 2
     assert seen["guard_regions"] == ["us-east-1", "eu-west-1"]
     assert seen["guard_tolerance"] == 10 and seen["guard_json"] is True
+
+
+@pytest.mark.parametrize("ua,via", [
+    ("signin.amazonaws.com", "console"),
+    ("console.amazonaws.com", "console"),
+    ("console.ec2.amazonaws.com", "console"),
+    ("aws-cli/2.15.0 Python/3.11 Linux/6 exe/x86_64 prompt/off command/ec2.run-instances", "aws-cli"),
+    # A host name embedded in something else is not the console.
+    ("evil.example/signin.amazonaws.com.attacker", "sdk"),
+])
+def test_console_is_matched_by_whole_host(ua, via):
+    from finops.guard_reconcile import _via
+    got = _via(ua, {"type": "IAMUser"})
+    assert (got == "console") == (via == "console"), got
