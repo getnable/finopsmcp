@@ -60,6 +60,25 @@ hook, and fixed.
   `nable budget ci-gate --fail-on-breach` fails a pipeline step.
 - New: DynamoDB provisioned-capacity check, and prices checked against the
   AWS Price List (EC2, RDS per engine, EBS, load balancers, NAT).
+- **Fixed in a pre-release code review.**
+  - Guard: quote masking, same-line aliases, line continuations and
+    backslash escapes can no longer hide a destroy; masking scans in linear
+    time, so a padded command cannot outlast the hook timeout; an MCP shell
+    tool can no longer run a destroy that does not start the command; a
+    budget ask no longer downgrades a policy deny; compound commands are
+    priced part by part; changing a budget from the agent asks; Cursor and
+    Codex no longer block every command when uvx is offline.
+  - Ledger and reconcile: JSON, YAML and header secrets are redacted; a
+    ledger that cannot be written is recorded as such; console actions and
+    failed calls are no longer matched to agent records.
+  - Money: RDS is priced by engine everywhere, idle EC2 by instance price,
+    Gateway Load Balancers read from their own metrics, snapshots as an
+    upper bound, and no finding collapses across regions. A refused OpenAI
+    key is unread, not $0; gpt-5 and gpt-4.1 are priced.
+  - Budgets: with no cost data for the period the CI gate says it cannot
+    check (exit 2) and the guard says the budget went unchecked.
+  - Setup: re-running setup moves a license key into the vault instead of
+    dropping it, and `NABLE_TELEMETRY=off` is respected.
 
 ## 0.8.216
 
