@@ -1232,13 +1232,14 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         if record:
             if history_error is not None:
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
-                                  check="history")
-            _record(v, tool=tool, command=command)
+                                  check="history", session_id=session_id)
+            _record(v, tool=tool, command=command, session_id=session_id)
         v = _with_budget_note(v, note)
         return None if v["decision"] == "allow" else v
     except Exception as exc:
         if record:
-            _record_fail_open(exc, harness=harness, tool=tool, command=command)
+            _record_fail_open(exc, harness=harness, tool=tool, command=command,
+                              session_id=session_id)
         return None
 
 
@@ -1323,19 +1324,21 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 history_error = v.pop("_history_error", None)
                 if history_error is not None and record:
                     _record_fail_open(history_error, harness=harness, tool=tool_name,
-                                      command=act.command, check="history")
+                                      command=act.command, check="history",
+                                      session_id=session_id)
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
             if worst is None:
                 return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
         worst = {**worst, "harness": harness, "mcp_tool": tool_name}
         if record:
-            _record(worst, tool=tool_name, command=summary)
+            _record(worst, tool=tool_name, command=summary, session_id=session_id)
         worst = _with_budget_note(worst, note)
         return None if worst["decision"] == "allow" else worst
     except Exception as exc:
         if record:
-            _record_fail_open(exc, harness=harness, tool=tool_name, command=summary)
+            _record_fail_open(exc, harness=harness, tool=tool_name, command=summary,
+                              session_id=session_id)
         return None
 
 
@@ -1415,7 +1418,17 @@ def _append(entry: dict[str, Any]) -> None:
         guard_ledger.append(entry)
 
 
-def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
+def _session_field(session_id: Any) -> dict[str, Any]:
+    """The agent session a record belongs to, redacted like everything else
+    (a session id is not a secret, but the ledger never trusts a string)."""
+    from . import guard_ledger
+    if not session_id or not isinstance(session_id, str):
+        return {}
+    return {"session": guard_ledger.redact(session_id, limit=128)}
+
+
+def _record(v: dict[str, Any], *, tool: str, command: str,
+            session_id: str | None = None) -> None:
     """Append one verdict to the ledger. Cheap, and never raises: a ledger
     problem is a missing line, never a lost verdict."""
     with contextlib.suppress(Exception):
@@ -1423,6 +1436,7 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
         est = v.get("estimate") or {}
         _append({
             "harness": v.get("harness"),
+            **_session_field(session_id),
             "tool": tool,
             "command": guard_ledger.redact(command),
             "door": v.get("door"),
@@ -1449,7 +1463,7 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
 
 
 def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any,
-                      check: str | None = None) -> None:
+                      check: str | None = None, session_id: Any = None) -> None:
     """A guard error let a call through unexamined; that is a verdict too.
 
     `check` names the part that failed when the rest of the verdict stood (a
@@ -1459,6 +1473,7 @@ def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: A
         from . import guard_ledger
         _append({
             "harness": harness,
+            **_session_field(session_id),
             "tool": tool if isinstance(tool, str) else None,
             "command": guard_ledger.redact(command) if command else None,
             "decision": "fail_open",

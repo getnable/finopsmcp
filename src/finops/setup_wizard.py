@@ -2639,7 +2639,8 @@ def _guard_report(parsed) -> None:
     from .welcome import amber, bold, cyan, dim
 
     days = getattr(parsed, "guard_days", 30) or 30
-    summary = guard_ledger.summarize(days)
+    session = getattr(parsed, "guard_session", None) or None
+    summary = guard_ledger.summarize(days, session=session)
     chain = guard_ledger.check()
     problems = ([f"it breaks at line {chain['broken_at']}: {chain['problem']}"]
                 if not chain["ok"] else []) + chain["warnings"]
@@ -2654,10 +2655,14 @@ def _guard_report(parsed) -> None:
         print(dim("  Details: nable guard verify-log"))
     d = summary["by_decision"]
     print()
-    print(f"  {bold('nable guard')}: the last {days:g} days, {summary['records']} decision(s)")
+    scope = f" in session {session}" if session else ""
+    print(f"  {bold('nable guard')}: the last {days:g} days{scope}, "
+          f"{summary['records']} decision(s)")
     print()
     if not summary["records"]:
-        print(dim("  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
+        print(dim(f"  Nothing recorded for session {session} in that window."
+                  if session else
+                  "  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
         print(dim(f"  {summary['path']}"))
         print()
         return
@@ -2685,6 +2690,17 @@ def _guard_report(parsed) -> None:
         for r in summary["largest"]:
             print(f"    {cyan(r['decision']):<5} ~${r['monthly_usd']:,.0f}/mo  {r['command']}")
             print(dim(f"          {r['ts']}  {r['harness']}  {r['tool']}"))
+    sessions = [(k, v) for k, v in summary["by_session"].items()
+                if v["usd_per_month_escalated_or_blocked"] or v["usd_per_month_allowed_with_a_figure"]]
+    if sessions and not session:
+        print()
+        print(f"  {bold('By agent session')} (priced, largest first)")
+        for sid, v in sessions[:5]:
+            print(f"    {sid[:36]:<36}  let through ~${v['usd_per_month_allowed_with_a_figure']:,.0f}/mo"
+                  f"  escalated or blocked ~${v['usd_per_month_escalated_or_blocked']:,.0f}/mo")
+            print(dim(f"    {'':<36}  {v['records']} decision(s), {v['first']} to {v['last']}"))
+        if len(sessions) > 5:
+            print(dim(f"    and {len(sessions) - 5} more; one session: nable guard report --session ID"))
     print()
     print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
     print(dim("  Check the log was not edited: nable guard verify-log"))
@@ -3120,6 +3136,9 @@ def main(args: list[str] | None = None) -> None:
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
                          help="With 'report', 'verify-log' or 'doctor': print JSON")
+    guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
+                         help="With 'report': only this agent session (the hook payload's "
+                              "session id, as report lists them)")
     guard_p.add_argument("--reanchor", dest="guard_reanchor", action="store_true",
                          help="With 'verify-log': accept the ledger as it is now (after you "
                               "rotated or archived it) as the new anchor")

@@ -522,17 +522,23 @@ def _positive(x: Any) -> float:
     return float(x) if isinstance(x, (int, float)) and x > 0 else 0.0
 
 
-def summarize(days: float = 30, path: Path | None = None) -> dict[str, Any]:
-    """What `nable guard report` prints: counts, dollars at stake, the biggest.
+def summarize(days: float = 30, path: Path | None = None, *,
+              session: str | None = None) -> dict[str, Any]:
+    """What `nable guard report` prints: counts, dollars at stake, the biggest,
+    and the same dollars per agent session (by_session, largest first).
 
-    Dollar sums count cost increases only, once per decision: a repeat of the
-    same command from the same session within ten minutes is counted in the
-    decisions but not summed again (repeats_not_summed)."""
+    `session` limits everything to one session's records. Dollar sums count
+    cost increases only, once per decision: a repeat of the same command from
+    the same session within ten minutes is counted in the decisions but not
+    summed again (repeats_not_summed)."""
     recs = read(days, path)
+    if session is not None:
+        recs = [r for r in recs if r.get("session") == session]
     repeats = _repeats(recs)
     by_decision = {d: 0 for d in DECISIONS}
     by_harness: dict[str, int] = {}
     by_action: dict[str, int] = {}
+    by_session: dict[str, dict[str, Any]] = {}
     stake = allowed = committed = 0.0
     errors: dict[str, int] = {}
     for i, r in enumerate(recs):
@@ -545,14 +551,27 @@ def summarize(days: float = 30, path: Path | None = None) -> dict[str, Any]:
         if d == "fail_open":
             e = r.get("error") or "unknown"
             errors[e] = errors.get(e, 0) + 1
+        sess = by_session.setdefault(r.get("session") or "unknown", {
+            "records": 0, "asked_or_blocked": 0, "usd_per_month_escalated_or_blocked": 0.0,
+            "usd_per_month_allowed_with_a_figure": 0.0, "first": r.get("ts"),
+            "harness": r.get("harness")})
+        sess["records"] += 1
+        sess["last"] = r.get("ts")
+        if d in ("ask", "deny"):
+            sess["asked_or_blocked"] += 1
         if i in repeats:
             continue
         usd = _positive(r.get("monthly_usd"))
         if d in ("ask", "deny"):
             stake += usd
             committed += _positive(r.get("total_usd"))
+            sess["usd_per_month_escalated_or_blocked"] += usd
         elif d in ("allow", "warn"):
             allowed += usd
+            sess["usd_per_month_allowed_with_a_figure"] += usd
+    for sess in by_session.values():
+        for k in ("usd_per_month_escalated_or_blocked", "usd_per_month_allowed_with_a_figure"):
+            sess[k] = round(sess[k], 2)
     priced = [r for i, r in enumerate(recs) if r.get("decision") in ("ask", "deny")
               and i not in repeats and _positive(r.get("monthly_usd"))]
     top = sorted(priced, key=lambda r: -r["monthly_usd"])[:5]
@@ -567,7 +586,12 @@ def summarize(days: float = 30, path: Path | None = None) -> dict[str, Any]:
         "usd_order_ceilings_escalated_or_blocked": round(committed, 2),
         "fail_open_errors": errors,
         "repeats_not_summed": len(repeats),
-        "largest": [{k: r.get(k) for k in ("ts", "harness", "tool", "decision",
+        "session": session,
+        "by_session": dict(sorted(
+            by_session.items(),
+            key=lambda kv: -(kv[1]["usd_per_month_escalated_or_blocked"]
+                             + kv[1]["usd_per_month_allowed_with_a_figure"]))),
+        "largest": [{k: r.get(k) for k in ("ts", "harness", "session", "tool", "decision",
                                            "action_type", "monthly_usd", "basis",
                                            "command")} for r in top],
         "path": str(path or ledger_path()),

@@ -584,3 +584,92 @@ def test_report_into_a_closed_pipe_exits_quietly():
 def _activity_without_env():
     for cmd in ("terraform destroy", "aws ec2 run-instances --instance-type t3.micro"):
         g.gate_command(cmd)
+
+
+# ── per-session ───────────────────────────────────────────────────────────────
+
+def test_the_session_is_recorded():
+    g.gate_command("aws ec2 run-instances --instance-type t3.micro", session_id="sess-a")
+    g.gate_mcp_call("mcp__aws-api__call_aws", {"cli_command": "aws ec2 terminate-instances "
+                                                              "--instance-ids i-1"},
+                    session_id="sess-b")
+    g.gate_command("ls")                                        # not infra: no record
+    g.gate_command("terraform destroy")                          # no session given
+    recs = _records()
+    assert [r.get("session") for r in recs] == ["sess-a", "sess-b", None]
+
+
+def test_the_hook_records_the_payloads_session():
+    payload = {"tool_name": "Bash", "session_id": "0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+               "tool_input": {"command": "terraform destroy"}}
+    g.run_hook(io.StringIO(json.dumps(payload)), io.StringIO())
+    assert _records()[0]["session"] == "0a1b2c3d-4e5f-6789-abcd-ef0123456789"
+
+
+def test_a_session_id_goes_through_the_same_redaction():
+    g.gate_command("terraform destroy", session_id=f"AWS_SECRET_ACCESS_KEY={SECRET}")
+    assert SECRET not in gl.ledger_path().read_text()
+
+
+def test_a_fail_open_keeps_its_session(monkeypatch):
+    monkeypatch.setattr(g, "classify_command", lambda c: 1 / 0)
+    g.gate_command("terraform destroy", session_id="sess-z")
+    assert _records()[0]["session"] == "sess-z"
+
+
+def _sessions(monkeypatch):
+    g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8",
+                   session_id="big")                                                # ask
+    g.gate_command("aws ec2 run-instances --instance-type t3.micro", session_id="small")
+    g.gate_command("aws ec2 run-instances --instance-type t3.large", session_id="small")
+
+
+def test_summary_has_per_session_priced_totals(monkeypatch):
+    _sessions(monkeypatch)
+    s = gl.summarize(30)
+    assert list(s["by_session"]) == ["big", "small"], "largest first"
+    assert s["by_session"]["big"]["usd_per_month_escalated_or_blocked"] == \
+        pytest.approx(P4D_X8_MONTHLY, rel=1e-3)
+    assert s["by_session"]["small"]["usd_per_month_allowed_with_a_figure"] == \
+        pytest.approx((0.0104 + 0.0832) * 730, rel=1e-3)
+    assert s["by_session"]["small"]["records"] == 2
+
+
+def test_summary_for_one_session(monkeypatch):
+    _sessions(monkeypatch)
+    s = gl.summarize(30, session="small")
+    assert s["records"] == 2 and s["session"] == "small"
+    assert s["usd_per_month_escalated_or_blocked"] == 0
+    assert list(s["by_session"]) == ["small"]
+
+
+def test_report_cli_shows_sessions_and_filters_by_one(monkeypatch):
+    _sessions(monkeypatch)
+    out = _cli("report", guard_days=30, guard_json=False)
+    assert "By agent session" in out and "big" in out and "small" in out
+    one = _cli("report", guard_days=30, guard_json=False, guard_session="small")
+    assert "in session small, 2 decision(s)" in one
+    assert "p4d.24xlarge" not in one
+    data = json.loads(_cli("report", guard_days=30, guard_json=True, guard_session="big"))
+    assert data["records"] == 1 and data["session"] == "big"
+
+
+def test_report_for_an_unknown_session_says_so():
+    g.gate_command("terraform destroy", session_id="a")
+    out = _cli("report", guard_days=30, guard_json=False, guard_session="nope")
+    assert "Nothing recorded for session nope" in out
+
+
+def test_report_session_flag_parses():
+    from finops import setup_wizard
+    seen = {}
+    real = setup_wizard._run_guard
+
+    def spy(parsed):
+        seen["session"] = parsed.guard_session
+    setup_wizard._run_guard = spy
+    try:
+        setup_wizard.main(["guard", "report", "--session", "abc"])
+    finally:
+        setup_wizard._run_guard = real
+    assert seen["session"] == "abc"
