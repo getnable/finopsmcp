@@ -177,9 +177,9 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
     ("az login --service-principal -u app -p Pa55w0rd --tenant t", "Pa55w0rd",
      "-p [REDACTED] --tenant t"),
     ("docker login -u me -p hunter2 registry.io", "hunter2", "-p [REDACTED] registry.io"),
-    ("curl -H 'Authorization: xoxb-1234-5678-abcdefgh' https://slack.com", "xoxb-1234",
+    ("curl -H 'Authorization: xoxb-1234-5678-abcdefgh' https://slack.com", "xoxb-1234",  # pragma: allowlist secret
      "[REDACTED-SLACK-TOKEN]"),
-    ("curl -d t=xoxp-99-88-77aa https://slack.com", "xoxp-99", "[REDACTED-SLACK-TOKEN]"),
+    ("curl -d t=xoxp-99-88-77aa https://slack.com", "xoxp-99", "[REDACTED-SLACK-TOKEN]"),  # pragma: allowlist secret
     ("azcopy copy 'https://a.blob.core.windows.net/c?sv=2020&sig=AbC%2Bdef' .", "AbC%2Bdef",
      "&sig=[REDACTED]"),
     ("echo ghp_abcdefghijklmnop1234 | gh auth login", "ghp_abcdef", "[REDACTED-GITHUB-TOKEN]"),

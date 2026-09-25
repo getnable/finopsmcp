@@ -86,12 +86,12 @@ def test_the_linear_rules_judge_what_the_old_patterns_did(cmd, want):
 def test_redact_reads_a_bounded_prefix():
     out, took = _timed(gl.redact, "terraform destroy # " + "http://a" * (10 * MB // 8))
     assert took < 0.2 and len(out) <= 400
-    secret_after_cut = "x " * 3000 + "PASSWORD=hunter2"
+    secret_after_cut = "x " * 3000 + "PASSWORD=hunter2"  # pragma: allowlist secret
     assert "hunter2" not in gl.redact(secret_after_cut, limit=10_000)
 
 
 def test_a_token_cut_at_the_boundary_is_dropped_not_half_kept():
-    cmd = " " * (gl._REDACT_INPUT_MAX - 20) + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    cmd = " " * (gl._REDACT_INPUT_MAX - 20) + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
     out = gl.redact(cmd)
     assert "wJalrXUtnFEMI" not in out and out.endswith("...")
 
