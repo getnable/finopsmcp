@@ -2583,6 +2583,10 @@ def _guard_doctor(parsed) -> None:
     else:
         print(f"  Decision ledger: {amber('chain broken at line ' + str(led['broken_at']))}")
     print(dim(f"  {led['path']}"))
+    lost = led.get("unrecorded") or {}
+    if lost.get("count"):
+        print(f"  {amber(str(lost['count']) + ' verdict(s) answered but not recorded')}"
+              f" (ledger locked or not a file), last at {lost['last']}")
     print()
     for line in textwrap.wrap(d["seatbelt"], 76):
         print(f"  {line}")

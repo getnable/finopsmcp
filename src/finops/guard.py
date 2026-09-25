@@ -1874,6 +1874,14 @@ def doctor() -> dict[str, Any]:
     if not ledger["ok"]:
         fix("nable guard verify-log", f"the decision ledger breaks at line "
             f"{ledger.get('broken_at')}: a record was edited, removed, reordered or torn")
+    lost = guard_ledger.unrecorded()
+    ledger["unrecorded"] = lost
+    if lost["count"]:
+        gaps.append(f"{lost['count']} verdict(s) answered but not recorded, last at "
+                    f"{lost['last']}: the ledger file was locked by another process or "
+                    "replaced by something that is not a file")
+        fix(f"check what holds {ledger['path']} (lsof), then remove {lost['path']}",
+            "records the guard could not write")
     fixes = [f"{cmd}  ({'; '.join(why)})" if why else cmd for cmd, why in todo.items()]
     fixes.append("give agents read-only cloud credentials; keep write access behind a human")
 

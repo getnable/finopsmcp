@@ -16,7 +16,10 @@ ticket, a commit, a log shipper) and compared later.
 
 Cost to the hook: one open, one lock, one bounded read of the last line (a
 seek from the end, never a scan), one write. append() never raises. A ledger
-that cannot be written is a missing line, not a blocked agent.
+that cannot be written is a missing line, not a blocked agent. The lock is
+waited on for at most 200 ms: a lock held longer (by anything, the agent
+included) costs the record, which is counted in guard-ledger.unrecorded.jsonl
+for `nable guard doctor`, and never the verdict.
 
 Commands are stored as a redacted summary. An agent's shell line can carry a
 credential (`AWS_SECRET_ACCESS_KEY=... terraform apply`, a bearer token in a
@@ -26,16 +29,23 @@ much: a lost detail in a summary costs nothing, a leaked key costs a rotation.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
+import stat
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 LEDGER_NAME = "guard-ledger.jsonl"
+# Verdicts answered but not recorded (the ledger was locked or not a file).
+UNRECORDED_NAME = "guard-ledger.unrecorded.jsonl"
+# The longest append() waits for another process's lock.
+_LOCK_WAIT_S = 0.2
 GENESIS = "0" * 64
 SCHEMA = 1
 DECISIONS = ("allow", "warn", "ask", "deny", "fail_open")
@@ -162,24 +172,97 @@ def _last_line(fd: int) -> bytes | None:
         chunk = min(size, chunk * 2)
 
 
+def _lock(fd: int) -> bool:
+    """Take the ledger's exclusive lock, waiting at most _LOCK_WAIT_S.
+
+    A blocking lock let anything that could hold one (`flock -x
+    ~/.finops/guard-ledger.jsonl sleep 999 &`, run by the agent itself) hang
+    every recorded verdict until the harness timed the hook out, which fails
+    open. False means the lock is held elsewhere; the caller gives up on the
+    record, never on the verdict."""
+    try:
+        import fcntl
+    except ImportError:
+        return True                        # no flock (Windows): single-writer best effort
+    deadline = time.monotonic() + _LOCK_WAIT_S
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        except OSError:
+            return True                    # a filesystem without flock: best effort, as before
+
+
+def _note_unrecorded(entry: dict[str, Any], why: str) -> None:
+    """Count a verdict that was answered but could not be recorded.
+
+    One short line in a file beside the ledger (no command, so nothing to
+    redact), which `nable guard doctor` reads. Never blocks and never raises:
+    opened non-blocking, and only a regular file is written."""
+    with contextlib.suppress(Exception):
+        path = ledger_path().with_name(UNRECORDED_NAME)
+        flags = (os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(path, flags, 0o600)
+        try:
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                line = json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"),
+                                   "why": why, "decision": entry.get("decision"),
+                                   "action_type": entry.get("action_type")})
+                os.write(fd, line.encode() + b"\n")
+        finally:
+            os.close(fd)
+
+
+def unrecorded(path: Path | None = None) -> dict[str, Any]:
+    """{count, last, why} for verdicts answered but never recorded."""
+    path = path or ledger_path().with_name(UNRECORDED_NAME)
+    out: dict[str, Any] = {"count": 0, "last": None, "why": {}, "path": str(path)}
+    try:
+        with path.open("rb") as fh:
+            for raw in fh:
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                out["count"] += 1
+                out["last"] = rec.get("ts")
+                why = str(rec.get("why"))
+                out["why"][why] = out["why"].get(why, 0) + 1
+    except OSError:
+        pass
+    return out
+
+
 def append(entry: dict[str, Any]) -> bool:
-    """Append one record, chained to the one before it. Never raises."""
+    """Append one record, chained to the one before it. Never raises, and
+    never waits more than _LOCK_WAIT_S on another process: a record that
+    cannot be written in time is counted (unrecorded()) and dropped."""
     try:
         path = ledger_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        flags = (os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0))
         fd = os.open(path, flags, 0o600)
         try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                # A FIFO or a device in the ledger's place would block the
+                # first read forever.
+                _note_unrecorded(entry, "not_a_file")
+                return False
             try:
-                if os.fstat(fd).st_mode & 0o077:
+                if st.st_mode & 0o077:
                     os.fchmod(fd, 0o600)   # a pre-existing file keeps no group/world bits
             except (AttributeError, OSError):
                 pass
-            try:
-                import fcntl
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            except (ImportError, OSError):
-                pass                       # no flock (Windows): single-writer best effort
+            if not _lock(fd):
+                _note_unrecorded(entry, "locked")
+                return False
             last = _last_line(fd)
             rec = {"v": SCHEMA,
                    "ts": datetime.now(UTC).isoformat(timespec="seconds"),
