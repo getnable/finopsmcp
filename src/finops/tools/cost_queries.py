@@ -119,6 +119,7 @@ async def get_cost_summary(
     # reachable without paying for 130 tool definitions on every message.
     from ..tool_surface import drilldown_for
     result["next_tools"] = drilldown_for(k for k, _ in _ranked_services[:8])
+    result.update(_no_rows_flags(by_provider))
     if _failed:
         # Some read, some did not. The total is real but incomplete, and nothing
         # downstream may present it as the whole bill.
@@ -383,6 +384,7 @@ async def get_cost_trends(
         "by_provider": by_provider,
         "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
     }
+    result.update(_no_rows_flags(by_provider))
     if failed:
         result.update(_partial(ok, failed))
     return result
@@ -1997,6 +1999,21 @@ async def explain_recent_cost_drivers(
                          "zero spend or of a cost decrease."),
             }
 
+        # Read, and nothing came back. "Costs increased by $0 (+N/A%)" was the
+        # answer when Cost Explorer returned no rows for either window.
+        rows_now, rows_prev = _no_rows_flags(prov_now), _no_rows_flags(prov_prev)
+        if rows_now.get("no_cost_rows"):
+            return {
+                "error": "no_cost_data",
+                "message": rows_now["no_rows_note"],
+                "note": ("No provider returned cost rows for the current window, so "
+                         "there is nothing to compare. This is not a finding of zero "
+                         "spend or of a cost change."),
+                "next_step": ("Check that Cost Explorer (or the provider's billing "
+                              "export) has data for this period, then ask again."),
+            }
+        no_prior_rows = bool(rows_prev.get("no_cost_rows"))
+
         # Build per-provider + per-service breakdown
         drivers: list[dict] = []
         all_keys: set = set(cost_now.keys()) | set(cost_prev.keys())
@@ -2042,11 +2059,31 @@ async def explain_recent_cost_drivers(
             "summary": (
                 f"Costs {'increased' if net_change >= 0 else 'decreased'} by "
                 f"${abs(net_change):,.0f} "
-                f"({'+' if net_change >= 0 else ''}{round(net_pct, 1) if net_pct is not None else 'N/A'}%) "
-                f"vs the prior {days}-day period. "
+                + (f"({'+' if net_change >= 0 else ''}{round(net_pct, 1)}%) "
+                   if net_pct is not None else "")
+                + f"vs the prior {days}-day period. "
                 f"{len(increases)} services had cost increases, {len(decreases)} had decreases."
             ),
         }
+        if no_prior_rows:
+            # Every service "increased" by its whole spend against a window that
+            # returned nothing. That is not a change; report this period only.
+            result.update({
+                "comparison_unavailable": True,
+                "net_change_usd": None,
+                "net_change_pct": None,
+                "top_increases": [],
+                "top_decreases": [],
+                "all_drivers": [],
+                "current_by_service": {k: round(v, 2) for k, v in sorted(
+                    cost_now.items(), key=lambda x: -x[1])[:top_n]},
+                "no_rows_note": rows_prev["no_rows_note"],
+                "summary": (
+                    f"Costs this {days}-day period: ${total_now:,.0f}. The prior "
+                    f"{days}-day period returned no cost rows, so there is no "
+                    "change to compare against."
+                ),
+            })
         if failed:
             # Same contract get_cost_summary uses, so a reader who has seen one
             # of these knows what the other means.
@@ -2280,6 +2317,31 @@ def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
             out["failed_providers"] = failed
         return out
     return None
+
+
+def _no_rows_flags(by_provider: dict) -> dict:
+    """Keys that tell "no rows returned" apart from "read, and zero".
+
+    A provider that answered with no rows sums to $0.00 exactly like one whose
+    bill really was $0.00. The second carries its own note (AWS flags a real
+    zero-spend account); the first gets this.
+    """
+    ok = [n for n, p in by_provider.items() if isinstance(p, dict) and not p.get("error")]
+    empty = [n for n in ok if by_provider[n].get("no_rows")]
+    if not empty:
+        return {}
+    notes = " ".join(by_provider[n].get("no_rows_note", "") for n in empty).strip()
+    if len(empty) == len(ok):
+        return {
+            "no_cost_rows": True,
+            "grand_total_formatted": "unknown (no cost rows returned)",
+            "no_rows_note": f"{notes} {_NOT_ZERO}",
+        }
+    return {
+        "providers_with_no_rows": empty,
+        "no_rows_note": (f"{notes} The total covers the other providers only; "
+                         f"for {', '.join(empty)} it is not a finding of zero spend."),
+    }
 
 
 def _partial(ok, failed: dict, noun: str = "provider") -> dict:

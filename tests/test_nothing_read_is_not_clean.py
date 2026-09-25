@@ -263,3 +263,97 @@ def test_dashboard_with_no_cost_rows_is_unavailable_not_zero(tmp_path):
     assert out["this_month_usd"] is None, out["summary"]
     assert "$0.00" not in out["summary"]
     assert "no cost rows" in out["summary"]
+
+
+# ── 3. Cost queries: "no rows returned" is not "read, and zero" ───────────────
+
+def _cost_env(monkeypatch, targets):
+    import finops.server as server
+    from finops import cache
+
+    cache.clear()
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+
+    async def _active(subset=None):
+        return dict(targets)
+
+    async def _no_credit(*a, **k):
+        return None
+
+    monkeypatch.setattr(server, "_active", _active)
+    monkeypatch.setattr(server, "_credit_context", _no_credit)
+    return server
+
+
+class _RowsOnlyAfter(_NoRowsConnector):
+    """No rows before `cutoff`, $120 of EC2 from it on."""
+
+    def __init__(self, cutoff):
+        self.cutoff = cutoff
+
+    async def get_costs(self, start, end, granularity="MONTHLY", **kw):
+        if start < self.cutoff:
+            return _empty_summary(start, end)
+        from finops.connectors.base import CostEntry
+        e = CostEntry(provider="aws", account_id="1", account_name="1",
+                      service="Amazon EC2", region="us-east-1", amount=120.0)
+        return CostSummary(provider="aws", start_date=start, end_date=end, total_usd=120.0,
+                           by_service={"Amazon EC2": 120.0}, by_account={"1": 120.0},
+                           by_region={"us-east-1": 120.0}, entries=[e])
+
+
+class _ZeroSpendConnector(_NoRowsConnector):
+    """Read, and a real $0 bill: AWS returned periods with nothing billed."""
+
+    async def get_costs(self, start, end, granularity="MONTHLY", **kw):
+        s = _empty_summary(start, end)
+        s._zero_spend_account = True
+        return s
+
+
+def test_cost_summary_with_no_rows_says_so(monkeypatch):
+    server = _cost_env(monkeypatch, {"aws": _NoRowsConnector()})
+    out = asyncio.run(server.get_cost_summary())
+
+    assert out.get("no_cost_rows") is True, out
+    assert "no cost rows" in out["no_rows_note"]
+    assert "not a finding of zero spend" in out["no_rows_note"]
+    assert out["grand_total_formatted"] != "$0.00"
+
+
+def test_cost_summary_read_and_zero_is_not_no_rows(monkeypatch):
+    server = _cost_env(monkeypatch, {"aws": _ZeroSpendConnector()})
+    out = asyncio.run(server.get_cost_summary())
+
+    assert "no_cost_rows" not in out
+    assert out["grand_total_formatted"] == "$0.00"
+    assert "$0.00 in spend" in out["by_provider"]["aws"]["note"]
+
+
+def test_cost_trends_with_no_rows_says_so(monkeypatch):
+    server = _cost_env(monkeypatch, {"aws": _NoRowsConnector()})
+    out = asyncio.run(server.get_cost_trends(days=14))
+
+    assert out.get("no_cost_rows") is True, out
+    assert "no cost rows" in out["no_rows_note"]
+
+
+def test_recent_cost_drivers_with_no_rows_is_not_a_zero_dollar_change(monkeypatch):
+    server = _cost_env(monkeypatch, {"aws": _NoRowsConnector()})
+    out = asyncio.run(server.explain_recent_cost_drivers(days=7))
+
+    assert "Costs increased by $0" not in str(out)
+    assert out["error"] == "no_cost_data"
+    assert "no cost rows" in out["message"]
+
+
+def test_recent_cost_drivers_with_no_prior_rows_is_not_a_change(monkeypatch):
+    from datetime import date, timedelta
+
+    server = _cost_env(monkeypatch, {
+        "aws": _RowsOnlyAfter(date.today() - timedelta(days=7))})
+    out = asyncio.run(server.explain_recent_cost_drivers(days=7))
+
+    assert "N/A%" not in out["summary"], out["summary"]
+    assert "no cost rows" in out["summary"]
+    assert out.get("comparison_unavailable") is True
