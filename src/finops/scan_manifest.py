@@ -72,6 +72,10 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("ecs.describe_services", "ecs:DescribeServices"),
         ("ecs.describe_task_definition", "ecs:DescribeTaskDefinition"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+    "dynamodb": ("Provisioned tables reserving far more read/write capacity than they use", [
+        ("dynamodb.list_tables", "dynamodb:ListTables"),
+        ("dynamodb.describe_table", "dynamodb:DescribeTable"),
+        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
 }
 
 # Asked once per scan, from us-east-1, when the ec2, lambda or rds checks run.

@@ -542,6 +542,8 @@ _WASTE_LABELS: dict[str, tuple[str, str]] = {
     "compute_optimizer_overprovisioned_lambda": ("Lambda function with unused memory",
                                                  "Lambda functions with unused memory"),
     "ecs_overprovisioned_cpu": ("ECS service with unused CPU", "ECS services with unused CPU"),
+    "dynamodb_overprovisioned_capacity": ("DynamoDB table with unused capacity",
+                                          "DynamoDB tables with unused capacity"),
     "ecr_old_untagged_images": ("ECR repo with old untagged images",
                                 "ECR repos with old untagged images"),
     "s3_suboptimal_storage_class": ("S3 bucket in a costlier storage class",

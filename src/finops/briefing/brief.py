@@ -228,6 +228,7 @@ _FINDING_LABELS: dict[str, str] = {
     "s3_suboptimal_storage_class": "S3 bucket in a costlier storage class",
     "ecr_old_untagged_images": "ECR repo with old untagged images",
     "ecs_overprovisioned_cpu": "ECS service with unused CPU",
+    "dynamodb_overprovisioned_capacity": "DynamoDB table with unused capacity",
     "lambda_memory_overprovisioned": "Lambda function with unused memory",
     "lambda_zero_invocations": "Lambda function never invoked",
 }

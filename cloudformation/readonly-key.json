@@ -115,6 +115,8 @@
                 "compute-optimizer:GetEC2InstanceRecommendations",
                 "compute-optimizer:GetLambdaFunctionRecommendations",
                 "compute-optimizer:GetRDSDatabaseRecommendations",
+                "dynamodb:DescribeTable",
+                "dynamodb:ListTables",
                 "ec2:DescribeAddresses",
                 "ec2:DescribeImages",
                 "ec2:DescribeInstances",

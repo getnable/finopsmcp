@@ -252,6 +252,11 @@ def test_a_moto_backed_scan_calls_nothing_the_policy_does_not_grant(monkeypatch)
             containerDefinitions=[{"name": "app", "image": "nginx", "memory": 512}])
         ecs.create_service(cluster="c", serviceName="svc", taskDefinition="f",
                            desiredCount=1, launchType="FARGATE")
+        boto3.client("dynamodb", region_name=r).create_table(
+            TableName="orders", BillingMode="PROVISIONED",
+            AttributeDefinitions=[{"AttributeName": "k", "AttributeType": "S"}],
+            KeySchema=[{"AttributeName": "k", "KeyType": "HASH"}],
+            ProvisionedThroughput={"ReadCapacityUnits": 5, "WriteCapacityUnits": 5})
 
         session = boto3.Session(region_name=r)
         session.events.register("before-call", record)
@@ -260,6 +265,7 @@ def test_a_moto_backed_scan_calls_nothing_the_policy_does_not_grant(monkeypatch)
 
     # The calls the static test depends on actually happened here.
     for action in ("ec2:DescribeImages", "ecs:ListServices", "ecs:DescribeTaskDefinition",
-                   "cloudtrail:GetTrailStatus", "s3:ListBucketMultipartUploads"):
+                   "cloudtrail:GetTrailStatus", "s3:ListBucketMultipartUploads",
+                   "dynamodb:ListTables", "dynamodb:DescribeTable"):
         assert action in seen, action
     assert seen - set(iam_actions(include_get_metric_data=False)) == set()

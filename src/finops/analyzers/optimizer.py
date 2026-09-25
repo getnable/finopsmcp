@@ -45,6 +45,7 @@ _ALL_CHECKS = frozenset([
     "load_balancer", # idle ALBs, NLBs, Classic ELBs
     "ecr",           # old untagged ECR images
     "ecs",           # ECS Fargate over-provisioned CPU
+    "dynamodb",      # DynamoDB provisioned capacity well above use
 ])
 
 _DEFAULT_REGIONS = ["us-east-1"]
@@ -148,6 +149,7 @@ def _audit_region(
         check_idle_load_balancers,
         check_ecr_old_images,
         check_ecs_task_rightsizing,
+        check_dynamodb_provisioned,
     )
 
     findings = _RegionFindings()
@@ -159,7 +161,7 @@ def _audit_region(
     ec2_client = _client("ec2") if checks & {"ebs", "snapshots", "eips", "nat", "ec2"} else None
     cw_client = _client("cloudwatch") if checks & {
         "nat", "s3", "lambda", "ec2", "cloudwatch",
-        "rds_rightsizing", "rds_idle", "load_balancer", "ecs",
+        "rds_rightsizing", "rds_idle", "load_balancer", "ecs", "dynamodb",
     } else None
     rds_client = _client("rds") if checks & {"rds", "rds_rightsizing", "rds_idle"} else None
     lambda_client = _client("lambda") if "lambda" in checks else None
@@ -170,6 +172,7 @@ def _audit_region(
     elb_client = _client("elb") if "load_balancer" in checks else None
     ecr_client = _client("ecr") if "ecr" in checks else None
     ecs_client = _client("ecs") if "ecs" in checks else None
+    dynamodb_client = _client("dynamodb") if "dynamodb" in checks else None
 
     def _run(name: str, fn, *args):
         try:
@@ -239,6 +242,9 @@ def _audit_region(
 
     if "ecs" in checks and ecs_client and cw_client:
         _run("ecs", check_ecs_task_rightsizing, ecs_client, cw_client, region)
+
+    if "dynamodb" in checks and dynamodb_client and cw_client:
+        _run("dynamodb", check_dynamodb_provisioned, dynamodb_client, cw_client, region)
 
     if "lambda" in checks and lambda_client and cw_client:
         _run("lambda", check_lambda_memory, lambda_client, cw_client, region)

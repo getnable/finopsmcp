@@ -131,6 +131,19 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
             "Confirm the service is not scaling on CPU, or you will change its scaling behaviour.",
         ),
     ),
+    "dynamodb_overprovisioned_capacity": EvidenceSpec(
+        INFERRED, "medium",
+        why_unsure=(
+            "Provisioned and consumed capacity are both measured, but hourly sums hide "
+            "bursts inside the hour, auto scaling may own the setting, and the account's "
+            "free 25 RCU and 25 WCU are not netted out."
+        ),
+        confirm_steps=(
+            ("Check ThrottledRequests and the per-minute ConsumedRead/WriteCapacityUnits "
+             "peak before lowering capacity."),
+            "If Application Auto Scaling manages the table, lower its minimum instead.",
+        ),
+    ),
 
     # ── configuration we saw, cost we modelled ──────────────────────────────
     "excessive_rds_backup_retention": EvidenceSpec(

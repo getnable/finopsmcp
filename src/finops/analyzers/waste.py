@@ -18,8 +18,9 @@ Monetary estimates use on-demand approximations — not exact billing figures.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from ..aws_prices import (
@@ -1941,6 +1942,140 @@ def check_data_transfer_costs(
                 "usage_type": usage_type,
                 "monthly_cost": round(amount, 2),
             })
+
+    return findings
+
+
+# ── DynamoDB provisioned capacity ────────────────────────────────────────────
+
+# Provisioned capacity, per unit-hour, us-east-1, from the AWS Price List
+# (AmazonDynamoDB offer, us-east-1 index.csv, version 20260911124422, published
+# 2026-09-11): ReadCapacityUnit-Hrs $0.00013 and WriteCapacityUnit-Hrs $0.00065
+# for the Standard table class, $0.00016 and $0.00081 for Standard-IA. The first
+# 25 RCU and 25 WCU a month are free across the account; that is not netted
+# out here, so a figure on a tiny table can overstate by up to about $14/mo.
+_DDB_RCU_HOURLY = {"STANDARD": 0.00013, "STANDARD_INFREQUENT_ACCESS": 0.00016}
+_DDB_WCU_HOURLY = {"STANDARD": 0.00065, "STANDARD_INFREQUENT_ACCESS": 0.00081}
+_DDB_HEADROOM = 2.0        # recommend twice the busiest hour's average rate
+_DDB_MIN_SAVINGS = 5.0     # below this a capacity change is not worth a finding
+
+
+def check_dynamodb_provisioned(
+    dynamodb_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    lookback_days: int = 14,
+) -> list[dict]:
+    """
+    Detect provisioned-mode DynamoDB tables whose read or write capacity is well
+    above what they consume.
+
+    Free APIs only: ListTables and DescribeTable, and CloudWatch
+    ConsumedRead/WriteCapacityUnits through the shared GetMetricStatistics
+    reader. The busiest hour over the lookback sets the bar, and the
+    recommendation keeps twice that hour's average rate, because a burst
+    inside an hour runs above its average.
+
+    A table younger than the lookback is skipped: an empty metric on it means
+    "too new to say", not "idle". On an older table, no datapoints means
+    nothing was consumed, which DynamoDB reports by publishing nothing.
+    """
+    findings = CheckFindings()
+
+    names: list[str] = []
+    paginator = dynamodb_client.get_paginator("list_tables")
+    for page in paginator.paginate():
+        names.extend(page.get("TableNames", []))
+
+    now = datetime.now(UTC)
+    start = now - timedelta(days=lookback_days)
+
+    tables: list[dict] = []
+    for name in names:
+        try:
+            table = dynamodb_client.describe_table(TableName=name).get("Table", {})
+        except Exception as exc:  # noqa: BLE001 - recorded as a partial failure
+            findings.note_failure("dynamodb.describe_table", exc, unit="tables",
+                                  effect="tables not checked")
+            continue
+        mode = (table.get("BillingModeSummary") or {}).get("BillingMode", "PROVISIONED")
+        if mode != "PROVISIONED" or table.get("TableStatus") != "ACTIVE":
+            continue
+        created = table.get("CreationDateTime")
+        if created is not None:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            if created > start:
+                continue
+        tables.append(table)
+
+    failed: dict = {}
+    series = fetch_metric_values(cw_client, [
+        MetricQuery((t["TableName"], metric), "AWS/DynamoDB", metric,
+                    (("TableName", t["TableName"]),), "Sum", 3600)
+        for t in tables
+        for metric in ("ConsumedReadCapacityUnits", "ConsumedWriteCapacityUnits")
+    ], start, now, failures=failed)
+    # One record per table, however many of its two metrics failed.
+    unread: dict[str, str] = {}
+    for (table_name, _metric), code in failed.items():
+        unread.setdefault(table_name, code)
+    _note_unread(findings, unread, "tables", "consumed capacity")
+
+    for table in tables:
+        name = table["TableName"]
+        if name in unread:
+            continue
+        cls = (table.get("TableClassSummary") or {}).get("TableClass", "STANDARD")
+        rcu_price = _DDB_RCU_HOURLY.get(cls, _DDB_RCU_HOURLY["STANDARD"])
+        wcu_price = _DDB_WCU_HOURLY.get(cls, _DDB_WCU_HOURLY["STANDARD"])
+        throughput = table.get("ProvisionedThroughput") or {}
+
+        savings = 0.0
+        parts: list[str] = []
+        recommended: dict[str, int] = {}
+        for label, key, metric, price in (
+            ("read", "ReadCapacityUnits", "ConsumedReadCapacityUnits", rcu_price),
+            ("write", "WriteCapacityUnits", "ConsumedWriteCapacityUnits", wcu_price),
+        ):
+            provisioned = int(throughput.get(key) or 0)
+            hourly_sums = series.get((name, metric)) or []
+            peak_per_sec = max(hourly_sums, default=0.0) / 3600.0
+            target = max(1, math.ceil(peak_per_sec * _DDB_HEADROOM))
+            recommended[key] = min(provisioned, target) if provisioned else 0
+            if provisioned > target:
+                saved = (provisioned - target) * price * 730
+                savings += saved
+                parts.append(
+                    f"{label}: {provisioned} provisioned, busiest hour averaged "
+                    f"{peak_per_sec:.1f}/s, {target} would keep {_DDB_HEADROOM:.0f}x "
+                    f"headroom (${saved:,.2f}/mo)")
+
+        if savings < _DDB_MIN_SAVINGS:
+            continue
+        findings.append({
+            "resource_id": name,
+            "resource_type": "DynamoDB Table",
+            "waste_type": "dynamodb_overprovisioned_capacity",
+            "estimated_monthly_savings": round(savings, 2),
+            "detail": (
+                f"DynamoDB table '{name}' ({cls.lower().replace('_', '-')} class) over "
+                f"{lookback_days} days: " + "; ".join(parts) + ". "
+                f"If auto scaling manages this table, lower its minimum capacity "
+                f"instead. Command: aws dynamodb update-table --table-name {name} "
+                f"--provisioned-throughput ReadCapacityUnits="
+                f"{recommended['ReadCapacityUnits']},WriteCapacityUnits="
+                f"{recommended['WriteCapacityUnits']} --region {region}"
+            ),
+            "severity": _severity_from_savings(savings),
+            "region": region,
+            "account_id": None,
+            "table_class": cls,
+            "provisioned_rcu": int(throughput.get("ReadCapacityUnits") or 0),
+            "provisioned_wcu": int(throughput.get("WriteCapacityUnits") or 0),
+            "recommended_rcu": recommended["ReadCapacityUnits"],
+            "recommended_wcu": recommended["WriteCapacityUnits"],
+        })
 
     return findings
 
