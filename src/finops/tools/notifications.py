@@ -25,11 +25,25 @@ async def send_digest_now() -> dict:
     if err := _srv.require_role("analyst"):
         return err
 
-    from ..scheduler.jobs import run_digest_now
+    from ..notifications import slack, teams
+    if not slack.is_configured() and not teams.is_configured():
+        return {"sent": False,
+                "message": "No notification channels configured. Run 'uvx nable slack' or "
+                           "'uvx nable teams' in a terminal."}
+    from ..scheduler.jobs import has_snapshot_on, run_digest_now
+    yesterday = _srv.date.today() - _srv.timedelta(days=1)
+    if not has_snapshot_on(yesterday):
+        # The digest reports yesterday from local snapshots; with none it would
+        # post "$0" as if that were the bill.
+        return {"sent": False,
+                "message": (f"No cost data for {yesterday.isoformat()} yet, so no digest was "
+                            "posted. Take a cost snapshot (take_snapshot_now), then ask again.")}
     sent = await run_digest_now()
     return {
         "sent": sent,
-        "message": "Digest sent." if sent else "No notification channels configured. Run 'uvx nable slack' or 'uvx nable teams' in a terminal.",
+        "message": "Digest sent." if sent else (
+            "Slack or Teams did not accept the digest. Check the webhook or token with "
+            "'uvx nable slack' or 'uvx nable teams'."),
     }
 
 
@@ -558,7 +572,9 @@ def list_report_subscriptions() -> dict:
     try:
         from ..notifications.reports import list_subscriptions
         subs = list_subscriptions()
-        return {
+        # "on_request" on an open install: nothing sends these on the cron shown.
+        delivery = "scheduled" if _scheduler_installed() else "on_request"
+        out = {
             "count": len(subs),
             "subscriptions": [
                 {
@@ -571,10 +587,15 @@ def list_report_subscriptions() -> dict:
                     "filters": s["filters"],
                     "lookback_days": s.get("lookback_days", 7),
                     "last_sent_at": str(s.get("last_sent_at") or "never"),
+                    "delivery": delivery,
                 }
                 for s in subs
             ],
         }
+        if delivery == "on_request" and subs:
+            from ..license import DELIVERY_NOTE
+            out["note"] = (DELIVERY_NOTE + " Send one with send_report_now(subscription_id=...).")
+        return out
     except Exception as e:
         return {"error": str(e)}
 

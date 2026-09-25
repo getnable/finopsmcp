@@ -537,6 +537,7 @@ def job_weekly_email_digest() -> dict:
             top_providers=top_providers,
             anomalies=anomalies,
             recommendations=rec_list,
+            has_data=bool(rows),
         )
     except Exception as e:
         log.exception("Weekly email digest job failed")
@@ -774,6 +775,18 @@ async def run_anomaly_check_now() -> list[dict]:
 
 async def run_digest_now() -> bool:
     return await _send_daily_digest()
+
+
+def has_snapshot_on(d: date) -> bool:
+    """True when any cost snapshot exists for day d. The daily digest reports
+    yesterday; with no snapshot for it, it would post "$0" as a finding."""
+    from ..storage.db import cost_snapshots, get_engine
+    from sqlalchemy import func, select
+    with get_engine().connect() as conn:
+        return bool(conn.execute(
+            select(func.count()).select_from(cost_snapshots)
+            .where(cost_snapshots.c.snapshot_date == d.isoformat())
+        ).scalar())
 
 
 async def run_weekly_insight_now() -> bool:
