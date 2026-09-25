@@ -90,7 +90,15 @@ def test_numbers_and_names_mix(monkeypatch):
 def test_an_unknown_name_is_refused_and_asked_again(monkeypatch, capsys):
     _answers(monkeypatch, "awz", "1")
     assert SW._select_providers(_PROVIDERS) == ["aws"]
-    assert "Not on the list: awz" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "1 entry was not on the list" in out
+
+
+def test_an_unrecognised_entry_is_not_echoed(monkeypatch, capsys):
+    """A key pasted into the wrong prompt must not be printed back."""
+    _answers(monkeypatch, "sk-live-abc123secret", "1")  # pragma: allowlist secret
+    assert SW._select_providers(_PROVIDERS) == ["aws"]
+    assert "sk-live-abc123secret" not in capsys.readouterr().out  # pragma: allowlist secret
 
 
 def test_nothing_valid_selects_nothing(monkeypatch):

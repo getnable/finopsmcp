@@ -89,7 +89,12 @@ def _select_providers(providers: list[str], attempts: int = 3) -> list[str]:
             if pick not in selected:
                 selected.append(pick)
         if bad:
-            print(f"  Not on the list: {', '.join(bad)}. Use the numbers or names above.")
+            # Not echoed back: a key pasted into the wrong prompt would be
+            # printed to the terminal (and CodeQL flags the prompt's text as
+            # possibly sensitive).
+            n = len(bad)
+            print(f"  {n} entr{'y was' if n == 1 else 'ies were'} not on the list. "
+                  "Use the numbers or names above.")
             continue
         return selected
     return []
