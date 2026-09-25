@@ -162,6 +162,11 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
      "s3cretPass", "https://me:[REDACTED]@"),
     ("helm install x --set token=Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRkdI", "Zm9vYmFyYmF6",
      "helm install x"),
+    # The secret word as the whole name, not a suffix of one.
+    ("helm upgrade app ./chart --set db.password=hunter2", "hunter2",
+     "--set db.password=[REDACTED]"),
+    ("PASSWORD=hunter2 terraform apply", "hunter2", "PASSWORD=[REDACTED] terraform apply"),
+    ("helm install x --set auth.token=abc123", "abc123", "auth.token=[REDACTED]"),
 ])
 def test_secrets_never_reach_the_ledger(raw, gone, kept):
     out = gl.redact(raw)

@@ -87,8 +87,10 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
                 re.DOTALL), "[REDACTED-PRIVATE-KEY]"),
     # NAME=value where NAME mentions a key, secret, token or password:
     # AWS_SECRET_ACCESS_KEY=..., GITHUB_TOKEN="...", db_password='...'.
-    (re.compile(rf"\b([A-Za-z_][A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|\S+)",
-                re.IGNORECASE), r"\1=[REDACTED]"),
+    # The name may be the secret word alone (`password=...`, `--set
+    # db.password=...`): the lookbehind anchors it without spending a character.
+    (re.compile(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
+                r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1=[REDACTED]"),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
     (re.compile(r"(--[A-Za-z0-9-]*(?:password|passwd|secret|token|key)[A-Za-z0-9-]*)(=|\s+)"
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
