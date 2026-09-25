@@ -14,8 +14,8 @@ import finops.license as L
 import finops.setup_wizard as W
 
 # The throwaway keypair from tests/test_license_v2.py, unrelated to production.
-_TEST_PRIV = "8fbe8En53x3KhJ93ZwEmE3L0IVLHQm6yI-gn3FGIpeg"
-_TEST_PUB = "sxzvFKJjtkqH4xZWXQZLvrYhRxQFVoaJ5YRiEu18dMw"
+_TEST_PRIV = "8fbe8En53x3KhJ93ZwEmE3L0IVLHQm6yI-gn3FGIpeg"  # pragma: allowlist secret
+_TEST_PUB = "sxzvFKJjtkqH4xZWXQZLvrYhRxQFVoaJ5YRiEu18dMw"  # pragma: allowlist secret
 
 
 class _FakeVault:
