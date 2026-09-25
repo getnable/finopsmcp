@@ -74,7 +74,15 @@ async def nable_setup_status() -> dict:
         for f in found
     ]
 
+    from ..demo_data import SAMPLE_PROVIDERS_NOTE, connected_providers, is_demo
+    demo_bits = {
+        "_demo_mode": True,
+        "sample_providers": [e["name"] for e in connected_providers()],
+        "_demo_note": SAMPLE_PROVIDERS_NOTE,
+    } if is_demo() else {}
+
     return {
+        **demo_bits,
         "connected": sorted(connected),
         "not_connected": sorted(not_connected),
         "ambient_credentials_detected": detected,

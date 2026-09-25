@@ -79,20 +79,27 @@ async def list_connected_providers() -> dict:
         - "Is GCP set up yet?"
         - "What plan am I on?"
     """
-    from ..demo_data import is_demo, connected_providers as _demo_connected
+    from ..demo_data import (
+        SAMPLE_PROVIDERS_NOTE, is_demo, connected_providers as _demo_connected,
+    )
 
     result: dict[str, dict] = {}
 
-    # Demo mode: advertise the seeded provider set as connected. The live probes
-    # below read real credentials, which a demo instance does not have, so without
-    # this the "what am I connected to" view would show everything not-configured.
+    # Demo mode: list the sample provider set, as sample data. The live probes
+    # below read real credentials, which a demo instance does not have. These
+    # were reported "connected" with no demo flag, while what_can_nable_do said
+    # nothing was connected; both now say the same thing: sample providers,
+    # none of the user's own accounts.
     if is_demo():
         for entry in _demo_connected():
             result[entry["name"]] = {
                 "category": entry["category"],
-                "configured": True,
-                "status": "connected",
+                "configured": False,
+                "sample_data": True,
+                "status": "sample data (demo mode), not a connected account",
             }
+        result["_demo_mode"] = True  # type: ignore[assignment]
+        result["_demo_note"] = SAMPLE_PROVIDERS_NOTE  # type: ignore[assignment]
         status = _srv.get_status()
         if status.mode == "trial":
             result["_plan"] = {"plan": "trial", "days_remaining": status.days_remaining}
@@ -187,20 +194,30 @@ async def check_connector_health() -> dict:
         - "Which connectors are broken or stale?"
         - "Why am I not getting data from Datadog?"
     """
-    from ..demo_data import is_demo, connected_providers as _demo_connected
+    from ..demo_data import (
+        SAMPLE_PROVIDERS_NOTE, is_demo, connected_providers as _demo_connected,
+    )
     if is_demo():
+        # Nothing real to probe in demo. Say so rather than report nine
+        # "healthy" connectors the user never connected.
         probes = [{
-            "name": e["name"], "configured": True, "healthy": True,
-            "last_data": "12m ago", "response_ms": 180, "error": None, "fix": None,
+            "name": e["name"], "configured": False, "sample_data": True,
+            "healthy": None, "last_data": None, "response_ms": None,
+            "error": None, "fix": None,
         } for e in _demo_connected()]
         return {
-            "summary": f"{len(probes)} healthy",
-            "healthy_count": len(probes),
+            "summary": (f"Demo mode: {len(probes)} sample-data providers, no real "
+                        "connectors to test"),
+            "healthy_count": 0,
             "broken_count": 0,
             "unconfigured_count": 0,
+            "sample_count": len(probes),
             "connectors": probes,
             "broken": [],
-            "tip": None,
+            "tip": ("Connect a real account with connect_aws, connect_gcp or "
+                    "connect_azure, then check health again."),
+            "_demo_mode": True,
+            "_demo_note": SAMPLE_PROVIDERS_NOTE,
         }
 
     import asyncio
@@ -1598,6 +1615,10 @@ async def what_can_nable_do(detailed: bool = False) -> str:
         - "List your capabilities"
 
     """
+    from ..demo_data import capabilities_text, is_demo
+    if is_demo():
+        return capabilities_text(detailed=detailed)
+
     connected: set[str] = set()
 
     # Cloud + SaaS connectors live in the class registries.

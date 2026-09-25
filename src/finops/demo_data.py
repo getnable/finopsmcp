@@ -1079,6 +1079,61 @@ def connected_providers() -> list[dict[str, str]]:
     ]
 
 
+_PROVIDER_LABEL = {
+    "aws": "AWS", "gcp": "GCP", "azure": "Azure", "kubernetes": "Kubernetes",
+    "openai": "OpenAI", "anthropic": "Anthropic", "datadog": "Datadog",
+    "snowflake": "Snowflake", "databricks": "Databricks",
+}
+
+# One sentence every "what am I connected to" view uses in demo, so
+# list_connected_providers, check_connector_health, nable_setup_status and
+# what_can_nable_do all tell the same story: nine sample providers, none of the
+# user's own accounts.
+SAMPLE_PROVIDERS_NOTE = (
+    "Demo mode: these are the providers in the StreamCo sample environment, shown with "
+    "sample data. They are not accounts the user connected; none of the user's own "
+    "accounts are connected. connect_aws, connect_gcp or connect_azure connects a real one.")
+
+
+def capabilities_text(detailed: bool = False) -> str:
+    """what_can_nable_do in demo mode. The live renderer reports what is really
+    connected, which in demo is nothing, so it answered "nothing's connected"
+    while list_connected_providers answered "nine connected". This says what is
+    true: the answers are sample data, here is what the sample covers, and here
+    is how to swap it for the user's own account."""
+    from .capabilities import TOTAL_TOOLS
+
+    names = ", ".join(_PROVIDER_LABEL.get(p, p) for p in _DEMO_PROVIDERS)
+    lines = [
+        "## What nable can do (demo mode, sample data)",
+        "",
+        "This session answers from the StreamCo sample environment: sample data for "
+        f"{names}. None of your own accounts are connected, so no answer here is about "
+        "your spend.",
+        "",
+        "Try asking (each one answers from the sample):",
+        '- "What did we spend in the last 30 days?"  (get_cost_summary)',
+        '- "Why did the bill go up?"  (explain_recent_cost_drivers)',
+        '- "Break spend down by team, account or region"  (slice_costs)',
+        '- "Any cost anomalies?"  (get_anomalies)',
+        '- "What can we save?"  (get_savings_summary, get_rightsizing_recommendations)',
+        '- "Where will this month land?"  (forecast_costs)',
+        '- "What are we spending on AI?"  (get_llm_costs, optimize_ai_spend)',
+        '- "How efficient is our Kubernetes cluster?"  (get_kubernetes_costs)',
+        "",
+        "To see your own numbers, connect an account right here: connect_aws or "
+        "connect_gcp (they detect credentials already on this machine) or connect_azure. "
+        "Answers switch from sample data to your account as soon as one is connected.",
+        "",
+        f"nable ships {TOTAL_TOOLS}+ read-only tools. The ones the sample cannot answer "
+        "light up once a real account is connected.",
+    ]
+    if detailed:
+        lines += ["", "### Tools that answer from the sample",
+                  ", ".join(sorted(demo_tool_names()))]
+    return "\n".join(lines)
+
+
 def demo_accounts() -> dict[str, list[dict[str, Any]]]:
     """Per-provider account/subscription/org identifiers for the demo, in the
     shape list_accounts returns (provider -> list of account dicts)."""
@@ -1437,7 +1492,32 @@ def after_connect_in_demo(result: Any) -> Any:
     return result
 
 
-DEMO_TEXT_HEADER ="Sample data (demo mode): the StreamCo sample environment, not your account."
+DEMO_TEXT_HEADER = "Sample data (demo mode): the StreamCo sample environment, not your account."
+DEMO_NOTE = (
+    "Sample data (demo mode): every figure comes from the StreamCo sample environment, "
+    "not the user's account. None of the user's own accounts are connected. To see real "
+    "numbers, connect one here with connect_aws, connect_gcp or connect_azure.")
+
+
+def label_demo(value: Any) -> Any:
+    """Stamp a demo-mode answer so no reader, model or human, can take it for
+    the user's own numbers: `_demo_mode: true` and a sample-data note on a dict,
+    the sample-data header on text, the flag on each dict in a list.
+
+    Applied once, at the server chokepoint, to every tool that answers in demo
+    mode. Several tools used to answer with no flag at all (list_connected_providers
+    reported nine providers "connected"), so the label depended on each tool
+    remembering it."""
+    if isinstance(value, dict):
+        value.setdefault("_demo_mode", True)
+        value.setdefault("_demo_note", DEMO_NOTE)
+    elif isinstance(value, str):
+        return render_text(value)
+    elif isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                item.setdefault("_demo_mode", True)
+    return value
 
 
 def render_text(value: Any) -> str:

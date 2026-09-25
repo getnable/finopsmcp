@@ -12,6 +12,7 @@ schema requires, and fails on any exception.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -63,15 +64,45 @@ def test_the_registry_is_the_whole_product():
     assert len(_all_tools()) > 150
 
 
+def _text(result) -> str:
+    parts: list[str] = []
+
+    def walk(node):
+        if isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+        elif hasattr(node, "text"):
+            parts.append(str(node.text))
+        else:
+            parts.append(json.dumps(node, default=str))
+
+    walk(result)
+    return "\n".join(parts)
+
+
 def test_every_tool_answers_in_demo_mode(demo):
     failures: dict[str, str] = {}
+    unlabelled: list[str] = []
     for tool in _all_tools():
         try:
-            asyncio.run(server.mcp.call_tool(tool.name, _minimal_args(tool.parameters)))
+            out = asyncio.run(server.mcp.call_tool(tool.name, _minimal_args(tool.parameters)))
         except Exception as exc:  # validation errors surface as ToolError
             failures[tool.name] = f"{type(exc).__name__}: {str(exc)[:160]}"
+            continue
+        # Every demo answer says it is the sample, in a flag a program can read
+        # and in words a person reads.
+        # A text tool has nowhere to put a flag, so its text must open with the
+        # label instead.
+        text = _text(out)
+        if server._declared_return(tool.fn) is str:
+            labelled = "sample data (demo mode)" in text.lower()
+        else:
+            labelled = '"_demo_mode": true' in text and "sample data" in text.lower()
+        if not labelled:
+            unlabelled.append(tool.name)
     assert not failures, "tools that crash in demo mode:\n" + "\n".join(
         f"  {k}: {v}" for k, v in failures.items())
+    assert not unlabelled, f"demo answers with no sample-data label: {unlabelled}"
 
 
 @pytest.mark.parametrize("tool", [
@@ -123,3 +154,49 @@ def test_first_answer_directive_in_demo_names_a_sample_backed_tool():
     assert "get_savings_summary" in d["directive"]
     assert "get_savings_summary" in demo_tool_names()
     assert "isn't in the sample" not in str(demo_bridge_result("get_savings_summary", {}))
+
+
+# ── the "what am I connected to" views agree with each other ───────────────────
+
+def _run_tool(name, **kwargs):
+    return asyncio.run(server.mcp._tool_manager.get_tool(name).fn(**kwargs))
+
+
+def test_connected_views_agree_in_demo(demo):
+    """Dogfood: list_connected_providers reported nine providers "connected"
+    with no demo flag, while what_can_nable_do said nothing was connected. All
+    four views now say the same thing: sample providers, none of the user's."""
+    from finops.demo_data import SAMPLE_PROVIDERS_NOTE, connected_providers
+
+    sample = {e["name"] for e in connected_providers()}
+
+    listed = _run_tool("list_connected_providers")
+    assert listed["_demo_mode"] is True
+    assert listed["_demo_note"] == SAMPLE_PROVIDERS_NOTE
+    rows = {k: v for k, v in listed.items() if not k.startswith("_")}
+    assert set(rows) == sample
+    assert all(v["configured"] is False and v["sample_data"] for v in rows.values())
+    assert not any(v["status"] == "connected" for v in rows.values())
+
+    health = _run_tool("check_connector_health")
+    assert health["_demo_mode"] is True and health["healthy_count"] == 0
+    assert {c["name"] for c in health["connectors"]} == sample
+
+    setup = _run_tool("nable_setup_status")
+    assert setup["_demo_mode"] is True
+    assert set(setup["sample_providers"]) == sample
+
+    caps = _run_tool("what_can_nable_do")
+    assert caps.lower().startswith("sample data")
+    assert "None of your own accounts are connected" in caps
+    assert "connect_aws" in caps
+    for label in ("AWS", "GCP", "Azure", "OpenAI", "Snowflake"):
+        assert label in caps
+
+
+def test_capability_map_in_demo_lists_only_sample_backed_tools(demo):
+    from finops.demo_data import demo_tool_names
+
+    caps = _run_tool("what_can_nable_do", detailed=True)
+    listed = caps.rsplit("### Tools that answer from the sample", 1)[1]
+    assert {t.strip() for t in listed.split(",")} == set(demo_tool_names())

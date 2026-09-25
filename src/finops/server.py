@@ -455,7 +455,8 @@ def _instrumented_tool(*dargs, **dkwargs):
                     _was_demo = True
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
-                        return _demo_as_declared(fn, _demo)
+                        from .demo_data import label_demo
+                        return label_demo(_demo_as_declared(fn, _demo))
             except Exception as _exc:   # never let the guard break a real call
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
 
@@ -498,6 +499,14 @@ def _instrumented_tool(*dargs, **dkwargs):
                     result = after_connect_in_demo(result)
                 except Exception as _exc:
                     log.debug("demo connect label skipped: %s", _exc)
+            elif _was_demo:
+                # Every answer given in demo mode carries the sample-data label,
+                # including the tools that serve the sample themselves.
+                try:
+                    from .demo_data import label_demo
+                    result = label_demo(result)
+                except Exception as _exc:
+                    log.debug("demo label skipped: %s", _exc)
             # Determine outcome: check for RBAC-denied results
             _outcome = "success"
             if isinstance(result, dict) and result.get("error", "").startswith("Access denied"):
