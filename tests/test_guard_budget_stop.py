@@ -168,7 +168,7 @@ def test_the_warn_note_rides_along_with_an_allowed_infra_command(monkeypatch):
 def test_the_warn_note_never_softens_an_ask(monkeypatch):
     monkeypatch.setattr(ai_budget, "status", _near)
     v = guard.gate_command("terraform destroy", session_id="s1")
-    assert v["decision"] == "ask" and "one-way door" in v["reason"]
+    assert v["decision"] == "ask" and "cannot be undone" in v["reason"]
 
 
 def test_the_claude_hook_shows_the_warn_note_without_a_permission_decision(monkeypatch):

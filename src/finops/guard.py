@@ -1330,6 +1330,11 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
     if gate.get("gate") == GATE_ESCALATE:
+        if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
+            # Say what the command does and to what, in words: "'delete_resource'
+            # is a one-way door" was the policy's vocabulary, not the human's.
+            opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
+            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing, est=est)
         return verdict("ask", cost + gate.get("reason", "a human must review this action."),
                        est=est)
     if gate.get("gate") == GATE_BLOCK:
@@ -1337,6 +1342,72 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                                                "this action is not in your policy allowlist."),
                        est=est)
     return allowed(est)
+
+
+# What a one-way command does, in words, by the rule that caught it: the
+# first fragment found in that rule's pattern names it. Checked against the
+# normalised command in the classifier's own order.
+_ONE_WAY_PHRASES: list[tuple[str, str]] = [
+    ("base64-to-shell", "runs a decoded script the guard cannot read"),
+    ("python-boto3-delete", "looks like a Python one-liner that deletes or terminates "
+                            "AWS resources"),
+    ("workspace", "would delete a Terraform workspace, leaving what it manages "
+                  "running with no state"),
+    ("drain", "would evict every pod from a node"),
+    ("kubectl-replace-force", "would delete and recreate Kubernetes resources"),
+    ("kubectl", "would delete Kubernetes resources"),
+    ("helm", "would uninstall a Helm release"),
+    ("s3", "would delete stored data"),
+    ("gsutil", "would delete stored data"),
+    ("schedule-key-deletion", "would schedule a KMS key for deletion"),
+    ("terraform", "would destroy infrastructure"),
+    ("tofu", "would destroy infrastructure"),
+    ("pulumi", "would destroy infrastructure"),
+    ("cdk", "would destroy infrastructure"),
+    ("sam", "would destroy infrastructure"),
+    ("apply-with-destroy-flag", "would destroy infrastructure"),
+    ("tf-cli-args-destroy", "would destroy infrastructure"),
+]
+_ACTION_PHRASES = {
+    "terminate_instance": "would terminate EC2 instances",
+    "release_ip": "would release an Elastic IP address",
+    "snapshot_delete": "would delete a snapshot",
+    "purchase_commitment": "would buy a commitment",
+    "idle_cleanup": "would clean up idle resources",
+}
+# Tools whose target is the directory they run in.
+_DIR_TOOLS_RE = re.compile(r"\b(?:terraform|tofu|terragrunt|pulumi|cdk|sam)\s")
+_SHOWN_COMMAND_MAX = 100
+
+
+def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tuple[str, str]:
+    """("This would destroy infrastructure (`terraform destroy` in infra/)",
+    "It cannot be undone; confirm to proceed.") for a one-way command."""
+    norm = _normalize(command)
+    what = _ACTION_PHRASES.get(action_type)
+    if what is None:
+        what = "would delete cloud resources"
+        rule = next((r for r, _ in _ONE_WAY_RULES if r.search(norm)), None)
+        if rule is not None:
+            what = next((phrase for frag, phrase in _ONE_WAY_PHRASES
+                         if frag in rule.pattern), what)
+    shown = " ".join(command.split())
+    if len(shown) > _SHOWN_COMMAND_MAX:
+        shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
+    where = ""
+    if _DIR_TOOLS_RE.search(norm):
+        cd = _CD_PREFIX_RE.match(norm)
+        chdir = re.search(r"-chdir=(\S+)", norm)
+        d = (chdir.group(1) if chdir else cd.group(1) if cd
+             else Path(cwd).name if cwd else "")
+        where = f" in {d.rstrip('/')}/" if d else ""
+    if action_type == "purchase_commitment":
+        closing = "It cannot be cancelled once bought; confirm to proceed."
+    elif what.startswith(("runs", "looks")):
+        closing = "The guard cannot see exactly what it does; confirm to proceed."
+    else:
+        closing = "It cannot be undone; confirm to proceed."
+    return f"This {what} (`{shown}`{where})", closing
 
 
 # ── History: what the guard already let through ────────────────────────────────

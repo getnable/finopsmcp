@@ -106,7 +106,7 @@ def test_a_savings_plan_states_the_commitment_for_both_terms():
     assert "$87,600 over a 1-year term" in v["reason"]
     assert "$262,800 over 3 years" in v["reason"]
     assert "offering id" in v["reason"], "the basis must say why the term is not known"
-    assert "one-way door" in v["reason"]
+    assert "This would buy a commitment" in v["reason"] and "cannot be cancelled" in v["reason"]
 
 
 def test_a_savings_plan_upfront_amount_is_named():

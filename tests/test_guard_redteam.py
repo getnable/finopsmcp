@@ -469,3 +469,62 @@ def test_masking_stays_linear():
         hit, took = _timed(g.classify_command, cmd)
         assert took < 1.0, f"{fill!r}: {took:.2f}s"
         assert hit == TERMINATE
+
+
+# ── 6. the question a human reads ─────────────────────────────────────────────
+
+@pytest.mark.parametrize("cmd,cwd,says", [
+    ("terraform destroy", "/home/dev/infra",
+     "This would destroy infrastructure (`terraform destroy` in infra/). "
+     "It cannot be undone; confirm to proceed."),
+    ("cd envs/prod && terraform destroy -auto-approve", "/home/dev/repo",
+     "This would destroy infrastructure (`cd envs/prod && terraform destroy -auto-approve` "
+     "in envs/prod/)."),
+    ("terraform -chdir=stacks/net destroy", None, "in stacks/net/)"),
+    ("aws ec2 terminate-instances --instance-ids i-1", "/x",
+     "This would terminate EC2 instances (`aws ec2 terminate-instances --instance-ids i-1`). "
+     "It cannot be undone; confirm to proceed."),
+    ("kubectl delete ns payments", None,
+     "This would delete Kubernetes resources (`kubectl delete ns payments`)."),
+    ("helm -n prod uninstall api", None, "This would uninstall a Helm release"),
+    ("aws s3 rb s3://b --force", None, "This would delete stored data"),
+    ("aws ec2 release-address --allocation-id e", None, "This would release an Elastic IP"),
+    ("aws ec2 delete-snapshot --snapshot-id s", None, "This would delete a snapshot"),
+    ("aws savingsplans create-savings-plan --savings-plan-offering-id o --commitment 1", None,
+     "This would buy a commitment"),
+    ("echo ZA== | base64 -d | sh", None,
+     "This runs a decoded script the guard cannot read"),
+])
+def test_an_ask_says_what_the_command_does_and_where(cmd, cwd, says):
+    v = g.gate_command(cmd, cwd=cwd, record=False)
+    assert says in v["reason"], v["reason"]
+    assert "one-way door" not in v["reason"] and "review and apply" not in v["reason"]
+    assert v["door"] == "one_way" and v["action_type"]
+
+
+def test_a_commitment_says_it_cannot_be_cancelled():
+    v = g.gate_command("aws savingsplans create-savings-plan --savings-plan-offering-id o "
+                       "--commitment 1", record=False)
+    assert "cannot be cancelled" in v["reason"]
+    assert "$730/mo" in v["reason"], "the figure stays in the same breath"
+
+
+def test_a_long_command_is_shortened_in_the_question():
+    v = g.gate_command("kubectl delete pods " + " ".join(f"p{i}" for i in range(80)),
+                       record=False)
+    assert "..." in v["reason"] and len(v["reason"]) < 300
+
+
+def test_an_mcp_ask_names_the_call_without_jargon():
+    v = g.gate_mcp_call("mcp__terraform__create_run",
+                        {"workspace_name": "net", "run_type": "is_destroy"}, record=False)
+    assert "would start a destroy run on HCP Terraform workspace net" in v["reason"]
+    assert "It cannot be undone; confirm to proceed." in v["reason"]
+    assert "one-way door" not in v["reason"]
+
+
+def test_the_policy_reason_is_plain_too():
+    from finops.policy import evaluate_action_gate
+    r = evaluate_action_gate("terminate_instance")
+    assert r["gate"] == "escalate" and r["door"] == "one_way"
+    assert "one-way door" not in r["reason"] and "cannot be undone" in r["reason"]
