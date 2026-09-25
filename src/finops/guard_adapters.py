@@ -70,6 +70,12 @@ A stale uvx cache running yesterday's nable would then stop every shell
 command the agent tries. Detection has no such failure: an older nable given a
 payload it does not recognise stays silent, which both harnesses read as allow.
 
+uvx itself can fail the same way: it exits 2 when it cannot reach PyPI or
+resolve the package, before nable runs at all. So every harness that blocks on
+a failed hook gets the command wrapped to exit 0 whatever the launcher does
+(_fail_safe): Cursor and Codex block on exit 2, Copilot and Gemini CLI on any
+exit they do not read as a warning. Cline's script exits 0 itself.
+
 Fails open everywhere, like the Claude hook: an adapter error allows the
 command and says why on stderr. stdout carries the harness's JSON and nothing
 else.
@@ -921,7 +927,10 @@ def _cursor_commands(doc: dict) -> list[Any]:
 def _cursor_install(doc: dict, path: Path, cmd: str, stale: tuple[str, ...] = ()) -> str:
     """Our entry on both events: shell commands, and MCP tool calls (which the
     guard translates when they are Terraform, AWS or Kubernetes tools). An
-    install from before MCP coverage gains the second entry as a repair."""
+    install from before MCP coverage gains the second entry as a repair, and
+    one from before the fail-safe wrapper has its bare command wrapped."""
+    stale = _wrapped(stale, _fail_safe) + (cmd,)
+    cmd = _fail_safe(cmd)
     outcomes = []
     for event in _CURSOR_EVENTS:
         entries = _cursor_entries(doc, path, create=True, event=event)
@@ -1011,7 +1020,10 @@ def _codex_handlers(doc: dict) -> list[dict]:
     return _event_handlers(doc, "PreToolUse")
 
 
-def _codex_install(doc: dict, path: Path, cmd: str) -> str:
+def _codex_install(doc: dict, path: Path, cmd: str, stale: tuple[str, ...] = ()) -> str:
+    # The bare command earlier releases wrote is replaced by the wrapped one.
+    stale = _wrapped(stale, _fail_safe_cmd_exe) + (cmd,)
+    cmd = _fail_safe_cmd_exe(cmd)
     groups = _codex_groups(doc, path, create=True)
     ours = [h for h in _codex_handlers(doc) if _is_ours(h.get("command"))]
     if not ours:
@@ -1030,7 +1042,7 @@ def _codex_install(doc: dict, path: Path, cmd: str) -> str:
                 and any(isinstance(h, dict) and _is_ours(h.get("command")) for h in inner)):
             group["matcher"] = _CODEX_MATCHER
             widened = True
-    outcome = _repair(ours, cmd)
+    outcome = _repair(ours, cmd, stale=stale)
     return _merge_outcomes([outcome, "repaired"]) if widened else outcome
 
 
@@ -1094,12 +1106,28 @@ def _fail_safe(cmd: str) -> str:
     """The hook command for a harness that blocks on a failed hook.
 
     Copilot denies the tool call when a preToolUse command exits non-zero for
-    any reason but a timeout, and Gemini CLI blocks on any exit but 0 and 1.
-    `finops guard hook` always exits 0, but a teammate without uv, a sandbox
-    that cannot reach PyPI, or an older nable rejecting its arguments would
-    otherwise stop every shell command. The trailing `exit 0` means the same in
-    bash, sh and PowerShell, so one string serves both of Copilot's shells."""
+    any reason but a timeout, Gemini CLI blocks on any exit but 0 and 1, and
+    Cursor blocks on exit 2. `finops guard hook` always exits 0, but a
+    teammate without uv, a sandbox that cannot reach PyPI (uvx exits 2), or
+    an older nable rejecting its arguments would otherwise stop every shell
+    command. The trailing `exit 0` means the same in bash, sh and PowerShell,
+    the shells these harnesses run hooks in (Cursor, Copilot and Gemini CLI
+    use PowerShell on Windows)."""
     return f"{cmd}; exit 0"
+
+
+def _fail_safe_cmd_exe(cmd: str) -> str:
+    """_fail_safe for Codex, which blocks on exit 2 and runs a hook through
+    cmd.exe on Windows (COMSPEC /C, codex-rs hooks/src/engine/command_runner.rs)
+    and `$SHELL -lc` elsewhere. cmd.exe does not split commands on `;`: the
+    `; exit 0` would reach nable as arguments and fail every call. `||` means
+    "on failure" in cmd.exe and in every POSIX shell."""
+    return f"{cmd} || exit 0"
+
+
+def _wrapped(stale: tuple[str, ...], wrap: Any) -> tuple[str, ...]:
+    """`stale` in both spellings, bare and wrapped."""
+    return tuple(stale) + tuple(wrap(c) for c in stale)
 
 
 # ── GitHub Copilot: {"version": 1, "hooks": {"preToolUse": [{type, command, ...}]}} ──
@@ -1318,8 +1346,8 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
     if harness == "cline":
         return _cline_install(path, cmd, _stale_forms(harness, global_scope)), path
     doc = _load(path, comments_allowed=harness == "gemini")
-    if harness == "cursor":
-        outcome = _cursor_install(doc, path, cmd, _stale_forms(harness, global_scope))
+    if harness in ("cursor", "codex"):
+        outcome = _ADAPTERS[harness][0](doc, path, cmd, _stale_forms(harness, global_scope))
     else:
         outcome = _ADAPTERS[harness][0](doc, path, cmd)
     if outcome != "already":

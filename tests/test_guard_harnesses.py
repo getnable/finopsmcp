@@ -892,8 +892,9 @@ def test_an_old_codex_matcher_is_widened_and_a_hand_written_one_is_not(monkeypat
 
     path.write_text(json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": g._UVX_HOOK_CMD}]}]}}))
-    assert ga.install("codex", True)[0] == "already"
+    assert ga.install("codex", True)[0] == "repaired"      # the bare command gains || exit 0
     assert json.loads(path.read_text())["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
+    assert ga.install("codex", True)[0] == "already"
 
 
 # ── project files stay portable ───────────────────────────────────────────────
