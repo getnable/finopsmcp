@@ -2,8 +2,9 @@
 OpenAI cost and usage connector.
 
 Uses the OpenAI Organization API to fetch:
-  - Daily cost by model (via /v1/organization/costs)
+  - Daily cost by line item and project (via /v1/organization/costs)
   - Token usage breakdown by model (via /v1/organization/usage/completions)
+  - Cost by project, API key or user (get_cost_attribution)
 
 Requires an Admin API key (sk-admin-...) or an org-level key with
   "Read billing" and "Read usage" scopes.
@@ -67,12 +68,36 @@ def _headers(api_key: str, org_id: str | None = None) -> dict[str, str]:
     return h
 
 
+_ORG_API = "https://api.openai.com/v1/organization"
+
+
+def _list_all(httpx: Any, url: str, headers: dict[str, str],
+              params: dict[str, Any] | None = None) -> list[dict]:
+    """Every object of a cursor-paged admin list (data / has_more / last_id,
+    continued with ?after=), the shape of /organization/projects, /users and
+    /projects/{id}/api_keys."""
+    params = {"limit": 100, **(params or {})}
+    items: list[dict] = []
+    for _ in range(_MAX_PAGES):
+        resp = httpx.get(url, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        page = data.get("data", [])
+        items.extend(page)
+        last = data.get("last_id") or (page[-1].get("id") if page else None)
+        if not data.get("has_more") or not last:
+            return items
+        params["after"] = last
+    raise RuntimeError(f"{url} still had more pages after {_MAX_PAGES}")
+
+
 def get_projects(api_key: str, org_id: str | None = None) -> dict[str, str]:
     """
     Fetch the list of OpenAI projects and return an id→name mapping.
 
-    Calls GET /v1/organization/projects (requires Admin API key).
-    Returns an empty dict gracefully on any error.
+    Calls GET /v1/organization/projects (requires Admin API key), every page,
+    archived projects included: last month's spend can sit on a project that
+    has been archived since. Returns an empty dict gracefully on any error.
     """
     try:
         import httpx
@@ -80,25 +105,57 @@ def get_projects(api_key: str, org_id: str | None = None) -> dict[str, str]:
         return {}
 
     try:
-        resp = httpx.get(
-            "https://api.openai.com/v1/organization/projects",
-            params={"limit": 100},
-            headers=_headers(api_key, org_id),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        projects = _list_all(httpx, f"{_ORG_API}/projects", _headers(api_key, org_id),
+                             {"include_archived": True})
     except Exception as e:
         log.debug("OpenAI projects API unavailable: %s", e)
         return {}
 
     id_to_name: dict[str, str] = {}
-    for proj in data.get("data", []):
+    for proj in projects:
         pid  = proj.get("id", "")
         name = proj.get("name") or pid
         if pid:
             id_to_name[pid] = name
     return id_to_name
+
+
+# API keys are listed per project, one call each. Past this many projects the
+# rest stay as raw key ids rather than fan out into hundreds of calls.
+_KEY_NAME_PROJECT_CAP = 50
+
+
+def _api_key_names(api_key: str, org_id: str | None, project_ids: list[str]) -> dict[str, str]:
+    """key id -> key name, from GET /organization/projects/{id}/api_keys.
+    Best effort: a project that cannot be listed leaves its keys unnamed."""
+    try:
+        import httpx
+    except ImportError:
+        return {}
+    names: dict[str, str] = {}
+    for pid in project_ids[:_KEY_NAME_PROJECT_CAP]:
+        try:
+            keys = _list_all(httpx, f"{_ORG_API}/projects/{pid}/api_keys",
+                             _headers(api_key, org_id))
+        except Exception as e:
+            log.debug("OpenAI api_keys list failed for %s: %s", pid, e)
+            continue
+        for k in keys:
+            if k.get("id") and k.get("name"):
+                names[k["id"]] = k["name"]
+    return names
+
+
+def _user_names(api_key: str, org_id: str | None) -> dict[str, str]:
+    """user id -> email (or name), from GET /organization/users. Best effort."""
+    try:
+        import httpx
+        users = _list_all(httpx, f"{_ORG_API}/users", _headers(api_key, org_id))
+    except Exception as e:
+        log.debug("OpenAI users list unavailable: %s", e)
+        return {}
+    return {u["id"]: (u.get("email") or u.get("name") or u["id"])
+            for u in users if u.get("id")}
 
 
 def get_costs(
@@ -154,10 +211,10 @@ def get_costs(
         "bucket_width": "1d",
         "limit": _COSTS_PAGE_LIMIT,
     }
-    if group_by:
-        params["group_by"] = group_by
-    else:
-        params["group_by"] = ["model", "project_id"]
+    # The costs endpoint groups by project_id, line_item and api_key_id only.
+    # It used to be asked for "model", which is not in that list; the model
+    # is the first part of each line item ("gpt-4o-2024-08-06, input").
+    params["group_by"] = group_by or ["project_id", "line_item"]
 
     try:
         data = {"data": _get_all_buckets(
@@ -200,6 +257,40 @@ def get_costs(
     return parsed
 
 
+def _line_item_model(line_item: Any) -> str | None:
+    """The model a costs line item bills for: "gpt-4o-2024-08-06, input" ->
+    "gpt-4o-2024-08-06". A line item that is not per model ("web search tool
+    calls") has no comma and comes back whole, so it still gets a label."""
+    if not line_item or not isinstance(line_item, str):
+        return None
+    return line_item.split(",", 1)[0].strip() or None
+
+
+def _row_model(result: dict) -> str:
+    """UsageCompletionsResult names the model `model`; `model_id` is kept for
+    older payloads and the fixtures that still use it."""
+    return result.get("model") or result.get("model_id") or "unknown"
+
+
+def _usage_row_cost(result: dict) -> float | None:
+    """List-price USD for one usage/completions row, or None when the model has
+    no known price (the caller lists it; pricing it at $0 would hide it).
+    input_tokens includes the cached subset, which bills at the cached rate."""
+    price = price_for(_row_model(result))
+    if price is None:
+        return None
+    input_tok = int(result.get("input_tokens", 0) or 0)
+    cached = min(int(result.get("input_cached_tokens", 0) or 0), input_tok)
+    return price.cost(input_tokens=input_tok - cached, cache_read_tokens=cached,
+                      output_tokens=int(result.get("output_tokens", 0) or 0))
+
+
+def _note_unpriced(unpriced: dict[str, dict[str, int]], result: dict) -> None:
+    u = unpriced.setdefault(_row_model(result), {"input_tokens": 0, "output_tokens": 0})
+    u["input_tokens"] += int(result.get("input_tokens", 0) or 0)
+    u["output_tokens"] += int(result.get("output_tokens", 0) or 0)
+
+
 def _parse_costs_response(
     data: dict,
     project_names: dict[str, str] | None = None,
@@ -218,7 +309,8 @@ def _parse_costs_response(
 
         for result in bucket.get("results", []):
             amount = result.get("amount", {}).get("value", 0.0)
-            model  = result.get("model_id") or "unknown"
+            model  = (result.get("model_id") or _line_item_model(result.get("line_item"))
+                      or "unknown")
             proj   = result.get("project_id") or "default"
             proj_name = project_names.get(proj, proj)
 
@@ -378,25 +470,15 @@ def _estimate_from_usage(
         bucket_by_model: dict[str, float] = {}
 
         for result in bucket.get("results", []):
-            model       = result.get("model_id") or "unknown"
-            input_tok   = result.get("input_tokens", 0)
-            output_tok  = result.get("output_tokens", 0)
+            model       = _row_model(result)
             # Same usage rows already carry the token counts the KPI engine needs.
             _accumulate_tokens(result, by_model_tokens)
-            price       = price_for(model)
-            if price is None:
+            cost = _usage_row_cost(result)
+            if cost is None:
                 # No published price for this model id. Pricing it at $0 made
                 # its spend vanish from the estimate; list it instead.
-                u = unpriced.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
-                u["input_tokens"] += int(input_tok or 0)
-                u["output_tokens"] += int(output_tok or 0)
+                _note_unpriced(unpriced, result)
                 continue
-            # input_tokens includes the cached subset, which bills at the cached
-            # rate rather than full input.
-            cached = min(int(result.get("input_cached_tokens", 0) or 0), int(input_tok or 0))
-            cost = price.cost(input_tokens=int(input_tok or 0) - cached,
-                              cache_read_tokens=cached,
-                              output_tokens=int(output_tok or 0))
             bucket_total += cost
             bucket_by_model[model] = bucket_by_model.get(model, 0.0) + cost
             by_model[model]        = by_model.get(model, 0.0) + cost
@@ -422,6 +504,150 @@ def _estimate_from_usage(
         out["unpriced_models"] = unpriced
         out["note"] += (f" {len(unpriced)} model(s) have no known price and are "
                         f"excluded from total_usd: {', '.join(sorted(unpriced))}.")
+    return out
+
+
+# ── Cost attribution: spend by project, API key or user ──────────────────────
+# dimension -> (the org API field that carries it, whether the billed costs
+# endpoint can group by it). Costs group by project_id, line_item and
+# api_key_id; user_id exists on usage rows only, so user spend is an estimate.
+_ATTRIBUTION_FIELDS: dict[str, tuple[str, bool]] = {
+    "project": ("project_id", True),
+    "api_key": ("api_key_id", True),
+    "user":    ("user_id", False),
+}
+_UNASSIGNED = {"project": "(no project)", "api_key": "(no API key)", "user": "(no user)"}
+_NOT_AVAILABLE = {
+    "workspace": "OpenAI has projects, not workspaces. Use dimension='project'.",
+    "team": ("OpenAI has no team field. Projects are the usual stand-in for a team or "
+             "product area: use dimension='project'."),
+    "tag": "OpenAI's cost and usage APIs carry no request tags or metadata.",
+    "session": "OpenAI's cost and usage APIs carry no session id.",
+}
+_ESTIMATE_NOTE = ("Estimated from completions token usage at list price. Does not reflect "
+                  "discounts or credits, and embeddings, images, audio and tool fees are "
+                  "not included.")
+
+
+def _unix(d: date) -> int:
+    from datetime import datetime, timezone
+    return int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
+
+
+def _amount_usd(result: dict) -> float | None:
+    """USD of one costs result, or None when its amount cannot be read. An
+    unreadable amount is not a $0 line item; the caller counts it."""
+    amount = result.get("amount")
+    value = amount.get("value") if isinstance(amount, dict) else None
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> dict[str, Any]:
+    """
+    OpenAI spend for [start_date, end_date] split by project, API key or user.
+
+    project and api_key read billed dollars from /v1/organization/costs
+    (group_by=project_id or api_key_id, source="cost_api"). If that endpoint
+    fails they fall back to /v1/organization/usage/completions priced at list
+    price (source="estimated"). user is always that estimate: costs carry no
+    user_id. Names come from /organization/projects, /projects/{id}/api_keys
+    and /organization/users when the key can read them, raw ids otherwise.
+
+    Returns the shared attribution shape (see _attribution.py): groups on a
+    read, source="unsupported" for a dimension OpenAI does not have, and an
+    unread result, never an empty $0, when nothing could be read.
+    """
+    from ._attribution import groups_result, unread, unsupported
+
+    if dimension in _NOT_AVAILABLE:
+        return unsupported(_NOT_AVAILABLE[dimension])
+    if dimension not in _ATTRIBUTION_FIELDS:
+        return unsupported(f"OpenAI cannot attribute cost by '{dimension}'.")
+    try:
+        import httpx
+    except ImportError:
+        return unread("httpx_missing")
+
+    from ...security.env import get_env
+    api_key = get_env("OPENAI_ADMIN_KEY") or get_env("OPENAI_API_KEY")
+    org_id = get_env("OPENAI_ORG_ID") or None
+    if not api_key:
+        return unread("not_configured")
+
+    field, billed = _ATTRIBUTION_FIELDS[dimension]
+    headers = _headers(api_key, org_id)
+    # end_time is exclusive, so the day after end_date keeps end_date whole.
+    window = {"start_time": _unix(start_date),
+              "end_time": _unix(end_date + timedelta(days=1)),
+              "bucket_width": "1d"}
+
+    sums: dict[str | None, float] | None = None
+    source, note = "cost_api", None
+    unpriced: dict[str, dict[str, int]] = {}
+    unreadable = 0
+    if billed:
+        try:
+            buckets = _get_all_buckets(
+                httpx, f"{_ORG_API}/costs",
+                {**window, "group_by": [field], "limit": _COSTS_PAGE_LIMIT}, headers)
+            sums = {}
+            for bucket in buckets:
+                for result in bucket.get("results", []):
+                    usd = _amount_usd(result)
+                    if usd is None:
+                        unreadable += 1
+                        continue
+                    gid = result.get(field)
+                    sums[gid] = sums.get(gid, 0.0) + usd
+        except Exception as e:
+            log.info("OpenAI costs by %s failed (%s), estimating from usage", field, e)
+
+    if sums is None:
+        try:
+            buckets = _get_all_buckets(
+                httpx, f"{_ORG_API}/usage/completions",
+                {**window, "group_by": [field, "model"], "limit": _USAGE_1D_PAGE_LIMIT},
+                headers)
+        except Exception as e:
+            if _is_auth_error(e):
+                return unread(
+                    "credential_invalid",
+                    "OpenAI refused this key on the organization cost and usage APIs, "
+                    "which need an Admin key: set OPENAI_ADMIN_KEY (sk-admin-...). "
+                    f"({e})", source="error")
+            return unread("api_error", str(e))
+        sums, source, note = {}, "estimated", _ESTIMATE_NOTE
+        for bucket in buckets:
+            for result in bucket.get("results", []):
+                cost = _usage_row_cost(result)
+                if cost is None:
+                    _note_unpriced(unpriced, result)
+                    continue
+                gid = result.get(field)
+                sums[gid] = sums.get(gid, 0.0) + cost
+
+    if dimension == "project":
+        names = get_projects(api_key, org_id)
+    elif dimension == "api_key":
+        names = _api_key_names(api_key, org_id, list(get_projects(api_key, org_id)))
+    else:
+        names = _user_names(api_key, org_id)
+
+    out = groups_result(sums, names, source=source, unassigned=_UNASSIGNED[dimension],
+                        note=note)
+    if unpriced:
+        out["unpriced_models"] = unpriced
+        out["note"] = (f"{out.get('note', '')} {len(unpriced)} model(s) have no known price "
+                       f"and are excluded: {', '.join(sorted(unpriced))}.").strip()
+    if unreadable:
+        out["unreadable_rows"] = unreadable
+        out["note"] = (f"{out.get('note', '')} {unreadable} cost row(s) had no readable "
+                       f"amount and are excluded.").strip()
     return out
 
 
