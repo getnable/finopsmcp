@@ -362,6 +362,25 @@ def test_nable_why_cost_explorer_denied_exits_1(billed_stub):
     assert code == 1 and "ce:GetCostAndUsage" in err
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+def test_nable_why_exits_1_when_every_service_drill_down_failed(billed_stub, as_json):
+    def stubbing(s1, s2):
+        cur, base = dd.windows_for_period(7)
+        services = [_day(d, [([EC2], 300.0 if d >= cur.start else 10.0)])
+                    for d in base.dates() + cur.dates()]
+        s1.add_response("get_cost_and_usage", {"ResultsByTime": services})
+        s1.add_client_error("get_cost_and_usage", service_error_code="ThrottlingException",
+                            service_message="slow down", http_status_code=400)
+
+    code, out, _ = _why(billed_stub, ["--json"] if as_json else [], stubbing)
+    assert code == 1
+    if as_json:
+        doc = json.loads(out)
+        assert doc["ok"] is False and "ThrottlingException" in doc["lines"][0]
+    else:
+        assert "ThrottlingException" in out
+
+
 def test_nable_why_rejects_a_window_it_cannot_read(billed_stub):
     code, out, _ = _why(billed_stub, ["--days", "90", "--json"], lambda s1, s2: None)
     assert code == 2 and "1 to 45" in json.loads(out)["error"]["message"]
