@@ -53,16 +53,34 @@ _WINDOW_HOURS = float(os.getenv("FINOPS_AI_WINDOW_HOURS", "5"))
 # to this blended rate, Sonnet 4.6's by default, and is reported as unpriced rather
 # than silently folded in. Configurable for the model you run.
 _BLEND = llm_prices.MODEL_PRICES["claude-sonnet-4-6"]
-_FALLBACK = llm_prices.ModelPrice(
-    model="fallback", provider="fallback",
-    input=float(os.getenv("FINOPS_AI_USD_PER_MTOK_IN", str(_BLEND.input))),
-    output=float(os.getenv("FINOPS_AI_USD_PER_MTOK_OUT", str(_BLEND.output))),
-    cache_write_5m=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE",
-                                   str(_BLEND.cache_write_5m))),
-    cache_write_1h=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H",
-                                   str(_BLEND.cache_write_1h))),
-    cache_read=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", str(_BLEND.cache_read))),
-)
+
+# Cache rates as multiples of the input rate: a 5-minute write 1.25x, a 1-hour
+# write 2x, a read 0.1x, the ratios llm_prices carries for Anthropic's models.
+# Derived from FINOPS_AI_USD_PER_MTOK_IN, so setting the input rate you pay
+# moves them with it, unless each is set on its own.
+_CACHE_RATES = (("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE", 1.25),
+                ("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H", 2.0),
+                ("FINOPS_AI_USD_PER_MTOK_CACHE_READ", 0.1))
+
+
+def _env_rate(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def _fallback() -> llm_prices.ModelPrice:
+    """The rate an unpriced model is charged at, read from the environment now."""
+    inp = _env_rate("FINOPS_AI_USD_PER_MTOK_IN", _BLEND.input)
+    (w5, m5), (w1, m1), (rd, mr) = _CACHE_RATES
+    return llm_prices.ModelPrice(
+        model="fallback", provider="fallback",
+        input=inp, output=_env_rate("FINOPS_AI_USD_PER_MTOK_OUT", _BLEND.output),
+        cache_write_5m=_env_rate(w5, inp * m5), cache_write_1h=_env_rate(w1, inp * m1),
+        cache_read=_env_rate(rd, inp * mr))
+
 
 def _data_dir() -> Path:
     d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
@@ -316,7 +334,8 @@ def _responses(proj: Path, since_epoch: float,
 _SESSIONS_LISTED = 20
 
 
-def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
+def _response_usd(r: dict[str, Any],
+                  fallback: llm_prices.ModelPrice | None = None) -> tuple[float, bool]:
     """(list-price USD, priced) for one response. Unpriced means the fallback rate.
 
     A record that carries its own `usd` (Cursor reports what each request cost
@@ -324,7 +343,7 @@ def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
     if isinstance(r.get("usd"), (int, float)):
         return float(r["usd"]), True
     price = llm_prices.price_for(r["model"])
-    usd = (price or _FALLBACK).cost(
+    usd = (price or fallback or _fallback()).cost(
         input_tokens=r["input"], output_tokens=r["output"],
         cache_write_5m_tokens=r["cache_write"] - r["cache_write_1h"],
         cache_write_1h_tokens=r["cache_write_1h"], cache_read_tokens=r["cache_read"],
@@ -340,6 +359,8 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
     usd_by_model: dict[str, float] = {}
     usd_by_harness: dict[str, float] = {}
     tokens_by_harness: dict[str, int] = {}
+    unpriced_usd = 0.0
+    fallback = _fallback()
     unpriced: dict[str, int] = {}
     sessions: dict[str, dict[str, Any]] = {}
     first_ts: float | None = None
@@ -349,7 +370,7 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         tin += ti; tout += to; cwrite += cw; cread += cr
         model = r["model"]
         by_model[model] = by_model.get(model, 0) + ti + to + cw + cr
-        usd, priced = _response_usd(r)
+        usd, priced = _response_usd(r, fallback)
         usd_total += usd
         usd_by_model[model] = usd_by_model.get(model, 0.0) + usd
         harness = r.get("harness") or harness_usage.HARNESS_CLAUDE
@@ -357,6 +378,7 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         tokens_by_harness[harness] = tokens_by_harness.get(harness, 0) + ti + to + cw
         if not priced:
             unpriced[model] = unpriced.get(model, 0) + ti + to + cw
+            unpriced_usd += usd
         ts = r["ts"]
         first_ts = ts if first_ts is None else min(first_ts, ts)
         last_ts = ts if last_ts is None else max(last_ts, ts)
@@ -392,6 +414,7 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         # dollars are in usd_equivalent at the fallback rate, and named here so a
         # figure built on a guessed rate is never presented as a list price.
         "unpriced_models": dict(sorted(unpriced.items(), key=lambda kv: -kv[1])),
+        "unpriced_usd": round(unpriced_usd, 2),
         # The costliest sessions, each one task's worth of agent work. Capped so a
         # month of sessions cannot swamp an MCP response; session_count is all.
         "by_session": {sid: {**v, "usd_equivalent": round(v["usd_equivalent"], 2)}
@@ -418,10 +441,15 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         if skipped:
             out["codex_compressed_rollouts_skipped"] = skipped
     if unpriced:
+        fb = fallback
         out["unpriced_note"] = (
-            f"{', '.join(unpriced)} priced at the fallback ${_FALLBACK.input:g}/"
-            f"${_FALLBACK.output:g} per 1M in/out; set FINOPS_AI_USD_PER_MTOK_IN/OUT "
-            f"to the rate you pay.")
+            f"{', '.join(unpriced)} priced at the fallback ${fb.input:g}/${fb.output:g} "
+            f"per 1M in/out, ${fb.cache_write_5m:g}/${fb.cache_write_1h:g} per 1M cache "
+            f"writes (5m/1h) and ${fb.cache_read:g} per 1M cache reads; set "
+            f"FINOPS_AI_USD_PER_MTOK_IN/OUT to the rate you pay. The cache rates follow "
+            f"the input rate unless FINOPS_AI_USD_PER_MTOK_CACHE_WRITE, "
+            f"FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H or FINOPS_AI_USD_PER_MTOK_CACHE_READ "
+            f"is set.")
     return out
 
 
@@ -515,7 +543,7 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "usd_equivalent": usd, "billable_tokens": u["billable_tokens"],
         "messages": u["messages"],
         "cost_by_model": u["cost_by_model"], "unpriced_models": u["unpriced_models"],
-        "cost_by_harness": u["cost_by_harness"],
+        "cost_by_harness": u["cost_by_harness"], "unpriced_usd": u["unpriced_usd"],
         "first_activity": u["first_activity"], "last_activity": u["last_activity"],
         "cap_usd": cap or None,
         "cap_scope": ("this_session" if sid in budget["session_caps"]
@@ -658,8 +686,10 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
         "subsidy": subsidy,
         "cost_per_1m_list": cost_per_1m_list,
         "cost_per_1m_effective": cost_per_1m_effective,
-        "summary": _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
-                                 subsidy, window, cost_per_1m_effective, session),
+        "summary": _with_fallback_note(
+            _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
+                          subsidy, window, cost_per_1m_effective, session),
+            {"session": session, "month": mtd, "window": window}),
         # Set when `session` is a guess, not the caller's own session.
         "session_note": (f"{GUESSED_SESSION_NOTE}; pass session_id to name yours"
                          if _guessed(session) else None),
@@ -668,42 +698,62 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
     }
 
 
+def _with_fallback_note(line: tuple[str, str], lenses: dict[str, Any]) -> str:
+    """The summary, plus how much of the dollars it quotes rest on a fallback
+    rate, whenever any do. The lens is the one the line is about."""
+    text, lens = line
+    usd = (lenses.get(lens) or {}).get("unpriced_usd") or 0.0
+    if usd > 0:
+        text += f" This includes ~${usd:,.2f} priced at a fallback rate (see unpriced_models)."
+    return text
+
+
 def _summary_line(verdict, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
-                  eff_per_1m, session=None) -> str:
+                  eff_per_1m, session=None) -> tuple[str, str]:
+    """(summary, the lens it is about: "session", "month" or "window")."""
     tag = {BUDGET_OK: "on track", BUDGET_WARN: "approaching your budget",
            BUDGET_OVER: "over budget"}[verdict]
     if basis == "session":
         if _guessed(session):
             return (f"~${session['usd_equivalent']:,.2f} of the latest session's "
                     f"${session['cap_usd']:,.2f} cap used (estimated at list price; "
-                    f"{GUESSED_SESSION_NOTE}), {tag}.")
+                    f"{GUESSED_SESSION_NOTE}), {tag}."), "session"
         return (f"~${session['usd_equivalent']:,.2f} of this session's "
-                f"${session['cap_usd']:,.2f} cap used (estimated at list price), {tag}.")
+                f"${session['cap_usd']:,.2f} cap used (estimated at list price), "
+                f"{tag}."), "session"
+    return _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
+                          eff_per_1m)
+
+
+def _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
+                   eff_per_1m) -> tuple[str, str]:
     if basis == "spend":
         return (f"~${est_usd:,.0f} estimated at list price of your "
                 f"${budget['spend_cap']:,.0f} spend cap, {tag}. "
-                f"Connect an Admin key for exact spend.")
+                f"Connect an Admin key for exact spend."), "month"
     if basis == "tokens":
-        return f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, {tag}."
+        return (f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, "
+                f"{tag}."), "month"
     if subsidy and subsidy["multiple"]:
         extra = f" ~${eff_per_1m:g}/1M effective." if eff_per_1m else ""
         return (f"You pay ${subsidy['plan_cost_usd']:,.0f}/mo and have pulled "
                 f"~${est_usd:,.0f} of compute (estimated at list price), "
-                f"~{subsidy['multiple']:g}x your plan.{extra} The provider covers the rest.")
+                f"~{subsidy['multiple']:g}x your plan.{extra} The provider covers the "
+                f"rest."), "month"
     # A budget IS configured but there is no usage to measure against yet. Confirm
     # it, never tell someone to set a budget they just set (found dogfooding).
     if mode == "flat" and budget["plan_cost"] > 0:
         return (f"Your ${budget['plan_cost']:,.0f}/mo plan is set. No agent usage recorded yet "
-                f"this month; the numbers fill in as your agent runs.")
+                f"this month; the numbers fill in as your agent runs."), "month"
     if mode == "metered" and budget["spend_cap"] > 0:
         return (f"Your ${budget['spend_cap']:,.0f}/mo spend cap is set. No agent usage recorded "
-                f"yet this month.")
+                f"yet this month."), "month"
     if budget["monthly_tokens"] > 0:
         return (f"Usage cap of {budget['monthly_tokens']:,} tokens/mo is set. No agent usage "
-                f"recorded yet this month.")
+                f"recorded yet this month."), "month"
     return (f"{window['billable_tokens']:,} tokens in the last {_WINDOW_HOURS:g}h "
             f"(~${window['usd_equivalent']:,.0f} at list price). "
-            f"Run `nable ai-budget` to set a budget.")
+            f"Run `nable ai-budget` to set a budget."), "window"
 
 
 def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict[str, Any]:
