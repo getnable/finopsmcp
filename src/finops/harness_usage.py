@@ -224,6 +224,11 @@ def _codex_file(path: Path, since_epoch: float, meta: dict[str, Any] | None,
     prev: tuple[int, ...] | None = None
     has_records = False
     own_totals: set[tuple[int, ...]] = set()
+    # token_count deltas, held until the file is read: Codex writes the event
+    # for a response before its token_usage_record, so a delta seen before
+    # the file's first record is the same response again. A file with any
+    # record is counted by its records alone.
+    deltas: dict[Any, dict[str, Any]] = {}
     try:
         fh = path.open("r", encoding="utf-8", errors="ignore")
     except OSError:
@@ -284,7 +289,9 @@ def _codex_file(path: Path, since_epoch: float, meta: dict[str, Any] | None,
                 continue
             r = _record(ts, model, delta, session, cwd)
             if r:
-                responses[(str(path), lineno)] = r
+                deltas[(str(path), lineno)] = r
+    if not has_records:
+        responses.update(deltas)
     seen.update(own_totals)
 
 

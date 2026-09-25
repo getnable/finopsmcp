@@ -168,6 +168,23 @@ def test_records_count_each_response_once_and_the_token_counts_are_not_added(cod
     assert (u["messages"], u["usd_equivalent"]) == (2, 5.6)
 
 
+def test_a_token_count_before_the_first_record_is_not_counted_as_well(codex):
+    """Codex can write a response's token_count event before its
+    token_usage_record. A file with any record is counted by its records
+    alone, so that earlier event is not a second copy of the response."""
+    now = time.time()
+    r1 = _usage(inp=1_000_000, out=100_000)
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "o3"),
+        _count(now - 280, r1, r1),
+        _record(now - 279, "resp-1", r1),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    # o3: 1M input x $2 + 0.1M output x $8, once.
+    assert (u["messages"], u["usd_equivalent"]) == (1, 2.8)
+
+
 def test_cache_writes_and_reasoning_are_not_counted_twice(codex):
     """Responses API usage: input_tokens includes the cached and cache-write
     tokens, output_tokens includes reasoning (codex-api/src/sse/responses.rs)."""
