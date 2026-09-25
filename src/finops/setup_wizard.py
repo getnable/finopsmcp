@@ -2915,7 +2915,8 @@ def main(args: list[str] | None = None) -> None:
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
             ("editor & agents", ["claude", "guard", "agents"]),
-            ("account & billing", ["login", "logout", "license", "license-status", "credits"]),
+            ("account & billing", ["login", "logout", "license", "license-status", "credits",
+                                   "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
         ]
 
@@ -2967,6 +2968,14 @@ def main(args: list[str] | None = None) -> None:
                 sub = self._sub_action()
                 choices = list(sub.choices.keys()) if sub else []
                 close = difflib.get_close_matches(bad, choices, n=3, cutoff=0.6)
+                # Only the near-best matches: "unistall" is 0.94 from
+                # "uninstall" and 0.67 from "mistral", and listing both made
+                # a user trying to uninstall read "did you mean: mistral".
+                if close:
+                    def _r(c):
+                        return difflib.SequenceMatcher(None, bad, c).ratio()
+                    best = _r(close[0])
+                    close = [c for c in close if _r(c) >= best - 0.1]
                 print(f"nable: unknown command '{bad}'", file=_sys.stderr)
                 if close:
                     print(f"Did you mean: {', '.join(close)}?", file=_sys.stderr)
@@ -3053,6 +3062,11 @@ def main(args: list[str] | None = None) -> None:
     login_p = sub.add_parser("login",       help="Sign in by email to activate Pro (no license key to copy)")
     login_p.add_argument("email", nargs="?", default="", help="Account email (optional; prompts if omitted)")
     sub.add_parser("logout",                help="Sign out and remove the stored license from this machine")
+    un_p = sub.add_parser("uninstall",      help="Remove nable from your editors and agent hooks (--purge also deletes its data)")
+    un_p.add_argument("--purge", action="store_true",
+                      help="Also delete nable's data directories (vault, cost history, settings)")
+    un_p.add_argument("--yes", "-y", action="store_true", help="Do not ask; for scripts")
+    un_p.add_argument("--dry-run", action="store_true", help="Show what would change, change nothing")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
@@ -3340,6 +3354,10 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "logout":
         _run_logout()
         return
+    elif parsed.cmd == "uninstall":
+        raise SystemExit(_run_uninstall(getattr(parsed, "purge", False),
+                                        getattr(parsed, "yes", False),
+                                        getattr(parsed, "dry_run", False)))
     elif parsed.cmd == "license-status":
         _run_license_status()
         return
@@ -3926,6 +3944,162 @@ def _strip_license_from_editor_configs() -> "list[tuple[str, Path]]":
                 hit = True
         return hit
     return _edit_editor_configs(_edit)
+
+
+def _is_nable_entry(name: str, entry: object) -> bool:
+    """Strict match for removal: the names nable registers under, or an entry
+    that launches the finops-mcp package. Never a lookalike name alone."""
+    if (name or "").lower() in ("nable", "finops"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _nable_entries_in_editor_configs() -> "list[tuple[str, Path, str]]":
+    """(client, path, server name) for every nable MCP entry nable wrote. Read-only."""
+    import json
+    found = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for servers in _server_maps(doc):
+            for name, entry in servers.items():
+                if _is_nable_entry(name, entry):
+                    found.append((client, path, name))
+    return found
+
+
+def _state_dirs() -> "list[Path]":
+    """The directories nable keeps state in: the vault and database, the trial
+    clock and install id, CLI sentinels, and the nable data dir."""
+    home = Path.home()
+    dirs = [home / ".finops", home / ".finops-mcp", home / ".config" / "finops", home / ".nable"]
+    data = os.environ.get("FINOPS_DATA_DIR", "").strip()
+    if data:
+        p = Path(data).expanduser()
+        if p not in dirs:
+            dirs.append(p)
+    return dirs
+
+
+def _dir_size(p: Path) -> int:
+    total = 0
+    try:
+        for f in p.rglob("*"):
+            try:
+                if f.is_file() and not f.is_symlink():
+                    total += f.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+def _run_uninstall(purge: bool = False, yes: bool = False, dry_run: bool = False,
+                   prompt=None) -> int:
+    """`nable uninstall`: take nable out of every editor config and agent hook
+    it wrote, then list (or with --purge delete) the directories it keeps.
+
+    Default: shows what it will change and asks. --yes skips the questions.
+    --dry-run only shows. The package itself is removed with whatever installed
+    it; this is the part a package manager cannot see."""
+    import shutil
+    from . import guard_adapters as ga
+
+    ask = prompt or _prompt
+
+    def _confirm(q: str) -> bool:
+        if yes:
+            return True
+        try:
+            return ask(f"  {q} [y/N]", default="n").strip().lower() in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            return False
+
+    print("\n  nable uninstall" + ("  (dry run: nothing is changed)" if dry_run else "") + "\n")
+
+    entries = _nable_entries_in_editor_configs()
+    hooks = []
+    for h in ga.HARNESSES:
+        for is_global in (True, False):
+            if ga.state(h, is_global) != "absent":
+                hooks.append((h, is_global, ga.hooks_path(h, is_global)))
+
+    if entries:
+        print("  MCP server entries:")
+        for client, path, name in entries:
+            print(f"    - {client}: \"{name}\" in {path}")
+    else:
+        print("  MCP server entries: none found")
+    if hooks:
+        print("  Guard hooks:")
+        for h, is_global, path in hooks:
+            print(f"    - {ga.LABELS[h]} ({'global' if is_global else 'this project'}): {path}")
+    else:
+        print("  Guard hooks: none found (global, and this project)")
+    print()
+
+    failed = 0
+    if (entries or hooks) and not dry_run and _confirm("Remove these?"):
+        changed = _edit_editor_configs(
+            lambda servers: [servers.pop(n) for n in
+                             [n for n, e in list(servers.items()) if _is_nable_entry(n, e)]])
+        for client, path in changed:
+            _ok(f"Removed nable from {client}: {path}")
+        for h, is_global, path in hooks:
+            try:
+                removed, _ = ga.uninstall(h, is_global)
+                if removed:
+                    _ok(f"Removed the guard hook from {path}")
+            except SystemExit as e:      # a refusal: the file was left as found
+                failed += 1
+                _warn(f"{path}: {str(e.code).strip()}")
+            except OSError as e:
+                failed += 1
+                _warn(f"Could not write {path}: {e.strerror or e}")
+        if changed:
+            print("  Restart those editors so they stop launching nable.")
+    elif (entries or hooks) and not dry_run:
+        print("  Kept: nothing was removed.")
+    print("  Guard hooks in other projects: run `nable guard uninstall --all` inside each.\n")
+
+    present = [d for d in _state_dirs() if d.exists()]
+    if present:
+        print("  nable's data on this machine (vault, cost history, trial clock, settings):")
+        for d in present:
+            print(f"    - {d}  ({_dir_size(d) / 1024:,.0f} KB)")
+        if not purge:
+            print("  Kept. Delete them with:  nable uninstall --purge")
+        elif dry_run:
+            print("  --purge would delete them.")
+        elif _confirm("Delete these directories? This removes your stored credentials "
+                      "and local cost history and cannot be undone."):
+            for d in present:
+                try:
+                    shutil.rmtree(d)
+                    _ok(f"Deleted {d}")
+                except OSError as e:
+                    failed += 1
+                    _warn(f"Could not delete {d}: {e.strerror or e}")
+        else:
+            print("  Kept: the directories were not deleted.")
+    else:
+        print("  No nable data directories found.")
+    print("  The OS keychain may also hold nable items (\"nable-trial\", the vault key);")
+    print("  remove them in your keychain app if you want them gone.")
+
+    print("\n  Last, remove the package with whatever installed it:")
+    print("    uv tool uninstall finops-mcp   |   pipx uninstall finops-mcp   |   pip uninstall finops-mcp\n")
+    return 1 if failed else 0
 
 
 def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
