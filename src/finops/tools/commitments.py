@@ -480,8 +480,17 @@ def recommend_spot_adoption(
 
         candidates = _scan(regions=regions)
 
+        unread = list(getattr(candidates, "cpu_unread_instances", None) or [])
+        unread_note = (
+            f"CPU history could not be read for {len(unread)} instance(s), so they "
+            f"were not assessed: {', '.join(unread[:10])}"
+            f"{' and more' if len(unread) > 10 else ''}."
+        ) if unread else ""
+
         if not candidates:
             scanned = ", ".join(regions) if regions else "all regions"
+            if unread:
+                return f"No spot adoption candidates assessed in: {scanned}.\n{unread_note}"
             return (
                 f"No spot adoption candidates found in: {scanned}.\n"
                 "All running instances are already on spot, or no on-demand "
@@ -515,6 +524,9 @@ def recommend_spot_adoption(
                 f"| ${c['monthly_savings']:,.2f} "
                 f"| {c['savings_pct']:.1f}% |"
             )
+
+        if unread_note:
+            lines += ["", unread_note]
 
         lines += [
             "",
