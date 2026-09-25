@@ -3193,7 +3193,7 @@ def main(args: list[str] | None = None) -> None:
         _GROUPS = [
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
-            ("get answers", ["scan", "brief", "ai-budget"]),
+            ("get answers", ["scan", "brief", "ai-budget", "ai-costs"]),
             ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
@@ -3303,6 +3303,8 @@ def main(args: list[str] | None = None) -> None:
     _add_brief_parser(sub)
     from .cli_ai_budget import add_parser as _add_ai_budget_parser
     _add_ai_budget_parser(sub)
+    from .cli_ai_costs import add_parser as _add_ai_costs_parser
+    _add_ai_costs_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3741,6 +3743,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "ai-budget":
         from .cli_ai_budget import run as _ab_run
         raise SystemExit(_ab_run(parsed))
+    elif parsed.cmd == "ai-costs":
+        from .cli_ai_costs import run as _ac_run
+        raise SystemExit(_ac_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
