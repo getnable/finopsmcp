@@ -10,8 +10,12 @@ money and lines them up against the ledger:
   seen_and_happened     the guard saw it (allowed, warned or asked) and it happened
   denied_but_happened   the guard denied something like it and it happened anyway
   no_guard_record       it happened and nothing in the ledger accounts for it
+  console               it happened in the AWS console, where no agent hook runs;
+                        never matched to a ledger record, however close in time
   service_initiated     an AWS service did it on someone's behalf (a stack
                         launching its instances, Auto Scaling replacing one)
+  attempted_but_failed  the call was made and AWS refused it (an errorCode):
+                        nothing happened, so it is in neither "happened" bucket
   guarded_without_event the guard let an AWS command through and CloudTrail
                         shows nothing matching (declined at the prompt, failed
                         before the API call, or in a region not read)
@@ -23,9 +27,11 @@ Matching is conservative, and says so. The ledger holds no resource ids (the
 guard runs before anything exists), so an event is matched to a record by kind
 (create, destroy, commit), by time (from a minute before the verdict to
 `tolerance_minutes` after it) and, where the ledger's command names the API
-(`aws ec2 run-instances` can only be RunInstances), by event name. A broad
-command (terraform apply, an MCP call) can account for any event of its kind
-in its window. When in doubt an event is left unmatched: an audit that
+(`aws ec2 run-instances` can only be RunInstances), by event name. Such a
+record accounts for one event at most: one allowed launch does not explain
+five. A broad command (terraform apply, an MCP call) can account for any
+number of events of its kind in its window. When in doubt an event is left
+unmatched: an audit that
 over-reports "no guard record" costs a look, one that explains away a change
 it should not is worse.
 
@@ -127,9 +133,11 @@ _DENIED_CODES = ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation
 MATCHING_NOTE = (
     "Matched by kind and time only: the ledger holds no resource ids (the guard "
     "runs before anything exists). A command that names one API (aws ec2 "
-    "run-instances) matches only that API's events; a broad one (terraform apply, "
-    "an MCP call) matches any event of its kind in its window. Unmatched means "
-    "nothing in the ledger accounts for it, not proof that no agent did it."
+    "run-instances) matches one event of that API; a broad one (terraform apply, "
+    "an MCP call) matches any event of its kind in its window. Console actions "
+    "are never matched to the ledger, and failed calls are listed apart. "
+    "Unmatched means nothing in the ledger accounts for it, not proof that no "
+    "agent did it."
 )
 
 
@@ -341,22 +349,33 @@ def match(events: list[dict[str, Any]], records: list[dict[str, Any]], *,
     """Put each event in one bucket (see the module docstring). An event
     matches the nearest compatible record; a record that let the call through
     is preferred over a deny, so "bypass" is claimed only when a deny is the
-    only thing that could account for it."""
+    only thing that could account for it. A record naming one API accounts
+    for one event; a console action or a failed call is matched to none."""
     cands = _candidates(records)
     used: set[int] = set()
     out: dict[str, list[dict[str, Any]]] = {
         "seen_and_happened": [], "denied_but_happened": [], "no_guard_record": [],
-        "service_initiated": []}
+        "console": [], "service_initiated": [], "attempted_but_failed": []}
     for ev in events:
         public = {k: v for k, v in ev.items() if not k.startswith("_")}
+        if ev.get("error_code"):
+            out["attempted_but_failed"].append(public)
+            continue
         if ev["via"] == "aws-service":
             out["service_initiated"].append(public)
+            continue
+        if ev["via"] == "console":
+            # A person in the console, not an agent: a ledger record a minute
+            # away is a coincidence, and claiming it would hide the console change.
+            out["console"].append(public)
             continue
         when = ev.get("_when")
         fits = []
         for i, r in enumerate(cands):
             if r["_kind"] != ev["kind"] or not isinstance(when, datetime):
                 continue
+            if r["_expect"] and i in used:
+                continue                # one named API call, one event
             if not (r["_ts"] - SKEW <= when <= r["_ts"] + tolerance):
                 continue
             if r["_expect"] is not None and ev["event"] not in r["_expect"]:

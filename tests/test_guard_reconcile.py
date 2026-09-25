@@ -150,9 +150,9 @@ def test_each_event_lands_in_the_right_bucket():
     assert seen["via"] == "aws-cli"
     [bypass] = r["denied_but_happened"]
     assert bypass["event"] == "TerminateInstances" and bypass["ledger"]["decision"] == "deny"
-    [outside] = r["no_guard_record"]
+    [outside] = r["console"]
     assert outside["event"] == "CreateStack" and outside["identity_arn"] == PERSON_ARN
-    assert outside["via"] == "console"
+    assert outside["via"] == "console" and r["no_guard_record"] == []
     [svc] = r["service_initiated"]
     assert svc["invoked_by"] == "cloudformation.amazonaws.com"
     [quiet] = r["guarded_without_event"]
@@ -191,7 +191,46 @@ def test_bypass_is_claimed_only_when_a_deny_is_all_that_fits():
 
 def test_a_failed_call_is_reported_with_its_error():
     r, _ = _run({"RunInstances": [[_event("RunInstances", 5, error="UnauthorizedOperation")]]})
-    assert r["no_guard_record"][0]["error_code"] == "UnauthorizedOperation"
+    assert r["attempted_but_failed"][0]["error_code"] == "UnauthorizedOperation"
+    assert r["no_guard_record"] == []
+
+
+def test_a_failed_call_is_never_a_happened_or_a_bypass():
+    """A denied terminate that AWS also refused did not happen anyway."""
+    _ledger("deny", "terminate_instance", "aws ec2 terminate-instances --instance-ids i-1", 30)
+    _ledger("allow", "infra_apply", "aws ec2 run-instances --instance-type t3.micro", 10)
+    r, _ = _run({"TerminateInstances": [[_event("TerminateInstances", 29,
+                                                error="UnauthorizedOperation")]],
+                 "RunInstances": [[_event("RunInstances", 9, error="InsufficientInstanceCapacity")]]})
+    assert [e["event"] for e in r["attempted_but_failed"]] == ["TerminateInstances",
+                                                                "RunInstances"]
+    assert r["denied_but_happened"] == [] and r["seen_and_happened"] == []
+
+
+def test_a_console_action_is_never_explained_by_a_nearby_record():
+    """An agent's allowed launch a minute before someone's console launch
+    used to account for both, and the console change vanished from the audit."""
+    _ledger("allow", "infra_apply", "terraform apply", 10)
+    r, _ = _run({"RunInstances": [[
+        _event("RunInstances", 9, eid="cli"),
+        _event("RunInstances", 8, eid="con", arn=PERSON_ARN, ua="signin.amazonaws.com"),
+    ]]})
+    assert [e["event_id"] for e in r["seen_and_happened"]] == ["cli"]
+    assert [e["event_id"] for e in r["console"]] == ["con"]
+
+
+def test_a_record_naming_one_api_explains_one_event():
+    _ledger("allow", "infra_apply", "aws ec2 run-instances --instance-type t3.micro --count 1", 10)
+    r, _ = _run({"RunInstances": [[_event("RunInstances", 9 - i, eid=f"e{i}")
+                                   for i in range(3)]]})
+    assert len(r["seen_and_happened"]) == 1 and len(r["no_guard_record"]) == 2
+
+
+def test_a_broad_record_still_explains_every_event_of_its_kind():
+    _ledger("allow", "infra_apply", "terraform apply", 10)
+    r, _ = _run({"RunInstances": [[_event("RunInstances", 9 - i, eid=f"e{i}")
+                                   for i in range(3)]]})
+    assert len(r["seen_and_happened"]) == 3 and r["no_guard_record"] == []
 
 
 # ── the API: paged, paced, read-only ──────────────────────────────────────────
@@ -312,7 +351,9 @@ def test_cli_prints_the_buckets_with_who_did_it(monkeypatch):
                      guard_tolerance=3)
     assert fake.args == (6, ["us-east-1"], 3)
     assert "Denied by the guard, happened anyway (1)" in out
-    assert "No guard record (1)" in out and PERSON_ARN in out and "via console" in out
+    assert "No guard record (0)" in out
+    assert "Made in the AWS console (no agent hook runs there) (1)" in out
+    assert PERSON_ARN in out and "via console" in out
     assert "guard: deny at" in out
     assert "no resource ids" in out
 

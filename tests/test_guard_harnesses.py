@@ -368,7 +368,32 @@ def test_cline_the_worst_of_several_commands_wins(monkeypatch):
     _, body, _ = _run(_cline(ALLOW_CMD, DENY_CMD, ASK_CMD))
     assert body["cancel"] is True
     # A deny outranks an ask, so the reason is the deny's, without the ask note.
-    assert "stopped the task instead" not in body["errorMessage"]
+    assert ga._CLINE_NO_ASK.strip() not in body["errorMessage"]
+
+
+@pytest.mark.parametrize("payload,field,why", [
+    (lambda: _gemini(ASK_CMD), ("reason",), "A Gemini CLI hook cannot reliably pause"),
+    (lambda: _cline(ASK_CMD), ("errorMessage",), "Cline hooks cannot pause to ask you"),
+    (lambda: {"hook_event_name": "PreToolUse", "turn_id": "t", "tool_name": "Bash",
+              "session_id": "s", "tool_input": {"command": ASK_CMD}},
+     ("hookSpecificOutput", "permissionDecisionReason"), "Codex hooks cannot pause"),
+])
+def test_a_harness_that_cannot_ask_does_not_say_confirm_to_proceed(payload, field, why):
+    """"It cannot be undone; confirm to proceed. ... so nable blocked it
+    instead" asked for a confirmation nobody could give."""
+    _, body, _ = _run(payload())
+    for key in field:
+        body = body[key]
+    assert "confirm to proceed" not in body.lower()
+    assert "It cannot be undone." in body and why in body
+    assert body.endswith("run the command yourself.")
+
+
+def test_a_budget_ask_reads_as_a_sentence_where_it_cannot_ask():
+    reason = ("nable guard: This goes over the budget. Confirm to proceed, or raise the "
+              "budget. Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
+    out = ga._cannot_ask(reason, ga._GEMINI_NO_ASK)
+    assert "over the budget. Raise the budget. Set" in out and "onfirm" not in out
 
 
 @pytest.mark.parametrize("parameters,tool", [
@@ -636,6 +661,24 @@ def test_copilot_uninstall_keeps_a_file_someone_added_to(monkeypatch):
         "sessionStart": [{"type": "command", "bash": "./banner.sh"}]}}
 
 
+def test_a_copilot_entry_under_the_bash_key_is_ours_everywhere(monkeypatch):
+    """status read `command or bash`, install and uninstall read `command`
+    only: a hand-written bash entry showed as installed, install added a
+    second hook beside it, and uninstall left it running."""
+    _uvx(monkeypatch)
+    path = ga.hooks_path("copilot", False)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"version": 1, "hooks": {"preToolUse": [
+        {"type": "command", "bash": f"uvx --from {g._PYPI_NAME} finops guard hook"}]}}))
+    assert ga.state("copilot", False) == "installed"
+    assert ga.install("copilot", False)[0] == "repinned"
+    [entry] = json.loads(path.read_text())["hooks"]["preToolUse"]
+    assert "command" not in entry and entry["bash"] == g._UVX_HOOK_CMD + "; exit 0"
+    assert ga.install("copilot", False)[0] == "already"
+    assert ga.uninstall("copilot", False)[0] is True
+    assert ga.state("copilot", False) == "absent"
+
+
 @pytest.mark.parametrize("harness,body,described_as", [
     ("copilot", '{"version": 2, "hooks": {}}', "version 2"),
     ("copilot", '{"version": 1, "hooks": {"preToolUse": {"bash": "x"}}}', "dict"),
@@ -700,10 +743,18 @@ def test_malformed_json_is_refused_backed_up_and_left_alone(harness):
     path.parent.mkdir(parents=True)
     body = b'{"hooks": { NOT JSON'
     path.write_bytes(body)
-    with pytest.raises(SystemExit):
+    path.chmod(0o600)
+    with pytest.raises(SystemExit) as e:
         ga.install(harness, True)
     assert path.read_bytes() == body
-    assert len(list(path.parent.glob(f"{path.name}.nable-backup-*"))) == 1
+    backups = list(path.parent.glob(f"{path.name}.nable-backup-*"))
+    if harness == "gemini":
+        # Nothing is rewritten, and settings.json holds MCP server tokens: no
+        # copy for anyone to find, and no claim of one.
+        assert backups == [] and "copy" not in str(e.value.code)
+    else:
+        [backup] = backups
+        assert stat.S_IMODE(backup.stat().st_mode) == 0o600, "a copy wider than the file"
 
 
 @pytest.mark.parametrize("harness", ["cursor", "codex", "copilot", "gemini"])
@@ -892,8 +943,9 @@ def test_an_old_codex_matcher_is_widened_and_a_hand_written_one_is_not(monkeypat
 
     path.write_text(json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": g._UVX_HOOK_CMD}]}]}}))
-    assert ga.install("codex", True)[0] == "already"
+    assert ga.install("codex", True)[0] == "repaired"      # the bare command gains || exit 0
     assert json.loads(path.read_text())["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
+    assert ga.install("codex", True)[0] == "already"
 
 
 # ── project files stay portable ───────────────────────────────────────────────

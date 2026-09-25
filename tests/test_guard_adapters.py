@@ -382,8 +382,10 @@ def test_cursor_install_writes_the_documented_shape(monkeypatch):
     assert entry["timeout"] >= 30                 # cold uvx resolve
     # A desktop app may not see a terminal's PATH, so uvx is spelled out.
     # Pinned to this release, like the Claude Code hook: an unpinned uvx
-    # fetches the newest PyPI release on every shell command.
-    assert entry["command"] == f"{uvx} --from finops-mcp=={g.__version__} finops guard hook"
+    # fetches the newest PyPI release on every shell command. Cursor blocks on
+    # exit 2, which uvx returns when PyPI is out of reach, so it ends in exit 0.
+    assert entry["command"] == (f"{uvx} --from finops-mcp=={g.__version__} finops guard hook"
+                                "; exit 0")
 
 
 def test_codex_install_writes_the_documented_shape(monkeypatch):
@@ -399,7 +401,8 @@ def test_codex_install_writes_the_documented_shape(monkeypatch):
     [handler] = group["hooks"]
     assert handler["type"] == "command"
     # Codex runs hooks through a login shell, so the bare uvx form resolves.
-    assert handler["command"] == g._UVX_HOOK_CMD
+    # It blocks on exit 2 and uses cmd.exe on Windows, hence `|| exit 0`.
+    assert handler["command"] == f"{g._UVX_HOOK_CMD} || exit 0"
 
 
 @pytest.mark.parametrize("harness", ["cursor", "codex"])
@@ -409,6 +412,46 @@ def test_the_installed_command_carries_no_harness_flag(harness, monkeypatch):
     _uvx(monkeypatch)
     ga.install(harness, global_scope=True)
     assert "--harness" not in ga.hooks_path(harness, True).read_text()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the hook command in sh")
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_a_launcher_that_exits_2_does_not_block(harness, monkeypatch, tmp_path):
+    """uvx exits 2 when it cannot reach PyPI, before nable runs, and both
+    Cursor and Codex read exit 2 as "block": every shell command stopped."""
+    uvx = _uvx(monkeypatch)
+    ga.install(harness, global_scope=True)
+    doc = json.loads(ga.hooks_path(harness, True).read_text())
+    [cmd, *_] = [c for c in ga._ADAPTERS[harness][2](doc) if ga._is_ours(c)]
+    failing = tmp_path / "uvx-offline"
+    failing.write_text("#!/bin/sh\necho 'error: failed to fetch' >&2\nexit 2\n")
+    failing.chmod(0o755)
+    run = cmd.replace(uvx, str(failing), 1) if uvx in cmd else cmd.replace("uvx", str(failing), 1)
+    r = subprocess.run(["sh", "-c", run], capture_output=True, text=True, check=False)
+    assert r.returncode == 0 and r.stdout == ""
+
+
+@pytest.mark.parametrize("harness,suffix", [("cursor", "; exit 0"), ("codex", " || exit 0")])
+def test_a_bare_command_from_an_earlier_release_is_wrapped_and_still_ours(harness, suffix,
+                                                                         monkeypatch):
+    _uvx(monkeypatch)
+    bare = ga.hook_command(harness, True)
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if harness == "cursor":
+        path.write_text(json.dumps({"version": 1, "hooks": {
+            e: [{"command": bare, "timeout": 30}] for e in ga._CURSOR_EVENTS}}))
+    else:
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": ga._CODEX_MATCHER, "hooks": [{"type": "command", "command": bare}]}]}}))
+    assert ga.state(harness, True) == "installed" and ga.pin_state(harness, True) == "pinned"
+    assert ga.install(harness, True)[0] == "repaired"
+    ours = ga._our_commands(harness, True)
+    assert ours and all(c == bare + suffix for c in ours)
+    assert ga.state(harness, True) == "installed" and ga.pin_state(harness, True) == "pinned"
+    assert ga.install(harness, True)[0] == "already"
+    assert ga.uninstall(harness, True)[0] is True
+    assert "guard hook" not in path.read_text()
 
 
 def test_codex_home_is_honoured(tmp_path, monkeypatch):
@@ -510,6 +553,7 @@ def test_malformed_json_is_refused_backed_up_and_left_alone(harness):
     assert len(backups) == 1, f"expected one backup for one broken file, got {backups}"
     assert backups[0].read_bytes() == body
     assert backups[0].name in str(e.value.code)
+    assert stat.S_IMODE(backups[0].stat().st_mode) & 0o077 == 0, "the copy is owner-only"
 
 
 @pytest.mark.parametrize("harness,body,described_as", [

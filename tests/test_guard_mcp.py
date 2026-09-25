@@ -454,3 +454,58 @@ def test_the_hook_asks_before_the_budget_changes():
     g.run_hook(io.StringIO(json.dumps({"tool_name": "mcp__nable__set_ai_budget",
                                        "tool_input": {"spend_cap": 99999}})), out)
     assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+# ── command lines hidden inside a shell server's arguments ────────────────────
+
+_DESTROY = "terraform destroy -auto-approve"
+
+
+def _nested(value, levels):
+    for _ in range(levels):
+        value = {"x": value}
+    return value
+
+
+@pytest.mark.parametrize("args", [
+    {"command": f"echo hi && {_DESTROY}"},
+    {"command": f"/usr/bin/env {_DESTROY}"},
+    {"command": f"timeout 600 {_DESTROY}"},
+    {"command": f"({_DESTROY})"},
+    {"command": f"set -e; {_DESTROY}"},
+    {"command": f"true\n{_DESTROY}"},
+    {"script": f"#!/bin/bash\n{_DESTROY}"},
+    {"body": f"#!/bin/bash\nset -e\n{_DESTROY}"},
+    {"pad": ["x"] * 64, "command": _DESTROY},
+    {"notes": [f"aws s3 cp a{i} b" for i in range(70)], "command": _DESTROY},
+    _nested({"command": _DESTROY}, 4),
+])
+def test_a_command_anywhere_on_a_shell_line_is_judged(args):
+    """The pre-filter used to be anchored at the start of the string, so any
+    prefix the shell guard would see through (`echo hi &&`, `timeout 600`, a
+    script's first line) walked a destroy past it."""
+    v = g.gate_mcp_call("mcp__shell__run_command", args, record=False)
+    assert v is not None and v["decision"] == "ask", args
+    assert v["action_type"] == "delete_resource"
+
+
+@pytest.mark.parametrize("args,why", [
+    (_nested({"command": _DESTROY}, 12), "nested more than"),
+    ({f"c{i}": f"aws s3 cp x{i} y" for i in range(70)}, "more than 64 command lines"),
+    ({"rows": [{"a": str(i)} for i in range(5000)] + [{"cmd": _DESTROY}]},
+     "argument values"),
+])
+def test_command_lines_past_the_budget_are_asked_about_not_passed(args, why):
+    v = g.gate_mcp_call("mcp__shell__run_command", args, record=False)
+    assert v is not None and v["decision"] == "ask"
+    assert why in v["reason"] and "mcp__shell__run_command" in v["reason"]
+
+
+@pytest.mark.parametrize("args", [
+    _nested({"text": "hello"}, 12),
+    {"rows": [{"a": str(i), "b": "note"} for i in range(5000)]},
+    {f"c{i}": "plain text" for i in range(200)},
+    {"body": "we moved the aws account; never run terraform destroy by hand"},
+])
+def test_big_or_deep_arguments_without_a_cli_stay_silent(args):
+    assert g.gate_mcp_call("mcp__notes__save", args, record=False) is None

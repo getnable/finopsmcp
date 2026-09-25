@@ -186,6 +186,25 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
     ("export OPENAI=sk-proj-abcdefghijklmnop", "sk-proj-abc", "[REDACTED-API-KEY]"),
     ("aws s3 cp s3://b/k . --expires 1 --pass-phrase x", "--pass-phrase x",
      "--pass-phrase [REDACTED]"),
+    # Review finds: the JSON and YAML spellings, headers, and commands that
+    # take a secret as a plain positional or --value.
+    ("""aws rds create-db-instance --cli-input-json '{"MasterUserPassword":"Hunter2Secret!"}'""",
+     "Hunter2Secret", '"MasterUserPassword":[REDACTED]'),
+    ("""terraform apply -var 'db={"password":"x9"}'""", "x9", '"password":[REDACTED]'),
+    ('terraform apply -var "client_secret: xyz"', "xyz", "client_secret: [REDACTED]"),
+    ('curl -H "X-Api-Key: 3f9a1c0e8b7d6a5f4e3d2c1b0a9f8e7d" https://x',  # pragma: allowlist secret
+     "3f9a1c0e", '-H "X-Api-Key: [REDACTED]"'),
+    ("curl -H 'PRIVATE-TOKEN: glpat-AbCdEfGhIjKlMnOpQrSt' https://gitlab",  # pragma: allowlist secret
+     "AbCdEfGh", "PRIVATE-TOKEN: [REDACTED"),
+    ("doctl auth init -t dop_v1_" + "0123456789abcdef" * 4, "0123456789abcdef",
+     "[REDACTED-DIGITALOCEAN-TOKEN]"),
+    (f"aws configure set aws_secret_access_key /{SECRET[:20]} && terraform apply", SECRET[:20],
+     "aws_secret_access_key [REDACTED] && terraform apply"),
+    ("pulumi config set --secret dbPassword hunter2 && pulumi up", "hunter2",
+     "&& pulumi up"),
+    ("pulumi config set apiKey hunter2", "hunter2", "pulumi config set apiKey [REDACTED]"),
+    (("aws ssm put-parameter --name /prod/db --value 'S3cr3tP@ss' --type SecureString "
+      "&& terraform apply"), "S3cr3tP@ss", "--value [REDACTED] --type SecureString"),
 ])
 
 def test_secrets_never_reach_the_ledger(raw, gone, kept):
@@ -200,6 +219,10 @@ def test_secrets_never_reach_the_ledger(raw, gone, kept):
     "git push -u origin main",
     "aws ec2 run-instances --instance-type m5.large --count 2",
     "kubectl -n prod get pods -o wide",
+    "curl -H 'Content-Type: application/json' https://keycloak:8443/x",
+    "aws secretsmanager get-secret-value arn:aws:secretsmanager:us-east-1:1:secret:prod",
+    "pulumi config set aws:region us-east-1",
+    "aws configure set region us-east-1",
 ])
 def test_ordinary_flags_are_left_alone(cmd):
     assert gl.redact(cmd) == cmd
@@ -494,6 +517,68 @@ def test_reanchor_accepts_a_rotated_ledger():
     out = _verify_log(guard_reanchor=True)
     assert "Re-anchored at 0 record(s)" in out
     assert gl.check()["clean"]
+
+
+def test_a_mid_file_edit_is_a_break_not_a_truncation():
+    """verify() stops counting at the break, and check() used to read that
+    shorter count as records gone from the end."""
+    for i in range(10):
+        gl.append({"decision": "allow", "command": f"terraform apply {i}"})
+    _verify_log()
+    p = gl.ledger_path()
+    lines = p.read_bytes().split(b"\n")
+    lines[2] = lines[2].replace(b"terraform apply 2", b"edited")
+    p.write_bytes(b"\n".join(lines))
+    r = gl.check()
+    assert not r["ok"] and r["broken_at"] == 4 and not r["clean"]
+    assert not any("gone from the end" in w for w in r["warnings"])
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink") or sys.platform == "win32",
+                    reason="needs POSIX symlinks")
+def test_a_symlinked_ledger_is_counted_and_flagged():
+    """O_NOFOLLOW makes append() refuse a symlink, which is right, but the
+    refusal was silent: the frozen copy it pointed at still verified clean
+    while every verdict went unrecorded."""
+    _three()
+    _verify_log()
+    p = gl.ledger_path()
+    frozen = p.with_name("frozen.jsonl")
+    os.rename(p, frozen)
+    os.symlink(frozen, p)
+    for _ in range(5):
+        assert gl.append({"decision": "deny", "command": "terraform destroy"}) is False
+    lost = gl.unrecorded()
+    assert lost["count"] == 5 and set(lost["why"]) == {"ELOOP"}
+    r = gl.check()
+    assert not r["clean"] and "symlink" in r["warnings"][0]
+    with pytest.raises(OSError):
+        gl.recent(60)
+    d = g.doctor()
+    assert d["ok"] is False
+    assert any("symlink" in fix for fix in d["recommendations"])
+
+
+def test_an_unopenable_ledger_is_counted(monkeypatch):
+    import errno
+
+    def refuse(*_a, **_k):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    real_open = os.open
+    monkeypatch.setattr(os, "open", lambda path, *a, **k: refuse() if str(path) == str(
+        gl.ledger_path()) else real_open(path, *a, **k))
+    assert gl.append({"decision": "ask"}) is False
+    assert gl.unrecorded()["why"] == {"ENOSPC": 1}
+
+
+def test_a_record_with_a_naive_timestamp_is_skipped_not_fatal():
+    _three()
+    with gl.ledger_path().open("ab") as fh:
+        fh.write(b'{"ts":"2026-09-25T00:00:00","decision":"allow","command":"x","prev":"x"}\n')
+    assert len(gl.read(30)) == 3
+    assert gl.summarize(30)["records"] == 3
+    assert gl._repeats([{"ts": "2026-09-25T00:00:00", "command": "x"},
+                        {"ts": "2026-09-25T00:01:00", "command": "x"}]) == set()
 
 
 def test_doctor_is_not_ok_when_the_ledger_shrank(monkeypatch):
