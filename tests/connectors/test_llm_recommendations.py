@@ -53,10 +53,10 @@ def test_bedrock_sku_display_name_sonnet_to_haiku():
     # canonical id and fire a Sonnet -> Haiku rec for Bedrock-only users.
     r = _rec_for("Claude Sonnet 4.5", 3224.0)
     assert r is not None
-    assert "claude-haiku-3-5" in r["recommendation"]
-    # sonnet blended 3+15=18, haiku-3-5 blended 0.8+4=4.8 -> ~73% savings.
-    assert r["estimated_savings_pct"] == "73%"
-    expected = 3224.0 * (1 - 4.8 / 18.0)
+    assert "claude-haiku-4-5" in r["recommendation"]
+    # sonnet blended 3+15=18, haiku-4-5 blended 1+5=6 -> ~67% savings.
+    assert r["estimated_savings_pct"] == "67%"
+    expected = 3224.0 * (1 - 6.0 / 18.0)
     assert abs(r["estimated_savings_usd"] - expected) < 5.0
     assert r["estimated_savings_usd"] > 0
     # Honesty/basis labeling is preserved.
@@ -66,7 +66,7 @@ def test_bedrock_sku_display_name_sonnet_to_haiku():
 def test_bedrock_sku_display_name_sonnet_4_6_also_matches():
     r = _rec_for("Claude Sonnet 4.6", 100.0)
     assert r is not None
-    assert "claude-haiku-3-5" in r["recommendation"]
+    assert "claude-haiku-4-5" in r["recommendation"]
     assert r["estimated_savings_usd"] > 0
 
 

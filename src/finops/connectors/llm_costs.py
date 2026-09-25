@@ -558,8 +558,8 @@ def _generate_recommendations(
         "claude-opus-4-1-20250805": "claude-sonnet-4-5-20250929",
         # Canonical Bedrock ids (from _normalize_model_id) so Sonnet SKU display
         # names route to Haiku for lower-complexity tasks.
-        "claude-sonnet-4-5":        "claude-haiku-3-5",
-        "claude-sonnet-4-6":        "claude-haiku-3-5",
+        "claude-sonnet-4-5":        "claude-haiku-4-5",
+        "claude-sonnet-4-6":        "claude-haiku-4-5",
         "o1":                       "o3-mini",
     }
 

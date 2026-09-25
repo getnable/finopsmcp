@@ -114,7 +114,7 @@ def test_a_model_without_a_confirmed_price_is_not_given_a_siblings():
 
 def test_cost_per_invocation_sonnet_higher_than_haiku():
     sonnet_cost = _cost_per_invocation("claude-sonnet-4-6", avg_input_tokens=300, avg_output_tokens=100)
-    haiku_cost = _cost_per_invocation("claude-haiku-3-5", avg_input_tokens=300, avg_output_tokens=100)
+    haiku_cost = _cost_per_invocation("claude-haiku-4-5", avg_input_tokens=300, avg_output_tokens=100)
     assert sonnet_cost > haiku_cost
 
 
@@ -223,7 +223,10 @@ def test_recommend_flags_short_task_sonnet():
 
     assert len(result["routing_opportunities"]) > 0
     opp = result["routing_opportunities"][0]
-    assert "haiku" in opp["recommended_model"]
+    # The current Haiku, not the retired Haiku 3.5.
+    assert opp["recommended_model"] == "claude-haiku-4-5"
+    assert "claude-haiku-4-5" in result["implementation_note"]
+    assert "haiku-3-5" not in result["implementation_note"]
     assert opp["monthly_savings"] > 0
     assert opp["projected_monthly_cost"] < opp["current_monthly_cost"]
 
@@ -399,3 +402,19 @@ def test_a_failed_listing_falls_back_to_the_model_key():
     cw = MagicMock()
     cw.get_paginator.side_effect = RuntimeError("AccessDenied")
     assert bedrock_routing._bedrock_model_dimensions(cw) is None
+
+
+def test_the_sonnet_to_haiku_ratio_quoted_is_the_price_tables():
+    """The tool and module said Sonnet costs 20x Haiku. Sonnet 4.x against
+    Haiku 4.5 is 3x on input and on output."""
+    import inspect
+
+    import finops.server  # noqa: F401  (tools register against the server)
+    from finops.tools import llm as llm_tools
+    sonnet, haiku = MODEL_PRICES["claude-sonnet-4-6"], MODEL_PRICES["claude-haiku-4-5"]
+    ratio = sonnet.input / haiku.input
+    assert ratio == sonnet.output / haiku.output == 3
+    for text in (bedrock_routing.__doc__,
+                 inspect.getdoc(getattr(llm_tools.recommend_bedrock_model_routing, "fn",
+                                        llm_tools.recommend_bedrock_model_routing))):
+        assert "20x" not in text and f"{ratio:g}x" in text
