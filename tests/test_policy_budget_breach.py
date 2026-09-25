@@ -92,6 +92,56 @@ def test_the_env_var_sets_it_and_wins_over_the_file(tmp_path, monkeypatch):
 def test_a_value_that_is_not_ask_or_deny_is_ignored(tmp_path, text):
     _policy_file(tmp_path, text)
     assert policy.load_policy()["on_budget_breach"] == "ask"
+    # ...but not silently: doctor says which file and why the default applies.
+    [problem] = policy.policy_problems()
+    assert str(tmp_path / "nable.policy.yaml") in problem and "default" in problem
+    assert any(problem in r for r in g.doctor()["recommendations"])
+
+
+def test_a_file_that_parses_says_nothing_to_doctor(tmp_path):
+    _policy_file(tmp_path, "on_budget_breach: deny\n")
+    assert policy.policy_problems() == []
+
+
+def test_the_file_is_read_as_utf8(tmp_path):
+    (tmp_path / "nable.policy.yaml").write_bytes("# Budgets: 5 €/mo\non_budget_breach: deny\n"
+                                                 .encode("utf-8"))
+    assert policy.load_policy()["on_budget_breach"] == "deny"
+    assert policy.policy_problems() == []
+
+
+@pytest.mark.parametrize("env,value", [
+    ("FINOPS_POLICY_MAX_AUTO_USD", "nan"), ("FINOPS_POLICY_MAX_AUTO_USD", "inf"),
+    ("FINOPS_POLICY_MAX_AUTO_USD", "-5"), ("FINOPS_POLICY_MAX_AUTO_USD", "1e999"),
+    ("FINOPS_POLICY_VELOCITY_CAP_USD", "nan"), ("FINOPS_POLICY_VELOCITY_CAP_USD", "-1"),
+    ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "0"), ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "inf"),
+    ("FINOPS_POLICY_LOOP_WINDOW_MIN", "-10"), ("FINOPS_POLICY_LOOP_COUNT", "-3"),
+])
+def test_an_env_value_that_would_switch_a_gate_off_keeps_the_default(env, value, monkeypatch):
+    """float("nan") compares False with everything, so a threshold of nan let
+    every priced change through; inf and negatives did the same one way or
+    the other."""
+    monkeypatch.setenv(env, value)
+    pol = policy.load_policy()
+    assert pol == {**policy.DEFAULT_POLICY,
+                   "allowed_action_types": list(policy.DEFAULT_POLICY["allowed_action_types"])}
+    assert policy.velocity_cap(pol) == 4 * policy.DEFAULT_POLICY["max_auto_monthly_usd"]
+    assert any(f"{env}={value}" in p for p in policy.policy_problems())
+    v = g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8",
+                       record=False)
+    assert v and v["decision"] == "ask"
+
+
+@pytest.mark.parametrize("env,value,key,want", [
+    ("FINOPS_POLICY_MAX_AUTO_USD", "0", "max_auto_monthly_usd", 0.0),
+    ("FINOPS_POLICY_VELOCITY_CAP_USD", "0", "velocity_cap_monthly_usd", 0.0),
+    ("FINOPS_POLICY_LOOP_COUNT", "0", "loop_repeat_count", 0),
+    ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "15", "velocity_window_minutes", 15.0),
+])
+def test_documented_values_still_apply(env, value, key, want, monkeypatch):
+    monkeypatch.setenv(env, value)
+    assert policy.load_policy()[key] == want
+    assert policy.policy_problems() == []
 
 
 def test_the_file_is_not_read_from_the_working_directory(tmp_path, monkeypatch):

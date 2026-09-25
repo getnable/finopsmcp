@@ -8,6 +8,7 @@ and is intentionally NOT implemented here, propose-only stays fully intact.
 """
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -114,32 +115,106 @@ def policy_file_path() -> Path:
 _FILE_CACHE: dict[str, Any] = {}
 
 
-def _policy_file_keys() -> dict[str, Any]:
-    """The policy keys set in the policy file, validated. Currently only
-    on_budget_breach. Empty when there is no file, it cannot be parsed, or a
-    value is not one this policy knows: a broken file never loosens the gate
-    and never breaks it."""
+def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
+    """(the keys the policy file sets, validated; what is wrong with it).
+    Currently only on_budget_breach. No keys when there is no file, it cannot
+    be parsed, or a value is not one this policy knows: a broken file never
+    loosens the gate and never breaks it. The problems say so, for doctor."""
     try:
         path = policy_file_path()
         st = path.stat()
     except (OSError, ValueError):
-        return {}
+        return {}, []
     key = (str(path), st.st_mtime_ns, st.st_size)
     if _FILE_CACHE.get("key") == key:
-        return dict(_FILE_CACHE["keys"])
+        return dict(_FILE_CACHE["keys"]), list(_FILE_CACHE["problems"])
     keys: dict[str, Any] = {}
+    problems: list[str] = []
     try:
         import yaml
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
-    except Exception:  # noqa: BLE001 - an unreadable file is no file
+    except Exception as e:  # noqa: BLE001 - an unreadable file is no file
         doc = None
+        problems.append(f"{path} could not be read ({type(e).__name__}: "
+                        f"{str(e).splitlines()[0] if str(e) else 'no detail'}), so the "
+                        "defaults apply")
     if isinstance(doc, dict):
         val = doc.get("on_budget_breach")
         if isinstance(val, str) and val.strip().lower() in BUDGET_BREACH_ACTIONS:
             keys["on_budget_breach"] = val.strip().lower()
-    _FILE_CACHE.update(key=key, keys=keys)
-    return dict(keys)
+        elif val is not None:
+            problems.append(f"{path} sets on_budget_breach: {val!r}, which is not "
+                            f"{' or '.join(BUDGET_BREACH_ACTIONS)}, so the default "
+                            f"({DEFAULT_POLICY['on_budget_breach']}) applies")
+    elif doc is not None:
+        problems.append(f"{path} is a YAML {type(doc).__name__}, not a mapping of "
+                        "settings, so the defaults apply")
+    _FILE_CACHE.update(key=key, keys=keys, problems=problems)
+    return dict(keys), list(problems)
+
+
+def _policy_file_keys() -> dict[str, Any]:
+    return _read_policy_file()[0]
+
+
+# Numeric env overrides: (env var, policy key, whether 0 is allowed). A value
+# that is not a finite number of 0 or more (a window: more than 0) keeps the
+# default: "nan", "inf" or a negative figure would switch a gate off.
+_NUMERIC_ENV = (("FINOPS_POLICY_MAX_AUTO_USD", "max_auto_monthly_usd", True),
+                ("FINOPS_POLICY_VELOCITY_CAP_USD", "velocity_cap_monthly_usd", True),
+                ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "velocity_window_minutes", False),
+                ("FINOPS_POLICY_LOOP_WINDOW_MIN", "loop_window_minutes", False))
+
+
+def _env_number(env: str, zero_ok: bool) -> tuple[float | None, str | None]:
+    """(the value, None), (None, why it was refused), or (None, None) when unset."""
+    raw = os.getenv(env, "").strip()
+    if not raw:
+        return None, None
+    try:
+        x = float(raw)
+    except ValueError:
+        x = math.nan
+    if math.isfinite(x) and (x >= 0 if zero_ok else x > 0):
+        return x, None
+    need = "a finite number of 0 or more" if zero_ok else "a finite number above 0"
+    return None, f"{env}={raw} is not {need}, so the default applies"
+
+
+def _env_count(env: str) -> tuple[int | None, str | None]:
+    raw = os.getenv(env, "").strip()
+    if not raw:
+        return None, None
+    try:
+        n = int(raw)
+    except ValueError:
+        n = -1
+    if n >= 0:
+        return n, None
+    return None, f"{env}={raw} is not a whole number of 0 or more, so the default applies"
+
+
+def policy_problems() -> list[str]:
+    """Settings load_policy() ignored, each with why: a policy file it could
+    not parse or a value it does not know, and env overrides that are not a
+    usable number. For `nable guard doctor`; never raises."""
+    try:
+        problems = _read_policy_file()[1]
+        for env, _, zero_ok in _NUMERIC_ENV:
+            why = _env_number(env, zero_ok)[1]
+            if why:
+                problems.append(why)
+        why = _env_count("FINOPS_POLICY_LOOP_COUNT")[1]
+        if why:
+            problems.append(why)
+        ob = os.getenv("FINOPS_POLICY_ON_BUDGET_BREACH", "").strip()
+        if ob and ob.lower() not in BUDGET_BREACH_ACTIONS:
+            problems.append(f"FINOPS_POLICY_ON_BUDGET_BREACH={ob} is not "
+                            f"{' or '.join(BUDGET_BREACH_ACTIONS)}, so it is ignored")
+        return problems
+    except Exception:  # noqa: BLE001 - a diagnostic must not break doctor
+        return []
 
 
 def load_policy() -> dict[str, Any]:
@@ -158,7 +233,9 @@ def load_policy() -> dict[str, Any]:
 
         on_budget_breach: deny     # a change over budget is blocked, not asked
 
-    The env var wins over the file.
+    The env var wins over the file. A value that cannot be used (not a
+    finite number of 0 or more, a window of 0, an unknown on_budget_breach, a
+    file that does not parse) keeps the default; policy_problems() lists it.
     """
     pol: dict[str, Any] = dict(DEFAULT_POLICY)
     pol["allowed_action_types"] = list(DEFAULT_POLICY["allowed_action_types"])
@@ -168,23 +245,14 @@ def load_policy() -> dict[str, Any]:
     if ob in BUDGET_BREACH_ACTIONS:
         pol["on_budget_breach"] = ob
 
-    for env, key in (("FINOPS_POLICY_MAX_AUTO_USD", "max_auto_monthly_usd"),
-                     ("FINOPS_POLICY_VELOCITY_CAP_USD", "velocity_cap_monthly_usd"),
-                     ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "velocity_window_minutes"),
-                     ("FINOPS_POLICY_LOOP_WINDOW_MIN", "loop_window_minutes")):
-        mx = os.getenv(env, "").strip()
-        if mx:
-            try:
-                pol[key] = float(mx)
-            except ValueError:
-                pass
+    for env, key, zero_ok in _NUMERIC_ENV:
+        x, _ = _env_number(env, zero_ok)
+        if x is not None:
+            pol[key] = x
 
-    lc = os.getenv("FINOPS_POLICY_LOOP_COUNT", "").strip()
-    if lc:
-        try:
-            pol["loop_repeat_count"] = int(lc)
-        except ValueError:
-            pass
+    lc, _ = _env_count("FINOPS_POLICY_LOOP_COUNT")
+    if lc is not None:
+        pol["loop_repeat_count"] = lc
 
     al = os.getenv("FINOPS_POLICY_ALLOWED_ACTIONS", "").strip()
     if al:

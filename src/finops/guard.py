@@ -2928,6 +2928,10 @@ def doctor() -> dict[str, Any]:
     for row in budgets["not_enforced"]:
         gaps.append(f"the '{row['name']}' budget ({row['scope']}): the guard cannot tell "
                     f"which changes are in it; set {row['needs']} where the agent runs")
+    from .policy import policy_problems
+    problems = policy_problems()
+    for problem in problems:
+        fix("correct the policy setting", problem)
     fixes = [f"{cmd}  ({'; '.join(why)})" if why else cmd for cmd, why in todo.items()]
     fixes.append("give agents read-only cloud credentials; keep write access behind a human")
 
@@ -2939,6 +2943,7 @@ def doctor() -> dict[str, Any]:
         "mcp_tools": families,
         "ledger": ledger,
         "budgets": budgets,
+        "policy_problems": problems,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
