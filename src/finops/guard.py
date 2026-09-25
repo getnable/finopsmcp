@@ -76,18 +76,19 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
-    (r"\b(?:terraform|tofu|terragrunt)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b",
-     "delete_resource"),
+    ("apply-with-destroy-flag", "delete_resource"),
     # The same flag passed through terraform's own env hook:
     # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
     # pattern below would otherwise wave through as a reversible mutation.
-    (r"\bTF_CLI_ARGS(?:_\w+)?=\S*-destroy\b", "delete_resource"),
+    ("tf-cli-args-destroy", "delete_resource"),
     (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
     # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
     (r"\baws\s+s3\s+r[mb]\b", "delete_resource"),
-    (r"\bgsutil\s+(?:-\S+\s+)*r[mb]\b", "delete_resource"),
+    # Anchored at a token start, not \b: `-gsutil -gsutil ...` would otherwise
+    # give every token a start and every start the whole run to scan.
+    (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
     (r"\bhelm\s+(?:uninstall|delete)\b", "delete_resource"),
     (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
@@ -178,15 +179,103 @@ def _normalize(command: str) -> str:
     return _strip_aws_global_options(cmd)
 
 
+# ── Linear-time matching ──────────────────────────────────────────────────────
+# The command is whatever the agent sends, and a hook that runs past the
+# harness's timeout fails open: `terraform destroy # AAAA...` padded to 100 KB
+# used to take the hook 18 s, and the destroy ran. So no pattern may cost more
+# than linear time in the command, however it is padded.
+#
+# The costly shape is "program, any tokens, verb" (`terraform (?:\S+\s+)*
+# destroy`) searched from every occurrence of the program: each failed start
+# rescans the rest of the command. But any token the pattern could reach from
+# a later occurrence it can also reach from the first one (the later program
+# name is itself just a token to skip), so only the first start needs trying.
+# And from there, "any tokens, then the verb" is "the verb at any token start
+# after the program": one forward scan, no backtracking through the tokens.
+_ANY_TOKENS = r"(?:\S+\s+)*"
+
+
+class _Rule:
+    """A compiled classifier pattern with search() linear in the command.
+
+    For a pattern HEAD + _ANY_TOKENS + TAIL, search() returns the TAIL match
+    (its end() is where the whole pattern would end), or None."""
+
+    def __init__(self, pattern: str) -> None:
+        self.pattern = pattern
+        head, sep, tail = pattern.partition(_ANY_TOKENS)
+        if sep:
+            self.head: re.Pattern[str] | None = re.compile(head)
+            self.tail = re.compile(r"(?<!\S)" + tail)
+        else:
+            self.head, self.tail = None, re.compile(pattern)
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        if self.head is None:
+            return self.tail.search(cmd)
+        m = self.head.search(cmd)
+        return self.tail.search(cmd, m.end()) if m else None
+
+
+class _ApplyWithDestroyFlag:
+    """`terraform|tofu|terragrunt ... apply ... -destroy` in one shell segment:
+    destroy hidden behind the apply verb. Checked segment by segment, so each
+    character is looked at a bounded number of times."""
+
+    pattern = "apply-with-destroy-flag"
+    _tool = re.compile(r"\b(?:terraform|tofu|terragrunt)\s")
+    _apply = re.compile(r"(?<!\S)apply\b")
+    _flag = re.compile(r"\s-destroy\b")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        for seg in re.split(r"[|;&]", cmd):
+            tool = self._tool.search(seg)
+            if tool is None:
+                continue
+            apply = self._apply.search(seg, tool.end())
+            if apply is not None:
+                flag = self._flag.search(seg, apply.end())
+                if flag is not None:
+                    return flag
+        return None
+
+
+class _TfCliArgsDestroy:
+    """`TF_CLI_ARGS[_cmd]=...-destroy`: the flag passed through terraform's
+    env hook. One scan per assignment token, never one per character."""
+
+    pattern = "tf-cli-args-destroy"
+    _assign = re.compile(r"\bTF_CLI_ARGS(?:_\w+)?=\S*")
+    _flag = re.compile(r"-destroy\b")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        for m in self._assign.finditer(cmd):
+            if self._flag.search(m.group(0)):
+                return m
+        return None
+
+
+_SPECIAL_RULES = {r.pattern: r for r in (_ApplyWithDestroyFlag(), _TfCliArgsDestroy())}
+
+
+def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
+    return [(_SPECIAL_RULES.get(p) or _Rule(p), a) for p, a in table]
+
+
+_ONE_WAY_RULES = _compile(_ONE_WAY_CLASSIFIERS)
+_TWO_WAY_RULES = _compile(_TWO_WAY_CLASSIFIERS)
+
+
 def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
-    when it is not an infrastructure mutation nable cares about."""
+    when it is not an infrastructure mutation nable cares about. Linear in the
+    length of the command (see _Rule)."""
     cmd = _normalize(command)
-    for pattern, action in _ONE_WAY_CLASSIFIERS:
-        if re.search(pattern, cmd):
+    for rule, action in _ONE_WAY_RULES:
+        if rule.search(cmd):
             return ("one_way", action)
-    for pattern, action in _TWO_WAY_CLASSIFIERS:
-        if re.search(pattern, cmd):
+    for rule, action in _TWO_WAY_RULES:
+        if rule.search(cmd):
             return ("two_way", action)
     return None
 
@@ -224,9 +313,9 @@ _SAVINGS_PLAN_RE = re.compile(r"\baws\s+savingsplans\s+create-savings-plan\b")
 _RESERVED_RE = re.compile(r"\baws\s+ec2\s+purchase-reserved-instances-offering\b")
 # JSON ({"Amount": 1200, ...}, quotes already stripped) and shorthand
 # (Amount=1200,CurrencyCode=USD) spell the same thing.
-_LIMIT_AMOUNT_RE = re.compile(r"--limit-price[=\s]+\S*?Amount\W{1,3}([\d.]+)")
-_GCE_CREATE_RE = re.compile(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!-)")
-_AZ_VM_CREATE_RE = re.compile(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
+_LIMIT_AMOUNT_RE = re.compile(r"--limit-price[=\s]+\S{0,200}?Amount\W{1,3}([\d.]+)")
+_GCE_CREATE_RE = _Rule(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!-)")
+_AZ_VM_CREATE_RE = _Rule(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
 _SHELL_BREAKS = ("&&", "||", ";", "|")
 
 # The engines _RDS_HOURLY's rates are for. Aurora bills per cluster instance
@@ -537,7 +626,7 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, 
     }
 
 
-_PRICERS: list[tuple[re.Pattern[str], Any]] = [
+_PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_RDS_CREATE_RE, _price_rds),
     (_SAVINGS_PLAN_RE, _price_savings_plan),
@@ -857,7 +946,7 @@ def _minutes_ago(minutes: float) -> str:
 # database called db-3): that is the shape of an agent re-creating what it
 # already made. Anything else classified as a creation is keyed on its whole
 # normalised command.
-_LOOP_ARGS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
+_LOOP_ARGS: list[tuple[Any, tuple[str, ...]]] = [
     (_RUN_INSTANCES_RE, ("instance-type", "count", "image-id", "launch-template")),
     (re.compile(r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b"),
      ("template-file", "template-url", "template-body")),
@@ -1050,6 +1139,8 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         budget_hit = check_budget_gate(session_id)
         if budget_hit is not None:
             v = {**budget_hit, "harness": harness}
+        elif len(command) > MAX_JUDGED_CHARS:
+            v = {**_oversize_verdict(command), "harness": harness}
         else:
             hit = classify_command(command)
             if hit is None:
@@ -1069,6 +1160,22 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
 
 
 _SEVERITY = {"deny": 3, "ask": 2, "warn": 1, "allow": 0}
+
+# The longest command the guard judges. Every check is linear in the command,
+# but linear in ten megabytes still runs past the harness's hook timeout, and a
+# timed-out hook fails open: padding a destroy with a long comment was a way to
+# switch the guard off. A model's single tool call is far shorter than this, so
+# a command this long is either generated by something else or built to be
+# long, and a human should look at it.
+MAX_JUDGED_CHARS = 256 * 1024
+
+
+def _oversize_verdict(command: str) -> dict[str, Any]:
+    return {"decision": "ask", "action_type": "oversize_command", "door": None,
+            "reason": (f"nable guard: this command is {len(command) / 1024:,.0f} KB, longer "
+                       f"than the {MAX_JUDGED_CHARS // 1024} KB the guard can check before "
+                       "its hook times out. A human should read it before it runs.")}
+
 
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
@@ -1103,6 +1210,9 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
             context = argument_text(arguments)
             worst = None
             for act in actions:
+                if len(act.command) > MAX_JUDGED_CHARS:
+                    worst, summary = _oversize_verdict(act.command), act.command
+                    break
                 hit = act.hit or classify_command(act.command)
                 if hit is None:
                     continue
@@ -1140,13 +1250,49 @@ def _policy_version() -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
+# Ledger writes held back while a hook answers (see answer_first).
+_PENDING: list[dict[str, Any]] | None = None
+
+
+@contextlib.contextmanager
+def answer_first():
+    """Hold ledger writes until the block exits.
+
+    A hook's job is the verdict; the ledger line is the receipt. Inside this
+    block the verdict is computed and written to the harness first, and the
+    ledger is written after, so a slow or locked ledger file can delay a
+    receipt but never the answer. Nested use is a no-op: the outermost block
+    writes."""
+    global _PENDING
+    if _PENDING is not None:
+        yield
+        return
+    _PENDING = []
+    try:
+        yield
+    finally:
+        pending, _PENDING = _PENDING, None
+        with contextlib.suppress(Exception):
+            from . import guard_ledger
+            for entry in pending:
+                guard_ledger.append(entry)
+
+
+def _append(entry: dict[str, Any]) -> None:
+    from . import guard_ledger
+    if _PENDING is not None:
+        _PENDING.append(entry)
+    else:
+        guard_ledger.append(entry)
+
+
 def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
     """Append one verdict to the ledger. Cheap, and never raises: a ledger
     problem is a missing line, never a lost verdict."""
     with contextlib.suppress(Exception):
         from . import guard_ledger
         est = v.get("estimate") or {}
-        guard_ledger.append({
+        _append({
             "harness": v.get("harness"),
             "tool": tool,
             "command": guard_ledger.redact(command),
@@ -1182,7 +1328,7 @@ def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: A
     policy alone, and the verdict itself is recorded next to this line."""
     with contextlib.suppress(Exception):
         from . import guard_ledger
-        guard_ledger.append({
+        _append({
             "harness": harness,
             "tool": tool if isinstance(tool, str) else None,
             "command": guard_ledger.redact(command) if command else None,
@@ -1204,8 +1350,11 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
     with no output. Fails open by design: any error or unknown payload exits 0
     with no output so the guard can never break the user's agent.
     """
-    stdin = stdin or sys.stdin
-    stdout = stdout or sys.stdout
+    with answer_first():
+        return _run_hook(stdin or sys.stdin, stdout or sys.stdout)
+
+
+def _run_hook(stdin: Any, stdout: Any) -> int:
     tool: Any = None
     try:
         payload = json.load(stdin)
@@ -1229,6 +1378,7 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
             # No permissionDecision: the call goes through the normal
             # permission flow untouched, with the figure shown alongside.
             json.dump({"systemMessage": verdict["reason"]}, stdout)
+            _flush(stdout)
             return 0
         json.dump({
             "hookSpecificOutput": {
@@ -1237,12 +1387,19 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
                 "permissionDecisionReason": verdict["reason"],
             }
         }, stdout)
+        _flush(stdout)
         return 0
     except Exception as exc:
         # Still exit 0 with nothing on stdout: availability beats judgement.
         # But a fail-open is exactly what an audit should be able to count.
         _record_fail_open(exc, harness="claude-code", tool=tool, command=None)
         return 0
+
+
+def _flush(stdout: Any) -> None:
+    """The verdict leaves the process before the ledger is written."""
+    with contextlib.suppress(Exception):
+        stdout.flush()
 
 
 # ── Installer ──────────────────────────────────────────────────────────────────

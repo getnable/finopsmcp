@@ -192,16 +192,21 @@ def run_hook(harness: str | None = None, stdin: Any = None, stdout: Any = None,
     # Anything the gate prints by accident (a library warning, a stray debug
     # line) goes to stderr: one extra line on stdout and the harness cannot
     # parse the verdict at all.
-    try:
-        with contextlib.redirect_stdout(stderr):
-            if name == "claude":
-                return guard.run_hook(io.StringIO(raw), stdout)
-            response = _RESPONDERS[name](payload)
-    except Exception as e:
-        return _fail_open(name, stdout, stderr, f"{type(e).__name__}: {e}")
-    if response is not None:
-        stdout.write(json.dumps(response))
-    return 0
+    # The answer is written before the ledger (guard.answer_first): a slow or
+    # locked ledger file must never hold up the verdict.
+    with guard.answer_first():
+        try:
+            with contextlib.redirect_stdout(stderr):
+                if name == "claude":
+                    return guard.run_hook(io.StringIO(raw), stdout)
+                response = _RESPONDERS[name](payload)
+        except Exception as e:
+            return _fail_open(name, stdout, stderr, f"{type(e).__name__}: {e}")
+        if response is not None:
+            stdout.write(json.dumps(response))
+            with contextlib.suppress(Exception):
+                stdout.flush()
+        return 0
 
 
 # ── Where each harness keeps its hooks ────────────────────────────────────────

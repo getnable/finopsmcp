@@ -44,6 +44,9 @@ DECISIONS = ("allow", "warn", "ask", "deny", "fail_open")
 _path_override: Path | None = None
 
 _SUMMARY_MAX = 400
+# What redact() reads of its input, at most. Ten times the summary, so the
+# summary is always complete, and small enough that no pattern can be slow.
+_REDACT_INPUT_MAX = 4096
 _TAIL_CHUNK = 64 * 1024
 # The most recent() reads on the hook path: a few thousand records, a few ms.
 _RECENT_MAX_BYTES = 4 * 1024 * 1024
@@ -92,13 +95,16 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1=[REDACTED]"),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
-    (re.compile(r"(--[A-Za-z0-9-]*(?:password|passwd|secret|token|key)[A-Za-z0-9-]*)(=|\s+)"
+    (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|secret|token|key)"
+                r"[A-Za-z0-9-]*)(=|\s+)"
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
      "[REDACTED-AWS-KEY-ID]"),
     (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),
     # A password embedded in a URL, before the @.
-    (re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
+    # Anchored where a scheme can start, so a long run of letters is one start,
+    # not one per letter (redact must stay linear: see _REDACT_INPUT_MAX).
+    (re.compile(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
      r"\1[REDACTED]@"),
 ]
 # Long high-entropy runs: base64 or url-safe tokens (AWS secret keys, GitHub
@@ -117,8 +123,17 @@ def _long_token(m: re.Match[str]) -> str:
 
 
 def redact(text: Any, limit: int = _SUMMARY_MAX) -> str:
-    """A summary of `text` safe to keep in an audit log."""
-    s = " ".join(str(text or "").split())
+    """A summary of `text` safe to keep in an audit log.
+
+    Only the first _REDACT_INPUT_MAX characters are looked at: the summary is
+    a few hundred characters anyway, and an agent's command can be padded to
+    megabytes to make the hook run past its timeout. A token cut in two at
+    that boundary is dropped rather than kept half-redacted."""
+    raw = str(text or "")
+    cut = len(raw) > _REDACT_INPUT_MAX
+    s = " ".join(raw[:_REDACT_INPUT_MAX].split())
+    if cut:
+        s = s.rsplit(" ", 1)[0] + " ..." if " " in s else "..."
     for pattern, repl in _REDACTIONS:
         s = pattern.sub(repl, s)
     s = _LONG_TOKEN_RE.sub(_long_token, s)
