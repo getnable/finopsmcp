@@ -13,8 +13,8 @@ from ..license import checkout_url as _checkout_url, plan_label as _plan_label
 @_srv.mcp.tool()
 async def send_digest_now() -> dict:
     """
-    Manually trigger a cost digest to Slack and/or Teams right now.
-    Normally this sends automatically at 09:00 UTC daily.
+    Send a cost digest to Slack and/or Teams right now. This install sends
+    digests only when asked; sending them on a schedule is nable Cloud.
 
     Examples:
         - "Send the daily cost digest to Slack"
@@ -48,7 +48,7 @@ def check_notification_config() -> dict:
     """
     from ..notifications import slack, teams
 
-    return {
+    result = {
         "slack": {
             "configured": slack.is_configured(),
             "method": "webhook" if _srv.os.environ.get("SLACK_WEBHOOK_URL") else "bot_token" if _srv.os.environ.get("SLACK_BOT_TOKEN") else "none",
@@ -57,12 +57,21 @@ def check_notification_config() -> dict:
         "teams": {
             "configured": teams.is_configured(),
         },
-        "schedule": {
+    }
+    if _scheduler_installed():
+        result["delivery"] = "scheduled"
+        result["schedule"] = {
             "snapshot": _srv.os.environ.get("FINOPS_SNAPSHOT_CRON", "0 1 * * * (01:00 UTC)"),
             "anomaly_check": _srv.os.environ.get("FINOPS_ANOMALY_CRON", "0 2 * * * (02:00 UTC)"),
             "daily_digest": _srv.os.environ.get("FINOPS_DIGEST_CRON", "0 9 * * * (09:00 UTC)"),
-        },
-    }
+        }
+    else:
+        # A schedule block here read as "digests go out at 09:00" on an install
+        # that runs nothing on a timer.
+        from ..license import DELIVERY_NOTE
+        result["delivery"] = "on_request"
+        result["note"] = DELIVERY_NOTE
+    return result
 
 
 @_srv.mcp.tool()

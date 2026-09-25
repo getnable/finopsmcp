@@ -1930,10 +1930,38 @@ def setup_slack_bot() -> None:
         print('    Install it before running finops-slack:  pip install "finops-mcp[slack]"')
 
 
+def _offer_test_post(where: str, send) -> bool:
+    """Offer one test message to the destination the user just entered.
+
+    Setup used to finish with "Slack configured" having sent nothing, so a
+    mistyped webhook or a bot not in the channel stayed invisible until the day
+    someone wondered where the alerts were. The post is the user's choice, to
+    the webhook or channel they just gave. `send` returns (ok, detail)."""
+    ans = _prompt(f"  Send a test message to {where} now? [Y/n]", default="y").strip().lower()
+    if ans not in ("", "y", "yes"):
+        print("  No test message was sent. Nothing has been posted yet.")
+        return False
+    try:
+        ok, detail = send()
+    except Exception as e:  # network, DNS, TLS
+        ok, detail = False, str(e)
+    if ok:
+        _ok(f"Test message posted to {where}.")
+        return True
+    _warn(f"The test message was not accepted ({detail}). Check it and run this again.")
+    return False
+
+
+def _print_delivery_note() -> None:
+    from .license import DELIVERY_NOTE
+    print(f"  {DELIVERY_NOTE}\n")
+
+
 def setup_slack() -> None:
-    _section("Slack: Cost Alerts and Daily Digest")
+    _section("Slack: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     print("  Choose method:")
-    print("  1) Incoming Webhook (simpler)")
+    print("  1) Incoming Webhook (simpler; posts to the one channel it was created for)")
     print("  2) Bot Token (richer, supports buttons)")
     print("  3) Conversational bot (two-way: questions, RCA, draft PRs and tickets)")
     choice = _prompt("  Choice", default="1")
@@ -1942,28 +1970,36 @@ def setup_slack() -> None:
     if choice == "3":
         setup_slack_bot()
         return
+    import httpx
+    text = "nable test message: this channel will get the cost alerts and reports you send from nable."
     if choice == "1":
-        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True)
+        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True).strip()
+        if not url:
+            _warn("No webhook entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_WEBHOOK_URL", url)
+
+        def _send():
+            r = httpx.post(url, json={"text": text}, timeout=10)
+            return r.status_code == 200, f"HTTP {r.status_code}"
+        posted = _offer_test_post("the Slack webhook", _send)
     else:
-        token = _prompt("  Bot Token (xoxb-...)", secret=True)
+        token = _prompt("  Bot Token (xoxb-...)", secret=True).strip()
         channel = _prompt("  Channel (e.g. #finops-alerts)", default="#finops-alerts")
+        if not token:
+            _warn("No bot token entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_BOT_TOKEN", token)
         vault.store("SLACK_CHANNEL", channel)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Slack configured")
+
+        def _send():
+            r = httpx.post("https://slack.com/api/chat.postMessage",
+                           headers={"Authorization": f"Bearer {token}"},
+                           json={"channel": channel, "text": text}, timeout=10)
+            body = r.json() if r.status_code == 200 else {}
+            return bool(body.get("ok")), body.get("error") or f"HTTP {r.status_code}"
+        posted = _offer_test_post(channel, _send)
+    _ok("Slack saved" + ("." if posted else ". No message has been sent yet."))
 
 
 def setup_n8n() -> None:
@@ -2024,25 +2060,25 @@ def setup_n8n() -> None:
 
 
 def setup_teams() -> None:
-    _section("Microsoft Teams: Cost Alerts and Daily Digest")
+    _section("Microsoft Teams: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     from .security.vault import Vault
     vault = Vault.default()
-    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
+    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True).strip()
+    if not url:
+        _warn("No webhook entered. Run 'finops setup teams' to try again.")
+        return
     vault.store("TEAMS_WEBHOOK_URL", url)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Teams configured")
+
+    def _send():
+        import asyncio
+        from .notifications.teams import send_to_webhook
+        ok = asyncio.run(send_to_webhook(
+            url, "nable test message: this channel will get the cost alerts and reports "
+                 "you send from nable."))
+        return ok, "not accepted, or not an Office webhook URL"
+    posted = _offer_test_post("the Teams webhook", _send)
+    _ok("Teams saved" + ("." if posted else ". No message has been sent yet."))
 
 
 # ── Vault management ──────────────────────────────────────────────────────────
@@ -2781,7 +2817,8 @@ def _post_connect_message(provider: str | None) -> str:
     """The 'done, here's what to do' line, tailored to the provider just connected."""
     p = (provider or "").lower()
     if p in _CONNECT_CHANNELS:
-        return f"Done. Restart Claude Desktop, alerts and digests will post to {_CONNECT_CHANNELS[p]}."
+        return (f"Done. Restart Claude Desktop, then ask it to send a report or alert to "
+                f"{_CONNECT_CHANNELS[p]}. Nothing posts on its own from this install.")
     if p == "sso":
         return "Done. Restart Claude Desktop, SSO is wired up for the team dashboard."
     q = _CONNECT_QUESTIONS.get(p, "What's driving my cloud and AI bill?")
@@ -2982,7 +3019,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("twilio",       help="Connect Twilio usage records")
     sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
     sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
-    sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
+    sub.add_parser("slack",        help="Connect Slack for alerts and reports you send on request")
     sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
     sub.add_parser("notion",       help="Configure Notion cost report publishing")
     sub.add_parser("n8n",          help="Configure n8n workflow automation webhook")
@@ -3428,16 +3465,7 @@ def main(args: list[str] | None = None) -> None:
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    from .welcome import _cli
-    print("\n  " + _post_connect_message(parsed.cmd))
-    print()
-    print("  Want a visual dashboard?")
-    print(f"    {_cli('serve')}")
-    print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
-    print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
-    print()
-    print(f"  To add more providers: {_cli('setup')}")
-    print("  Full docs: https://getnable.com/docs\n")
+    _print_setup_footer(parsed.cmd)
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -3448,6 +3476,29 @@ def main(args: list[str] | None = None) -> None:
         })
     except Exception:
         pass
+
+
+def _dashboard_installed() -> bool:
+    """The web dashboard left the open package; only offer `serve` where it exists."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("finops.server_web") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _print_setup_footer(cmd: "str | None") -> None:
+    from .welcome import _cli
+    print("\n  " + _post_connect_message(cmd))
+    print()
+    if _dashboard_installed():
+        print("  Want a visual dashboard?")
+        print(f"    {_cli('serve')}")
+        print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
+        print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
+        print()
+    print(f"  To add more providers: {_cli('setup')}")
+    print("  Full docs: https://getnable.com/docs\n")
 
 
 # ── Post-setup email capture ──────────────────────────────────────────────────

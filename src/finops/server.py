@@ -718,19 +718,37 @@ def _fmt_usd(amount: float) -> str:
 
 _PRO_MONTHLY_USD = 25.0  # single source of truth for the Pro price in code
 
-# Contextual Team upsells: shown to free users at most once per topic per session,
-# keyed to the kind of question they just asked, so the nudge names the exact Team
-# capability they are missing instead of a generic "upgrade." Frequent but not
-# spammy: a user who asks different kinds of questions sees the specific thing Team
-# adds for each, once. The model surfaces it in one short sentence when it fits.
-_TEAM_UPSELLS = {
-    "anomaly":     "Pro auto-posts anomalies to Slack or Teams the moment they fire and opens a Jira, Linear, or GitHub ticket, so a spike never sits unnoticed.",
-    "rightsizing": "Pro takes this further: it opens the PR with the change and tracks whether it actually shipped, not just the recommendation.",
-    "attribution": "Pro delivers this as a scheduled weekly digest to whoever owns the budget, so nobody has to remember to run it.",
-    "commitment":  "Pro models your Savings Plan and reserved-instance coverage gap and recommends exactly what to commit to.",
-    "org":         "Pro rolls spend up across every account in your org automatically and emails the report.",
-    "budget":      "Pro enforces budgets and alerts at 80% and 100%, before you blow past them.",
-    "scorecard":   "Pro turns these scorecards into auto-created tickets so the worst offenders actually get fixed.",
+# Contextual upsells: shown to free users at most once per topic per session,
+# keyed to the kind of question they just asked, so the nudge names the exact
+# paid capability they are missing instead of a generic "upgrade." Frequent but
+# not spammy. The model surfaces it in one short sentence when it fits.
+#
+# Each tip names a feature by its gate, and a topic whose feature is free today
+# (on the _HOLD_AI_UNGATE hold) shows nothing: the tips used to sell rightsizing
+# PRs and commitment recommendations as Pro while every free user had them.
+# Anything that posts on a timer is nable Cloud: the open install answers when
+# asked, and the tip promising that Pro posts anomalies to Slack as they fire
+# was never true of it.
+_TEAM_UPSELLS: dict[str, tuple[str, str]] = {
+    "anomaly":     ("ticket_creation",
+                    "Pro opens a Jira, Linear, or GitHub ticket from an anomaly, so a spike has an "
+                    "owner. Posting alerts to Slack or Teams as they fire, unattended, is nable Cloud."),
+    "rightsizing": ("remediation",
+                    "Pro opens the PR with the change and tracks whether it shipped, not just the "
+                    "recommendation."),
+    "attribution": ("scheduled_email_digests",
+                    "Pro emails this breakdown to whoever owns the budget, on request. A weekly "
+                    "digest sent on a schedule is nable Cloud."),
+    "commitment":  ("commitment_recommendations",
+                    "Pro recommends exactly which Savings Plan or reserved instances to buy, with ROI."),
+    "org":         ("org_reports",
+                    "Pro rolls spend up across every account and OU in your org, and emails the "
+                    "report on request."),
+    "budget":      ("alerts",
+                    "Pro sets alert policies that post to Slack or Teams when a budget crosses 80% "
+                    "or 100%, each time you check. Checking on a schedule is nable Cloud."),
+    "scorecard":   ("ticket_creation",
+                    "Pro turns these scorecards into tickets so the worst offenders actually get fixed."),
 }
 
 _TOOL_UPSELL_TOPIC = {
@@ -755,19 +773,23 @@ _team_tips_shown: set = set()
 def _maybe_team_tip(tool_name: str) -> dict | None:
     """For free users only, a one-time contextual Team upsell for this tool's topic.
     Returns None for paying users, unmapped tools, or a topic already nudged."""
+    from .license import checkout_url, locked_features, plan_label
     topic = _TOOL_UPSELL_TOPIC.get(tool_name)
-    if not topic or topic in _team_tips_shown:
+    if not topic or topic in _team_tips_shown or topic not in _TEAM_UPSELLS:
         return None
+    feature, pitch = _TEAM_UPSELLS[topic]
     try:
-        if get_status().mode in ("pro", "trial", "enterprise"):
+        if get_status().mode in ("pro", "team", "trial", "enterprise"):
+            return None
+        if feature not in locked_features():   # free today: nothing to sell
             return None
     except Exception:
         return None
     _team_tips_shown.add(topic)
     return {
         "_note_to_model": "Mention this in one short, non-pushy sentence after your answer, only if it fits naturally.",
-        "missing_with_team": _TEAM_UPSELLS[topic],
-        "upgrade": f"Pro is ${_PRO_MONTHLY_USD:.0f}/mo flat, one price for your whole team, with a 7-day free trial: {_UPGRADE_URL}",
+        "missing_with_team": pitch,
+        "upgrade": f"{plan_label('pro')}: {checkout_url('pro')}",
     }
 
 

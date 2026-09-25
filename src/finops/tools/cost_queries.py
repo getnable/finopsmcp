@@ -155,8 +155,8 @@ async def get_cost_summary(
     # Only fires for free users with real spend data (not $0 accounts)
     if grand_total > 10:
         nudge = _srv._team_nudge(
-            "To get automatic Slack alerts when spend spikes and auto-create tickets "
-            "for waste findings, upgrade to Pro:"
+            "To open Jira, Linear, or GitHub tickets for waste findings, upgrade to "
+            "Pro:"
         , context="cost_summary")
         if nudge:
             result["_tip"] = nudge

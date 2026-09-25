@@ -147,13 +147,13 @@ def get_anomalies(
         nudge_msg = (
             f"You have {spike_count} cost spike{'s' if spike_count != 1 else ''}"
             + (f" ({high_spikes} high-severity)" if high_spikes else "")
-            + ". To get Slack or Teams alerts the moment these fire so you catch spikes live,"
-            + " upgrade to Pro:"
+            + ". To open a Jira, Linear, or GitHub ticket for each so a spike has an owner,"
+            + " upgrade to Pro. (Alerts sent on a schedule, without asking, are nable Cloud.)"
         )
     else:
         nudge_msg = (
-            "To get Slack or Teams alerts the moment a cost spike fires so you catch"
-            " it live, upgrade to Pro:"
+            "To open a Jira, Linear, or GitHub ticket from a cost spike so it has an owner,"
+            " upgrade to Pro. (Alerts sent on a schedule, without asking, are nable Cloud.)"
         )
     nudge = _srv._team_nudge(nudge_msg, context="anomalies")
     if nudge:
