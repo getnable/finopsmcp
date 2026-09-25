@@ -140,6 +140,7 @@ class Scorecard:
     total_score: float        # 0–100 weighted sum
     grade: str
     trend: str                # "improving" | "declining" | "stable" | "no_history"
+                              # | "not_comparable" (different dimensions measured)
     trend_delta: float        # pts change vs 7 days ago
 
     # Dimension breakdown
@@ -372,19 +373,12 @@ def _score_waste_reduction(
     if not actions:
         actions.append("Continue monitoring for idle and over-provisioned resources")
 
-    # Waste is measured only when a waste-detection input actually ran. With no
-    # idle-resource / k8s / helm inputs, total_waste is 0 and the score would be a
-    # fabricated 100 ("no waste!") over data nobody collected — abstain instead so
-    # it does not inflate the headline grade on a box that never ran the scans.
-    # An input that ran and found nothing (an empty list) is a measurement: the
-    # all-None case already returned above as not scanned.
-    waste_available = any(x is not None for x in (idle_resources, k8s_reports, orphaned_helm_releases))
     return DimensionScore(
         name="waste_reduction", display_name="Waste Reduction",
         raw_score=raw, weight=WEIGHTS["waste_reduction"],
         weighted_score=raw * WEIGHTS["waste_reduction"] / 100,
         grade=_grade(raw), findings=findings, actions=actions, metadata=meta,
-        data_available=waste_available,
+        data_available=True,
     )
 
 
@@ -728,10 +722,23 @@ def _score_anomaly_response(
 
 # ── Trend tracking ────────────────────────────────────────────────────────────
 
-def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
+# The key, in a persisted score's details, that lists the dimensions it was
+# measured over (the only ones a later total can be compared with it on).
+_AVAILABLE_KEY = "available_dimensions"
+
+def _get_score_trend(scope: str, current_score: float,
+                     available: list[str] | None = None) -> tuple[str, float]:
     """
     Compare current score against the score from 7 days ago.
     Returns (trend_label, delta_pts).
+
+    `available` is the set of dimensions measured for the current score. A
+    total is renormalized over the dimensions measured, so two totals over
+    different sets are different quantities: a tag scan that ran this week
+    and not last week would read as a swing nobody made. When `available` is
+    given, the old score is compared only if it was measured over the same
+    set (persisted with it); otherwise, including a score saved before the
+    set was recorded, the trend is "not_comparable".
     """
     try:
         from ..storage.db import get_engine, scorecard_history
@@ -752,7 +759,7 @@ def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
         # looking perfectly healthy.
         with engine.connect() as conn:
             row = conn.execute(
-                select(scorecard_history.c.total_score)
+                select(scorecard_history.c.total_score, scorecard_history.c.details)
                 .where(scorecard_history.c.scope == scope)
                 .where(scorecard_history.c.score_date <= week_ago)
                 .order_by(scorecard_history.c.score_date.desc())
@@ -763,6 +770,14 @@ def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
             return "no_history", 0.0
 
         prev_score = row[0]
+        if available is not None:
+            try:
+                prev = json.loads(row[1] or "{}")
+            except (TypeError, ValueError):
+                prev = {}
+            then = prev.get(_AVAILABLE_KEY) if isinstance(prev, dict) else None
+            if not isinstance(then, list) or sorted(then) != sorted(available):
+                return "not_comparable", 0.0
         delta = current_score - prev_score
 
         if abs(delta) < 2:
@@ -868,8 +883,9 @@ def build_scorecard(
 
     # Trend: only record and compare a real grade. An N/A, or a total scaled from
     # a lone dimension, would pollute the history the trend reads back.
+    measured_dims = sorted(d.name for d in available)
     if graded:
-        trend, delta = _get_score_trend(scope, total)
+        trend, delta = _get_score_trend(scope, total, measured_dims)
     else:
         trend, delta = "no_history", 0.0
 
@@ -898,6 +914,7 @@ def build_scorecard(
         "declining": f"↓ {abs(delta):.0f}pts vs last week",
         "stable":    "→ stable vs last week",
         "no_history": "first score recorded",
+        "not_comparable": "no trend (last week measured different dimensions)",
     }[trend]
 
     if graded:
@@ -936,7 +953,8 @@ def build_scorecard(
     # number the next run compares against and reports as a swing.
     if graded:
         _persist_score(scope, total, grade, {
-            d.name: round(d.raw_score, 1) for d in dimensions
+            **{d.name: round(d.raw_score, 1) for d in dimensions},
+            _AVAILABLE_KEY: measured_dims,
         })
 
     return scorecard
