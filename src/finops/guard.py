@@ -2059,6 +2059,12 @@ def _oversize_verdict(command: str) -> dict[str, Any]:
                        "its hook times out. A human should read it before it runs.")}
 
 
+def _unchecked_verdict(tool_name: str, why: str) -> dict[str, Any]:
+    return {"decision": "ask", "action_type": "oversize_command", "door": None,
+            "reason": (f"nable guard: {tool_name} carries command lines the guard did not "
+                       f"check ({why}), and one of them names a cloud or IaC CLI. A human "
+                       "should read it before it runs.")}
+
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                   harness: str = "claude-code", session_id: str | None = None,
@@ -2077,9 +2083,11 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     guard does not otherwise judge, and a budget stop on one is recorded
     under the tool's name. Under budget, an unknown MCP tool is judged only on
     the command lines in its arguments (`{"command": "terraform destroy"}` to
-    a shell server, guard_mcp.command_strings); with none it returns None and
+    a shell server, guard_mcp.scan_arguments); with none it returns None and
     is not recorded: the guard never asks about a tool it does not
-    understand. Recording and fail-open as gate_command.
+    understand. One with more command lines than the guard judges, or one
+    nested too deep, is asked about instead of passed. Recording and
+    fail-open as gate_command.
     """
     summary = tool_name
     try:
@@ -2115,17 +2123,20 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 if len(act.command) > MAX_JUDGED_CHARS:
                     worst, summary = _oversize_verdict(act.command), act.command
                     break
-                hit = act.hit or classify_command(act.command)
-                if hit is None:
-                    continue
-                v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
-                                 via=(f"{tool_name} would {act.summary}" if act.summary
-                                      else f"{tool_name} amounts to `{act.command}`"))
-                history_error = v.pop("_history_error", None)
-                if history_error is not None and record:
-                    _record_fail_open(history_error, harness=harness, tool=tool_name,
-                                      command=act.command, check="history",
-                                      session_id=session_id)
+                if act.unchecked:
+                    v = _unchecked_verdict(tool_name, act.unchecked)
+                else:
+                    hit = act.hit or classify_command(act.command)
+                    if hit is None:
+                        continue
+                    v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
+                                     via=(f"{tool_name} would {act.summary}" if act.summary
+                                          else f"{tool_name} amounts to `{act.command}`"))
+                    history_error = v.pop("_history_error", None)
+                    if history_error is not None and record:
+                        _record_fail_open(history_error, harness=harness, tool=tool_name,
+                                          command=act.command, check="history",
+                                          session_id=session_id)
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
             if worst is None:

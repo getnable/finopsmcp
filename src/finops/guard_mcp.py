@@ -21,8 +21,11 @@ Matching rules, and why:
   - A tool that matches no rule yields no actions and the guard says nothing,
     with one exception: an argument that is itself a command line for a cloud
     or IaC CLI (`{"command": "kubectl delete namespace prod"}` to a shell or
-    kubectl server) is judged as that command. Shell-runner servers are
-    exactly how an agent reaches a CLI without the Bash tool. Otherwise,
+    kubectl server, `echo hi && terraform destroy`, a `#!/bin/bash` script)
+    is judged as that command. Shell-runner servers are exactly how an agent
+    reaches a CLI without the Bash tool, so a call with more such command
+    lines than the guard judges, or with one nested too deep, is asked about
+    rather than let through (scan_arguments). Otherwise,
     asking about MCP tools nable does not understand would be friction with
     no information in it, and friction is how a guard gets uninstalled.
   - Read-shaped calls on a recognised tool (plan_only runs, `read`
@@ -54,10 +57,13 @@ class McpAction:
              workspace net"); "" when the shell form says it best
     hit      a fixed (door, action_type) for calls with no faithful shell form;
              None means "classify `command` like any shell command"
+    unchecked  why a command line in the arguments went unjudged (too many,
+             too deep); a human is asked instead. "" for an ordinary action
     """
     command: str
     summary: str = ""
     hit: tuple[str, str] | None = None
+    unchecked: str = ""
 
 
 @dataclass(frozen=True)
@@ -134,20 +140,123 @@ CLIS = ("aws", "kubectl", "terraform", "tofu", "terragrunt", "helm", "pulumi", "
 _CLI_NAMES = "|".join(CLIS)
 # A string that starts with one of them, after what can come first on a
 # command line without changing which program runs: `sudo`, `env`, `npx`,
-# VAR=value assignments, a `cd dir &&`, a path, or a `bash -c` wrapper.
+# `timeout 600`, VAR=value assignments, a `cd dir &&`, a path, or a `bash -c`
+# wrapper.
 _CLI_START_RE = re.compile(
-    r"\s*(?:(?:sudo|env|command|exec|nohup|time|npx)\s+(?:-\S+\s+)*"
+    r"\s*(?:(?:[/.~]\S*/)?(?:sudo|env|command|exec|nohup|time|npx)\s+(?:-\S+\s+)*"
+    r"|(?:[/.~]\S*/)?(?:timeout|nice)\s+(?:-\S+\s+)*(?:\d\S*\s+)?"
     r"|[A-Za-z_]\w*=\S*\s+"
     r"|cd\s+\S+\s*(?:&&|;)\s*"
     r"|(?:\S*/)?(?:ba|z|da|k)?sh\s+-\w*c\s+['\"]?)*"
     rf"(?:\S*/)?(?:{_CLI_NAMES})(?:\s|$)", re.IGNORECASE)
-_CLI_PREFIX_SCAN = 512          # how far in the program name may sit
-_STRINGS_MAX = 64               # argument strings looked at per call
-_ARG_DEPTH = 4
+# Where a new command can begin inside a longer string: a new line (a script,
+# a `#!` line), or after ; & | ( and a backtick.
+_SEGMENT_RE = re.compile(r"[\n;&|(`]")
+# One of the CLIs as a word anywhere: the cheap test every string gets first.
+_CLI_ANY_RE = re.compile(rf"(?<![\w-])(?:{_CLI_NAMES})(?![\w-])", re.IGNORECASE)
+# One of them at a word boundary of a shell line, path allowed
+# (`/usr/bin/env terraform`, `timeout 600 terraform`, `(terraform destroy)`).
+# The path part cannot cross a boundary character, so a search stays linear.
+_CLI_WORD_RE = re.compile(
+    rf"(?:^|(?<=[\s;&|(`'\"]))(?:[^\s;&|()`'\"]*/)?(?:{_CLI_NAMES})(?=[\s;&|)`'\"]|$)",
+    re.IGNORECASE)
+# Keys whose value is a command line by name. Their strings are judged like a
+# Bash command wherever a CLI name sits in them, exactly as the shell guard
+# would judge it. Any other key's string is judged only when a line or a
+# `;`/`&&`/`|` segment of it starts with a CLI, so prose that mentions one
+# ("never run terraform destroy" in an issue body) stays silent.
+_COMMAND_KEYS = frozenset({"command", "commands", "cmd", "script", "args", "arguments",
+                           "argv", "input", "code", "cli_command", "shell"})
+_CLI_PREFIX_SCAN = 512          # how far into a line the program name may sit
+_STRINGS_MAX = 64               # command lines judged per call
+_ARG_DEPTH = 8                  # how deep in the arguments they are judged
+_NODES_MAX = 4096               # argument values walked per call
 
 
 def _is_cli_command(s: str) -> bool:
     return _CLI_START_RE.match(s[:_CLI_PREFIX_SCAN]) is not None
+
+
+def _names_cli(s: str, key: str) -> bool:
+    """Whether a string is a command line for one of CLIS: anywhere at a word
+    boundary under a command-like key, at the start of a line or segment
+    anywhere else. Linear in the string's length."""
+    if _CLI_ANY_RE.search(s) is None:
+        return False
+    if key.lower() in _COMMAND_KEYS:
+        return _CLI_WORD_RE.search(s) is not None
+    return any(_is_cli_command(seg) for seg in _SEGMENT_RE.split(s))
+
+
+@dataclass
+class _Scan:
+    found: list[str] = field(default_factory=list)
+    unchecked: str = ""         # why a CLI command line went unjudged, "" when none did
+
+
+def scan_arguments(args: Any, *, implied: str = "") -> _Scan:
+    """command_strings, plus whether a string that names a CLI was left
+    unjudged because the call has more of them than _STRINGS_MAX, or they sit
+    deeper than _ARG_DEPTH, or the arguments are bigger than _NODES_MAX
+    values. Silence about such a call would be a way around the guard, so the
+    caller asks instead (guard.gate_mcp_call)."""
+    scan = _Scan()
+    nodes = 0
+
+    def skipped(v: Any, why: str) -> None:
+        if scan.unchecked:
+            return
+        try:
+            text = v if isinstance(v, str) else json.dumps(v, default=str)
+        except Exception:
+            text = "aws"                # unreadable: assume the worst
+        if _CLI_ANY_RE.search(text):
+            scan.unchecked = why
+
+    def walk(v: Any, key: str, depth: int) -> None:
+        nonlocal nodes
+        if scan.unchecked:
+            return
+        nodes += 1
+        if nodes > _NODES_MAX:
+            skipped(v, f"more than {_NODES_MAX} argument values")
+            return
+        if depth > _ARG_DEPTH and isinstance(v, (str, list, dict)):
+            skipped(v, f"nested more than {_ARG_DEPTH} levels deep")
+            return
+        if isinstance(v, str):
+            text = v.strip()
+            if not text:
+                return
+            if _names_cli(text, key):
+                cmd = text
+            elif implied and key in ("args", "arguments", "command", "cmd"):
+                cmd = f"{implied} {text}"
+            else:
+                return
+            if len(scan.found) >= _STRINGS_MAX:
+                scan.unchecked = f"more than {_STRINGS_MAX} command lines"
+                return
+            scan.found.append(cmd)
+        elif isinstance(v, list):
+            if v and all(isinstance(x, str) for x in v) and \
+                    _is_cli_command(" ".join(v[:2]) + " "):
+                if len(scan.found) >= _STRINGS_MAX:
+                    scan.unchecked = f"more than {_STRINGS_MAX} command lines"
+                    return
+                scan.found.append(" ".join(v))
+                return
+            for x in v:
+                walk(x, key, depth + 1)
+        elif isinstance(v, dict):
+            # Command-like keys first, so padding in other arguments cannot
+            # use up the budget before the command is reached.
+            items = sorted(v.items(), key=lambda kv: str(kv[0]).lower() not in _COMMAND_KEYS)
+            for k, x in items:
+                walk(x, str(k), depth + 1)
+
+    walk(args, "", 0)
+    return scan
 
 
 def command_strings(args: Any, *, implied: str = "") -> list[str]:
@@ -155,36 +264,7 @@ def command_strings(args: Any, *, implied: str = "") -> list[str]:
     strings, and argv lists (`["pulumi", "destroy"]`) joined. `implied` is a
     CLI the tool's own name says it runs (`call_kubectl`), prefixed onto an
     `args`/`command` string that leaves it out (`delete deployment api`)."""
-    found: list[str] = []
-    seen = 0
-
-    def walk(v: Any, key: str, depth: int) -> None:
-        nonlocal seen
-        if seen >= _STRINGS_MAX or depth > _ARG_DEPTH:
-            return
-        if isinstance(v, str):
-            seen += 1
-            text = v.strip()
-            if not text:
-                return
-            if _is_cli_command(text):
-                found.append(text)
-            elif implied and key in ("args", "arguments", "command", "cmd"):
-                found.append(f"{implied} {text}")
-        elif isinstance(v, list):
-            if v and all(isinstance(x, str) for x in v) and \
-                    _is_cli_command(" ".join(v[:2]) + " "):
-                seen += 1
-                found.append(" ".join(v))
-                return
-            for x in v:
-                walk(x, key, depth + 1)
-        elif isinstance(v, dict):
-            for k, x in v.items():
-                walk(x, str(k), depth + 1)
-
-    walk(args, "", 0)
-    return found
+    return scan_arguments(args, implied=implied).found
 
 
 def _aws_cli(args: dict[str, Any]) -> list[McpAction]:
@@ -531,10 +611,14 @@ def translate(tool_name: str, arguments: Any) -> list[McpAction]:
     split = split_tool_name(tool_name)
     if split is None:
         try:
-            return [McpAction(c) for c in
-                    command_strings(arguments, implied=_implied_cli(tool_name))]
+            scan = scan_arguments(arguments, implied=_implied_cli(tool_name))
         except Exception:
             return []
+        actions = [McpAction(c) for c in scan.found]
+        if scan.unchecked:
+            actions.append(McpAction(f"{tool_name} (arguments not all checked)",
+                                     unchecked=scan.unchecked))
+        return actions
     rule = _BY_NAME[split[1]]
     if any(k not in arguments for k in rule.requires):
         return []
@@ -549,9 +633,11 @@ def argument_text(arguments: Any, limit: int = 4000) -> str:
     (a namespace, workspace or cluster called prod counts, as a --profile prod
     does on the shell)."""
     out: list[str] = []
+    size = 0                           # a running total: summing `out` per value was quadratic
 
     def walk(v: Any) -> None:
-        if sum(len(s) for s in out) > limit:
+        nonlocal size
+        if size > limit:
             return
         if isinstance(v, dict):
             for x in v.values():
@@ -561,6 +647,7 @@ def argument_text(arguments: Any, limit: int = 4000) -> str:
                 walk(x)
         elif isinstance(v, (str, int, float)) and not isinstance(v, bool):
             out.append(str(v))
+            size += len(out[-1])
 
     walk(arguments)
     return " ".join(out)[:limit]
