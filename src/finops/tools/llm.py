@@ -364,20 +364,37 @@ async def get_llm_cost_by_model(
         ed = _date.today()
         sd = ed - timedelta(days=days)
         from ..connectors.llm_costs import get_all_llm_costs
-        result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
+        result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed,
+                                              include_provider_results=True)
+        per_provider = result.pop("provider_results", {}) or {}
 
         if provider:
-            # Filter to specific provider
-            prov_cost = result["by_provider"].get(provider, 0.0)
+            key = provider.strip().lower()
+            failed = (result.get("failed_providers") or {}).get(key)
+            if failed:
+                # Returning total_usd 0.0 here reported a read that failed as
+                # "this provider costs nothing".
+                return {"provider": key, "error": f"{key} could not be read: {failed}",
+                        "partial": True, "period": result["period"],
+                        "hint": ("Org cost needs an admin key (sk-admin-...); a regular "
+                                 "API key cannot read billing.")}
+            if key not in per_provider:
+                return {"provider": key, "error": f"{key} is not connected.",
+                        "connected": sorted(per_provider), "period": result["period"],
+                        "hint": f"Run `nable {key}` to connect it." if key in ("openai", "anthropic")
+                                else "Connect it first; see list_connected_providers."}
+            prov_models = per_provider[key].get("by_model") or {}
             return {
-                "provider":    provider,
-                "total_usd":   prov_cost,
-                "by_model":    dict(sorted(result["by_model"].items(), key=lambda kv: kv[1], reverse=True)[:50]),
+                "provider":    key,
+                "total_usd":   result["by_provider"].get(key, 0.0),
+                "by_model":    dict(sorted(prov_models.items(), key=lambda kv: kv[1], reverse=True)[:50]),
                 "period":      result["period"],
                 "recommendations": result.get("recommendations", []),
             }
+        if result.get("error") and not per_provider:
+            return {"error": result["error"], "period": result["period"]}
 
-        return {
+        out = {
             "period":          result["period"],
             "total_usd":       result["total_usd"],
             "by_provider":     result["by_provider"],
@@ -385,6 +402,11 @@ async def get_llm_cost_by_model(
             "top_spenders":    result["top_spenders"],
             "recommendations": result.get("recommendations", []),
         }
+        # A provider that failed to read is missing from total_usd; say so.
+        for k in ("partial", "failed_providers", "note", "unpriced_models"):
+            if k in result:
+                out[k] = result[k]
+        return out
     except Exception as e:
         return {"error": str(e)}
 

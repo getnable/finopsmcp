@@ -368,6 +368,7 @@ def get_all_llm_costs(
         # export, both metered. Leave them to the --spend path.
         for _cn in _CLOUD_NATIVE_LLM:
             _fetchers.pop(_cn, None)
+    not_configured: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(_fetchers)) as _pool:
         _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
         for name, fut in _futs.items():
@@ -384,7 +385,9 @@ def get_all_llm_costs(
             reason = _unread_reason(data)
             if reason is None:
                 results[name] = data
-            elif not reason.startswith("not_configured"):
+            elif reason.startswith("not_configured"):
+                not_configured.append(name)
+            else:
                 failed[name] = reason
 
     # Aggregate
@@ -461,9 +464,20 @@ def get_all_llm_costs(
             _out["error"] = "No configured AI provider could be read."
     if unpriced:
         _out["unpriced_models"] = unpriced
+    if not results and not failed:
+        # Nothing is connected. A bare total_usd 0.0 read as "you spend nothing
+        # on AI" to a model relaying it; say what is missing instead.
+        if not_configured:
+            _out["not_configured"] = sorted(not_configured)
+        _out["error"] = (
+            "No AI provider is connected, so there is no AI spend to report. "
+            "Org cost needs an admin key: OPENAI_ADMIN_KEY (sk-admin-...) or "
+            "ANTHROPIC_ADMIN_KEY; a regular API key cannot read billing. "
+            "Run `nable openai` or `nable anthropic` to connect.")
     # A failed read is often transient; caching it would hide that provider's
-    # spend for the whole TTL.
-    if not failed:
+    # spend for the whole TTL. Nothing connected is not cached either, so a
+    # provider connected a minute later shows up at once.
+    if not failed and results:
         _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
     if not include_provider_results:
         _out = dict(_out)
