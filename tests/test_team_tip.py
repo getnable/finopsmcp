@@ -13,8 +13,8 @@ def test_free_user_gets_topic_tip_once(monkeypatch):
     monkeypatch.setattr(server, "get_status", lambda: _Lic("free"))
     tip = server._maybe_team_tip("get_anomalies")
     assert tip is not None
-    assert "Slack" in tip["missing_with_team"]
-    assert f"{server._PRO_MONTHLY_USD:.0f}/mo flat" in tip["upgrade"]  # flat, never per-seat
+    assert "ticket" in tip["missing_with_team"]
+    assert f"${server._PRO_MONTHLY_USD:.0f}/mo" in tip["upgrade"]
     # same topic again (different tool, same "anomaly" topic) -> suppressed
     assert server._maybe_team_tip("get_account_anomalies") is None
 
@@ -23,13 +23,17 @@ def test_distinct_topics_each_nudge_once(monkeypatch):
     server._team_tips_shown.clear()
     monkeypatch.setattr(server, "get_status", lambda: _Lic("free"))
     assert server._maybe_team_tip("get_anomalies") is not None                    # anomaly
-    assert server._maybe_team_tip("get_rightsizing_recommendations") is not None  # rightsizing
     assert server._maybe_team_tip("get_costs_by_team") is not None                # attribution
-    assert server._maybe_team_tip("get_commitment_analysis") is not None          # commitment
+    assert server._maybe_team_tip("get_org_cost_summary") is not None             # org
+    # Topics whose feature is on the free hold sell nothing: the user has it.
+    from finops.license import _HOLD_AI_UNGATE
+    if _HOLD_AI_UNGATE:
+        assert server._maybe_team_tip("get_rightsizing_recommendations") is None  # remediation
+        assert server._maybe_team_tip("get_commitment_analysis") is None          # commitment
 
 
 def test_paying_users_get_nothing(monkeypatch):
-    for mode in ("pro", "trial", "enterprise"):
+    for mode in ("pro", "team", "trial", "enterprise"):
         server._team_tips_shown.clear()
         monkeypatch.setattr(server, "get_status", lambda m=mode: _Lic(m))
         assert server._maybe_team_tip("get_anomalies") is None

@@ -163,7 +163,8 @@ SSO via OIDC: set the issuer/client env vars and roles map from your IdP.
   `FINOPS_CLEANUP_ENABLED=true`.
 - Audit log of every tool call (duration, outcome, actor in team mode).
 - `FINOPS_AIRGAP=1` forbids all non-provider traffic; `NABLE_NO_TELEMETRY=1`
-  disables telemetry alone.
+  disables telemetry alone; `NABLE_NO_UPDATE_CHECK=1` (or
+  `FINOPS_NO_UPDATE_CHECK=1`) stops the check against PyPI for a newer version.
 - Cost figures are composed by the AI editor each engineer already uses; for
   zero model exposure use the CLI. nable adds no new
   model endpoint.

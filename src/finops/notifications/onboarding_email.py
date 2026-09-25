@@ -16,6 +16,10 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from ..license import (
+    PRO_FEATURE_COPY, checkout_url, locked_features, plan_label, plan_price, pro_pitch,
+)
+
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
@@ -230,15 +234,12 @@ def trial_ending_html(days_left: int = 3) -> str:
     content = (
         _h1(f"Your trial ends in {days_left} day{'s' if days_left != 1 else ''}.")
         + _p("After your trial, nable stays free — cost queries, anomaly detection, rightsizing, budgets, and all connectors stay on forever.")
-        + _p("The Pro plan ($25/mo) adds:")
+        + _p(f"{plan_label('pro')} adds:")
         + f'<ul style="font-size:15px;line-height:1.9;color:{_SLATE};margin:0 0 24px;padding-left:24px">'
-        f'<li>Ticket auto-creation: Jira, Linear, GitHub Issues</li>'
-        f'<li>Email and Slack reports, sent on request</li>'
-        f'<li>Commitment purchase recommendations with ROI</li>'
-        f'<li>Org-wide multi-account cost rollup</li>'
-        f'</ul>'
-        + _cta("Keep Team features — first month free", "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02")
-        + _p("After checkout, run: <span style=\"font-family:'Courier New',monospace\">finops setup license &lt;your-key&gt;</span>", muted=True)
+        + "".join(f"<li>{PRO_FEATURE_COPY[f]}</li>" for f in locked_features())
+        + '</ul>'
+        + _cta(f"Keep Pro: {plan_price('pro')}", checkout_url('pro'))
+        + _p("After checkout, run: <span style=\"font-family:'Courier New',monospace\">finops login</span>", muted=True)
     )
     return _base(content, preheader=f"Trial ends in {days_left} days. Free tier stays on forever — here's what changes.")
 
@@ -297,5 +298,5 @@ def send_trial_ending(to_email: str, days_left: int = 3) -> bool:
         to_email=to_email,
         subject=f"nable trial ends in {days_left} day{'s' if days_left != 1 else ''} — free tier stays on forever",
         html=trial_ending_html(days_left),
-        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free — cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\nPro plan ($25/mo) adds: ticket auto-creation, email reports on request, commitment recommendations, org rollup.\n\nUpgrade: https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a\n\nAfter checkout, run: finops setup license <your-key>",
+        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free: cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\n{pro_pitch()}\n\nUpgrade: {checkout_url('pro')}\n\nAfter checkout, run: finops login",
     )

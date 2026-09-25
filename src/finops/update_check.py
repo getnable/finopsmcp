@@ -10,8 +10,8 @@ the situation, so the product now notices on its own.
 Design constraints:
   - Never blocks. The check runs with a 2 second cap and swallows everything.
   - Never phones home beyond PyPI's public JSON endpoint, and respects
-    FINOPS_AIRGAP and FINOPS_NO_UPDATE_CHECK (plus NABLE_NO_TELEMETRY for the
-    users who expressed the strictest preference).
+    FINOPS_AIRGAP and NABLE_NO_UPDATE_CHECK / FINOPS_NO_UPDATE_CHECK (plus
+    NABLE_NO_TELEMETRY for the users who expressed the strictest preference).
   - Never nags: at most one check per process, and the caller decides where the
     one-line note surfaces (end of welcome, server startup log).
 """
@@ -26,7 +26,8 @@ def _disabled() -> bool:
     from .telemetry import env_flag_set
     return any(
         env_flag_set(var)
-        for var in ("FINOPS_AIRGAP", "FINOPS_NO_UPDATE_CHECK", "NABLE_NO_TELEMETRY", "DO_NOT_TRACK")
+        for var in ("FINOPS_AIRGAP", "NABLE_NO_UPDATE_CHECK", "FINOPS_NO_UPDATE_CHECK",
+                    "NABLE_NO_TELEMETRY", "DO_NOT_TRACK")
     )
 
 

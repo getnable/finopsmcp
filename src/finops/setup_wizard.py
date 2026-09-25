@@ -1840,20 +1840,20 @@ def setup_slack_bot() -> None:
     # setup, not on the first @mention. Cost queries, anomalies and one-way
     # alerts are free; the two-way @nable bot is Team-only (trial passes).
     try:
-        from .license import check_license
+        from .license import check_license, checkout_url, plan_label, plan_name
         st = check_license()
         if st.is_team:
             if getattr(st, "mode", "") == "trial" and st.days_remaining > 0:
-                _ok(f"Team trial active ({st.days_remaining} day"
-                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked.")
+                _ok(f"Trial active ({st.days_remaining} day"
+                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked "
+                    "for the trial.")
             else:
-                _ok("Pro plan active. The @nable bot is unlocked.")
+                _ok(f"{plan_name(st.mode)} plan active. The @nable bot is unlocked.")
         else:
-            _warn("The conversational @nable bot is a nable Team feature "
-                  "($1,000/mo flat, unlimited seats), with a 7-day free trial.")
+            _warn(f"The conversational @nable bot is a nable {plan_label('team')} feature.")
             print("    Cost queries, anomalies and one-way alerts are free. The two-way bot is not.")
-            print("    Start a trial or activate a key:  finops setup license")
-            print("    Plans:  https://getnable.com/#pricing")
+            print(f"    Team checkout:  {checkout_url('team')}")
+            print("    Then sign in:   finops login")
         print()
     except Exception:
         pass
@@ -1931,10 +1931,38 @@ def setup_slack_bot() -> None:
         print('    Install it before running finops-slack:  pip install "finops-mcp[slack]"')
 
 
+def _offer_test_post(where: str, send) -> bool:
+    """Offer one test message to the destination the user just entered.
+
+    Setup used to finish with "Slack configured" having sent nothing, so a
+    mistyped webhook or a bot not in the channel stayed invisible until the day
+    someone wondered where the alerts were. The post is the user's choice, to
+    the webhook or channel they just gave. `send` returns (ok, detail)."""
+    ans = _prompt(f"  Send a test message to {where} now? [Y/n]", default="y").strip().lower()
+    if ans not in ("", "y", "yes"):
+        print("  No test message was sent. Nothing has been posted yet.")
+        return False
+    try:
+        ok, detail = send()
+    except Exception as e:  # network, DNS, TLS
+        ok, detail = False, str(e)
+    if ok:
+        _ok(f"Test message posted to {where}.")
+        return True
+    _warn(f"The test message was not accepted ({detail}). Check it and run this again.")
+    return False
+
+
+def _print_delivery_note() -> None:
+    from .license import DELIVERY_NOTE
+    print(f"  {DELIVERY_NOTE}\n")
+
+
 def setup_slack() -> None:
-    _section("Slack: Cost Alerts and Daily Digest")
+    _section("Slack: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     print("  Choose method:")
-    print("  1) Incoming Webhook (simpler)")
+    print("  1) Incoming Webhook (simpler; posts to the one channel it was created for)")
     print("  2) Bot Token (richer, supports buttons)")
     print("  3) Conversational bot (two-way: questions, RCA, draft PRs and tickets)")
     choice = _prompt("  Choice", default="1")
@@ -1943,28 +1971,36 @@ def setup_slack() -> None:
     if choice == "3":
         setup_slack_bot()
         return
+    import httpx
+    text = "nable test message: this channel will get the cost alerts and reports you send from nable."
     if choice == "1":
-        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True)
+        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True).strip()
+        if not url:
+            _warn("No webhook entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_WEBHOOK_URL", url)
+
+        def _send():
+            r = httpx.post(url, json={"text": text}, timeout=10)
+            return r.status_code == 200, f"HTTP {r.status_code}"
+        posted = _offer_test_post("the Slack webhook", _send)
     else:
-        token = _prompt("  Bot Token (xoxb-...)", secret=True)
+        token = _prompt("  Bot Token (xoxb-...)", secret=True).strip()
         channel = _prompt("  Channel (e.g. #finops-alerts)", default="#finops-alerts")
+        if not token:
+            _warn("No bot token entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_BOT_TOKEN", token)
         vault.store("SLACK_CHANNEL", channel)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Slack configured")
+
+        def _send():
+            r = httpx.post("https://slack.com/api/chat.postMessage",
+                           headers={"Authorization": f"Bearer {token}"},
+                           json={"channel": channel, "text": text}, timeout=10)
+            body = r.json() if r.status_code == 200 else {}
+            return bool(body.get("ok")), body.get("error") or f"HTTP {r.status_code}"
+        posted = _offer_test_post(channel, _send)
+    _ok("Slack saved" + ("." if posted else ". No message has been sent yet."))
 
 
 def setup_n8n() -> None:
@@ -2025,25 +2061,25 @@ def setup_n8n() -> None:
 
 
 def setup_teams() -> None:
-    _section("Microsoft Teams: Cost Alerts and Daily Digest")
+    _section("Microsoft Teams: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     from .security.vault import Vault
     vault = Vault.default()
-    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
+    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True).strip()
+    if not url:
+        _warn("No webhook entered. Run 'finops setup teams' to try again.")
+        return
     vault.store("TEAMS_WEBHOOK_URL", url)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Teams configured")
+
+    def _send():
+        import asyncio
+        from .notifications.teams import send_to_webhook
+        ok = asyncio.run(send_to_webhook(
+            url, "nable test message: this channel will get the cost alerts and reports "
+                 "you send from nable."))
+        return ok, "not accepted, or not an Office webhook URL"
+    posted = _offer_test_post("the Teams webhook", _send)
+    _ok("Teams saved" + ("." if posted else ". No message has been sent yet."))
 
 
 # ── Vault management ──────────────────────────────────────────────────────────
@@ -2996,7 +3032,8 @@ def _post_connect_message(provider: str | None) -> str:
     """The 'done, here's what to do' line, tailored to the provider just connected."""
     p = (provider or "").lower()
     if p in _CONNECT_CHANNELS:
-        return f"Done. Restart Claude Desktop, alerts and digests will post to {_CONNECT_CHANNELS[p]}."
+        return (f"Done. Restart Claude Desktop, then ask it to send a report or alert to "
+                f"{_CONNECT_CHANNELS[p]}. Nothing posts on its own from this install.")
     if p == "sso":
         return "Done. Restart Claude Desktop, SSO is wired up for the team dashboard."
     q = _CONNECT_QUESTIONS.get(p, "What's driving my cloud and AI bill?")
@@ -3093,7 +3130,8 @@ def main(args: list[str] | None = None) -> None:
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
             ("editor & agents", ["claude", "guard", "agents"]),
-            ("account & billing", ["login", "logout", "license", "license-status", "credits"]),
+            ("account & billing", ["login", "logout", "license", "license-status", "whoami",
+                                   "plan", "credits", "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
         ]
 
@@ -3145,6 +3183,14 @@ def main(args: list[str] | None = None) -> None:
                 sub = self._sub_action()
                 choices = list(sub.choices.keys()) if sub else []
                 close = difflib.get_close_matches(bad, choices, n=3, cutoff=0.6)
+                # Only the near-best matches: "unistall" is 0.94 from
+                # "uninstall" and 0.67 from "mistral", and listing both made
+                # a user trying to uninstall read "did you mean: mistral".
+                if close:
+                    def _r(c):
+                        return difflib.SequenceMatcher(None, bad, c).ratio()
+                    best = _r(close[0])
+                    close = [c for c in close if _r(c) >= best - 0.1]
                 print(f"nable: unknown command '{bad}'", file=_sys.stderr)
                 if close:
                     print(f"Did you mean: {', '.join(close)}?", file=_sys.stderr)
@@ -3197,7 +3243,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("twilio",       help="Connect Twilio usage records")
     sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
     sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
-    sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
+    sub.add_parser("slack",        help="Connect Slack for alerts and reports you send on request")
     sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
     sub.add_parser("notion",       help="Configure Notion cost report publishing")
     sub.add_parser("n8n",          help="Configure n8n workflow automation webhook")
@@ -3231,7 +3277,14 @@ def main(args: list[str] | None = None) -> None:
     login_p = sub.add_parser("login",       help="Sign in by email to activate Pro (no license key to copy)")
     login_p.add_argument("email", nargs="?", default="", help="Account email (optional; prompts if omitted)")
     sub.add_parser("logout",                help="Sign out and remove the stored license from this machine")
+    un_p = sub.add_parser("uninstall",      help="Remove nable from your editors and agent hooks (--purge also deletes its data)")
+    un_p.add_argument("--purge", action="store_true",
+                      help="Also delete nable's data directories (vault, cost history, settings)")
+    un_p.add_argument("--yes", "-y", action="store_true", help="Do not ask; for scripts")
+    un_p.add_argument("--dry-run", action="store_true", help="Show what would change, change nothing")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
+    sub.add_parser("whoami",                help="Same as license-status: your plan, email and expiry")
+    sub.add_parser("plan",                  help="Same as license-status: your plan, email and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
@@ -3542,7 +3595,11 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "logout":
         _run_logout()
         return
-    elif parsed.cmd == "license-status":
+    elif parsed.cmd == "uninstall":
+        raise SystemExit(_run_uninstall(getattr(parsed, "purge", False),
+                                        getattr(parsed, "yes", False),
+                                        getattr(parsed, "dry_run", False)))
+    elif parsed.cmd in ("license-status", "whoami", "plan"):
         _run_license_status()
         return
     elif parsed.cmd == "serve":
@@ -3679,20 +3736,7 @@ def main(args: list[str] | None = None) -> None:
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    from .welcome import _cli
-    print("\n  " + _post_connect_message(parsed.cmd))
-    print()
-    import importlib.util as _ilu
-    if _ilu.find_spec("finops.server_web") is not None:
-        # The dashboard ships with hosted nable only; an open install that
-        # followed this hint got "the dashboard has been removed".
-        print("  Want a visual dashboard?")
-        print(f"    {_cli('serve')}")
-        print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
-        print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
-        print()
-    print(f"  To add more providers: {_cli('setup')}")
-    print("  Full docs: https://getnable.com/docs\n")
+    _print_setup_footer(parsed.cmd)
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -3703,6 +3747,29 @@ def main(args: list[str] | None = None) -> None:
         })
     except Exception:
         pass
+
+
+def _dashboard_installed() -> bool:
+    """The web dashboard left the open package; only offer `serve` where it exists."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("finops.server_web") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _print_setup_footer(cmd: "str | None") -> None:
+    from .welcome import _cli
+    print("\n  " + _post_connect_message(cmd))
+    print()
+    if _dashboard_installed():
+        print("  Want a visual dashboard?")
+        print(f"    {_cli('serve')}")
+        print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
+        print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
+        print()
+    print(f"  To add more providers: {_cli('setup')}")
+    print("  Full docs: https://getnable.com/docs\n")
 
 
 # ── Post-setup email capture ──────────────────────────────────────────────────
@@ -3759,8 +3826,11 @@ def _offer_email_signup() -> None:
         sentinel.write_text(f"{email}\n")
     except Exception:
         # Don't block setup if the request fails, but don't write the sentinel
-        # so the user is re-prompted next time (their email was never recorded)
-        _ok("Got it. We'll follow up soon.")
+        # so the user is re-prompted next time (their email was never recorded).
+        # This used to print "Got it. We'll follow up soon.", for an email
+        # nobody received.
+        _warn("Could not reach getnable.com, so your email was not sent. "
+              "You will be asked again next time.")
 
     print()
 
@@ -3773,14 +3843,18 @@ def _run_license_setup(key: str = "") -> None:
     Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
     """
-    from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
+    from .license import (
+        PRO_FEATURE_COPY, TEAM_FEATURE_COPY, _UPGRADE_URL, checkout_url,
+        locked_features, plan_label, plan_name, validate_key,
+    )
     from .security.vault import Vault
 
-    print("\n  nable Pro license activation\n")
+    print("\n  nable license activation\n")
 
     # If key not passed as arg, prompt
     if not key:
-        print(f"  Subscribe at: {_CHECKOUT_URL}")
+        print(f"  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  After checkout your license key is shown on the confirmation page")
         print("  and emailed to you. It starts with FINOPS-2-\n")
         key = _prompt("  Paste your license key").strip()
@@ -3794,32 +3868,34 @@ def _run_license_setup(key: str = "") -> None:
 
     if status.mode == "invalid":
         _err(f"Invalid key: {status.message}")
-        print(f"\n  Subscribe at: {_CHECKOUT_URL}\n")
-        return
+        print(f"\n  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}\n")
+        # Non-zero, so a script activating a key can tell it did not take.
+        raise SystemExit(1)
 
-    if status.mode not in ("pro", "trial"):
-        _warn(f"Key validated but returned unexpected plan: {status.mode}")
-
-    # Store in vault AND write to env file for Claude Desktop
+    # The vault is the one copy; the server reads it there. An older key an
+    # earlier release copied into an editor config would outrank it, so clear it.
     vault = Vault.default()
     vault.store("FINOPS_LICENSE_KEY", key)
+    _strip_license_from_editor_configs()
 
-    # Also try to write directly into the Claude Desktop config
-    _inject_license_into_claude_config(key)
-
-    print(f"\n  ✓  Pro plan active, {status.email or 'license validated'}")
+    name = plan_name(status.mode)
+    print(f"\n  ✓  {name} plan active, {status.email or 'license validated'}")
     print("  ✓  Key stored in vault.")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
     if status.issued:
         print(f"  ✓  Issued: {status.issued}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print()
-    print("  Restart Claude Desktop to activate Team features:")
-    print("    • Ticket auto-creation (Jira, Linear, GitHub Issues)")
-    print("    • Email reports and digests, sent on request")
-    print("    • Commitment purchase recommendations")
-    print("    • Org-wide multi-account rollup")
-    print("    • Business metrics and unit economics")
-    print()
+    unlocked = [PRO_FEATURE_COPY[f] for f in locked_features()]
+    if status.is_team:
+        unlocked += list(TEAM_FEATURE_COPY.values())
+    if unlocked:
+        print(f"  Restart Claude Desktop to turn on {name}:")
+        for item in unlocked:
+            print(f"    • {item}")
+        print()
 
     try:
         from . import telemetry as _tel
@@ -3837,33 +3913,43 @@ def _run_license_status() -> None:
     Called by: finops setup license-status
                finops license-status
     """
-    from .license import check_license, _UPGRADE_URL
+    from .license import (
+        _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
+        trial_last_day, trial_line,
+    )
 
     status = check_license()
 
     print("\n  nable license status\n")
 
-    mode_display = {
-        "pro":     "\033[32mTeam (Pro)\033[0m",
-        "trial":   "\033[33mTrial\033[0m",
-        "free":    "\033[90mFree\033[0m",
-        "invalid": "\033[31mInvalid\033[0m",
-    }.get(status.mode, status.mode)
+    color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
+             "free": "90", "invalid": "31"}.get(status.mode)
+    label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
+    mode_display = f"\033[{color}m{label}\033[0m" if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
         print(f"  Email:   {status.email}")
-    if status.issued:
+    if status.issued and status.mode not in ("trial", "free"):
         print(f"  Issued:  {status.issued}")
-    if status.days_remaining >= 0:
-        print(f"  Trial:   {status.days_remaining} day(s) remaining")
-    print(f"  Message: {status.message}")
+    if status.expires:
+        print(f"  Expires: {status.expires}")
+    if status.mode == "trial":
+        last = trial_last_day(status)
+        n = status.days_remaining
+        through = f", through {fmt_day(last)}" if last else ""
+        print(f"  Trial:   {n} day{'s' if n != 1 else ''} left of {_TRIAL_DAYS}{through}. "
+              "All Pro features unlocked.")
+    else:
+        line = trial_line(status)
+        if line:
+            print(f"  Trial:   {line}")
+        print(f"  Message: {status.message}")
 
-    if status.mode == "free":
-        print(f"\n  Upgrade at: {_UPGRADE_URL}")
-        print("  Then run:   finops setup license FINOPS-2-...\n")
-    elif status.mode == "trial":
-        print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
+    if status.mode in ("free", "trial", "invalid"):
+        print(f"\n  {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
+        print("  Then run:   finops login\n")
     else:
         print()
 
@@ -3948,7 +4034,9 @@ def _run_login(email: str = "") -> None:
 
     if not key or plan == "free":
         _warn(f"No active subscription found for {email}.")
-        print(f"\n  Get Pro at: {_UPGRADE_URL}")
+        from .license import checkout_url, plan_label
+        print(f"\n  Get {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  Subscribed with a different email? Run 'finops login' with that one.\n")
         return
 
@@ -3956,13 +4044,16 @@ def _run_login(email: str = "") -> None:
     if status.mode == "invalid":
         _err(f"The license we received did not validate: {status.message}")
         return
-    _inject_license_into_claude_config(key)
+    _strip_license_from_editor_configs()
 
+    from .license import plan_label, plan_name
     print(f"\n  ✓  Signed in as {status.email or email}")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print("  ✓  License stored on this machine. Nothing to copy or remember.")
     print()
-    print("  Restart Claude Desktop (or your MCP client) to pick up Pro.")
+    print(f"  Restart Claude Desktop (or your MCP client) to pick up {plan_name(status.mode)}.")
     print()
 
     try:
@@ -3973,54 +4064,304 @@ def _run_login(email: str = "") -> None:
 
 
 def _run_logout() -> None:
-    """Remove the stored license from this machine. Called by: finops logout"""
+    """Remove the stored license from this machine: the vault copy, and any copy
+    an earlier release wrote into an editor's MCP config. Called by: finops logout"""
     from .license import clear_license
     clear_license()
-    print("\n  ✓  Signed out. Pro features are off on this machine.")
+    cleaned = _strip_license_from_editor_configs()
+    print("\n  ✓  Signed out. The license is removed from this machine's vault.")
+    for client, path in cleaned:
+        print(f"  ✓  Removed the license key from {client}: {path}")
+    if cleaned:
+        print("  Restart those editors so their nable server drops the key.")
+    if os.environ.get("FINOPS_LICENSE_KEY", "").strip():
+        _warn("FINOPS_LICENSE_KEY is still set in this shell's environment, and it "
+              "outranks the vault. Unset it (and remove it from your shell profile) "
+              "to finish signing out.")
     print("  Sign back in any time with: finops login\n")
 
 
-def _inject_license_into_claude_config(key: str) -> None:
-    """
-    Try to write FINOPS_LICENSE_KEY directly into claude_desktop_config.json
-    so the user doesn't have to manually edit it.
-    """
+# ── Editor configs nable writes ───────────────────────────────────────────────
+# The license key lives in the local vault and the server reads it from there.
+# It used to be copied in plaintext into claude_desktop_config.json as
+# env.FINOPS_LICENSE_KEY, where an env key outranks the vault, so `nable
+# logout` left Claude Desktop on Pro and the key sat in a file people paste into
+# bug reports. Nothing writes it into an editor config any more, and logout and
+# uninstall clean up every copy an earlier release wrote.
+
+def _claude_desktop_config_paths() -> "list[Path]":
+    appdata = os.environ.get("APPDATA", "")
+    paths = [
+        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "claude-desktop" / "claude_desktop_config.json",
+    ]
+    if appdata:
+        paths.insert(1, Path(appdata) / "Claude" / "claude_desktop_config.json")
+    seen: list = []
+    for p in paths:
+        if p not in seen:
+            seen.append(p)
+    return seen
+
+
+def _editor_config_paths() -> "list[tuple[str, Path]]":
+    """Every MCP config nable writes or tells the user to write: Claude Desktop,
+    Cursor, and Claude Code's user config (`claude mcp add -s user`)."""
+    out = [("Claude Desktop", p) for p in _claude_desktop_config_paths()]
+    out.append(("Cursor", Path.home() / ".cursor" / "mcp.json"))
+    out.append(("Claude Code", Path.home() / ".claude.json"))
+    return out
+
+
+def _is_nable_server(name: str, entry: object) -> bool:
+    n = (name or "").lower()
+    if n in ("nable", "finops") or "finops" in n or n.startswith("nable"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _server_maps(doc: dict) -> "list[dict]":
+    """The mcpServers maps in a config: the top level, plus Claude Code's
+    per-project ones in ~/.claude.json."""
+    maps = []
+    top = doc.get("mcpServers")
+    if isinstance(top, dict):
+        maps.append(top)
+    projects = doc.get("projects")
+    if isinstance(projects, dict):
+        for proj in projects.values():
+            if isinstance(proj, dict) and isinstance(proj.get("mcpServers"), dict):
+                maps.append(proj["mcpServers"])
+    return maps
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Replace a config in one step: a crash leaves the old file, never half a
+    new one. Keeps the file's mode and writes through a symlink, not over it."""
     import json
-    import platform
-
-    if platform.system() == "Darwin":
-        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-    elif platform.system() == "Windows":
-        config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-    else:
-        config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
-
+    import stat
+    import tempfile
+    target = path.resolve() if path.is_symlink() else path
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        if not config_path.exists():
-            return
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
-        config = json.loads(config_path.read_text())
-        servers = config.get("mcpServers", {})
 
-        updated = False
-        for server_name, server_cfg in servers.items():
-            if "finops" in server_name.lower() or "nable" in server_name.lower():
-                env = server_cfg.setdefault("env", {})
-                env["FINOPS_LICENSE_KEY"] = key
-                updated = True
+def _edit_editor_configs(edit) -> "list[tuple[str, Path]]":
+    """Apply edit(servers_map) -> bool to every nable-written config that exists
+    and parses. Writes only a file that changed; leaves an unparseable one as it
+    is. Returns (client, path) for each file changed."""
+    import json
+    changed = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        hit = False
+        for servers in _server_maps(doc):
+            hit = bool(edit(servers)) or hit
+        if hit:
+            try:
+                _atomic_write_json(path, doc)
+                changed.append((client, path))
+            except OSError as e:
+                _warn(f"Could not update {path}: {e.strerror or e}")
+    return changed
 
-        if updated:
-            config_path.write_text(json.dumps(config, indent=2))
-            config_path.chmod(0o600)
-            print("  ✓  Written to Claude Desktop config automatically.")
+
+def _strip_license_from_editor_configs() -> "list[tuple[str, Path]]":
+    """Remove FINOPS_LICENSE_KEY from nable's entries in the editor configs."""
+    def _edit(servers: dict) -> bool:
+        hit = False
+        for name, entry in servers.items():
+            if not (_is_nable_server(name, entry) and isinstance(entry, dict)):
+                continue
+            env = entry.get("env")
+            if isinstance(env, dict) and "FINOPS_LICENSE_KEY" in env:
+                del env["FINOPS_LICENSE_KEY"]
+                if not env:
+                    entry.pop("env", None)
+                hit = True
+        return hit
+    return _edit_editor_configs(_edit)
+
+
+def _is_nable_entry(name: str, entry: object) -> bool:
+    """Strict match for removal: the names nable registers under, or an entry
+    that launches the finops-mcp package. Never a lookalike name alone."""
+    if (name or "").lower() in ("nable", "finops"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _nable_entries_in_editor_configs() -> "list[tuple[str, Path, str]]":
+    """(client, path, server name) for every nable MCP entry nable wrote. Read-only."""
+    import json
+    found = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for servers in _server_maps(doc):
+            for name, entry in servers.items():
+                if _is_nable_entry(name, entry):
+                    found.append((client, path, name))
+    return found
+
+
+def _state_dirs() -> "list[Path]":
+    """The directories nable keeps state in: the vault and database, the trial
+    clock and install id, CLI sentinels, and the nable data dir."""
+    home = Path.home()
+    dirs = [home / ".finops", home / ".finops-mcp", home / ".config" / "finops", home / ".nable"]
+    data = os.environ.get("FINOPS_DATA_DIR", "").strip()
+    if data:
+        p = Path(data).expanduser()
+        if p not in dirs:
+            dirs.append(p)
+    return dirs
+
+
+def _dir_size(p: Path) -> int:
+    total = 0
+    try:
+        for f in p.rglob("*"):
+            try:
+                if f.is_file() and not f.is_symlink():
+                    total += f.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+def _run_uninstall(purge: bool = False, yes: bool = False, dry_run: bool = False,
+                   prompt=None) -> int:
+    """`nable uninstall`: take nable out of every editor config and agent hook
+    it wrote, then list (or with --purge delete) the directories it keeps.
+
+    Default: shows what it will change and asks. --yes skips the questions.
+    --dry-run only shows. The package itself is removed with whatever installed
+    it; this is the part a package manager cannot see."""
+    import shutil
+    from . import guard_adapters as ga
+
+    ask = prompt or _prompt
+
+    def _confirm(q: str) -> bool:
+        if yes:
+            return True
+        try:
+            return ask(f"  {q} [y/N]", default="n").strip().lower() in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            return False
+
+    print("\n  nable uninstall" + ("  (dry run: nothing is changed)" if dry_run else "") + "\n")
+
+    entries = _nable_entries_in_editor_configs()
+    hooks = []
+    for h in ga.HARNESSES:
+        for is_global in (True, False):
+            if ga.state(h, is_global) != "absent":
+                hooks.append((h, is_global, ga.hooks_path(h, is_global)))
+
+    if entries:
+        print("  MCP server entries:")
+        for client, path, name in entries:
+            print(f"    - {client}: \"{name}\" in {path}")
+    else:
+        print("  MCP server entries: none found")
+    if hooks:
+        print("  Guard hooks:")
+        for h, is_global, path in hooks:
+            print(f"    - {ga.LABELS[h]} ({'global' if is_global else 'this project'}): {path}")
+    else:
+        print("  Guard hooks: none found (global, and this project)")
+    print()
+
+    failed = 0
+    if (entries or hooks) and not dry_run and _confirm("Remove these?"):
+        changed = _edit_editor_configs(
+            lambda servers: [servers.pop(n) for n in
+                             [n for n, e in list(servers.items()) if _is_nable_entry(n, e)]])
+        for client, path in changed:
+            _ok(f"Removed nable from {client}: {path}")
+        for h, is_global, path in hooks:
+            try:
+                removed, _ = ga.uninstall(h, is_global)
+                if removed:
+                    _ok(f"Removed the guard hook from {path}")
+            except SystemExit as e:      # a refusal: the file was left as found
+                failed += 1
+                _warn(f"{path}: {str(e.code).strip()}")
+            except OSError as e:
+                failed += 1
+                _warn(f"Could not write {path}: {e.strerror or e}")
+        if changed:
+            print("  Restart those editors so they stop launching nable.")
+    elif (entries or hooks) and not dry_run:
+        print("  Kept: nothing was removed.")
+    print("  Guard hooks in other projects: run `nable guard uninstall --all` inside each.\n")
+
+    present = [d for d in _state_dirs() if d.exists()]
+    if present:
+        print("  nable's data on this machine (vault, cost history, trial clock, settings):")
+        for d in present:
+            print(f"    - {d}  ({_dir_size(d) / 1024:,.0f} KB)")
+        if not purge:
+            print("  Kept. Delete them with:  nable uninstall --purge")
+        elif dry_run:
+            print("  --purge would delete them.")
+        elif _confirm("Delete these directories? This removes your stored credentials "
+                      "and local cost history and cannot be undone."):
+            for d in present:
+                try:
+                    shutil.rmtree(d)
+                    _ok(f"Deleted {d}")
+                except OSError as e:
+                    failed += 1
+                    _warn(f"Could not delete {d}: {e.strerror or e}")
         else:
-            print("  →  Add to your Claude Desktop config manually:")
-            print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-            _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
-    except Exception:
-        print("  →  Add to your Claude Desktop config manually:")
-        print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-        _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
+            print("  Kept: the directories were not deleted.")
+    else:
+        print("  No nable data directories found.")
+    print("  The OS keychain may also hold nable items (\"nable-trial\", the vault key);")
+    print("  remove them in your keychain app if you want them gone.")
+
+    print("\n  Last, remove the package with whatever installed it:")
+    print("    uv tool uninstall finops-mcp   |   pipx uninstall finops-mcp   |   pip uninstall finops-mcp\n")
+    return 1 if failed else 0
 
 
 def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
@@ -4282,6 +4623,38 @@ def _upgrade_running_cli(current: str, target: str) -> bool:
     return True
 
 
+# The longest `nable upgrade` waits on PyPI. httpx's timeout is per phase, so on
+# a blackholed network a 10 s timeout sat ~10 s before saying anything.
+_PYPI_WAIT_S = 4.0
+
+
+def _latest_pypi_version() -> "str | None":
+    """Latest finops-mcp on PyPI, or None when PyPI does not answer within
+    _PYPI_WAIT_S. The request runs on a daemon thread so the wait is a hard cap."""
+    import threading
+    box: dict = {}
+
+    def _get():
+        try:
+            import httpx
+            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=_PYPI_WAIT_S)
+            r.raise_for_status()
+            box["v"] = r.json()["info"]["version"]
+        except Exception as e:
+            box["e"] = e
+    t = threading.Thread(target=_get, daemon=True)
+    t.start()
+    t.join(_PYPI_WAIT_S)
+    return box.get("v")
+
+
+def _version_tuple(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in v.strip().split("."))
+    except (ValueError, AttributeError):
+        return ()
+
+
 def _run_upgrade(target: str = "") -> None:
     """Upgrade nable, deliberately, in two places.
 
@@ -4298,19 +4671,26 @@ def _run_upgrade(target: str = "") -> None:
     _section("Upgrade nable")
     current = _installed_version() or "unknown"
 
+    explicit = bool(target)
     if not target:
-        try:
-            import httpx
-            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=10)
-            r.raise_for_status()
-            target = r.json()["info"]["version"]
-        except Exception as e:
-            _err(f"Could not reach PyPI to find the latest version ({e}).")
-            print("  Pass one explicitly:  finops upgrade 0.8.57")
+        target = _latest_pypi_version() or ""
+        if not target:
+            _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
+            print(f"  You are on {current}. When you are online, run this again, or pass a")
+            print("  version newer than that explicitly:  finops upgrade <version>")
             return
 
     print(f"  Installed: {current}")
-    print(f"  Latest:    {target}\n")
+    print(f"  {'Target' if explicit else 'Latest'}:    {target}\n")
+
+    cur_t, tgt_t = _version_tuple(current), _version_tuple(target)
+    if not explicit and cur_t and tgt_t and tgt_t < cur_t:
+        # A source or pre-release install can be ahead of PyPI. "Upgrading" to
+        # latest would be a downgrade, and this command never does one unasked.
+        _ok(f"You are on {current}, newer than PyPI's latest ({target}). Nothing to do.")
+        return
+    if explicit and cur_t and tgt_t and tgt_t < cur_t:
+        _warn(f"{target} is older than the installed {current}: this is a downgrade, as asked.")
 
     # 1. The CLI you are typing right now.
     _upgrade_running_cli(current, target)
@@ -4388,13 +4768,7 @@ def _build_mcp_server_entry() -> "tuple[dict, str]":
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin
-    try:
-        from .security.vault import Vault
-        _val = Vault.default().get("FINOPS_LICENSE_KEY")
-        if _val:
-            mcp_entry["env"] = {"FINOPS_LICENSE_KEY": _val}
-    except Exception:
-        pass
+    # No license key in the entry: the server reads it from the vault.
     return mcp_entry, display_cmd
 
 
@@ -4416,6 +4790,11 @@ def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
     entry = dict(mcp_entry)
     if isinstance(existing, dict) and existing.get("env"):
         entry["env"] = {**existing["env"], **entry.get("env", {})}
+    if isinstance(entry.get("env"), dict):
+        # A key an earlier release wrote here would outrank the vault.
+        entry["env"].pop("FINOPS_LICENSE_KEY", None)
+        if not entry["env"]:
+            entry.pop("env")
     servers.pop("finops", None)
     servers["nable"] = entry
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4599,23 +4978,14 @@ def _configure_claude_desktop_inner() -> bool:
 
     config.setdefault("mcpServers", {})
 
-    # Pull non-secret config from the vault into the env block.
-    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are intentionally excluded:
-    # the MCP server loads them from the vault at startup via load_vault_to_env(),
-    # so they never need to appear in plaintext in claude_desktop_config.json.
-    vault_env: dict[str, str] = {}
-    try:
-        from .security.vault import Vault
-        _v = Vault.default()
-        for _k in ("FINOPS_LICENSE_KEY",):
-            _val = _v.get(_k)
-            if _val:
-                vault_env[_k] = _val
-    except Exception:
-        pass
-
-    if vault_env:
-        mcp_entry["env"] = {**vault_env, **mcp_entry.get("env", {})}
+    # Nothing secret goes into the env block. The MCP server loads credentials
+    # and the license key from the vault at startup (load_vault_to_env and
+    # license.check_license), so none of them needs to sit in plaintext in
+    # claude_desktop_config.json. A license key there outranked the vault and
+    # survived `nable logout`, so an entry still carrying one is rewritten.
+    stale_key = "FINOPS_LICENSE_KEY" in ((config["mcpServers"].get("nable")
+                                          or config["mcpServers"].get("finops") or {})
+                                         .get("env") or {})
 
     # Standardize on "nable" (the product name). Read either key so we can
     # migrate a legacy "finops" entry without leaving both registered.
@@ -4626,7 +4996,7 @@ def _configure_claude_desktop_inner() -> bool:
     # Only short-circuit when the entry is ALREADY under the new "nable" key. If it
     # exists only under the legacy "finops" key, fall through to the migration below
     # (pop "finops", register "nable") even when the command is otherwise identical.
-    if existing_base == new_base and not vault_env and "nable" in config["mcpServers"]:
+    if existing_base == new_base and not stale_key and "nable" in config["mcpServers"]:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return True
 
@@ -4638,8 +5008,8 @@ def _configure_claude_desktop_inner() -> bool:
     _notes = []
     if uvx_bin:
         _notes.append("uvx mode: works on corporate machines without PATH changes")
-    if vault_env:
-        _notes.append(f"including {len(vault_env)} credential(s) from vault")
+    if stale_key:
+        _notes.append("removes a license key an earlier release wrote here (the vault holds it)")
     if existing:
         _notes.append("updates existing entry")
     for _note in _notes:
@@ -4658,9 +5028,11 @@ def _configure_claude_desktop_inner() -> bool:
         _print_manual_config(mcp_entry)
         return False
 
-    # Preserve any env keys already in the existing entry that we're not overwriting
+    # Preserve any env keys already in the existing entry that we're not
+    # overwriting, except a license key an earlier release wrote there.
     if existing.get("env"):
-        merged_env = {**existing["env"], **mcp_entry.get("env", {})}
+        merged_env = {k: v for k, v in {**existing["env"], **mcp_entry.get("env", {})}.items()
+                      if k != "FINOPS_LICENSE_KEY"}
         if merged_env:
             mcp_entry["env"] = merged_env
 

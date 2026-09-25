@@ -24,6 +24,12 @@ def _esc(v: object) -> str:
     return html.escape(str(v))
 
 
+def _subject(total_spend: float, period_label: str, has_data: bool = True) -> str:
+    if not has_data:
+        return f"FinOps Weekly: no cost data yet for {period_label}"
+    return f"FinOps Weekly: ${total_spend:,.0f} tracked spend, {period_label}"
+
+
 def _build_html(
     period_label: str,
     total_spend: float,
@@ -31,10 +37,20 @@ def _build_html(
     top_providers: list[dict],
     anomalies: list[dict],
     recommendations: list[dict],
+    has_data: bool = True,
 ) -> str:
-    pct_change = ((total_spend - prev_total) / prev_total * 100) if prev_total else 0
-    change_color = "#dc2626" if pct_change > 5 else "#16a34a" if pct_change < -5 else "#64748b"
-    change_label = f"+{pct_change:.1f}%" if pct_change >= 0 else f"{pct_change:.1f}%"
+    if prev_total:
+        pct_change = (total_spend - prev_total) / prev_total * 100
+        change_color = "#dc2626" if pct_change > 5 else "#16a34a" if pct_change < -5 else "#64748b"
+        change_label = (f"+{pct_change:.1f}%" if pct_change >= 0 else f"{pct_change:.1f}%") + " vs prior week"
+    else:
+        change_color = "#64748b"
+        change_label = "no prior week to compare"
+    # With nothing read, "$0 tracked spend" and "No anomalies detected" were
+    # findings about data nobody fetched.
+    total_label = f"${total_spend:,.0f}" if has_data else "No cost data yet"
+    no_anomalies = ("No anomalies detected this week." if has_data
+                    else "Not checked: no cost data yet.")
 
     provider_rows = "".join(
         f"<tr><td style='padding:8px 12px;border-bottom:1px solid #f1f5f9'>{_esc(p['provider'].upper())}</td>"
@@ -51,7 +67,7 @@ def _build_html(
         f"{'↑' if a['direction']=='spike' else '↓'} {abs(a['pct_change']):.0f}% "
         f"vs baseline (${a['current_amount']:,.0f})</li>"
         for a in anomalies[:5]
-    ) or "<li style='color:#64748b'>No anomalies detected this week.</li>"
+    ) or f"<li style='color:#64748b'>{no_anomalies}</li>"
 
     rec_items = "".join(
         f"<li style='margin-bottom:8px'>"
@@ -80,8 +96,8 @@ def _build_html(
   <!-- Total spend -->
   <div style="padding:32px;border-bottom:1px solid #f1f5f9">
     <p style="color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 8px">Total tracked spend</p>
-    <p style="font-size:40px;font-weight:800;color:#0f172a;margin:0">${total_spend:,.0f}</p>
-    <p style="font-size:14px;color:{change_color};font-weight:600;margin:4px 0 0">{change_label} vs prior week</p>
+    <p style="font-size:40px;font-weight:800;color:#0f172a;margin:0">{total_label}</p>
+    <p style="font-size:14px;color:{change_color};font-weight:600;margin:4px 0 0">{change_label if has_data else "Take a cost snapshot and the next digest has numbers."}</p>
   </div>
 
   <!-- Provider breakdown -->
@@ -129,6 +145,21 @@ def _build_html(
 </html>"""
 
 
+#: What the weekly digest needs before it can send, in the order a user sets them.
+DIGEST_VARS = ("FINOPS_SMTP_HOST", "FINOPS_SMTP_USER", "FINOPS_SMTP_PASSWORD", "FINOPS_DIGEST_TO")
+
+
+def missing_smtp_vars() -> list[str]:
+    """The SMTP variables a report email needs that are unset (the recipient
+    comes from the subscription, so FINOPS_DIGEST_TO is not one of them)."""
+    return [v for v in DIGEST_VARS if v != "FINOPS_DIGEST_TO" and not _env(v)]
+
+
+def missing_digest_vars() -> list[str]:
+    """The DIGEST_VARS that are unset. Empty means the digest can try to send."""
+    return [v for v in DIGEST_VARS if not _env(v)]
+
+
 def send_weekly_digest(
     total_spend: float,
     prev_total: float,
@@ -136,36 +167,58 @@ def send_weekly_digest(
     anomalies: list[dict],
     recommendations: list[dict],
     period_label: str | None = None,
+    has_data: bool = True,
 ) -> bool:
-    """
-    Send the weekly digest via SMTP. Returns True on success.
+    """Send the weekly digest via SMTP. Returns True on success. Callers that
+    report to a user want send_weekly_digest_result, which says why not."""
+    return bool(send_weekly_digest_result(
+        total_spend, prev_total, top_providers, anomalies, recommendations, period_label,
+        has_data=has_data,
+    )["sent"])
 
-    Required env vars (set via `finops setup email`):
-      FINOPS_SMTP_HOST, FINOPS_SMTP_PORT, FINOPS_SMTP_USER,
-      FINOPS_SMTP_PASSWORD, FINOPS_DIGEST_TO
+
+def send_weekly_digest_result(
+    total_spend: float,
+    prev_total: float,
+    top_providers: list[dict],
+    anomalies: list[dict],
+    recommendations: list[dict],
+    period_label: str | None = None,
+    has_data: bool = True,
+) -> dict:
     """
+    Send the weekly digest via SMTP and say what happened:
+    {"sent": bool, "recipient": str, "missing": [env vars], "error": str}.
+
+    Required env vars: FINOPS_SMTP_HOST, FINOPS_SMTP_USER, FINOPS_SMTP_PASSWORD,
+    FINOPS_DIGEST_TO (FINOPS_SMTP_PORT and FINOPS_SMTP_FROM are optional).
+    """
+    missing = missing_digest_vars()
+    if missing:
+        return {"sent": False, "recipient": _env("FINOPS_DIGEST_TO"), "missing": missing,
+                "error": "Email is not configured: set " + ", ".join(missing) + "."}
+
     host = _env("FINOPS_SMTP_HOST")
-    if not host:
-        return False
-
-    port = int(_env("FINOPS_SMTP_PORT", "587"))
+    try:
+        port = int(_env("FINOPS_SMTP_PORT", "587"))
+    except ValueError:
+        return {"sent": False, "recipient": _env("FINOPS_DIGEST_TO"), "missing": [],
+                "error": "FINOPS_SMTP_PORT is not a number."}
     user = _env("FINOPS_SMTP_USER")
     password = _env("FINOPS_SMTP_PASSWORD")
     to_addr = _env("FINOPS_DIGEST_TO")
     from_addr = _env("FINOPS_SMTP_FROM", user)
-
-    if not all([host, user, password, to_addr]):
-        return False
 
     if period_label is None:
         end = date.today()
         start = end - timedelta(days=6)
         period_label = f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
 
-    html = _build_html(period_label, total_spend, prev_total, top_providers, anomalies, recommendations)
+    html = _build_html(period_label, total_spend, prev_total, top_providers, anomalies,
+                       recommendations, has_data=has_data)
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"FinOps Weekly: ${total_spend:,.0f} tracked spend — {period_label}"
+    msg["Subject"] = _subject(total_spend, period_label, has_data)
     msg["From"] = from_addr
     msg["To"] = to_addr
     msg.attach(MIMEText(html, "html"))
@@ -177,11 +230,13 @@ def send_weekly_digest(
             server.starttls(context=ctx)
             server.login(user, password)
             server.sendmail(from_addr, to_addr, msg.as_string())
-        return True
+        return {"sent": True, "recipient": to_addr, "missing": [], "error": ""}
     except Exception as e:
         import logging
         logging.getLogger(__name__).error("Email digest failed: %s", e)
-        return False
+        return {"sent": False, "recipient": to_addr, "missing": [],
+                "error": f"The SMTP server at {host}:{port} did not take the message: "
+                         f"{type(e).__name__}: {e}"}
 
 
 def send_custom_digest(

@@ -513,6 +513,15 @@ def list_org_accounts() -> dict:
         return {"error": str(e)}
 
 
+def _aws_credentials_present() -> bool:
+    """True when the AWS credential chain resolves to something."""
+    try:
+        import boto3
+        return boto3.Session().get_credentials() is not None
+    except Exception:
+        return False
+
+
 @_srv.mcp.tool()
 def get_org_cost_summary(days_back: int = 30) -> dict:
     """
@@ -531,9 +540,22 @@ def get_org_cost_summary(days_back: int = 30) -> dict:
     """
     if err := _srv.require_pro("org_reports"):
         return err
+    if not _aws_credentials_present():
+        # "No accounts found in organization" read as an empty org, not as
+        # nothing connected to read one from.
+        return {"error": "aws_not_connected",
+                "message": ("AWS is not connected, so there is no organization to read. "
+                            "Call connect_aws right here in the chat, or run 'uvx nable' "
+                            "in a terminal.")}
     try:
         from ..connectors.aws_org import org_cost_summary
         result = org_cost_summary(days_back=days_back)
+        if isinstance(result, dict) and result.get("error") == "No accounts found in organization":
+            return {"error": "no_org_accounts",
+                    "message": ("AWS is connected, but these credentials could not list any "
+                                "AWS Organizations accounts. An org rollup needs the "
+                                "management account (organizations:ListAccounts and Cost "
+                                "Explorer there). This is not a finding of zero spend.")}
         accounts = result.get("accounts") if isinstance(result, dict) else None
         if accounts:
             # accounts is pre-sorted by total_usd desc; cap detail, keep aggregates.

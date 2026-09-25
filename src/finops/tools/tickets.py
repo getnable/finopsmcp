@@ -9,6 +9,24 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _no_tracker() -> dict | None:
+    """A result that says no tracker is configured, or None when one is.
+    "tickets_created: 0" with no tracker read as "nothing needed a ticket"."""
+    from ..integrations.ticketing import list_configured_providers
+    if list_configured_providers():
+        return None
+    return {
+        "tickets_created": 0,
+        "error": "no_ticket_tracker",
+        "message": (
+            "No ticket tracker is configured, so no tickets were created. Set one of: "
+            "Jira (JIRA_BASE_URL, JIRA_API_TOKEN, JIRA_USER_EMAIL, JIRA_PROJECT_KEY), "
+            "Linear (LINEAR_API_KEY, LINEAR_TEAM_ID), or GitHub Issues "
+            "(GITHUB_TOKEN, GITHUB_FINOPS_REPO)."
+        ),
+    }
+
+
 @_srv.mcp.tool()
 def send_onboarding_email(
     to_email: str,
@@ -170,13 +188,19 @@ def create_anomaly_tickets(limit: int = 20) -> dict:
     if err := _srv.require_pro("ticket_creation"):
         return err
 
+    if (none := _no_tracker()) is not None:
+        return none
     try:
         from ..integrations.ticketing import create_tickets_for_unnotified
         urls = create_tickets_for_unnotified(limit=limit)
-        return {
+        out = {
             "tickets_created": len(urls),
             "ticket_urls": urls,
         }
+        if not urls:
+            out["message"] = ("No new tickets: no active high or medium anomaly is without "
+                              "one, or the tracker did not accept them (see the server log).")
+        return out
     except Exception as e:
         return {"error": str(e)}
 
@@ -207,6 +231,8 @@ async def create_rightsizing_tickets(
             "message": "Rightsizing analysis is AWS-only (Compute Optimizer + CloudWatch).",
             "tickets_created": 0,
         }
+    if (none := _no_tracker()) is not None:
+        return none
 
     try:
         from ..integrations.ticketing import create_rightsizing_ticket
@@ -275,6 +301,8 @@ def create_scorecard_tickets(
     """
     if err := _srv.require_pro("ticket_creation"):
         return err
+    if (none := _no_tracker()) is not None:
+        return none
 
     try:
         from ..scoring.scorecard import build_scorecard

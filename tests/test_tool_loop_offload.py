@@ -357,6 +357,9 @@ def _block_get_org_cost_summary(monkeypatch):
     monkeypatch.setattr(_srv, "require_pro", lambda feature: None)
     monkeypatch.setattr(aws_org, "org_cost_summary", _sleepy({"accounts": []}))
     from finops.tools import attribution
+    # The tool now says "AWS is not connected" before reading anything when no
+    # credentials resolve (a CI runner has none); this test is about the read.
+    monkeypatch.setattr(attribution, "_aws_credentials_present", lambda: True)
     return attribution.get_org_cost_summary()
 
 

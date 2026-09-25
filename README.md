@@ -296,7 +296,7 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 **What is a FinOps MCP server?** An MCP (Model Context Protocol) server that answers cloud-cost questions from inside an AI editor. nable runs locally as one, so you can ask Claude, Cursor, or VS Code about your AWS, Azure, GCP, and AI spend and it reads your real cost data on your machine to answer.
 
-**Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. The agent team, ticket auto-creation, scheduled digests, and commitment recommendations are Pro.
+**Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. Every install starts with a 7-day trial of Pro features. Pro ($25/mo) adds ticket creation (Jira, Linear, GitHub Issues), email reports and digests sent on request, and the org-wide rollup across accounts. Team ($1,000/mo flat, unlimited seats) adds the conversational Slack bot and chat remediation. Forecasts, commitment recommendations, remediation PRs, and the Ledger are free today while their pricing is decided. Reports and alerts on a schedule, sent without anyone asking, are nable Cloud; this install sends them when you ask.
 
 **Does my billing data leave my machine?** No. nable is local-first and read-only by default. It reads your cost data on your machine and never uploads it, and you can confirm the no-egress behavior in the source.
 

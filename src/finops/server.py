@@ -727,22 +727,21 @@ async def connection_status() -> str:
             "no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."
         )
 
+    from .license import checkout_url, plan_label, plan_name, pro_pitch, trial_line
     lic = get_status()
     if lic.mode == "trial":
         plan_line = (
-            f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($25/mo)."
+            f"Plan: {trial_line(lic)} "
+            f"Keep Pro after the trial: {plan_label('pro')}, {checkout_url('pro')}"
         )
     elif lic.mode == "free":
         plan_line = (
-            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
-            f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Pro plan ($25/mo) adds: Slack anomaly alerts, ticket auto-creation, "
-            f"email digests, commitment recommendations, and org rollup. "
-            f"Upgrade at {_UPGRADE_URL}."
+            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts "
+            f"on request, PR comments, budgets, K8s analysis, and all connectors included. "
+            f"{pro_pitch()} Upgrade at {checkout_url('pro')}."
         )
-    elif lic.mode == "pro":
-        plan_line = f"Plan: Team: {lic.email}"
+    elif lic.mode in ("pro", "team", "enterprise"):
+        plan_line = f"Plan: {plan_name(lic.mode)}: {lic.email}"
     else:
         plan_line = f"Plan: {lic.mode}"
 
@@ -862,19 +861,37 @@ def _fmt_usd(amount: float) -> str:
 
 _PRO_MONTHLY_USD = 25.0  # single source of truth for the Pro price in code
 
-# Contextual Team upsells: shown to free users at most once per topic per session,
-# keyed to the kind of question they just asked, so the nudge names the exact Team
-# capability they are missing instead of a generic "upgrade." Frequent but not
-# spammy: a user who asks different kinds of questions sees the specific thing Team
-# adds for each, once. The model surfaces it in one short sentence when it fits.
-_TEAM_UPSELLS = {
-    "anomaly":     "Pro auto-posts anomalies to Slack or Teams the moment they fire and opens a Jira, Linear, or GitHub ticket, so a spike never sits unnoticed.",
-    "rightsizing": "Pro takes this further: it opens the PR with the change and tracks whether it actually shipped, not just the recommendation.",
-    "attribution": "Pro delivers this as a scheduled weekly digest to whoever owns the budget, so nobody has to remember to run it.",
-    "commitment":  "Pro models your Savings Plan and reserved-instance coverage gap and recommends exactly what to commit to.",
-    "org":         "Pro rolls spend up across every account in your org automatically and emails the report.",
-    "budget":      "Pro enforces budgets and alerts at 80% and 100%, before you blow past them.",
-    "scorecard":   "Pro turns these scorecards into auto-created tickets so the worst offenders actually get fixed.",
+# Contextual upsells: shown to free users at most once per topic per session,
+# keyed to the kind of question they just asked, so the nudge names the exact
+# paid capability they are missing instead of a generic "upgrade." Frequent but
+# not spammy. The model surfaces it in one short sentence when it fits.
+#
+# Each tip names a feature by its gate, and a topic whose feature is free today
+# (on the _HOLD_AI_UNGATE hold) shows nothing: the tips used to sell rightsizing
+# PRs and commitment recommendations as Pro while every free user had them.
+# Anything that posts on a timer is nable Cloud: the open install answers when
+# asked, and the tip promising that Pro posts anomalies to Slack as they fire
+# was never true of it.
+_TEAM_UPSELLS: dict[str, tuple[str, str]] = {
+    "anomaly":     ("ticket_creation",
+                    "Pro opens a Jira, Linear, or GitHub ticket from an anomaly, so a spike has an "
+                    "owner. Posting alerts to Slack or Teams as they fire, unattended, is nable Cloud."),
+    "rightsizing": ("remediation",
+                    "Pro opens the PR with the change and tracks whether it shipped, not just the "
+                    "recommendation."),
+    "attribution": ("scheduled_email_digests",
+                    "Pro emails this breakdown to whoever owns the budget, on request. A weekly "
+                    "digest sent on a schedule is nable Cloud."),
+    "commitment":  ("commitment_recommendations",
+                    "Pro recommends exactly which Savings Plan or reserved instances to buy, with ROI."),
+    "org":         ("org_reports",
+                    "Pro rolls spend up across every account and OU in your org, and emails the "
+                    "report on request."),
+    "budget":      ("alerts",
+                    "Pro sets alert policies that post to Slack or Teams when a budget crosses 80% "
+                    "or 100%, each time you check. Checking on a schedule is nable Cloud."),
+    "scorecard":   ("ticket_creation",
+                    "Pro turns these scorecards into tickets so the worst offenders actually get fixed."),
 }
 
 _TOOL_UPSELL_TOPIC = {
@@ -899,19 +916,23 @@ _team_tips_shown: set = set()
 def _maybe_team_tip(tool_name: str) -> dict | None:
     """For free users only, a one-time contextual Team upsell for this tool's topic.
     Returns None for paying users, unmapped tools, or a topic already nudged."""
+    from .license import checkout_url, locked_features, plan_label
     topic = _TOOL_UPSELL_TOPIC.get(tool_name)
-    if not topic or topic in _team_tips_shown:
+    if not topic or topic in _team_tips_shown or topic not in _TEAM_UPSELLS:
         return None
+    feature, pitch = _TEAM_UPSELLS[topic]
     try:
-        if get_status().mode in ("pro", "trial", "enterprise"):
+        if get_status().mode in ("pro", "team", "trial", "enterprise"):
+            return None
+        if feature not in locked_features():   # free today: nothing to sell
             return None
     except Exception:
         return None
     _team_tips_shown.add(topic)
     return {
         "_note_to_model": "Mention this in one short, non-pushy sentence after your answer, only if it fits naturally.",
-        "missing_with_team": _TEAM_UPSELLS[topic],
-        "upgrade": f"Pro is ${_PRO_MONTHLY_USD:.0f}/mo flat, one price for your whole team, with a 7-day free trial: {_UPGRADE_URL}",
+        "missing_with_team": pitch,
+        "upgrade": f"{plan_label('pro')}: {checkout_url('pro')}",
     }
 
 
@@ -1542,6 +1563,73 @@ def _denied_action(msg: str) -> str:
 
 
 
+_BANNER_FREE = [
+    "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
+    "✓  Anomaly detection, on request",
+    "✓  Rightsizing recommendations",
+    "✓  Budgets, forecasts & spend alerts",
+    "✓  Kubernetes cost analysis",
+    "✓  PR cost comments",
+    "✓  Connector health & savings tracking",
+]
+
+
+def _banner_pro() -> list[str]:
+    """What Pro unlocks today: PRO_FEATURES minus the temporary free hold. The
+    list this replaced also named line-item CUR, Azure detail and business
+    metrics, none of which is gated, and commitment recommendations, which are
+    free during the hold."""
+    from .license import PRO_FEATURE_COPY, locked_features
+    return [f"   ▸  {PRO_FEATURE_COPY[f]}" for f in locked_features()]
+
+
+def _plan_banner_lines(status) -> list[str]:
+    """The MCP server's start banner, named from the plan table in license.py.
+
+    It greeted a Pro key as "nable Team", a Team key as the free tier, and gave
+    the trial deadline as "Subscribe before day N", a number with no calendar
+    behind it. The name and the date now come from the one table."""
+    from .license import checkout_url, fmt_day, plan_label, plan_name, trial_last_day
+
+    W = 62
+    border = "─" * W
+    out: list[str] = []
+    mode = status.mode
+    if mode in ("pro", "team", "enterprise"):
+        until = f"  ·  through {status.expires}" if getattr(status, "expires", "") else ""
+        out += [f"\n  {border}", f"  nable {plan_name(mode)}  ·  {status.email}{until}", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
+        out.append(f"  {border}\n")
+    elif mode == "trial":
+        days = status.days_remaining
+        last = trial_last_day(status)
+        through = f", through {fmt_day(last)}" if last else ""
+        out += [f"\n  {border}",
+                f"  nable {plan_name('trial')}  ·  {days} day{'s' if days != 1 else ''} left{through}",
+                f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
+        out.append(f"  {'─' * W}")
+        when = f" after {fmt_day(last)}" if last else ""
+        out.append(f"  Keep Pro{when}: {plan_label('pro')}")
+        out.append(f"  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    else:
+        out += [f"\n  {border}", "  nable  ·  free tier", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        locked = _banner_pro()
+        if locked:
+            out.append("  Locked on free tier  ↓")
+            out += [f"  {t}" for t in locked]
+            out.append(f"  {'─' * W}")
+        out.append(f"  {plan_label('pro')}  →  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    return out
+
+
 def main() -> None:
     import contextlib
     import logging
@@ -1596,26 +1684,6 @@ def main() -> None:
     set_current_identity(ident)
 
     status = get_status()
-    W = 62
-    border = "─" * W
-
-    _FREE = [
-        "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
-        "✓  Anomaly detection, on request",
-        "✓  Rightsizing recommendations",
-        "✓  Budgets, forecasts & spend alerts",
-        "✓  Kubernetes cost analysis",
-        "✓  PR cost comments",
-        "✓  Connector health & savings tracking",
-    ]
-    _TEAM = [
-        "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
-        "   📧  Email and Slack reports, sent on request",
-        "   💰  RI / Savings Plan recommendations with $ ROI",
-        "   🏢  Org-wide multi-account rollup & OU breakdown",
-        "   🔍  Line-item CUR data, per-resource & RI waste",
-        "   📈  Unit economics, cost per customer, % of MRR",
-    ]
 
     # This banner is for a human. On the MCP-server path (the only path that
     # reaches here, the TTY case returned above) stdout is the JSON-RPC channel
@@ -1623,44 +1691,8 @@ def main() -> None:
     # mcp.run() can corrupt it so the client silently loads no tools. Route the
     # whole banner to stderr, where it still shows in the client's server logs.
     with contextlib.redirect_stdout(sys.stderr):
-        if status.mode == "pro":
-            print(f"\n  {border}")
-            print(f"  nable Team  ·  {status.email}")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * (W - 0)}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {border}\n")
-
-        elif status.mode == "trial":
-            days = status.days_remaining
-            print(f"\n  {border}")
-            print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {'─' * W}")
-            print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
-            print(f"  {_UPGRADE_URL}")
-            print(f"  {border}\n")
-
-        else:
-            print(f"\n  {border}")
-            print("  nable  ·  free tier")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * W}")
-            print("  Locked on free tier  ↓")
-            for t in _TEAM:
-                print(f"  {t}")
-            print(f"  {'─' * W}")
-            print(f"  First month free → {_UPGRADE_URL}")
-            print(f"  {border}\n")
+        for line in _plan_banner_lines(status):
+            print(line)
 
     # Warn if running in Postgres mode without auth enforcement
     if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":

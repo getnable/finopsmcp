@@ -7,6 +7,7 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url, plan_label
 
 
 @_srv.mcp.tool()
@@ -84,7 +85,8 @@ def get_commitment_analysis() -> dict:
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
             ]
             result["recommendations_note"] = (
-                f"This is a Team feature ($25/mo). Upgrade at {_srv._UPGRADE_URL} to unlock purchase recommendations with ROI projections."
+                f"Purchase recommendations with ROI projections are a {plan_label('pro')} feature. "
+                f"Upgrade at {checkout_url('pro')} to unlock them."
             )
         return result
     except Exception as e:
