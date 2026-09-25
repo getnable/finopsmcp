@@ -26,8 +26,9 @@ The cloud budget (budget_lens): a priced change that adds cost is also
 checked against the budgets the user set (`set_budget`, budget.yml). When
 month-to-date spend plus the change's cost for the rest of the period is over
 a budget that applies to it, the policy gate gets cost_verdict "over_budget"
-and the answer is "ask", or "deny" when FINOPS_GUARD_STOP_ON_BUDGET says hard
-stop. Spend comes from the summary the budget checks write
+and the answer is "ask", or "deny" when the policy's on_budget_breach is
+"deny" (nable.policy.yaml) or FINOPS_GUARD_STOP_ON_BUDGET=1; the env var wins
+either way. Spend comes from the summary the budget checks write
 (budget/summary.py), not the database; a summary older than 48 hours (or from
 last month) is not used, and a verdict on a priced change says the budget went
 unchecked.
@@ -1377,15 +1378,40 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
     return {"state": "no_budget", **when}
 
 
-def _budget_hard_stop() -> tuple[bool, str]:
-    """(hard stop?, why) for a change over a cloud budget. Default: ask."""
+def _budget_hard_stop() -> tuple[bool, str, str]:
+    """(hard stop?, why, how to undo it) for a change over a cloud budget.
+
+    FINOPS_GUARD_STOP_ON_BUDGET decides when set, either way (one session or
+    CI run); otherwise the policy's on_budget_breach. Default: ask."""
     env = os.getenv("FINOPS_GUARD_STOP_ON_BUDGET", "").strip().lower()
     if env in ("1", "true", "yes"):
-        return True, "FINOPS_GUARD_STOP_ON_BUDGET is on"
-    return False, ""
+        return True, "FINOPS_GUARD_STOP_ON_BUDGET is on", "unset it"
+    if env in ("0", "false", "no"):
+        return False, "", ""
+    if load_policy().get("on_budget_breach") == "deny":
+        return (True, "your policy sets on_budget_breach: deny",
+                f"set on_budget_breach: ask in {_policy_file_shown()}")
+    return False, "", ""
 
 
-def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str) -> str:
+def _policy_file_shown() -> str:
+    from .policy import policy_file_path
+    try:
+        return str(policy_file_path())
+    except Exception:  # noqa: BLE001 - only a path in a sentence
+        return "nable.policy.yaml"
+
+
+def _budget_policy() -> dict[str, Any]:
+    """The policy the gate judges a priced change with: the user's, with the
+    over-budget answer the guard's env var sets, so the gate and the verdict
+    cannot disagree about whether this is a stop."""
+    pol = load_policy()
+    hard, _, _ = _budget_hard_stop()
+    return {**pol, "on_budget_breach": "deny" if hard else "ask"}
+
+
+def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str, undo: str = "") -> str:
     """The over-budget sentence: the budget, spend so far, the change's figure,
     the projected overage, and how fresh the spend is."""
     so_far = "this week" if lens.get("period") == "weekly" else "month to date"
@@ -1407,10 +1433,11 @@ def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str) -> str:
             f"{change}, a projected ~{_usd(lens['projected_usd'])}, "
             f"~{_usd(lens['projected_overage_usd'])} over.{more} {fresh}.")
     if hard:
-        return (f"{text} Stopped because {why}; raise the budget, or unset it to "
-                "downgrade this to a confirmation.")
-    return (f"{text} Confirm to proceed, or raise the budget. "
-            "Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
+        return (f"{text} Stopped because {why}; raise the budget, or {undo or 'unset it'} "
+                "to downgrade this to a confirmation.")
+    return (f"{text} Confirm to proceed, or raise the budget. Set "
+            "FINOPS_GUARD_STOP_ON_BUDGET=1, or on_budget_breach: deny in the policy file, "
+            "to make this a hard stop.")
 
 
 def _summary_age(lens: dict[str, Any]) -> str:
@@ -1527,13 +1554,15 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
             over = lens is not None and lens["state"] == "over"
             gate = evaluate_action_gate(action_type,
                                         monthly_delta_usd=est.get("monthly_usd") or 0.0,
-                                        cost_verdict="over_budget" if over else None)
+                                        cost_verdict="over_budget" if over else None,
+                                        policy=_budget_policy() if over else None)
             if gate.get("gate") != GATE_ALLOW:
                 if gate.get("rule") == "over_budget" and lens is not None:
-                    hard, why = _budget_hard_stop()
+                    hard, why, undo = _budget_hard_stop()
                     return verdict("deny" if hard else "ask",
                                    f"{_cost_line(est)}. "
-                                   f"{_budget_reason(lens, hard=hard, why=why)}", est=est)
+                                   f"{_budget_reason(lens, hard=hard, why=why, undo=undo)}",
+                                   est=est)
                 return verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
                     f"{_cost_line(est)}. "
@@ -1573,12 +1602,13 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                 f"resource{'s' if len(destroys) != 1 else ''} ({shown}). ") + cost
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0,
-                                cost_verdict="over_budget" if over else None)
-    if over and gate.get("gate") != GATE_BLOCK:
+                                cost_verdict="over_budget" if over else None,
+                                policy=_budget_policy() if over else None)
+    if over and gate.get("rule") != "allowlist":
         # A commitment that breaks the budget: the budget sentence travels with
         # whatever else the gate said, and a hard stop makes it a deny.
-        hard, why = _budget_hard_stop()
-        budget_txt = _budget_reason(lens, hard=hard, why=why)
+        hard, why, undo = _budget_hard_stop()
+        budget_txt = _budget_reason(lens, hard=hard, why=why, undo=undo)
         if hard:
             return verdict("deny", cost + budget_txt, est=est)
         if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
