@@ -344,21 +344,21 @@ def get_cost_attribution(
     """
     from ._attribution import groups_result, unread, unsupported
 
+    if admin_key is None:
+        from ...security.env import get_env
+        admin_key = get_env("ANTHROPIC_ADMIN_KEY")
+        # Not connected comes first, as for every provider.
+        if not admin_key and not get_env("ANTHROPIC_API_KEY"):
+            return unread("not_configured")
     if dimension in _NOT_AVAILABLE:
         return unsupported(_NOT_AVAILABLE[dimension])
     if dimension not in _UNASSIGNED:
         return unsupported(f"Anthropic cannot attribute cost by '{dimension}'.")
-
-    if admin_key is None:
-        from ...security.env import get_env
-        admin_key = get_env("ANTHROPIC_ADMIN_KEY")
-        if not admin_key:
-            if get_env("ANTHROPIC_API_KEY"):
-                return unread("admin_key_required",
-                              "Anthropic's cost and usage reports need an Admin key: set "
-                              "ANTHROPIC_ADMIN_KEY (sk-ant-admin...). A regular API key "
-                              "cannot read them.")
-            return unread("not_configured")
+    if not admin_key:
+        return unread("admin_key_required",
+                      "Anthropic's cost and usage reports need an Admin key: set "
+                      "ANTHROPIC_ADMIN_KEY (sk-ant-admin...). A regular API key "
+                      "cannot read them.")
     try:
         import httpx
     except ImportError:

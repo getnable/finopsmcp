@@ -159,13 +159,13 @@ def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> di
     """
     from ._attribution import groups_result, unread, unsupported
 
+    base, api_key = _base_url(), _api_key()
+    if not base or not api_key:
+        return unread("not_configured")
     if dimension in _NOT_AVAILABLE:
         return unsupported(_NOT_AVAILABLE[dimension])
     if dimension not in _ACTIVITY:
         return unsupported(f"LiteLLM cannot attribute cost by '{dimension}'.")
-    base, api_key = _base_url(), _api_key()
-    if not base or not api_key:
-        return unread("not_configured")
     try:
         import httpx
     except ImportError:

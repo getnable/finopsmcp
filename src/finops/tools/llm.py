@@ -413,6 +413,79 @@ async def get_llm_cost_by_model(
         return {"error": str(e)}
 
 
+_ATTRIBUTION_GROUP_CAP = 50
+
+
+@_srv.mcp.tool()
+async def get_ai_cost_attribution(
+    dimension: str = "project",
+    provider: str | None = None,
+    days: int = 30,
+) -> dict:
+    """
+    AI/LLM spend split by who or what it was for: per project, workspace, API
+    key, team, user, tag or session. Answers "what does each team / feature /
+    customer / agent spend on AI" where get_llm_costs only splits by model.
+
+    Sources, each labelled in the answer: OpenAI projects and API keys (billed
+    costs) and users (estimated); Anthropic workspaces (billed) and API keys
+    and users (estimated); LiteLLM teams, virtual keys, users and request tags;
+    Langfuse trace tags, users and sessions. Customer, feature and agent map
+    to tags, since no provider has those fields. A provider that has no such
+    field says so under not_available; one that could not be read is listed
+    under failed_providers, never shown as $0. Read-only.
+
+    Args:
+        dimension: "project", "workspace", "api_key", "team", "user", "tag" or
+                   "session" ("customer", "feature" and "agent" read tags).
+        provider: Limit to "openai", "anthropic", "litellm" or "langfuse".
+        days: Lookback window in days (default 30).
+
+    Examples:
+        - "What does each team spend on AI?"
+        - "AI cost by customer / by feature for the last 30 days"
+        - "Which OpenAI project or API key costs the most?"
+        - "Spend per Anthropic workspace"
+    """
+    from ..demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_ai_cost_attribution", {
+            "dimension": dimension, "provider": provider, "days": days}) or {
+            "_demo_mode": True, "dimension": dimension,
+            "note": ("AI cost attribution is not in the sample dataset. Connect OpenAI, "
+                     "Anthropic, LiteLLM or Langfuse to split real AI spend.")}
+    try:
+        from ..connectors.ai_attribution import get_ai_cost_attribution as _attribute
+        result = await _srv.asyncio.to_thread(_attribute, dimension, provider, days)
+        if result.get("error") and "groups" not in result:
+            return result
+
+        groups = result.get("groups") or []
+        result["group_count"] = len(groups)
+        if len(groups) > _ATTRIBUTION_GROUP_CAP:
+            kept = groups[:_ATTRIBUTION_GROUP_CAP]
+            result["groups"] = kept
+            result["groups_truncated"] = (
+                f"showing the top {_ATTRIBUTION_GROUP_CAP} of {len(groups)} groups by cost "
+                f"(${sum(g['cost_usd'] for g in kept):,.2f} shown); by_provider totals cover "
+                f"all of them")
+
+        # AI cost per customer / MAU / request, when the total is safe to divide
+        # and business metrics are on file. Local metrics only: no Stripe call.
+        try:
+            from ..connectors.business_metrics import resolve_business_metrics
+            from ..connectors.llm_unit_economics import attribution_unit_economics
+            metrics = await resolve_business_metrics(allow_stripe=False)
+            econ = attribution_unit_economics(result, metrics or {}, days)
+            if econ:
+                result["unit_economics"] = econ
+        except Exception as e:
+            _srv.log.debug("AI unit economics skipped: %s", e)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @_srv.mcp.tool()
 async def get_langfuse_model_costs(
     days: int = 30,

@@ -350,13 +350,13 @@ def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> di
     from ...security.env import get_env
     from ._attribution import groups_result, unread, unsupported
 
+    public, secret = get_env("LANGFUSE_PUBLIC_KEY"), get_env("LANGFUSE_SECRET_KEY")
+    if not (public and secret):
+        return unread("not_configured")
     if dimension in _NOT_AVAILABLE:
         return unsupported(_NOT_AVAILABLE[dimension])
     if dimension not in _FIELDS:
         return unsupported(f"Langfuse cannot attribute cost by '{dimension}'.")
-    public, secret = get_env("LANGFUSE_PUBLIC_KEY"), get_env("LANGFUSE_SECRET_KEY")
-    if not (public and secret):
-        return unread("not_configured")
     host = (get_env("LANGFUSE_HOST") or "https://cloud.langfuse.com").rstrip("/")
     auth = "Basic " + b64encode(f"{public}:{secret}".encode()).decode()
     field = _FIELDS[dimension]

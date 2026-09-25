@@ -564,6 +564,13 @@ def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> di
     """
     from ._attribution import groups_result, unread, unsupported
 
+    from ...security.env import get_env
+    api_key = get_env("OPENAI_ADMIN_KEY") or get_env("OPENAI_API_KEY")
+    org_id = get_env("OPENAI_ORG_ID") or None
+    # Not connected comes first: "OpenAI has no team field" is only worth
+    # saying to someone who has OpenAI connected.
+    if not api_key:
+        return unread("not_configured")
     if dimension in _NOT_AVAILABLE:
         return unsupported(_NOT_AVAILABLE[dimension])
     if dimension not in _ATTRIBUTION_FIELDS:
@@ -572,12 +579,6 @@ def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> di
         import httpx
     except ImportError:
         return unread("httpx_missing")
-
-    from ...security.env import get_env
-    api_key = get_env("OPENAI_ADMIN_KEY") or get_env("OPENAI_API_KEY")
-    org_id = get_env("OPENAI_ORG_ID") or None
-    if not api_key:
-        return unread("not_configured")
 
     field, billed = _ATTRIBUTION_FIELDS[dimension]
     headers = _headers(api_key, org_id)

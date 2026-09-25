@@ -264,6 +264,7 @@ _DATABRICKS: frozenset[str] = frozenset({
 
 _LLM: frozenset[str] = frozenset({
     "forecast_llm_costs",
+    "get_ai_cost_attribution",
     "get_ai_spend_monitor",
     "get_bedrock_costs",
     "get_langfuse_model_costs",
@@ -409,6 +410,9 @@ TIER3: frozenset[str] = frozenset({
 LLM_FRONT_DOOR: frozenset[str] = frozenset({
     "get_llm_costs",
     "get_llm_cost_by_model",
+    # "What does each team / customer spend on AI" is the next question an
+    # AI-spend user asks, and by-model tools cannot answer it.
+    "get_ai_cost_attribution",
 })
 
 

@@ -2225,6 +2225,7 @@ from .tools.kubernetes import (  # noqa: E402,F401
 )
 from .tools.llm import (  # noqa: E402,F401
     forecast_llm_costs,
+    get_ai_cost_attribution,
     get_ai_engineering_report,
     get_ai_kpis,
     get_ai_spend_monitor,
