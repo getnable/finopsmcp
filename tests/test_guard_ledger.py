@@ -203,8 +203,8 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
     ("pulumi config set --secret dbPassword hunter2 && pulumi up", "hunter2",
      "&& pulumi up"),
     ("pulumi config set apiKey hunter2", "hunter2", "pulumi config set apiKey [REDACTED]"),
-    ("aws ssm put-parameter --name /prod/db --value 'S3cr3tP@ss' --type SecureString "
-     "&& terraform apply", "S3cr3tP@ss", "--value [REDACTED] --type SecureString"),
+    (("aws ssm put-parameter --name /prod/db --value 'S3cr3tP@ss' --type SecureString "
+      "&& terraform apply"), "S3cr3tP@ss", "--value [REDACTED] --type SecureString"),
 ])
 
 def test_secrets_never_reach_the_ledger(raw, gone, kept):

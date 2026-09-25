@@ -208,7 +208,7 @@ def scan_arguments(args: Any, *, implied: str = "") -> _Scan:
             return
         try:
             text = v if isinstance(v, str) else json.dumps(v, default=str)
-        except Exception:
+        except (TypeError, ValueError, RecursionError):
             text = "aws"                # unreadable: assume the worst
         if _CLI_ANY_RE.search(text):
             scan.unchecked = why

@@ -105,7 +105,7 @@ def test_a_file_that_parses_says_nothing_to_doctor(tmp_path):
 
 def test_the_file_is_read_as_utf8(tmp_path):
     (tmp_path / "nable.policy.yaml").write_bytes("# Budgets: 5 €/mo\non_budget_breach: deny\n"
-                                                 .encode("utf-8"))
+                                                 .encode())
     assert policy.load_policy()["on_budget_breach"] == "deny"
     assert policy.policy_problems() == []
 
