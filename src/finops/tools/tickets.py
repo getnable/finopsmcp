@@ -33,6 +33,13 @@ def send_onboarding_email(
         - "Send a day 7 nudge to user@company.com"
         - "Send the trial ending email to someone@corp.com with 3 days left"
     """
+    # A nable marketing email, for nable's own staff. A customer's model must
+    # not be able to send it from the customer's SMTP account, so it runs only
+    # with the internal flag set (and tool_surface never advertises it without).
+    from ..tool_surface import internal_tools_enabled
+    if not internal_tools_enabled():
+        return {"error": ("send_onboarding_email is an internal nable tool and is "
+                          "disabled. It sends nable's own onboarding emails.")}
     if err := _srv.require_role("admin"):
         return err
     try:

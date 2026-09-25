@@ -411,6 +411,17 @@ LLM_FRONT_DOOR: frozenset[str] = frozenset({
 })
 
 
+# nable's own staff tools. Never advertised to a customer's model, not under
+# FINOPS_ALL_TOOLS and not in demo mode: only with NABLE_INTERNAL_TOOLS=1.
+INTERNAL_TOOLS: frozenset[str] = frozenset({
+    "send_onboarding_email",
+})
+
+
+def internal_tools_enabled() -> bool:
+    return os.getenv("NABLE_INTERNAL_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+
 def tier(tool_name: str) -> int:
     """1 = front door, 3 = forensics, 2 = everything in between."""
     if tool_name in TIER1:
@@ -770,6 +781,8 @@ def advertise(tool_name: str) -> bool:
     it is looking for. A tool that fails the tier gate is not gone: the MCP call
     path resolves against the registry, so it runs the moment something names it.
     """
+    if tool_name in INTERNAL_TOOLS:
+        return internal_tools_enabled()
     if _all_tools_forced():
         return True
     try:

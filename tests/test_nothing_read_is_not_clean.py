@@ -626,3 +626,80 @@ def test_serve_help_does_not_describe_a_scheduler_or_bot_the_open_core_lacks(cap
     assert "FINOPS_ENABLE_SCHEDULER" not in out
     assert "SLACK_APP_TOKEN" not in out, "describes starting a bot the open core lacks"
     assert "hosted nable" in out
+
+
+# ── 9. Polish: annotations, missing terraform, dropped args, vendor tools ─────
+
+def _tool(name):
+    import finops.server as server
+    return server.mcp._tool_manager.get_tool(name)
+
+
+def test_terraform_estimators_say_why_they_are_not_marked_read_only():
+    """They change nothing, but tf_dir runs `terraform plan`, which executes the
+    directory's plugins, so readOnlyHint stays false (0d04468). A reader of the
+    annotation alone thought they write; the description now says why."""
+    from finops.tool_surface import tool_annotation
+    for name in ("estimate_change_cost", "check_action_policy", "estimate_terraform_cost"):
+        assert tool_annotation(name)["readOnlyHint"] is False
+        desc = _tool(name).description
+        assert "changes nothing" in desc.lower(), name
+        assert "terraform plan" in desc, name
+
+
+def test_audit_terraform_tags_without_terraform_says_how_to_run_without_it(
+        monkeypatch, tmp_path):
+    import finops.server as server
+
+    monkeypatch.setenv("TERRAFORM_BIN", "terraform-not-installed-here")
+    out = server.audit_terraform_tags(tf_dir=str(tmp_path))
+    if asyncio.iscoroutine(out):
+        out = asyncio.run(out)
+
+    assert "Errno" not in str(out), out
+    assert out["error"] == "terraform_not_installed"
+    assert "state_path" in out["message"]
+
+
+def test_a_write_tool_rejects_arguments_it_would_silently_drop(monkeypatch):
+    """set_business_metrics(mrr=5000) returned saved:true and stored nothing:
+    FastMCP ignores unknown arguments."""
+    import pytest
+
+    import finops.server as server
+    from finops.connectors import business_metrics
+
+    saved = []
+    monkeypatch.setattr(business_metrics, "save_metrics", lambda **k: saved.append(k) or {})
+    with pytest.raises(Exception) as err:
+        asyncio.run(server.mcp.call_tool("set_business_metrics", {"mrr": 5000}))
+    assert "mrr" in str(err.value) and "mrr_usd" in str(err.value)
+    assert saved == []
+
+
+def test_a_read_tool_still_tolerates_an_extra_argument():
+    import finops.server as server
+
+    out = asyncio.run(server.mcp.call_tool("what_can_nable_do", {"verbose": True}))
+    assert out is not None
+
+
+def test_vendor_onboarding_email_is_not_advertised_to_customers(monkeypatch):
+    from finops import tool_surface
+
+    monkeypatch.setenv("FINOPS_ALL_TOOLS", "1")
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
+    assert tool_surface.advertise("send_onboarding_email") is False
+    monkeypatch.setenv("NABLE_INTERNAL_TOOLS", "1")
+    assert tool_surface.advertise("send_onboarding_email") is True
+
+
+def test_vendor_onboarding_email_refuses_without_the_internal_flag(monkeypatch):
+    import finops.server as server
+
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
+    out = server.send_onboarding_email(to_email="someone@example.com")
+    if asyncio.iscoroutine(out):
+        out = asyncio.run(out)
+    assert out.get("sent") is not True
+    assert "internal" in out["error"].lower()

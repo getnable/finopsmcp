@@ -127,15 +127,19 @@ def test_databricks_env_reveals_family(monkeypatch):
 
 
 def test_all_tools_flag_advertises_everything(monkeypatch):
+    """Everything a customer can use. nable's internal staff tools (a vendor
+    marketing email) are never advertised to a customer's model."""
     monkeypatch.setenv("FINOPS_ALL_TOOLS", "1")
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
     registered = {t.name for t in server.mcp._tool_manager.list_tools()}
-    assert _advertised_names() == registered
+    assert _advertised_names() == registered - tool_surface.INTERNAL_TOOLS
 
 
 def test_demo_mode_advertises_everything(monkeypatch):
     monkeypatch.setattr("finops.demo_data.is_demo", lambda: True)
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
     registered = {t.name for t in server.mcp._tool_manager.list_tools()}
-    assert _advertised_names() == registered
+    assert _advertised_names() == registered - tool_surface.INTERNAL_TOOLS
 
 
 def test_unmapped_tool_fails_open_at_the_family_layer(monkeypatch):

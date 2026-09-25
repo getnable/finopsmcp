@@ -1086,6 +1086,8 @@ async def check_action_policy(
     budget_name: str = "",
 ) -> dict:
     """Advisory policy gate: should a proposed remediation action proceed?
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     The request-path guardrail, advisory. Describe a remediation action you are
     considering (action_type), optionally with the change to cost (a Terraform plan,

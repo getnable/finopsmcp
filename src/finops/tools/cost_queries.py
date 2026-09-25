@@ -873,6 +873,8 @@ def estimate_terraform_cost(
 ) -> dict:
     """
     Estimate the monthly AWS cost change from a Terraform plan BEFORE applying it.
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     Provide one of:
       - plan_json: raw JSON string from `terraform show -json plan.tfplan`
@@ -937,8 +939,9 @@ def estimate_change_cost(
 
     Agent-native. Call this BEFORE applying an infrastructure change to get a machine
     verdict (ok / warn / over_budget / no_budget) plus the monthly and annual cost
-    delta and the budget headroom. Read-only: it estimates and checks, it never applies
-    anything.
+    delta and the budget headroom. It estimates and checks, it never applies anything.
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     Describe the change one of these ways:
       - terraform_plan_json / terraform_plan_file / tf_dir : a Terraform plan
