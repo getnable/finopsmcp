@@ -373,3 +373,67 @@ def test_the_spend_cap_row_is_the_month_and_the_session_row_is_the_session(claud
     assert "(20%)" in usage and "OVER" not in usage
     session = next(ln for ln in out.splitlines() if "this session" in ln and "cap" in ln)
     assert "OVER (120%)" in session
+
+
+# ── `nable ai-budget` flags say what they saved ──────────────────────────────
+
+def _run_cli(**flags):
+    import argparse
+
+    from finops import cli_ai_budget as cli
+
+    ns = {"plan_cost": None, "spend_cap": None, "tokens": None, "session_cap": None,
+          "month": False, "reset": False, "json": False}
+    ns.update(flags)
+    return cli.run(argparse.Namespace(**ns))
+
+
+def test_the_session_cap_flag_confirms_the_cap_before_any_transcript(claude, capsys):
+    out = _cli(capsys, session_cap=40)
+    assert ab.get_budget()["session_cap"] == 40.0
+    assert "per-session cap" in out.splitlines()[0]
+    line = next(ln for ln in out.splitlines() if "every session" in ln)
+    assert "session cap" in line and "$40.00" in line
+
+
+def test_plan_cost_on_a_metered_budget_switches_it_to_flat_and_says_so(claude, capsys):
+    ab.set_budget(spend_cap=100)
+    out = _cli(capsys, plan_cost=20)
+    b = ab.get_budget()
+    assert (b["mode"], b["plan_cost"]) == ("flat", 20.0)
+    assert "switched from metered to flat" in out
+
+
+def test_spend_cap_on_a_flat_budget_switches_it_to_metered_and_says_so(claude, capsys):
+    ab.set_budget(plan_cost=20)
+    out = _cli(capsys, spend_cap=100)
+    assert ab.get_budget()["mode"] == "metered"
+    assert "switched from flat to metered" in out
+
+
+def test_both_flags_keep_the_mode_and_say_which_one_counts(claude, capsys):
+    ab.set_budget(spend_cap=100)
+    out = _cli(capsys, plan_cost=20, spend_cap=200)
+    assert ab.get_budget()["mode"] == "metered"
+    assert "still metered" in out
+
+
+@pytest.mark.parametrize("flag", ["session_cap", "spend_cap", "plan_cost", "tokens"])
+def test_a_negative_value_is_rejected_not_cleared(claude, capsys, flag):
+    ab.set_budget(session_cap=40, spend_cap=100, monthly_tokens=1000)
+    before = ab.get_budget()
+    assert _run_cli(**{flag: -5}) == 2
+    captured = capsys.readouterr()
+    assert "negative" in captured.err and "nothing was saved" in captured.err
+    after = ab.get_budget()
+    assert {k: after[k] for k in ("session_cap", "spend_cap", "plan_cost", "monthly_tokens")} == (
+        {k: before[k] for k in ("session_cap", "spend_cap", "plan_cost", "monthly_tokens")})
+
+
+def test_set_budget_rejects_a_negative_cap(claude):
+    with pytest.raises(ValueError):
+        ab.set_budget(session_cap=-1)
+    from finops import server as srv
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=-1, every_session=True))
+    assert "error" in out and "negative" in out["error"]

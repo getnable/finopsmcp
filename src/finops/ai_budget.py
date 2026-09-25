@@ -141,7 +141,13 @@ def set_budget(mode: str | None = None, plan_cost: float | None = None,
     the mode. monthly_tokens is an optional usage cap for either. Any subset.
 
     session_cap with a session_id caps that one session; without one it is the
-    cap for every session. 0 clears it."""
+    cap for every session. 0 clears it. A negative value is an error (it used
+    to clear the cap silently), and nothing is saved."""
+    for name, value in (("plan_cost", plan_cost), ("spend_cap", spend_cap),
+                        ("monthly_tokens", monthly_tokens), ("session_cap", session_cap)):
+        if value is not None and value < 0:
+            raise ValueError(f"{name} cannot be negative ({value:g}); pass 0 to clear it, "
+                             f"nothing was saved.")
     b = get_budget()
     if mode in ("flat", "metered"):
         b["mode"] = mode

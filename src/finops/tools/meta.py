@@ -1028,9 +1028,12 @@ def set_ai_budget(mode: str | None = None,
                           "session. Nothing was saved."),
                 "guessed_session_id": sid,
             }
-    budget = set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
-                        monthly_tokens=monthly_tokens, plan_label=plan_label,
-                        session_cap=session_cap, session_id=sid)
+    try:
+        budget = set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
+                            monthly_tokens=monthly_tokens, plan_label=plan_label,
+                            session_cap=session_cap, session_id=sid)
+    except ValueError as e:                     # a negative cap: refused, not cleared
+        return {"error": str(e)}
     out = {"budget": budget, "note": "Saved. Call get_ai_budget_status to see where you stand."}
     if session_cap is not None:
         out["session_cap_applies_to"] = (

@@ -101,6 +101,9 @@ def _interactive_setup(ab, out) -> None:
     except (EOFError, KeyboardInterrupt):
         print(file=out)
         return
+    except ValueError as e:                     # a negative amount
+        print(f"  {e}", file=out)
+        return
     print(file=out)
 
 
@@ -109,15 +112,42 @@ def run(args) -> int:
 
     out = sys.stdout
 
+    session_cap = getattr(args, "session_cap", None)
+    # A negative cap is a typo, not "clear it" (0 does that). Checked before
+    # anything is written, --reset included.
+    for flag, value in (("--plan-cost", args.plan_cost), ("--spend-cap", args.spend_cap),
+                        ("--tokens", args.tokens), ("--session-cap", session_cap)):
+        if value is not None and value < 0:
+            print(f"  {flag} cannot be negative ({value:g}); pass 0 to clear it, "
+                  f"nothing was saved.", file=sys.stderr)
+            return 2
+
     if getattr(args, "reset", False):
         ab.reset_budget()
 
-    session_cap = getattr(args, "session_cap", None)
     gave_flags = (args.plan_cost is not None or args.spend_cap is not None
                   or args.tokens is not None or session_cap is not None)
+    notes: list[str] = []
     if gave_flags:
-        ab.set_budget(plan_cost=args.plan_cost, spend_cap=args.spend_cap,
+        before = ab.get_budget()["mode"]
+        # A plan cost means a flat plan and a spend cap a metered one, so either
+        # flag alone sets the mode it belongs to. Leaving a metered budget
+        # metered after --plan-cost saved a number nothing would ever read.
+        mode = None
+        if args.plan_cost and args.spend_cap is None:
+            mode = "flat"
+        elif args.spend_cap and args.plan_cost is None:
+            mode = "metered"
+        ab.set_budget(mode=mode, plan_cost=args.plan_cost, spend_cap=args.spend_cap,
                       monthly_tokens=args.tokens, session_cap=session_cap)
+        after = ab.get_budget()["mode"]
+        if before and after != before:
+            notes.append(f"switched from {before} to {after}.")
+        if args.plan_cost and args.spend_cap:
+            gate = "--spend-cap" if after == "metered" else "--plan-cost"
+            notes.append(f"both --plan-cost and --spend-cap given: "
+                         f"{'still' if after == before else 'now'} {after}, so {gate} "
+                         f"is the one that counts. Pass the other alone to switch.")
 
     # First run, nothing set, a real terminal: ask instead of making them read flags.
     if (not gave_flags and not getattr(args, "json", False)
@@ -135,9 +165,12 @@ def run(args) -> int:
     verdict = st["verdict"]
     vcolor = {"ok": _OK, "warn": _WARN, "over": _OVER}[verdict]
 
+    capped = b["session_cap"] > 0 or bool(b["session_caps"])
     label = st["plan_label"] or {"flat": "subscription", "metered": "metered API"}.get(
-        mode, "per-session cap" if (st.get("session") or {}).get("cap_usd") else "no budget set")
+        mode, "per-session cap" if capped else "no budget set")
     print(_c("nable ai-budget", _BOLD) + _c(f"  ·  {label}", _DIM), file=out)
+    for note in notes:
+        print(_c(f"  {note}", _ACCENT), file=out)
     if not w["source_present"]:
         # A dead end otherwise. Claude Code and Codex are the only agents readable
         # with no key, so someone on Cursor, Windsurf, Zed or a plain API sees nothing but
@@ -203,6 +236,10 @@ def run(args) -> int:
         else:
             row(lbl, f"{spent} · {sess['messages']} msgs  "
                      + _c("· no session cap (--session-cap USD)", _DIM))
+    elif b["session_cap"] > 0:
+        # No session to measure yet. Still confirm the cap that was just saved.
+        row("session cap", f"${b['session_cap']:,.2f} for every session  ·  "
+                           + _c("no session usage yet", _DIM))
     row("burn rate", f"~{_tok(st['burn_tokens_per_hour'])} tokens/hour")
 
     _breakdown(st, out, month=getattr(args, "month", False))
