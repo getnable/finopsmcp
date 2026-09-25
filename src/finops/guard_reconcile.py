@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -228,6 +228,31 @@ def _client_error_code(exc: Exception) -> str:
     return str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
 
 
+def is_denied(code: str) -> bool:
+    """True for the error codes that mean the credentials lack the permission."""
+    return code in _DENIED_CODES or "AccessDenied" in code
+
+
+def lookup(client: Any, pacer: _Pacer, key: str, value: str, start: datetime,
+           end: datetime) -> Iterator[dict[str, Any]]:
+    """One LookupEvents query (one lookup attribute), every page, each request
+    paced. Yields each page's response; the caller counts and reads them.
+    Shared with the cost root-cause reader (anomaly/change_events.py)."""
+    token = None
+    while True:
+        kwargs: dict[str, Any] = {
+            "LookupAttributes": [{"AttributeKey": key, "AttributeValue": value}],
+            "StartTime": start, "EndTime": end, "MaxResults": PAGE_SIZE}
+        if token:
+            kwargs["NextToken"] = token
+        pacer.wait()
+        resp = client.lookup_events(**kwargs)
+        yield resp
+        token = resp.get("NextToken")
+        if not token:
+            return
+
+
 def read_events(session: Any, regions: Iterable[str], start: datetime, end: datetime, *,
                 names: Iterable[str] = tuple(EVENTS), sleep: Callable[[float], Any] = time.sleep,
                 clock: Callable[[], float] = time.monotonic) -> dict[str, Any]:
@@ -255,23 +280,11 @@ def read_events(session: Any, regions: Iterable[str], start: datetime, end: date
         client = session.client("cloudtrail", region_name=region, config=config)
         try:
             for name in names:
-                token = None
-                while True:
-                    kwargs: dict[str, Any] = {
-                        "LookupAttributes": [{"AttributeKey": "EventName",
-                                              "AttributeValue": name}],
-                        "StartTime": start, "EndTime": end, "MaxResults": PAGE_SIZE}
-                    if token:
-                        kwargs["NextToken"] = token
-                    pacer.wait()
-                    resp = client.lookup_events(**kwargs)
+                for resp in lookup(client, pacer, "EventName", name, start, end):
                     calls += 1
                     for raw in resp.get("Events") or []:
                         ev = _event(raw, region)
                         events[ev["event_id"] or f"{region}:{len(events)}"] = ev
-                    token = resp.get("NextToken")
-                    if not token:
-                        break
         except (NoCredentialsError, PartialCredentialsError) as exc:
             raise ReconcileError(
                 "No AWS credentials found. reconcile reads CloudTrail with the same "
@@ -279,7 +292,7 @@ def read_events(session: Any, regions: Iterable[str], start: datetime, end: date
                 f"({exc})") from exc
         except ClientError as exc:
             code = _client_error_code(exc)
-            if code in _DENIED_CODES or "AccessDenied" in code:
+            if is_denied(code):
                 raise ReconcileError(
                     f"CloudTrail refused LookupEvents in {region} ({code}). The "
                     "credentials need cloudtrail:LookupEvents: read-only, and free. "
