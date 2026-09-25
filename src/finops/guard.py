@@ -1213,14 +1213,25 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         from .guard_mcp import argument_text, translate
 
         budget_hit = check_budget_gate(session_id)
-        actions = translate(tool_name, arguments)
-        if not actions and budget_hit is None:
+        change = _budget_change(tool_name, arguments)
+        actions = [] if change is not None else translate(tool_name, arguments)
+        if not actions and budget_hit is None and change is None:
             return None
         if actions:
             summary = actions[0].command
 
-        if budget_hit is not None:
-            worst: dict[str, Any] | None = {**budget_hit}
+        if change is not None:
+            summary = change.pop("summary")
+            worst: dict[str, Any] | None = change
+            if budget_hit is not None:
+                # Over budget and raising it: the budget's own verdict (a deny
+                # under the hard stop) with both facts in one line.
+                worst = {**change,
+                         "decision": "deny" if budget_hit["decision"] == "deny" else "ask",
+                         "reason": f"{change['reason']} "
+                                   f"{budget_hit['reason'].removeprefix('nable guard: ')}"}
+        elif budget_hit is not None:
+            worst = {**budget_hit}
         else:
             context = argument_text(arguments)
             worst = None
@@ -1250,6 +1261,33 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         if record:
             _record_fail_open(exc, harness=harness, tool=tool_name, command=summary)
         return None
+
+
+# The nable MCP tool that sets the agent's own AI budget. An agent stopped by
+# the budget could call it to raise its own cap: no prompt, no record. Any
+# argument that sets or clears a cap, or switches the lens, is treated as a
+# possible raise, since telling a raise from a cut needs the current budget
+# and the hook should not have to read it. Reversible, and a human decides.
+_BUDGET_TOOL = "set_ai_budget"
+_BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session_cap",
+                    "every_session")
+
+
+def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
+    """An ask for a set_ai_budget call (under any server prefix) that changes
+    a cap, or None."""
+    if not (tool_name == _BUDGET_TOOL or tool_name.endswith("__" + _BUDGET_TOOL)):
+        return None
+    args = arguments if isinstance(arguments, dict) else {}
+    changed = {k: args[k] for k in _BUDGET_CAP_ARGS
+               if args.get(k) is not None and args.get(k) is not False}
+    if not changed:
+        return None
+    shown = ", ".join(f"{k}={v}" for k, v in changed.items())
+    return {"decision": "ask", "action_type": "ai_budget_change", "door": None,
+            "reason": (f"nable guard: the agent is changing its own AI budget ({shown}); "
+                       "a human should confirm."),
+            "summary": f"{_BUDGET_TOOL} {shown}"}
 
 
 # ── Decision ledger ───────────────────────────────────────────────────────────
