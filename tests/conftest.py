@@ -101,7 +101,7 @@ def _no_test_may_spend_money():
 
     def guarded(self, operation_name, api_params):
         service = self.meta.service_model.service_name
-        if service in billed:
+        if service in billed and not getattr(self, "_nable_billed_stub", False):
             raise AssertionError(
                 f"A test reached {service}.{operation_name} — {billed[service]}. "
                 f"This spends real money on whoever runs the suite. Stub the "
@@ -114,3 +114,28 @@ def _no_test_may_spend_money():
         yield
     finally:
         botocore.client.BaseClient._make_api_call = original
+
+
+@pytest.fixture
+def billed_stub():
+    """The one way a test reaches a billed client: through botocore's Stubber.
+
+    `with billed_stub(ce_client) as stub:` activates a Stubber on the client
+    and lets it past the block above for the duration. The Stubber answers
+    every call from its queue and raises on anything unqueued, so nothing
+    reaches AWS; the request parameters and the queued responses are still
+    checked against the real service model."""
+    import contextlib
+
+    from botocore.stub import Stubber
+
+    @contextlib.contextmanager
+    def _stub(client):
+        with Stubber(client) as stub:
+            client._nable_billed_stub = True
+            try:
+                yield stub
+            finally:
+                client._nable_billed_stub = False
+
+    return _stub
