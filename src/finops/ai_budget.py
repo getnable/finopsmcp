@@ -575,6 +575,10 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         pct, basis = tokens_mtd / budget["monthly_tokens"], "tokens"
     if pct is not None:
         verdict = _verdict(pct)
+    # The month's own standing, kept apart from the session's: the overall
+    # verdict below may be the session's, and a row about the month must not
+    # show that.
+    month_verdict, month_pct, month_basis = verdict, pct, basis
 
     # The per-session cap can only make the verdict worse. On a tie the one
     # further past its line is the one to name.
@@ -615,6 +619,9 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         "budget": budget,
         "plan_label": budget["plan_label"],
         "pct_of_budget": round(pct, 3) if pct is not None else None,
+        "month_verdict": month_verdict,
+        "month_verdict_basis": month_basis,
+        "month_pct_of_budget": round(month_pct, 3) if month_pct is not None else None,
         "session": session,
         "headroom": headroom,
         "burn_tokens_per_hour": burn,

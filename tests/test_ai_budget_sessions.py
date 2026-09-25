@@ -352,3 +352,24 @@ def test_the_tool_will_not_cap_every_session_when_it_meant_one(claude):
     out = asyncio.run(srv.set_ai_budget(session_cap=40))
     assert "error" in out
     assert ab.get_budget()["session_cap"] == 0.0
+
+
+def test_the_spend_cap_row_is_the_month_and_the_session_row_is_the_session(claude, capsys,
+                                                                            monkeypatch):
+    """A session over its cap makes the overall verdict OVER. The monthly spend
+    cap row must still say where the month stands: $24 of $100 is 24%, OK."""
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])  # $24
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-a")
+    ab.set_budget(spend_cap=100, monthly_tokens=10_000_000)
+    ab.set_budget(session_cap=20, session_id="sess-a")
+    st = ab.status()
+    assert (st["verdict"], st["verdict_basis"]) == (ab.BUDGET_OVER, "session")
+    assert (st["month_verdict"], st["month_pct_of_budget"]) == (ab.BUDGET_OK, 0.24)
+    out = _cli(capsys)
+    spend = next(ln for ln in out.splitlines() if "spend cap" in ln)
+    assert "~$24 est of $100" in spend and "OK (24%)" in spend and "OVER" not in spend
+    usage = next(ln for ln in out.splitlines() if "usage cap" in ln)
+    assert "(20%)" in usage and "OVER" not in usage
+    session = next(ln for ln in out.splitlines() if "this session" in ln and "cap" in ln)
+    assert "OVER (120%)" in session

@@ -168,10 +168,14 @@ def run(args) -> int:
         row("cost / 1M", f"~${lst:,.2f} at list price (est.)")
 
     sub = st["subsidy"]
-    pct = (st["pct_of_budget"] or 0) * 100
+    # The month's rows show the month's standing. st["verdict"] can be the
+    # session's (a session past its cap), which belongs on the session row.
+    m_verdict = st.get("month_verdict", verdict)
+    m_color = {"ok": _OK, "warn": _WARN, "over": _OVER}[m_verdict]
     if mode == "metered" and b["spend_cap"] > 0:
+        pct = st["est_usd_mtd_list_price"] / b["spend_cap"] * 100
         row("spend cap", f"~${st['est_usd_mtd_list_price']:,.0f} est of ${b['spend_cap']:,.0f}  ·  "
-                         f"{_c(verdict.upper(), vcolor)} ({pct:.0f}%)")
+                         f"{_c(m_verdict.upper(), m_color)} ({pct:.0f}%)")
     elif mode == "flat" and b["plan_cost"] > 0:
         # Always confirm the configured plan, even with no usage yet. The subsidy
         # multiple only appears once there is usage to value against it.
@@ -179,8 +183,9 @@ def run(args) -> int:
                  if sub and sub.get("multiple") else "")
         row("your plan", f"${b['plan_cost']:,.0f}/mo flat{extra}")
     if b["monthly_tokens"] > 0:
+        on_tokens = st.get("month_verdict_basis", st["verdict_basis"]) == "tokens"
         row("usage cap", f"{_tok(st['billable_tokens_mtd'])} of {_tok(b['monthly_tokens'])} tokens  ·  "
-                         f"{_c(verdict.upper() if st['verdict_basis'] == 'tokens' else 'tracking', vcolor if st['verdict_basis'] == 'tokens' else _DIM)}"
+                         f"{_c(m_verdict.upper() if on_tokens else 'tracking', m_color if on_tokens else _DIM)}"
                          f" ({st['billable_tokens_mtd']/b['monthly_tokens']*100:.0f}%)")
     if not mode:
         row("budget", _c("not set · run `nable ai-budget` to set one", _DIM))
