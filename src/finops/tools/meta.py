@@ -344,43 +344,10 @@ async def compare_providers(
         - "Compare our SaaS tool spending"
         - "How does AWS compare to Azure and GCP?"
     """
-    from ..demo_data import (
-        is_demo, _PROVIDER_SERVICES, _DEMO_PROVIDERS, _DEMO_PROVIDER_CATEGORY,
-    )
+    from ..demo_data import compare_providers as _demo_compare, is_demo
     if is_demo():
-        want = None
-        if category == "cloud":
-            want = {"cloud"}
-        elif category == "saas":
-            want = {"saas", "llm"}
-        provs = [p for p in _DEMO_PROVIDERS
-                 if want is None or _DEMO_PROVIDER_CATEGORY.get(p) in want]
-        rows: list[dict] = []
-        grand = 0.0
-        for p in provs:
-            svcs = _PROVIDER_SERVICES[p]
-            total = round(sum(s["amount"] for s in svcs), 2)
-            grand += total
-            rows.append({
-                "provider": p,
-                "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud"),
-                "total_usd": total,
-                "total_formatted": _srv._fmt_usd(total),
-                "top_services": [
-                    {"service": s["service"], "amount_usd": round(s["amount"], 2)}
-                    for s in sorted(svcs, key=lambda x: -x["amount"])[:5]
-                ],
-            })
-        for r in rows:
-            r["pct_of_total"] = round(r["total_usd"] / grand * 100, 1) if grand else 0
-        rows.sort(key=lambda x: -x["total_usd"])
-        return {
-            "period": {"start": _srv._default_dates()[0].isoformat(),
-                       "end": _srv._default_dates()[1].isoformat()},
-            "grand_total_usd": round(grand, 2),
-            "grand_total_formatted": _srv._fmt_usd(grand),
-            "providers": rows,
-        }
+        return _demo_compare({"category": category, "start_date": start_date,
+                              "end_date": end_date})
 
     sd, ed = _srv._default_dates()
     if start_date:

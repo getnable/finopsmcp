@@ -36,7 +36,9 @@ async def get_cost_summary(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_cost_summary") or {}
+        return get_demo_response("get_cost_summary", {
+            "provider": provider, "category": category,
+            "start_date": start_date, "end_date": end_date}) or {}
 
     sd, ed = _srv._default_dates()
     if start_date:
@@ -1918,7 +1920,8 @@ async def explain_recent_cost_drivers(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("explain_recent_cost_drivers") or {}
+        return get_demo_response("explain_recent_cost_drivers",
+                                 {"days": days, "top_n": top_n}) or {}
     try:
         today = _srv.date.today()
         period_end = today

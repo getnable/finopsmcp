@@ -77,7 +77,8 @@ async def get_llm_costs(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_llm_costs") or {}
+        return get_demo_response("get_llm_costs", {
+            "days": days, "start_date": start_date, "end_date": end_date}) or {}
     try:
         from datetime import date as _date
         sd = _date.fromisoformat(start_date) if start_date else None
@@ -358,7 +359,8 @@ async def get_llm_cost_by_model(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_llm_cost_by_model") or {}
+        return get_demo_response("get_llm_cost_by_model",
+                                 {"days": days, "provider": provider}) or {}
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
@@ -620,7 +622,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         # demonstrates (routing + caching levers, dollar savings), no creds.
         from ..demo_data import llm_costs as _demo_llm, bedrock_split as _demo_split
         from ..analytics.ai_optimizer import build_optimization_plan
-        plan = build_optimization_plan(_demo_llm(), days=days, bedrock_split=_demo_split())
+        plan = build_optimization_plan(_demo_llm({"days": days}), days=days,
+                                       bedrock_split=_demo_split())
         plan["_demo_mode"] = True
         return plan
     try:

@@ -448,17 +448,22 @@ def _instrumented_tool(*dargs, **dkwargs):
             #
             # Per-tool is_demo() branches were the alternative and are how this
             # happened: 60-odd tools, each needing to remember, and four did not.
+            #
+            # The demo answer replaces the tool call, not the rest of this
+            # wrapper: the first-answer directive and the connect hint below
+            # apply to it like to any other answer.
             _was_demo = False
+            _demo = None
             try:
                 from .demo_data import demo_bridge_result, is_demo
                 if is_demo():
                     _was_demo = True
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
-                        from .demo_data import label_demo
-                        return label_demo(_demo_as_declared(fn, _demo))
+                        _demo = _demo_as_declared(fn, _demo)
             except Exception as _exc:   # never let the guard break a real call
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
+                _demo = None
 
             try:
                 # Tools may be sync or async. A sync tool runs on a worker
@@ -473,7 +478,9 @@ def _instrumented_tool(*dargs, **dkwargs):
                 # Only await coroutines/awaitables, otherwise sync tools
                 # (whoami, *_api_key) raise "object dict can't be used in
                 # 'await' expression".
-                if _is_coroutine_tool:
+                if _demo is not None:
+                    result = _demo
+                elif _is_coroutine_tool:
                     result = await fn(*args, **kwargs)
                 else:
                     global _TOOL_LOOP

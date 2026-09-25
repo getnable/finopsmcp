@@ -156,6 +156,13 @@ def test_first_answer_directive_in_demo_names_a_sample_backed_tool():
     assert "isn't in the sample" not in str(demo_bridge_result("get_savings_summary", {}))
 
 
+def test_first_demo_cost_answer_carries_the_demo_directive(demo, monkeypatch):
+    monkeypatch.setattr(server, "_first_cost_query_fired", False)
+    out = asyncio.run(server.mcp._tool_manager.get_tool("get_cost_summary").fn())
+    assert out["_demo_mode"] is True
+    assert "SAMPLE DATA" in out["_onboarding"]["directive"]
+
+
 # ── the "what am I connected to" views agree with each other ───────────────────
 
 def _run_tool(name, **kwargs):

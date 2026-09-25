@@ -36,7 +36,8 @@ def get_anomalies(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_anomalies") or {}
+        return get_demo_response("get_anomalies", {
+            "provider": provider, "severity": severity, "limit": limit}) or {}
 
     from ..anomaly.detector import (
         get_active_anomalies, has_enough_history, history_is_stale, latest_snapshot_date,
