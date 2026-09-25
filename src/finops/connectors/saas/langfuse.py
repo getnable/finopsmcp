@@ -9,6 +9,7 @@ Required env vars:
 
 What this provides:
   • Total LLM spend broken down by model
+  • Spend by trace tag, user id and session id (get_cost_attribution)
   • Daily token usage (input / output / total)
   • Trace and observation counts (volume signals)
   • Per-model cost efficiency (cost per 1k tokens)
@@ -272,3 +273,149 @@ class LangfuseConnector(BaseConnector):
             "total_observations": total_observations,
             "daily": sorted(daily, key=lambda x: x["date"]),
         }
+
+
+# ── Cost attribution: spend by trace tag, user or session ────────────────────
+# The Metrics API sums totalCost grouped by one dimension. The v2 endpoint
+# (/api/public/v2/metrics, observations view) groups by `tags` but rejects the
+# high-cardinality userId and sessionId as grouping dimensions; the v1 endpoint
+# (/api/public/metrics, traces view) groups by all three. v1 is deprecated on
+# Langfuse Cloud and absent from Langfuse v4, so tags try v2 first and user
+# and session need v1.
+_ROW_LIMIT = 1000
+_V2_METRICS = "/api/public/v2/metrics"
+_V1_METRICS = "/api/public/metrics"
+_FIELDS = {"tag": "tags", "user": "userId", "session": "sessionId"}
+_UNASSIGNED = {"tag": "(untagged)", "user": "(no user id)", "session": "(no session id)"}
+_NOT_AVAILABLE = {
+    "project": ("A Langfuse key is scoped to one project, so it cannot split spend across "
+                "projects. Tag traces with the product area and use dimension='tag'."),
+    "workspace": "Langfuse has no workspace field. Tag traces and use dimension='tag'.",
+    "api_key": "Langfuse traces do not record which provider API key served them.",  # pragma: allowlist secret
+    "team": ("Langfuse traces have no team field. Put the team in a trace tag and use "
+             "dimension='tag'."),
+}
+
+
+class _MetricsUnavailable(RuntimeError):
+    """The server has no such metrics endpoint (404/405/410)."""
+
+
+def _metrics_rows(host: str, auth: str, path: str, view: str, field: str,
+                  start_date: date, end_date: date) -> list[dict[str, Any]]:
+    import json
+
+    query = {
+        "view": view,
+        "dimensions": [{"field": field}],
+        "metrics": [{"measure": "totalCost", "aggregation": "sum"}],
+        "filters": [],
+        "fromTimestamp": f"{start_date.isoformat()}T00:00:00Z",
+        "toTimestamp": f"{(end_date + timedelta(days=1)).isoformat()}T00:00:00Z",
+        "orderBy": [{"field": "sum_totalCost", "direction": "desc"}],
+        "config": {"row_limit": _ROW_LIMIT},
+    }
+    resp = httpx.get(f"{host}{path}", params={"query": json.dumps(query)},
+                     headers={"Authorization": auth, "Accept": "application/json"},
+                     timeout=30)
+    if resp.status_code in (404, 405, 410):
+        raise _MetricsUnavailable(f"{path} answered {resp.status_code}")
+    resp.raise_for_status()
+    data = resp.json() or {}
+    return data.get("data", []) if isinstance(data, dict) else []
+
+
+def _row_cost(row: dict[str, Any]) -> float | None:
+    """totalCost of one metrics row, or None when it cannot be read. A null sum
+    is Langfuse's own zero (no priced generations); garbage is not a $0."""
+    # Rows name each metric "<aggregation>_<measure>"; accept the reverse too.
+    raw = row.get("sum_totalCost", row.get("totalCost_sum"))
+    if raw is None:
+        return 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> dict[str, Any]:
+    """
+    Langfuse-observed LLM spend for [start_date, end_date] split by trace tag,
+    user id or session id, in the shared attribution shape (_attribution.py).
+
+    Spend is Langfuse's own cost calculation for the generations it traced
+    (source="api"), not a provider invoice. A trace with several tags counts
+    under each tag (groups_overlap); total_usd is the traced spend itself.
+    """
+    from ...security.env import get_env
+    from ._attribution import groups_result, unread, unsupported
+
+    if dimension in _NOT_AVAILABLE:
+        return unsupported(_NOT_AVAILABLE[dimension])
+    if dimension not in _FIELDS:
+        return unsupported(f"Langfuse cannot attribute cost by '{dimension}'.")
+    public, secret = get_env("LANGFUSE_PUBLIC_KEY"), get_env("LANGFUSE_SECRET_KEY")
+    if not (public and secret):
+        return unread("not_configured")
+    host = (get_env("LANGFUSE_HOST") or "https://cloud.langfuse.com").rstrip("/")
+    auth = "Basic " + b64encode(f"{public}:{secret}".encode()).decode()
+    field = _FIELDS[dimension]
+
+    try:
+        if dimension == "tag":
+            try:
+                rows = _metrics_rows(host, auth, _V2_METRICS, "observations", field,
+                                     start_date, end_date)
+            except _MetricsUnavailable:
+                rows = _metrics_rows(host, auth, _V1_METRICS, "traces", field,
+                                     start_date, end_date)
+        else:
+            rows = _metrics_rows(host, auth, _V1_METRICS, "traces", field,
+                                 start_date, end_date)
+    except _MetricsUnavailable:
+        if dimension == "tag":
+            return unread("endpoint_missing", "This Langfuse server has no metrics API.")
+        return unsupported(
+            f"This Langfuse server has no v1 metrics endpoint (removed in Langfuse v4), "
+            f"and the v2 metrics API does not group by {field}.")
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (401, 403):
+            return unread("credential_invalid",
+                          f"Langfuse refused LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY ({e}).",
+                          source="error")
+        return unread("api_error", str(e))
+
+    sums: dict[str | None, float] = {}
+    traced = 0.0
+    unreadable = 0
+    for row in rows:
+        cost = _row_cost(row)
+        if cost is None:
+            unreadable += 1
+            continue
+        traced += cost
+        value = row.get(field)
+        if dimension == "tag":
+            tags = [value] if isinstance(value, str) and value else list(value or [])
+            for tag in tags or [None]:
+                sums[tag] = sums.get(tag, 0.0) + cost
+        else:
+            sums[value or None] = sums.get(value or None, 0.0) + cost
+
+    note = "Spend as Langfuse calculates it for traced generations, not the provider invoice."
+    overlap = dimension == "tag"
+    if overlap:
+        note += (" A trace with several tags counts under each tag, so tag rows can add up "
+                 "to more than total_usd.")
+    out = groups_result(sums, source="api", unassigned=_UNASSIGNED[dimension],
+                        note=note, groups_overlap=overlap)
+    out["total_usd"] = round(traced, 4)
+    if len(rows) >= _ROW_LIMIT:
+        out["truncated"] = True
+        out["note"] += (f" Langfuse returned its {_ROW_LIMIT}-row maximum, so the smallest "
+                        f"groups and their spend are missing.")
+    if unreadable:
+        out["unreadable_rows"] = unreadable
+        out["note"] += f" {unreadable} row(s) had no readable cost and are excluded."
+    return out
