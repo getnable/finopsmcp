@@ -54,8 +54,9 @@ RDS = "aws rds create-db-instance --db-instance-identifier orders --engine postg
 
 
 def test_rds_is_priced_from_the_rds_table():
+    # PostgreSQL's own rate, not MySQL's 0.24 (aws_prices.RDS_HOURLY_POSTGRES)
     est = g.estimate_command_monthly_cost(f"{RDS} --db-instance-class db.r5.large")
-    assert est["monthly_usd"] == pytest.approx(0.24 * 730)
+    assert est["monthly_usd"] == pytest.approx(0.25 * 730)
     assert "list price" in est["basis"] and "storage" in est["basis"], \
         "the basis must say storage is not in the figure"
 
@@ -73,7 +74,7 @@ def test_multi_az_doubles_the_instance_hours():
 def test_an_expensive_database_asks_with_the_number():
     v = g.gate_command(f"{RDS} --db-instance-class db.r5.4xlarge --multi-az")
     assert v and v["decision"] == "ask"
-    assert "$2,803" in v["reason"]
+    assert "$2,920" in v["reason"]          # PostgreSQL: $2.00/hr x2 x 730
     assert v["estimate"]["basis"] in v["reason"]
 
 
@@ -106,7 +107,7 @@ def test_a_savings_plan_states_the_commitment_for_both_terms():
     assert "$87,600 over a 1-year term" in v["reason"]
     assert "$262,800 over 3 years" in v["reason"]
     assert "offering id" in v["reason"], "the basis must say why the term is not known"
-    assert "one-way door" in v["reason"]
+    assert "This would buy a commitment" in v["reason"] and "cannot be cancelled" in v["reason"]
 
 
 def test_a_savings_plan_upfront_amount_is_named():
@@ -383,3 +384,44 @@ def test_the_plan_read_does_not_get_the_vault(fake_tf, monkeypatch):
     (fake_tf["work"] / "plan.out").write_bytes(b"x")
     g.estimate_command_monthly_cost("terraform apply plan.out", cwd=str(fake_tf["work"]))
     assert "env" in seen, "terraform show ran without child_env()"
+
+
+def test_no_binary_asks_to_review_the_plan(fake_tf, monkeypatch):
+    """A plan the guard cannot read is a plan nobody checked: it may hold a
+    destroy or a GPU fleet. That used to pass silently."""
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))       # nothing runnable
+    v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask"
+    assert ("could not read saved plan plan.out (terraform is not on PATH); "
+            "review it before applying") in v["reason"]
+
+
+def test_a_slow_show_asks_to_review_the_plan(fake_tf, monkeypatch):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("FAKE_TF_SLEEP", "3")
+    monkeypatch.setattr(g, "_PLAN_SHOW_TIMEOUT_S", 0.3)
+    v = g.gate_command("tofu apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask"
+    assert "could not read saved plan plan.out (`tofu show -json` took longer than 0.3 s)" \
+        in v["reason"]
+
+
+def test_a_failing_show_asks_to_review_the_plan(fake_tf):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    fake_tf["plan_json"].write_text("not json")
+    v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask" and "could not read saved plan plan.out" in v["reason"]
+
+
+def test_a_plan_file_named_destroy_is_read_like_any_other(fake_tf):
+    (fake_tf["work"] / "destroy.tfplan").write_bytes(b"x")
+    est = g.estimate_command_monthly_cost("terraform apply destroy.tfplan",
+                                          cwd=str(fake_tf["work"]))
+    assert est and est["plan"] == "destroy.tfplan"
+
+
+@pytest.mark.parametrize("cmd", ["terraform apply", "terraform apply missing.out"])
+def test_no_plan_file_still_means_no_question(fake_tf, monkeypatch, cmd):
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))
+    assert g.gate_command(cmd, cwd=str(fake_tf["work"]), record=False) is None

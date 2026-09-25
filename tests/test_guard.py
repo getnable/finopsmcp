@@ -90,7 +90,7 @@ def test_one_way_asks(monkeypatch):
     monkeypatch.delenv("FINOPS_GUARD_STRICT", raising=False)
     v = g.gate_command("terraform destroy")
     assert v["decision"] == "ask"
-    assert "one-way" in v["reason"]
+    assert "cannot be undone" in v["reason"] and v["door"] == "one_way"
 
 
 def test_reversible_silent_by_default(monkeypatch):
@@ -311,7 +311,7 @@ def test_guard_try_shows_all_four_beats(capsys, monkeypatch):
     assert "nothing is executed" in out
     assert out.count("stays silent") >= 2, "the zero-friction beats are missing"
     assert "$128,233" in out, "the expensive-launch beat is missing"
-    assert "one-way door" in out, "the irreversibility beat is missing"
+    assert "It cannot be undone; confirm to proceed." in out, "the irreversibility beat is missing"
     assert "nable guard install" in out, "the tryout must end at the install step"
     assert "nable setup" not in out
 

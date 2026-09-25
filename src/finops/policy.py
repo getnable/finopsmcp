@@ -33,6 +33,16 @@ ONE_WAY_DOORS = {
     "release_ip", "purchase_commitment", "snapshot_delete",
 }
 
+# How a one-way action reads in a sentence, for the escalation reason.
+_ONE_WAY_WHAT = {
+    "idle_cleanup": "Cleaning up an idle resource",
+    "delete_resource": "Deleting a resource",
+    "terminate_instance": "Terminating an instance",
+    "release_ip": "Releasing an IP address",
+    "purchase_commitment": "Buying a commitment",
+    "snapshot_delete": "Deleting a snapshot",
+}
+
 DEFAULT_POLICY: dict[str, Any] = {
     "allowed_action_types": sorted(TWO_WAY_DOORS),  # reversible actions that are in-policy
     "max_auto_monthly_usd": 500.0,                  # a cost increase above this escalates
@@ -181,9 +191,13 @@ def evaluate_action_gate(
     # ---- Static policy (the floor of caution) ----
     if door == "one_way" and pol.get("escalate_one_way_doors", True):
         # One-way doors always escalate (irreversible or a financial commitment).
+        # The reason is for a human: what the action does, in words, not the
+        # policy's own vocabulary (action_type and door carry that).
         out["gate"] = GATE_ESCALATE
-        out["reason"] = (f"'{action_type}' is a one-way door (irreversible or a financial "
-                         "commitment); a human must review and apply it.")
+        what = _ONE_WAY_WHAT.get(action_type, "This action")
+        out["reason"] = (f"{what} cannot be "
+                         f"{'cancelled' if action_type == 'purchase_commitment' else 'undone'},"
+                         " so a human must confirm it before it is applied.")
     elif action_type not in set(pol.get("allowed_action_types", [])):
         # Not in the human's allowlist -> block.
         out["gate"] = GATE_BLOCK

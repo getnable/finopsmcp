@@ -199,7 +199,7 @@ def test_the_reason_says_what_the_call_amounts_to():
     v = g.gate_mcp_call("mcp__terraform__create_run",
                         {"workspace_name": "net", "run_type": "is_destroy"})
     assert "would start a destroy run on HCP Terraform workspace net" in v["reason"]
-    assert "one-way door" in v["reason"]
+    assert "It cannot be undone; confirm to proceed." in v["reason"]
 
 
 @pytest.mark.parametrize("tool,args,says", [

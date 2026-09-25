@@ -63,7 +63,7 @@ def test_an_ask_is_recorded_with_its_classification():
     assert (r["door"], r["action_type"]) == ("one_way", "delete_resource")
     assert (r["harness"], r["tool"]) == ("claude-code", "Bash")
     assert r["command"] == "terraform destroy -auto-approve"
-    assert "one-way door" in r["reason"]
+    assert "This would destroy infrastructure" in r["reason"]
     assert r["policy_version"] and r["nable_version"]
     assert r["ts"].endswith("+00:00")
 

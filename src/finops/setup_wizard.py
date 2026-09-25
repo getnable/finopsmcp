@@ -2433,6 +2433,8 @@ def _run_guard(parsed) -> None:
         # pulls the newest PyPI release on every agent tool call?
         # install() pins it in place; this counts how many it reached.
         was_unpinned = bool(guard.unpinned_hook_command(guard._settings_path(global_scope)))
+        # Or pinned to another release: install moves the pin to this one.
+        pinned_elsewhere = guard.pinned_elsewhere_hook_command(guard._settings_path(global_scope))
         try:
             path = guard.install(global_scope)
         except OSError as e:
@@ -2448,7 +2450,7 @@ def _run_guard(parsed) -> None:
         # commands, no cost data. Honors NABLE_NO_TELEMETRY like everything else.
         _fire_telemetry("guard_installed", {
             "scope": scope,
-            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned
+            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned or pinned_elsewhere
                         else ("already" if already else "new")),
             "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
         })
@@ -2458,6 +2460,10 @@ def _run_guard(parsed) -> None:
         elif was_unpinned:
             print(f"  {green('✓')} Guard pinned to finops-mcp=={guard.__version__} → {path}")
             print(dim("    It used to fetch the newest PyPI release on every agent command."))
+        elif pinned_elsewhere:
+            print(f"  {green('✓')} Guard re-pinned from "
+                  f"finops-mcp=={guard.hook_release(pinned_elsewhere) or 'another release'} "
+                  f"to finops-mcp=={guard.__version__} → {path}")
         elif already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
@@ -2523,8 +2529,12 @@ def _run_guard(parsed) -> None:
                 else:
                     print(f"    {green('allow')}  not an infra-mutating command: the guard stays silent")
             print()
-        print("  Wire this into Claude Code so it runs on every agent command:")
-        print(f"    {cyan('nable guard install')}")
+        if any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
+            print("  The guard is already installed in Claude Code, so it runs on every")
+            print(f"  agent command. {dim('nable guard status')} shows where.")
+        else:
+            print("  Wire this into Claude Code so it runs on every agent command:")
+            print(f"    {cyan('nable guard install')}")
         print()
         return
 
@@ -2583,16 +2593,18 @@ def _run_guard(parsed) -> None:
     if action == "check":
         cmd = getattr(parsed, "guard_command", "")
         if not cmd:
-            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n")
-            return
+            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n",
+                  file=sys.stderr)
+            raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
             if hit:
-                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy) — the guard stays silent")
+                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy): "
+                      "the guard stays silent")
             else:
-                print(f"  {green('allow')}  not an infra-mutating command — the guard stays silent")
+                print(f"  {green('allow')}  not an infra-mutating command: the guard stays silent")
         else:
             print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
         print()
@@ -2602,6 +2614,7 @@ def _run_guard(parsed) -> None:
     print()
     stale: list[bool] = []
     unpinned: list[bool] = []
+    elsewhere: list[tuple[bool, str]] = []
     narrow: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
@@ -2617,6 +2630,10 @@ def _run_guard(parsed) -> None:
             elif guard.unpinned_hook_command(p):
                 unpinned.append(is_global)
                 state = amber("installed, unpinned")
+            elif guard.pinned_elsewhere_hook_command(p):
+                release = guard.hook_release(guard.pinned_elsewhere_hook_command(p) or "")
+                elsewhere.append((is_global, release or "another release"))
+                state = amber(f"installed, pinned to {release or 'another release'}")
             elif not guard.hook_surfaces(p)["mcp"]:
                 narrow.append(is_global)
                 state = amber("installed, Bash only")
@@ -2648,6 +2665,11 @@ def _run_guard(parsed) -> None:
         print(f"  {amber('The hook fetches the newest finops-mcp from PyPI on every agent command.')}")
         print(dim("  A security hook should run the release you chose. Pin it in place:"))
         _fix(unpinned)
+    if elsewhere:
+        runs = ", ".join(sorted({r for _, r in elsewhere}))
+        print(f"  {amber(f'The hook runs finops-mcp {runs}, not this one ({guard.__version__}).')}")
+        print(dim("  Re-pin it to this release in place:"))
+        _fix([is_global for is_global, _ in elsewhere])
     if narrow:
         print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
         print(dim("  The hook only sees Bash. Widen it in place:"))

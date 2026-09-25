@@ -80,14 +80,22 @@ from .policy import (
 # policy.py. Over-matching is tolerable (worst case an unnecessary confirm);
 # missing a one-way door is not, so patterns are deliberately broad.
 
+# The end of a verb or flag: whitespace, the end, or a shell operator right
+# after it (`terraform destroy;echo`), never more word (destroy.tfplan).
+_END = r"(?![^\s;&|)`])"
+
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
-    (r"\bterraform\s+(?:\S+\s+)*destroy\b", "delete_resource"),
-    (r"\btofu\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # `destroy` must end the word: a plan file called destroy.tfplan is a
+    # file name, and `terraform apply destroy.tfplan` goes to the saved-plan
+    # reader like any other apply. `-out destroy` names a file too.
+    (rf"\bterraform\s+(?:\S+\s+)*destroy(?<!-out destroy){_END}", "delete_resource"),
+    (rf"\btofu\s+(?:\S+\s+)*destroy(?<!-out destroy){_END}", "delete_resource"),
     # Terragrunt wraps terraform and fans out: `terragrunt run-all destroy` (or
     # `run --all destroy`, or the older `destroy-all`) tears down every module
     # under the directory in one command. It had no pattern at all, so the
     # widest destroy in the toolchain was the one the guard could not see.
-    (r"\bterragrunt\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    (rf"\bterragrunt\s+(?:\S+\s+)*destroy(?<!-out destroy)(?:-all)?{_END}",
+     "delete_resource"),
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
@@ -96,26 +104,57 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
     # pattern below would otherwise wave through as a reversible mutation.
     ("tf-cli-args-destroy", "delete_resource"),
-    (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # A workspace delete drops the workspace's state: whatever it managed is
+    # orphaned, still running and still billed, with nothing left to destroy it.
+    (rf"\b(?:terraform|tofu)\s+(?:\S+\s+)*workspace\s+delete{_END}", "delete_resource"),
+    # `pulumi down` is pulumi's own alias for destroy.
+    (rf"\bpulumi\s+(?:\S+\s+)*(?:destroy|down){_END}", "delete_resource"),
+    # The rest of the IaC toolchain: AWS CDK (also as `npx cdk`), SAM, doctl.
+    (rf"\bcdk\s+(?:\S+\s+)*destroy{_END}", "delete_resource"),
+    (rf"\bsam\s+(?:\S+\s+)*delete{_END}", "delete_resource"),
+    (rf"\bdoctl\s+(?:\S+\s+)*(?:delete|rm){_END}", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
     # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
     (r"\baws\s+s3\s+r[mb]\b", "delete_resource"),
+    # `aws s3 sync --delete` removes whatever the source does not have: synced
+    # from an empty directory, it empties the bucket.
+    ("s3-sync-delete", "delete_resource"),
     # Anchored at a token start, not \b: `-gsutil -gsutil ...` would otherwise
     # give every token a start and every start the whole run to scan.
     (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
-    (r"\bhelm\s+(?:uninstall|delete)\b", "delete_resource"),
-    (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
+    # Helm's own aliases for uninstall are del, delete and un; flags such as
+    # `-n prod` may come first.
+    (rf"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un){_END}", "delete_resource"),
+    (rf"\bkubectl\s+(?:\S+\s+)*delete{_END}", "delete_resource"),
+    # `kubectl drain` evicts every pod on the node; `replace --force` deletes
+    # the object and creates it again, dropping whatever the old one held.
+    (rf"\bkubectl\s+(?:\S+\s+)*drain{_END}", "delete_resource"),
+    ("kubectl-replace-force", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
+    ("spot-fleet-terminate", "terminate_instance"),
     (r"\baws\s+ec2\s+release-address\b", "release_ip"),
     (r"\baws\s+ec2\s+delete-snapshot\b", "snapshot_delete"),
     (r"\baws\s+(?:savingsplans\s+create-savings-plan|"
      r"ec2\s+purchase-reserved-instances-offering|"
      r"ec2\s+purchase-host-reservation|"
      r"rds\s+purchase-reserved-db-instances-offering)", "purchase_commitment"),
-    (r"\baws\s+\S+\s+delete-[a-z0-9-]+", "delete_resource"),
+    # delete-*, and the batch forms (ecr batch-delete-image, dynamodb
+    # batch-delete-item) that delete many at once.
+    (r"\baws\s+\S+\s+(?:batch-)?delete-[a-z0-9-]+", "delete_resource"),
+    # Deletes AWS does not spell delete-*: a KMS key scheduled for deletion
+    # takes every byte encrypted under it along, an AMI deregistered cannot be
+    # launched again, a closed account is gone with everything in it.
+    (r"\baws\s+kms\s+schedule-key-deletion\b", "delete_resource"),
+    (r"\baws\s+\S+\s+deregister-[a-z0-9-]+", "delete_resource"),
+    (r"\baws\s+organizations\s+close-account\b", "delete_resource"),
     (r"\bgcloud\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baz\s+(?:\S+\s+)*delete\b", "delete_resource"),
+    # Heuristics. These cannot see what will actually run, so they only ever
+    # ask: a Python one-liner that imports boto3 and calls a delete or a
+    # terminate, and a base64 payload decoded straight into a shell.
+    ("python-boto3-delete", "delete_resource"),
+    ("base64-to-shell", "delete_resource"),
 ]
 
 _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
@@ -123,8 +162,8 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
-    (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
-    (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
+    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade){_END}", "infra_apply"),
+    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale){_END}", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
@@ -133,23 +172,35 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
+    # Changes that resize what is already running, or launch capacity by other
+    # verbs than run-instances. Reversible, but a class change to
+    # db.r6g.16xlarge or a desired capacity of 100 is a bill like any launch.
+    ("rds-class-change", "infra_apply"),
+    ("ec2-type-change", "infra_apply"),
+    (rf"\baws\s+ec2\s+(?:request-spot-instances|request-spot-fleet|create-fleet){_END}",
+     "infra_apply"),
+    (rf"\baws\s+autoscaling\s+(?:set-desired-capacity|create-auto-scaling-group){_END}",
+     "infra_apply"),
+    ("asg-capacity-change", "infra_apply"),
+    (rf"\baws\s+eks\s+create-nodegroup{_END}", "infra_apply"),
+    ("eks-nodegroup-scaling", "infra_apply"),
     (r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b", "infra_apply"),
     (r"\baz\s+(?:\S+\s+)*vm\s+create\b", "infra_apply"),
 ]
 
 
-# AWS global options sit between `aws` and the service name, so
-# `aws --profile prod ec2 terminate-instances` does not match a pattern anchored
-# on `aws\s+ec2`. Every aws entry in the tables above was anchored that way,
-# while the gcloud, az and kubectl entries already allowed intervening tokens.
-# The result: adding --profile, --region, --output, --no-cli-pager or an
-# --endpoint-url to a terminate, a bucket wipe or a commitment purchase made it
+# AWS global options may sit anywhere in an aws command: between `aws` and the
+# service name (`aws --profile prod ec2 terminate-instances`) or after it
+# (`aws ec2 --region us-west-2 terminate-instances`). The aws entries in the
+# tables above are anchored on `aws\s+ec2\s+terminate-instances`, so either
+# placement used to make a terminate, a bucket wipe or a commitment purchase
 # invisible to the guard, and the hook stayed silent on a one-way door. A
 # profile flag is not an exotic input; it is what anyone with more than one
 # account types by default.
 #
-# Rather than widen eight patterns (and every future one) this strips the global
-# options first, so the tables stay readable and a new aws rule cannot forget.
+# Rather than widen every pattern (and every future one) this strips the global
+# options from each aws command first, so the tables stay readable and a new
+# aws rule cannot forget.
 #
 # Matched from an explicit list rather than "any token": `(?:\S+\s+)*` would also
 # swallow a service name, so `aws s3 ls` could be read as a later verb's
@@ -164,20 +215,119 @@ _AWS_GLOBAL_BOOLEAN = (
     "debug|no-verify-ssl|no-paginate|no-sign-request|no-cli-pager|"
     "cli-auto-prompt|no-cli-auto-prompt"
 )
-_AWS_GLOBAL_OPTS_RE = re.compile(
-    r"\b(aws)\s+(?:"
-    rf"(?:--(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S+|\s+\S+))"
-    rf"|(?:--(?:{_AWS_GLOBAL_BOOLEAN}))"
-    r")(?:\s+(?:"
-    rf"(?:--(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S+|\s+\S+))"
-    rf"|(?:--(?:{_AWS_GLOBAL_BOOLEAN}))"
-    r"))*\s+"
+_AWS_GLOBAL_OPT_RE = re.compile(
+    rf" --(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S*| \S+)(?= |$)"
+    rf"| --(?:{_AWS_GLOBAL_BOOLEAN})(?= |$)"
 )
+# One aws command: from `aws` to the end of its shell segment.
+_AWS_SEGMENT_RE = re.compile(r"\baws [^;&|]*")
 
 
 def _strip_aws_global_options(cmd: str) -> str:
-    """`aws --profile p --region r ec2 terminate-instances` -> `aws ec2 terminate-instances`."""
-    return _AWS_GLOBAL_OPTS_RE.sub(r"\1 ", cmd)
+    """`aws --profile p ec2 --region r terminate-instances` -> `aws ec2 terminate-instances`.
+
+    Expects whitespace already collapsed to single spaces (see _normalize).
+    Each aws segment is scanned once, so this stays linear however many
+    there are."""
+    if "--" not in cmd:
+        return cmd
+    return _AWS_SEGMENT_RE.sub(lambda m: _AWS_GLOBAL_OPT_RE.sub("", m.group(0)), cmd)
+
+
+# The programs the tables above name. A case-insensitive filesystem (macOS's
+# default, Windows) runs `TERRAFORM destroy` as terraform, so the program name
+# is matched without regard to case; the verb after it is not, because the
+# program itself rejects `terraform DESTROY`.
+_PROGRAMS = ("aws|kubectl|terraform|tofu|terragrunt|helm|pulumi|gcloud|az|cdk|sam|doctl|"
+             "eksctl|gsutil|base64|python3?")
+_PROGRAM_RE = re.compile(rf"(?:{_PROGRAMS})(?![\w.-])")
+
+
+def _lower_programs(cmd: str) -> str:
+    """`TERRAFORM destroy` -> `terraform destroy`; every other word as written.
+
+    Program names are found in a lowercased copy (one case-sensitive scan,
+    much cheaper than an IGNORECASE one) and copied back where they differ."""
+    low = cmd.lower()
+    if low == cmd or len(low) != len(cmd):
+        return cmd
+    out, last = [], 0
+    for m in _PROGRAM_RE.finditer(low):
+        a, b = m.span()
+        if (a == 0 or not (low[a - 1].isalnum() or low[a - 1] in "_.-")) and cmd[a:b] != low[a:b]:
+            out += (cmd[last:a], low[a:b])
+            last = b
+    return "".join(out) + cmd[last:] if out else cmd
+
+# `alias tf=terraform; tf destroy`: an alias defined on the same line is
+# expanded where it is used later on that line. Only the first few aliases are
+# expanded, so a command made of ten thousand of them stays linear.
+_ALIAS_RE = re.compile(r"alias(?<![\w-]alias) ([\w.-]+)=([^\s;&|]+)")
+_ALIAS_MAX = 4
+
+
+def _expand_aliases(cmd: str) -> str:
+    if "alias " not in cmd:
+        return cmd
+    pos = 0
+    for _ in range(_ALIAS_MAX):
+        m = _ALIAS_RE.search(cmd, pos)
+        if m is None:
+            break
+        name, value = m.group(1), m.group(2)
+        esc = re.escape(name)
+        use = re.compile(rf"{esc}(?<![\w/.=-]{esc})(?![\w.=-])")
+        cmd = cmd[:m.end()] + use.sub(lambda _m, v=value: v, cmd[m.end():])
+        pos = m.end()
+    return cmd
+
+
+# Programs whose quoted arguments are data, not commands: a commit message or
+# a search pattern that mentions `terraform destroy` asked the human to
+# confirm a destroy nobody was running, and a guard that cries wolf on every
+# docs commit gets uninstalled. `bash -c`, `sh -c` and `eval` are not here:
+# their quoted argument is a command.
+_DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git)(?![\w.-])")
+_DATA_SEGMENT_RE = re.compile(
+    r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
+    r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
+    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S))")
+# A quoted string (single, or double with escapes) or a shell operator.
+_QUOTE_OR_OP_RE = re.compile(r"'[^']*+'|\"(?:[^\"\\]++|\\.)*+\"|&&|\|\||[;&|\n]")
+# Data that is then run: `printf "terraform destroy" | sh`, `| xargs ...`,
+# `$(...)`, backticks. Masking is off for the whole command when any of these
+# appears; over-matching is the safe side.
+_RUNS_DATA_RE = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:\S*/)?(?:(?:ba|z|da|k)?sh|xargs|source|eval|\.)(?!\S)|\$\(|`|<\(")
+_MASK_MAX_TOKENS = 20_000
+
+
+def _mask_quoted_data(command: str) -> str:
+    """`git commit -m "docs: terraform destroy"` -> `git commit -m ""`.
+
+    Quoted arguments of echo, printf, grep, rg, ag and `git commit|tag` are
+    blanked, one shell segment at a time, so what follows a `;` or `&&` is
+    still judged. Past _MASK_MAX_TOKENS quotes and operators the command is
+    left as it is: bounded work, and over-matching is the safe side."""
+    if ('"' not in command and "'" not in command) or not _DATA_PROGRAM_RE.search(command) \
+            or _RUNS_DATA_RE.search(command):
+        return command
+    out: list[str] = []
+    last = seg_start = 0
+    data: bool | None = None
+    for n, m in enumerate(_QUOTE_OR_OP_RE.finditer(command)):
+        if n >= _MASK_MAX_TOKENS:
+            return command
+        tok = m.group(0)
+        if tok[0] not in "'\"":
+            seg_start, data = m.end(), None
+            continue
+        if data is None:
+            data = _DATA_SEGMENT_RE.match(command, seg_start, m.start()) is not None
+        if data:
+            out += (command[last:m.start()], '""')
+            last = m.end()
+    return "".join(out) + command[last:] if out else command
 
 
 def _normalize(command: str) -> str:
@@ -188,9 +338,12 @@ def _normalize(command: str) -> str:
     Classification and pricing must read the SAME form: when only the
     classifier stripped AWS global options, `aws --region us-east-1 ec2
     run-instances --instance-type p4d.24xlarge --count 8` classified as a
-    launch, found no price, and passed silently at ~$191k/mo."""
-    cmd = command.replace('"', "").replace("'", "")
+    launch, found no price, and passed silently at six figures a month."""
+    cmd = _mask_quoted_data(command)
+    cmd = cmd.replace('"', "").replace("'", "")
     cmd = " ".join(cmd.split())  # normalize whitespace
+    cmd = _lower_programs(cmd)
+    cmd = _expand_aliases(cmd)
     return _strip_aws_global_options(cmd)
 
 
@@ -209,6 +362,25 @@ def _normalize(command: str) -> str:
 # after the program": one forward scan, no backtracking through the tokens.
 _ANY_TOKENS = r"(?:\S+\s+)*"
 
+# Linear is not the whole budget: every rule scans the command once, and a
+# pattern that opens with an assertion (`\bterraform`, `(?<!\S)destroy`) makes
+# Python's re try every position in turn, about ten times slower than a
+# pattern that opens with its literal word and can skip ahead to it. So the
+# leading assertion is moved behind the word: `\bterraform` is compiled as
+# `terraform(?<=\bterraform)`, which matches exactly the same text.
+_LEADING_ASSERTION_RE = re.compile(
+    r"(\\b|\(\?<!\\S\)|\(\?<!\[[^\]]+\]\))([A-Za-z0-9_]+)(?![*+?{])")
+
+
+def _fast(pattern: str) -> re.Pattern[str]:
+    m = _LEADING_ASSERTION_RE.match(pattern)
+    if m:
+        guard, word = m.groups()
+        behind = (f"(?<=\\b{word})" if guard == "\\b"
+                  else f"{guard[:-1]}{word})")      # (?<!X) -> (?<!Xword)
+        pattern = f"{word}{behind}{pattern[m.end():]}"
+    return re.compile(pattern)
+
 
 class _Rule:
     """A compiled classifier pattern with search() linear in the command.
@@ -220,10 +392,10 @@ class _Rule:
         self.pattern = pattern
         head, sep, tail = pattern.partition(_ANY_TOKENS)
         if sep:
-            self.head: re.Pattern[str] | None = re.compile(head)
-            self.tail = re.compile(r"(?<!\S)" + tail)
+            self.head: re.Pattern[str] | None = _fast(head)
+            self.tail = _fast(r"(?<!\S)" + tail)
         else:
-            self.head, self.tail = None, re.compile(pattern)
+            self.head, self.tail = None, _fast(pattern)
 
     def search(self, cmd: str) -> re.Match[str] | None:
         if self.head is None:
@@ -232,24 +404,29 @@ class _Rule:
         return self.tail.search(cmd, m.end()) if m else None
 
 
-class _ApplyWithDestroyFlag:
-    """`terraform|tofu|terragrunt ... apply ... -destroy` in one shell segment:
-    destroy hidden behind the apply verb. Checked segment by segment, so each
-    character is looked at a bounded number of times."""
+class _VerbWithFlag:
+    """PROGRAM ... VERB ... FLAG within one shell segment, e.g. `terraform
+    apply -destroy` (destroy hidden behind the apply verb) or `aws s3 sync
+    --delete`. Checked segment by segment, so each character is looked at a
+    bounded number of times."""
 
-    pattern = "apply-with-destroy-flag"
-    _tool = re.compile(r"\b(?:terraform|tofu|terragrunt)\s")
-    _apply = re.compile(r"(?<!\S)apply\b")
-    _flag = re.compile(r"\s-destroy\b")
+    def __init__(self, pattern: str, tool: str, verb: str, flag: str,
+                 flag_anywhere: bool = False) -> None:
+        self.pattern = pattern
+        self._tool = _fast(tool)
+        self._verb = _fast(verb)
+        self._flag = _fast(flag)
+        # The flag may also sit between the program and the verb.
+        self._flag_anywhere = flag_anywhere
 
     def search(self, cmd: str) -> re.Match[str] | None:
         for seg in re.split(r"[|;&]", cmd):
             tool = self._tool.search(seg)
             if tool is None:
                 continue
-            apply = self._apply.search(seg, tool.end())
-            if apply is not None:
-                flag = self._flag.search(seg, apply.end())
+            verb = self._verb.search(seg, tool.end())
+            if verb is not None:
+                flag = self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
                 if flag is not None:
                     return flag
         return None
@@ -261,7 +438,7 @@ class _TfCliArgsDestroy:
 
     pattern = "tf-cli-args-destroy"
     _assign = re.compile(r"\bTF_CLI_ARGS(?:_\w+)?=\S*")
-    _flag = re.compile(r"-destroy\b")
+    _flag = re.compile(r"--?destroy\b")
 
     def search(self, cmd: str) -> re.Match[str] | None:
         for m in self._assign.finditer(cmd):
@@ -270,7 +447,58 @@ class _TfCliArgsDestroy:
         return None
 
 
-_SPECIAL_RULES = {r.pattern: r for r in (_ApplyWithDestroyFlag(), _TfCliArgsDestroy())}
+class _PythonBoto3Delete:
+    """`python3 -c "import boto3; ...terminate_instances(...)"`: a one-liner
+    that deletes through the SDK instead of the CLI. A heuristic, so it only
+    ever asks. The code is not one shell segment (it has its own `;`), so the
+    rest of the command after the first `python -c` is what is searched: any
+    later `python -c` is inside that rest already."""
+
+    pattern = "python-boto3-delete"
+    _python = re.compile(r"(?<![\w.-])python(?:3(?:\.\d+)?)?(?: -\S+)*? -c ")
+    _boto3 = re.compile(r"\bboto3\b")
+    _delete = re.compile(r"\b(?:delete|terminate)_\w+|\.(?:delete|terminate)\(")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        py = self._python.search(cmd)
+        if py is None or self._boto3.search(cmd, py.end()) is None:
+            return None
+        return self._delete.search(cmd, py.end())
+
+
+class _Base64ToShell:
+    """`... | base64 -d | sh`: a script decoded straight into a shell, so the
+    guard never sees the command. A heuristic, so it only ever asks."""
+
+    pattern = "base64-to-shell"
+    _decode = re.compile(r"\bbase64 [^;&|]*?(?<!\S)(?:-[A-Za-z]*[dD][A-Za-z]*|--decode)(?!\S)")
+    _to_shell = re.compile(r"\| ?(?:sudo )?(?:\S*/)?(?:sh|bash|zsh|dash|ksh)(?!\S)")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        decode = self._decode.search(cmd)
+        return self._to_shell.search(cmd, decode.end()) if decode else None
+
+
+_SPECIAL_RULES = {r.pattern: r for r in (
+    _VerbWithFlag("apply-with-destroy-flag", r"\b(?:terraform|tofu|terragrunt)\s",
+                  rf"(?<!\S)apply{_END}", rf"\s--?destroy(?:=(?i:1|t|true))?{_END}",
+                  flag_anywhere=True),
+    _VerbWithFlag("s3-sync-delete", rf"\baws\s+s3\s+sync{_END}", r"", rf"\s--delete{_END}"),
+    _VerbWithFlag("kubectl-replace-force", r"\bkubectl\s", rf"(?<!\S)replace{_END}",
+                  rf"\s--force(?:=true)?{_END}", flag_anywhere=True),
+    _VerbWithFlag("spot-fleet-terminate", rf"\baws\s+ec2\s+cancel-spot-fleet-requests{_END}",
+                  r"", rf"\s--terminate-instances{_END}"),
+    _VerbWithFlag("rds-class-change", rf"\baws\s+rds\s+modify-db-instance{_END}", r"",
+                  r"\s--(?:db-instance-class|multi-az)(?![^\s=])"),
+    _VerbWithFlag("ec2-type-change", rf"\baws\s+ec2\s+modify-instance-attribute{_END}", r"",
+                  rf"\s--instance-type(?![^\s=])|\s--attribute[\s=]instanceType{_END}"),
+    _VerbWithFlag("asg-capacity-change",
+                  rf"\baws\s+autoscaling\s+update-auto-scaling-group{_END}", r"",
+                  r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
+    _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
+                  r"", r"\s--scaling-config(?![^\s=])"),
+    _TfCliArgsDestroy(), _PythonBoto3Delete(), _Base64ToShell(),
+)}
 
 
 def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
@@ -301,7 +529,8 @@ def _strict() -> bool:
 
 # ── Command cost estimation ────────────────────────────────────────────────────
 # The gap this closes: `aws ec2 run-instances --instance-type p4d.24xlarge
-# --count 8` (~$191k/mo) classified as a reversible in-policy mutation and the
+# --count 8` (six figures a month at list) classified as a reversible
+# in-policy mutation and the
 # guard stayed silent, while policy.py's dollar threshold sat unreachable
 # because nothing on the shell path ever computed a dollar figure. Reversible
 # is not the same as cheap.
@@ -319,11 +548,22 @@ def _strict() -> bool:
 _ON_DEMAND_BASIS = "on-demand us-east-1 list price"
 
 _RUN_INSTANCES_RE = re.compile(r"\baws\s+ec2\s+run-instances\b")
-_INSTANCE_TYPE_RE = re.compile(r"--instance-type[=\s]+([a-z0-9]+\.[a-z0-9]+)")
+# `--instance-type m5.large`, and the AttributeValue forms
+# modify-instance-attribute takes: `Value=m5.large`, `{"Value": "m5.large"}`.
+_INSTANCE_TYPE_RE = re.compile(
+    r"--instance-type[=\s]+(?:\{?\s*Value\s*[=:]\s*)?([a-z0-9]+\.[a-z0-9]+)")
+# An instance type inside a JSON or shorthand structure (a launch
+# specification, fleet overrides), quotes already stripped.
+_STRUCT_TYPE_RE = re.compile(r"\bInstanceType\s*[=:]\s*([a-z0-9]+\.[a-z0-9]+)")
 # `--count 8` or the min:max form `--count 2:8`; price the max, because the
 # guard's job is the ceiling a human is about to authorise, not the floor.
 _COUNT_RE = re.compile(r"--count[=\s]+(\d+)(?::(\d+))?")
 _RDS_CREATE_RE = re.compile(r"\baws\s+rds\s+create-db-instance\b")
+_RDS_MODIFY_RE = re.compile(r"\baws\s+rds\s+modify-db-instance\b")
+_EC2_MODIFY_RE = re.compile(r"\baws\s+ec2\s+modify-instance-attribute\b")
+_SPOT_RE = re.compile(r"\baws\s+ec2\s+request-spot-instances\b")
+_FLEET_RE = re.compile(r"\baws\s+ec2\s+create-fleet\b")
+_NODEGROUP_CREATE_RE = re.compile(r"\baws\s+eks\s+create-nodegroup\b")
 _SAVINGS_PLAN_RE = re.compile(r"\baws\s+savingsplans\s+create-savings-plan\b")
 _RESERVED_RE = re.compile(r"\baws\s+ec2\s+purchase-reserved-instances-offering\b")
 # JSON ({"Amount": 1200, ...}, quotes already stripped) and shorthand
@@ -333,9 +573,10 @@ _GCE_CREATE_RE = _Rule(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!
 _AZ_VM_CREATE_RE = _Rule(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
 _SHELL_BREAKS = ("&&", "||", ";", "|")
 
-# The engines _RDS_HOURLY's rates are for. Aurora bills per cluster instance
-# at other rates and SQL Server, Oracle and Db2 carry licence-included rates
-# the table does not hold: those get no figure, not a MySQL price.
+# The engines aws_prices.rds_hourly has rates for. Aurora bills per cluster
+# instance at other rates and SQL Server, Oracle and Db2 carry
+# licence-included rates the tables do not hold: those get no figure, not a
+# MySQL price.
 _RDS_TABLE_ENGINES = ("mysql", "postgres", "mariadb")
 
 
@@ -368,29 +609,92 @@ def _hours_per_month() -> float:
     return HOURS_PER_MONTH
 
 
-def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
-    m = _INSTANCE_TYPE_RE.search(cmd)
-    if not m:
+def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
+               lead: str = "") -> dict[str, Any] | None:
+    """`count` instances of `itype` at the EC2 table's rate, or None."""
+    if not itype:
         return None
-    itype = m.group(1)
     from .aws_prices import EC2_HOURLY
     hourly = EC2_HOURLY.get(itype)
     if not hourly:
         return None
-    count = 1
-    cm = _COUNT_RE.search(cmd)
-    if cm:
-        count = max(int(cm.group(1)), int(cm.group(2) or 0)) or 1
+    count = max(count, 1)
     monthly = hourly * count * _hours_per_month()
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": itype,
         "count": count,
-        "basis": _ON_DEMAND_BASIS,
-        "line": (f"{count}x {itype} at {_rate(hourly)}/hr ({_ON_DEMAND_BASIS}) "
+        "basis": basis,
+        "line": (f"{lead}{count}x {itype} at {_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"),
     }
+
+
+def _int_flag(cmd: str, name: str) -> int:
+    return int(_num(_flag(cmd, name)) or 0)
+
+
+def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
+    m = _INSTANCE_TYPE_RE.search(cmd)
+    if not m:
+        return None
+    # It launches up to --max-count (or the max of `--count min:max`), so the
+    # max is what a human is authorising; --min-count alone is the count.
+    count = _int_flag(cmd, "max-count") or _int_flag(cmd, "min-count")
+    cm = _COUNT_RE.search(cmd)
+    if cm:
+        count = max(count, int(cm.group(1)), int(cm.group(2) or 0))
+    return _price_ec2(m.group(1), count or 1)
+
+
+def _price_instance_type_change(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """modify-instance-attribute to a new type: the new type's full rate. The
+    current type is not in the command, so nothing is subtracted, and the
+    basis says so."""
+    m = _INSTANCE_TYPE_RE.search(cmd)
+    itype = m.group(1) if m else None
+    if itype is None and re.search(r"--attribute[=\s]instanceType(?!\S)", cmd):
+        itype = _flag(cmd, "value")
+    return _price_ec2(itype, 1, lead="resized to ",
+                      basis=f"{_ON_DEMAND_BASIS}, before subtracting the current type, "
+                            "which the command does not name")
+
+
+_SPOT_BASIS = (f"the {_ON_DEMAND_BASIS} as a ceiling; spot prices vary with demand and are "
+               "usually well below it, so this is an estimate, not a quote")
+
+
+def _price_spot(cmd: str, **_: Any) -> dict[str, Any] | None:
+    m = _STRUCT_TYPE_RE.search(cmd)
+    return _price_ec2(m.group(1) if m else None, _int_flag(cmd, "instance-count") or 1,
+                      basis=_SPOT_BASIS, lead="spot request for ")
+
+
+def _price_fleet(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-fleet with its capacity and ONE instance type on the command
+    line. A fleet over several types launches whichever mix it can get, so
+    that gets no figure rather than a guessed one."""
+    types = set(_STRUCT_TYPE_RE.findall(cmd))
+    cap = re.search(r"\bTotalTargetCapacity\s*[=:]\s*(\d+)", cmd)
+    if len(types) != 1 or not cap:
+        return None
+    spot = re.search(r"\bDefaultTargetCapacityType\s*[=:]\s*spot\b", cmd)
+    return _price_ec2(types.pop(), int(cap.group(1)), lead="fleet of ",
+                      basis=_SPOT_BASIS if spot else _ON_DEMAND_BASIS)
+
+
+def _price_nodegroup(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-nodegroup at its desired size, the nodes it starts with."""
+    types = _flag(cmd, "instance-types")
+    desired = re.search(r"\bdesiredSize\s*[=:]\s*(\d+)", cmd)
+    if not types or not desired:
+        return None
+    most = re.search(r"\bmaxSize\s*[=:]\s*(\d+)", cmd)
+    basis = _ON_DEMAND_BASIS + (f"; the group may scale to {most.group(1)} nodes"
+                                if most and most.group(1) != desired.group(1) else "")
+    return _price_ec2(types.split(",")[0], int(desired.group(1)), basis=basis,
+                      lead="a node group of ")
 
 
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -398,8 +702,8 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     engine = (_flag(cmd, "engine") or "").lower()
     if not cls or engine not in _RDS_TABLE_ENGINES:
         return None
-    from .aws_prices import RDS_HOURLY
-    hourly = RDS_HOURLY.get(cls)
+    from .aws_prices import rds_hourly
+    hourly = rds_hourly(cls, engine)
     if not hourly:
         return None
     # Multi-AZ runs a standby of the same class: twice the instance hours,
@@ -414,6 +718,39 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
         "count": 2 if multi_az else 1,
         "basis": basis,
         "line": (f"{cls} {engine}{' Multi-AZ' if multi_az else ''} at {_rate(hourly)}/hr"
+                 f"{' x2 for the standby' if multi_az else ''} ({basis}) "
+                 f"is ~${monthly:,.0f}/mo"),
+    }
+
+
+def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """modify-db-instance to a new class: the new class's full rate. Neither
+    the engine nor the current class is in the command, so the figure is the
+    higher of the MySQL/MariaDB and PostgreSQL rates for the new class (the
+    ceiling a human is authorising), nothing subtracted, and the basis says
+    both."""
+    cls = _flag(cmd, "db-instance-class")
+    if not cls:
+        return None
+    from .aws_prices import rds_hourly
+    rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
+             "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
+    engine, hourly = max(rates.items(), key=lambda kv: kv[1])
+    if not hourly:
+        return None
+    if len(set(rates.values())) == 1:
+        engine = "MySQL, MariaDB and PostgreSQL alike"
+    multi_az = _has_flag(cmd, "multi-az")
+    monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
+    basis = (f"{_ON_DEMAND_BASIS}, the {engine} rate (the engine is not in the command), "
+             "instance hours only, before subtracting the current class")
+    return {
+        "monthly_usd": round(monthly, 2),
+        "hourly_usd": hourly,
+        "instance_type": cls,
+        "count": 2 if multi_az else 1,
+        "basis": basis,
+        "line": (f"resized to {cls}{' Multi-AZ' if multi_az else ''} at {_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
                  f"is ~${monthly:,.0f}/mo"),
     }
@@ -536,17 +873,17 @@ def _planfile_arg(cmd: str, verb_end: int) -> str | None:
     return None
 
 
-_PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | None] = {}
+# A plan file's `show -json` document, or why it could not be read.
+_PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | str] = {}
 
 
-def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
-    """(tool, plan file as written, `show -json` document) for `terraform|tofu
-    apply <planfile>`, or None.
+def _plan_read(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any] | str] | None:
+    """(tool, plan file as written, `show -json` document or the reason it
+    could not be read) for `terraform|tofu apply <planfile>`, or None when
+    there is no plan file to read (a plain apply, a file that is not there).
 
-    Only when the plan file exists and the binary is on PATH; anything else (a
-    plain apply, a missing file, a slow or failing `show`) is None. Read once
-    per plan file per process: both pricing and the destroy check need it,
-    and the hook must not pay for `show` twice."""
+    Read once per plan file per process: pricing, the destroy check and the
+    unreadable check all need it, and the hook must not pay for `show` twice."""
     import shutil
     import subprocess
 
@@ -566,14 +903,18 @@ def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any
         base = base / Path(chdir.group(1)).expanduser()
     plan_path = base / Path(plan).expanduser()
     try:
+        if not plan_path.is_file():
+            return None
         key = (str(plan_path.resolve()), plan_path.stat().st_mtime)
     except OSError:
         return None
     if key not in _PLAN_CACHE:
-        _PLAN_CACHE[key] = None
-        exe = shutil.which((os.environ.get("TERRAFORM_BIN") or "terraform")
-                           if tool == "terraform" else "tofu")
-        if exe and plan_path.is_file():
+        name = (os.environ.get("TERRAFORM_BIN") or "terraform") if tool == "terraform" else "tofu"
+        exe = shutil.which(name)
+        why: dict[str, Any] | str
+        if not exe:
+            why = f"{name} is not on PATH"
+        else:
             # env=child_env(): terraform loads the providers the directory
             # declares, and none of them get nable's decrypted vault (see
             # estimate_from_dir).
@@ -582,13 +923,44 @@ def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any
                 r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
                                    capture_output=True, text=True, check=False,
                                    timeout=_PLAN_SHOW_TIMEOUT_S, env=child_env())
-                if r.returncode == 0:
-                    doc = json.loads(r.stdout)
-                    _PLAN_CACHE[key] = doc if isinstance(doc, dict) else None
-            except (OSError, ValueError, subprocess.SubprocessError):
-                pass
-    doc = _PLAN_CACHE[key]
-    return (tool, plan, doc) if doc is not None else None
+                doc = json.loads(r.stdout) if r.returncode == 0 else None
+                why = (doc if isinstance(doc, dict)
+                       else f"`{tool} show -json` exited {r.returncode}" if r.returncode
+                       else f"`{tool} show -json` did not return a plan")
+            except subprocess.TimeoutExpired:
+                why = f"`{tool} show -json` took longer than {_PLAN_SHOW_TIMEOUT_S:g} s"
+            except ValueError:
+                why = f"`{tool} show -json` did not return a plan"
+            except (OSError, subprocess.SubprocessError) as exc:
+                why = f"{tool} could not run: {type(exc).__name__}"
+        _PLAN_CACHE[key] = why
+    return tool, plan, _PLAN_CACHE[key]
+
+
+def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
+    """(tool, plan file as written, `show -json` document), or None when there
+    is no plan file or it could not be read (see saved_plan_unreadable)."""
+    read = _plan_read(cmd, cwd)
+    if read is None or not isinstance(read[2], dict):
+        return None
+    return read[0], read[1], read[2]
+
+
+def saved_plan_unreadable(command: str, *, cwd: str | None = None) -> str | None:
+    """For `terraform apply <planfile>` whose plan file exists but could not be
+    read: "could not read saved plan X (reason)". None otherwise.
+
+    The plan is the only place a destroy or a GPU fleet applied from a file
+    shows up, so a plan the guard cannot read is a plan nobody has checked:
+    that asks, rather than passing silently because terraform was missing or
+    `show` ran past its time."""
+    try:
+        read = _plan_read(_normalize(command), cwd)
+    except Exception:
+        return None
+    if read is None or isinstance(read[2], dict):
+        return None
+    return f"could not read saved plan {read[1]} ({read[2]})"
 
 
 def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
@@ -644,6 +1016,11 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, 
 _PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_RDS_CREATE_RE, _price_rds),
+    (_RDS_MODIFY_RE, _price_rds_class_change),
+    (_EC2_MODIFY_RE, _price_instance_type_change),
+    (_SPOT_RE, _price_spot),
+    (_FLEET_RE, _price_fleet),
+    (_NODEGROUP_CREATE_RE, _price_nodegroup),
     (_SAVINGS_PLAN_RE, _price_savings_plan),
     (_RESERVED_RE, _price_reserved_instances),
     (_GCE_CREATE_RE, _price_gce),
@@ -906,6 +1283,10 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         destroys = saved_plan_destroys(command, cwd=cwd)
         if destroys:
             door, action_type = "one_way", "delete_resource"
+        else:
+            unreadable = saved_plan_unreadable(command, cwd=cwd)
+            if unreadable:
+                return verdict("ask", f"{unreadable}; review it before applying.")
 
     if action_type == "infra_apply":
         # Reversible mutation. Zero friction by default; strict mode confirms,
@@ -914,7 +1295,7 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         #
         # Priceable commands additionally go through the policy's dollar
         # threshold: reversible does not mean cheap, and launching 8x
-        # p4d.24xlarge is a ~$191k/mo decision whichever door it is. The
+        # p4d.24xlarge is a six-figure monthly decision whichever door it is. The
         # estimate rides the same evaluate_action_gate as everything else, so
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
         est = estimate_command_monthly_cost(command, cwd=cwd)
@@ -960,6 +1341,11 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
     if gate.get("gate") == GATE_ESCALATE:
+        if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
+            # Say what the command does and to what, in words: "'delete_resource'
+            # is a one-way door" was the policy's vocabulary, not the human's.
+            opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
+            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing, est=est)
         return verdict("ask", cost + gate.get("reason", "a human must review this action."),
                        est=est)
     if gate.get("gate") == GATE_BLOCK:
@@ -967,6 +1353,72 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                                                "this action is not in your policy allowlist."),
                        est=est)
     return allowed(est)
+
+
+# What a one-way command does, in words, by the rule that caught it: the
+# first fragment found in that rule's pattern names it. Checked against the
+# normalised command in the classifier's own order.
+_ONE_WAY_PHRASES: list[tuple[str, str]] = [
+    ("base64-to-shell", "runs a decoded script the guard cannot read"),
+    ("python-boto3-delete", "looks like a Python one-liner that deletes or terminates "
+                            "AWS resources"),
+    ("workspace", "would delete a Terraform workspace, leaving what it manages "
+                  "running with no state"),
+    ("drain", "would evict every pod from a node"),
+    ("kubectl-replace-force", "would delete and recreate Kubernetes resources"),
+    ("kubectl", "would delete Kubernetes resources"),
+    ("helm", "would uninstall a Helm release"),
+    ("s3", "would delete stored data"),
+    ("gsutil", "would delete stored data"),
+    ("schedule-key-deletion", "would schedule a KMS key for deletion"),
+    ("terraform", "would destroy infrastructure"),
+    ("tofu", "would destroy infrastructure"),
+    ("pulumi", "would destroy infrastructure"),
+    ("cdk", "would destroy infrastructure"),
+    ("sam", "would destroy infrastructure"),
+    ("apply-with-destroy-flag", "would destroy infrastructure"),
+    ("tf-cli-args-destroy", "would destroy infrastructure"),
+]
+_ACTION_PHRASES = {
+    "terminate_instance": "would terminate EC2 instances",
+    "release_ip": "would release an Elastic IP address",
+    "snapshot_delete": "would delete a snapshot",
+    "purchase_commitment": "would buy a commitment",
+    "idle_cleanup": "would clean up idle resources",
+}
+# Tools whose target is the directory they run in.
+_DIR_TOOLS_RE = re.compile(r"\b(?:terraform|tofu|terragrunt|pulumi|cdk|sam)\s")
+_SHOWN_COMMAND_MAX = 100
+
+
+def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tuple[str, str]:
+    """("This would destroy infrastructure (`terraform destroy` in infra/)",
+    "It cannot be undone; confirm to proceed.") for a one-way command."""
+    norm = _normalize(command)
+    what = _ACTION_PHRASES.get(action_type)
+    if what is None:
+        what = "would delete cloud resources"
+        rule = next((r for r, _ in _ONE_WAY_RULES if r.search(norm)), None)
+        if rule is not None:
+            what = next((phrase for frag, phrase in _ONE_WAY_PHRASES
+                         if frag in rule.pattern), what)
+    shown = " ".join(command.split())
+    if len(shown) > _SHOWN_COMMAND_MAX:
+        shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
+    where = ""
+    if _DIR_TOOLS_RE.search(norm):
+        cd = _CD_PREFIX_RE.match(norm)
+        chdir = re.search(r"-chdir=(\S+)", norm)
+        d = (chdir.group(1) if chdir else cd.group(1) if cd
+             else Path(cwd).name if cwd else "")
+        where = f" in {d.rstrip('/')}/" if d else ""
+    if action_type == "purchase_commitment":
+        closing = "It cannot be cancelled once bought; confirm to proceed."
+    elif what.startswith(("runs", "looks")):
+        closing = "The guard cannot see exactly what it does; confirm to proceed."
+    else:
+        closing = "It cannot be undone; confirm to proceed."
+    return f"This {what} (`{shown}`{where})", closing
 
 
 # ── History: what the guard already let through ────────────────────────────────
@@ -978,7 +1430,7 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
 
 # What the guard let run without a human. An ask is not counted: the hook exits
 # before the human answers, so the ledger cannot tell an approved ask from a
-# declined one, and counting a declined $191k ask would put every launch for
+# declined one, and counting a declined six-figure ask would put every launch for
 # the next hour behind a prompt about money that was never spent.
 _LET_THROUGH = ("allow", "warn")
 _HISTORY_LISTED = 5
@@ -1292,7 +1744,9 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     The AI budget stop comes first and applies to every MCP tool, known or
     not: an agent over its budget must not keep spending through a tool the
     guard does not otherwise judge, and a budget stop on one is recorded
-    under the tool's name. Under budget, an unknown MCP tool returns None and
+    under the tool's name. Under budget, an unknown MCP tool is judged only on
+    the command lines in its arguments (`{"command": "terraform destroy"}` to
+    a shell server, guard_mcp.command_strings); with none it returns None and
     is not recorded: the guard never asks about a tool it does not
     understand. Recording and fail-open as gate_command.
     """
@@ -1616,7 +2070,6 @@ def hook_surfaces(path: Path) -> dict[str, bool]:
 # `nable guard install` from a newer release moves the pin forward in place.
 _PYPI_NAME = "finops-mcp"
 _UVX_HOOK_CMD = f"uvx --from {_PYPI_NAME}=={__version__} finops guard hook"
-_UVX_FROM_RE = re.compile(r"^uvx\s+--from[=\s]+['\"]?([^\s'\"]+)")
 
 
 def hook_pin(cmd: str) -> str | None:
@@ -1627,14 +2080,19 @@ def hook_pin(cmd: str) -> str | None:
     "unpinned" the uvx form with no version (resolves latest on every call)
     None       not the uvx form: a binary path is fixed by whatever was
                installed there, so it has no pin to speak of
-    """
-    m = _UVX_FROM_RE.match(cmd.strip())
-    if not m:
-        return None
-    spec = m.group(1)
-    if not re.fullmatch(rf"{re.escape(_PYPI_NAME)}==[A-Za-z0-9.+-]+", spec):
-        return "unpinned"
-    return "pinned" if spec == f"{_PYPI_NAME}=={__version__}" else "other"
+
+    Read from uvx's arguments (guard_adapters.uvx_pin), not its spelling: a
+    leading `uvx --from` was all this used to see, so `uvx finops-mcp ...`,
+    `uvx --python 3.12 --from ...`, an absolute uvx path and `uv tool run`
+    read as a binary path and were never flagged or re-pinned."""
+    from .guard_adapters import uvx_pin
+    return uvx_pin(cmd)
+
+
+def hook_release(cmd: str) -> str | None:
+    """The finops-mcp release a uvx hook command is pinned to, or None."""
+    from .guard_adapters import uvx_release
+    return uvx_release(cmd)
 
 
 def _is_ephemeral(path: str) -> bool:
@@ -1776,7 +2234,7 @@ def _command_runs(cmd: str) -> bool:
 def _timeout_for(cmd: str) -> int:
     # uvx resolves an environment per call; give the cold-cache case room.
     # Timeouts fail open in Claude Code, so a slow first call cannot block.
-    return 30 if cmd.startswith("uvx") else 10
+    return 30 if cmd.startswith("uvx") or hook_pin(cmd) is not None else 10
 
 
 def is_installed(path: Path) -> bool:
@@ -1809,6 +2267,16 @@ def unpinned_hook_command(path: Path) -> str | None:
     binary path."""
     for _entry, h in _read_our_hooks(path):
         if hook_pin(h["command"]) == "unpinned":
+            return h["command"]
+    return None
+
+
+def pinned_elsewhere_hook_command(path: Path) -> str | None:
+    """Our installed hook command, when it is the uvx form pinned to a release
+    other than this one. None when the hook is absent, current, unpinned, or a
+    binary path."""
+    for _entry, h in _read_our_hooks(path):
+        if hook_pin(h["command"]) == "other":
             return h["command"]
     return None
 
@@ -2029,6 +2497,9 @@ def doctor() -> dict[str, Any]:
         if r.get("pin") == "unpinned":
             fix(f"nable guard install{flag}", "pins the hook to this release instead of "
                 "the newest PyPI release on every call")
+        elif r.get("pin") == "other":
+            fix(f"nable guard install{flag}", "pins the hook to this release instead of "
+                f"another release ({hook_release(r['command']) or 'unknown'})")
 
     for name, (label, what) in _ADAPTER_SURFACES.items():
         mine = [r for r in adapter_rows if r["harness"] == name]
@@ -2066,7 +2537,8 @@ def doctor() -> dict[str, Any]:
     gaps.append("commands inside scripts the agent runs (the guard sees `bash deploy.sh`, "
                 "not what is in it)")
     gaps.append("MCP servers outside the recognised table (the guard stays silent on them "
-                "unless the AI budget stop applies)")
+                "unless an argument is itself an aws, kubectl, terraform or similar "
+                "command line, or the AI budget stop applies)")
     gaps.append("the AI budget stop on Claude Code's built-in tools (Edit, Write, Read, "
                 "WebFetch, Task and the like): in Claude Code it covers Bash and MCP "
                 "tool calls only")

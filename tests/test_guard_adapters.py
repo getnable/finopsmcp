@@ -260,10 +260,22 @@ def test_codex_never_gets_a_value_its_parser_rejects(verdict):
         assert out["permissionDecisionReason"].strip()
 
 
-@pytest.mark.parametrize("tool", ["apply_patch", "mcp__aws__delete_bucket", "spawn_agent"])
+@pytest.mark.parametrize("tool", ["apply_patch", "spawn_agent"])
 def test_codex_other_tools_are_left_alone(tool, monkeypatch):
     monkeypatch.setattr(g, "gate_command", lambda c, *a, **k: pytest.fail("gate consulted"))
     code, body, _ = _run({**CODEX_BASH, "tool_name": tool, "tool_input": {"command": ASK_CMD}})
+    assert code == 0 and body is None
+
+
+def test_codex_unknown_mcp_tool_is_judged_on_the_command_line_it_carries():
+    """An MCP tool the table does not know is left alone, unless an argument
+    is itself a command line: a shell server running `terraform destroy` is
+    that destroy."""
+    code, body, _ = _run({**CODEX_BASH, "tool_name": "mcp__shell__run_command",
+                          "tool_input": {"command": ASK_CMD}})
+    assert code == 0 and body["hookSpecificOutput"]["permissionDecision"] == "deny"
+    code, body, _ = _run({**CODEX_BASH, "tool_name": "mcp__aws__delete_bucket",
+                          "tool_input": {"bucket": "b"}})
     assert code == 0 and body is None
 
 
