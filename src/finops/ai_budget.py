@@ -729,8 +729,7 @@ def _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, windo
                    eff_per_1m) -> tuple[str, str]:
     if basis == "spend":
         return (f"~${est_usd:,.0f} estimated at list price of your "
-                f"${budget['spend_cap']:,.0f} spend cap, {tag}. "
-                f"Connect an Admin key for exact spend."), "month"
+                f"${budget['spend_cap']:,.0f} spend cap, {tag}."), "month"
     if basis == "tokens":
         return (f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, "
                 f"{tag}."), "month"

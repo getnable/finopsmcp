@@ -328,3 +328,17 @@ def test_no_fallback_note_when_every_model_is_priced(tmp_path):
                                                     model="claude-haiku-4-5")])
     assert ab.read_agent_usage(now - 3600)["unpriced_usd"] == 0.0
     assert "fallback" not in ab.status()["summary"]
+
+
+def test_the_spend_summary_promises_nothing_status_does_not_do(tmp_path):
+    """status() estimates at list price from local logs. It never reads a
+    provider's billing, so it must not tell anyone an Admin key would make the
+    figure exact."""
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 30, tin=1_000_000,
+                                                    model="claude-haiku-4-5")])
+    ab.set_budget(spend_cap=100)
+    st = ab.status()
+    assert st["verdict_basis"] == "spend"
+    assert "Admin key" not in st["summary"] and "exact spend" not in st["summary"]
+    assert "estimated at list price of your $100 spend cap" in st["summary"]
