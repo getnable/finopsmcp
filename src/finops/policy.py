@@ -46,6 +46,11 @@ DEFAULT_POLICY: dict[str, Any] = {
     # it too. 0 turns it off.
     "velocity_cap_monthly_usd": None,
     "velocity_window_minutes": 60.0,
+    # Loop detection: the same creation (same verb and key arguments) let
+    # through this many times within the window looks like an agent retrying
+    # rather than deciding, so the next one asks. Below 2 turns it off.
+    "loop_repeat_count": 3,
+    "loop_window_minutes": 10.0,
 }
 
 
@@ -79,19 +84,29 @@ def load_policy() -> dict[str, Any]:
       FINOPS_POLICY_ALLOWED_ACTIONS    comma-separated action types
       FINOPS_POLICY_VELOCITY_CAP_USD   monthly run-rate allowed per window (float, 0 = off)
       FINOPS_POLICY_VELOCITY_WINDOW_MIN  the window, in minutes (float, default 60)
+      FINOPS_POLICY_LOOP_COUNT         identical creations that make a loop (int, 0 = off)
+      FINOPS_POLICY_LOOP_WINDOW_MIN    ...within this many minutes (float, default 10)
     """
     pol: dict[str, Any] = dict(DEFAULT_POLICY)
     pol["allowed_action_types"] = list(DEFAULT_POLICY["allowed_action_types"])
 
     for env, key in (("FINOPS_POLICY_MAX_AUTO_USD", "max_auto_monthly_usd"),
                      ("FINOPS_POLICY_VELOCITY_CAP_USD", "velocity_cap_monthly_usd"),
-                     ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "velocity_window_minutes")):
+                     ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "velocity_window_minutes"),
+                     ("FINOPS_POLICY_LOOP_WINDOW_MIN", "loop_window_minutes")):
         mx = os.getenv(env, "").strip()
         if mx:
             try:
                 pol[key] = float(mx)
             except ValueError:
                 pass
+
+    lc = os.getenv("FINOPS_POLICY_LOOP_COUNT", "").strip()
+    if lc:
+        try:
+            pol["loop_repeat_count"] = int(lc)
+        except ValueError:
+            pass
 
     al = os.getenv("FINOPS_POLICY_ALLOWED_ACTIONS", "").strip()
     if al:

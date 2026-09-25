@@ -28,6 +28,10 @@ turn an allow or a warn into an ask, never anything else:
                  rolling window (60 min; 4x the per-action threshold unless
                  FINOPS_POLICY_VELOCITY_CAP_USD says otherwise), plus this
                  action, is over the cap
+  loop detection the same creation (same verb, instance type, count,
+                 template; local inputs unchanged) let through N-1 times in
+                 M minutes already (3 in 10 by default): "this looks like a
+                 retry loop"
 
 The hook never executes anything itself and it fails open: any internal error
 exits 0 so a guard bug can never break the user's agent.
@@ -106,6 +110,10 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
     (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
+    # CloudFormation creates whatever the template holds, and an agent that
+    # re-runs create-stack under a new name each time makes a new copy each
+    # time. Unpriced: the template is not read here.
+    (r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b", "infra_apply"),
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
@@ -673,7 +681,7 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     a guard that cannot read its own ledger must not take a position."""
     v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd)
     try:
-        return _check_history(v, command, via=via)
+        return _check_history(v, command, via=via, cwd=cwd)
     except Exception as exc:
         return {**v, "_history_error": exc}
 
@@ -793,25 +801,179 @@ _LET_THROUGH = ("allow", "warn")
 _HISTORY_LISTED = 5
 
 
-def _check_history(v: dict[str, Any], command: str, *, via: str = "") -> dict[str, Any]:
-    """`v` upgraded to an ask when recent history says so, else `v` unchanged.
-    May raise; _verdict_for turns that into a fail-open."""
+def _check_history(v: dict[str, Any], command: str, *, via: str = "",
+                   cwd: str | None = None) -> dict[str, Any]:
+    """`v` upgraded to an ask when recent history says so, else `v` unchanged
+    apart from its loop key. May raise; _verdict_for turns that into a
+    fail-open."""
+    if v.get("action_type") == "infra_apply":
+        key = loop_key(command, cwd=cwd)
+        if key is not None:
+            v = {**v, "loop_key": key[0], "loop_label": key[1]}
     if v.get("decision") not in _LET_THROUGH:
         return v
     pol = load_policy()
     new = (v.get("estimate") or {}).get("monthly_usd")
     cap = velocity_cap(pol)
-    window = float(pol.get("velocity_window_minutes") or 60.0)
-    if not (isinstance(new, (int, float)) and new > 0 and cap > 0 and window > 0):
+    vel_window = float(pol.get("velocity_window_minutes") or 0.0)
+    velocity_on = isinstance(new, (int, float)) and new > 0 and cap > 0 and vel_window > 0
+    loops = int(pol.get("loop_repeat_count") or 0)
+    loop_window = float(pol.get("loop_window_minutes") or 0.0)
+    loop_on = "loop_key" in v and loops > 1 and loop_window > 0
+    if not (velocity_on or loop_on):
         return v
     from . import guard_ledger
-    recent = guard_ledger.recent(window)
-    reason = _velocity_reason(v, recent, new=float(new), cap=cap, window=window)
-    if reason is None:
+    recent = guard_ledger.recent(max(vel_window if velocity_on else 0.0,
+                                     loop_window if loop_on else 0.0))
+    found: list[tuple[str, str]] = []
+    if loop_on:
+        why = _loop_reason(v, recent, repeats=loops, window=loop_window)
+        if why:
+            found.append(("loop", why))
+    if velocity_on:
+        since = _minutes_ago(vel_window)
+        why = _velocity_reason(v, [r for r in recent if str(r.get("ts", "")) >= since],
+                               new=float(new), cap=cap, window=vel_window)
+        if why:
+            found.append(("velocity", why))
+    if not found:
         return v
     lead = f"{via}. " if via else ""
-    return {**v, "decision": "ask", "reason": f"nable guard: {lead}{reason}",
-            "history": "velocity"}
+    return {**v, "decision": "ask",
+            "reason": f"nable guard: {lead}" + " Also: ".join(why for _, why in found),
+            "history": "+".join(name for name, _ in found)}
+
+
+def _minutes_ago(minutes: float) -> str:
+    """An ISO timestamp the ledger's `ts` strings compare against directly."""
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
+# Loop detection keys. A retry loop is the same creation run again and again,
+# so the key is the verb plus the arguments that decide WHAT gets created:
+# the instance type and count, the template, the database class. Names are
+# left out where each duplicate gets a fresh one (a stack called app-2, a
+# database called db-3): that is the shape of an agent re-creating what it
+# already made. Anything else classified as a creation is keyed on its whole
+# normalised command.
+_LOOP_ARGS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
+    (_RUN_INSTANCES_RE, ("instance-type", "count", "image-id", "launch-template")),
+    (re.compile(r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b"),
+     ("template-file", "template-url", "template-body")),
+    (_RDS_CREATE_RE, ("db-instance-class", "engine")),
+    (_GCE_CREATE_RE, ("machine-type",)),
+    (_AZ_VM_CREATE_RE, ("size", "count")),
+]
+_LOOP_FALLBACK_ARG = {"aws cloudformation": "stack-name"}
+# Flags that change how a command runs, not what it creates.
+_LOOP_NOISE_RE = re.compile(r"\s(?:-auto-approve|--auto-approve|-input=false|--yes|-y|"
+                            r"--no-cli-pager|--no-color|-no-color)(?=\s|$)")
+_LOOP_VALUE_MAX = 80
+# Local files a creation reads. Their modification times go into the key (not
+# the label): an agent that edits the template between runs is iterating, not
+# looping, and asking it to stop would be noise.
+_LOOP_FILE_ARGS = ("template-file", "template-body", "f", "filename", "values", "var-file")
+
+
+def loop_key(command: str, *, cwd: str | None = None) -> tuple[str, str] | None:
+    """(key, label) for a creating command, or None when there is nothing to key.
+
+    The label is what the human reads ("aws ec2 run-instances --instance-type
+    m5.2xlarge --count 8"); the key is a short hash of the label plus the
+    modification times of the local files the command reads, so two runs match
+    only when neither the command nor its inputs changed."""
+    import hashlib
+
+    cmd = _normalize(command)
+    label = None
+    for pattern, args in _LOOP_ARGS:
+        m = pattern.search(cmd)
+        if not m:
+            continue
+        parts = [m.group(0)]
+        for name in args:
+            val = _flag(cmd, name)
+            if val is not None:
+                parts.append(f"--{name} {_short(val)}")
+        if len(parts) == 1:
+            for prefix, name in _LOOP_FALLBACK_ARG.items():
+                val = _flag(cmd, name)
+                if m.group(0).startswith(prefix) and val is not None:
+                    parts.append(f"--{name} {_short(val)}")
+        label = " ".join(parts)
+        break
+    if label is None:
+        label = _LOOP_NOISE_RE.sub("", f" {cmd}").strip()
+        if not label:
+            return None
+    base = Path(cwd or os.getcwd())
+    stamp = [str(base)] if _TF_APPLY_RE.search(cmd) or "terragrunt" in cmd else []
+    if stamp:
+        stamp.append(_dir_stamp(base, cmd))
+    for name in _LOOP_FILE_ARGS:
+        for val in re.findall(rf"(?<!\S)--?{re.escape(name)}(?:=|\s+)(?!-)(\S+)", cmd):
+            stamp.append(_file_stamp(base, val))
+    digest = hashlib.sha256("\0".join([label, *stamp]).encode()).hexdigest()[:16]
+    return digest, label
+
+
+def _short(val: str) -> str:
+    """A flag value fit for a label: an inline template body becomes a hash."""
+    if len(val) <= _LOOP_VALUE_MAX:
+        return val
+    import hashlib
+    return "sha256:" + hashlib.sha256(val.encode()).hexdigest()[:12]
+
+
+def _file_stamp(base: Path, val: str) -> str:
+    raw = val[len("file://"):] if val.startswith("file://") else val
+    try:
+        p = base / Path(raw).expanduser()
+        if p.is_dir():
+            return f"{p}:{max((c.stat().st_mtime_ns for c in p.iterdir() if c.is_file()), default=0)}"
+        return f"{p}:{p.stat().st_mtime_ns}"
+    except (OSError, ValueError):
+        return val
+
+
+def _dir_stamp(base: Path, cmd: str) -> str:
+    """Newest *.tf / *.tfvars / *.hcl in the directory a Terraform apply runs
+    in (after a leading `cd` or -chdir=)."""
+    cd = _CD_PREFIX_RE.match(cmd)
+    if cd:
+        base = base / Path(cd.group(1)).expanduser()
+    chdir = re.search(r"-chdir=(\S+)", cmd)
+    if chdir:
+        base = base / Path(chdir.group(1)).expanduser()
+    try:
+        newest = max((p.stat().st_mtime_ns for p in base.iterdir()
+                      if p.suffix in (".tf", ".tfvars", ".hcl", ".json") and p.is_file()),
+                     default=0)
+    except OSError:
+        newest = 0
+    return f"{base}:{newest}"
+
+
+def _loop_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, repeats: int,
+                 window: float) -> str | None:
+    """Loop detection: this creation, identical to ones let through in the
+    window often enough to look like an agent retrying the same thing."""
+    from datetime import datetime
+
+    since = _minutes_ago(window)
+    same = [r for r in recent
+            if r.get("loop_key") == v["loop_key"] and r.get("decision") in _LET_THROUGH
+            and str(r.get("ts", "")) >= since]
+    if len(same) + 1 < repeats:
+        return None
+    first = datetime.fromisoformat(same[0]["ts"])
+    span = max(1, -(-int((datetime.now(first.tzinfo) - first).total_seconds()) // 60))
+    times = ", ".join(str(r.get("ts", ""))[11:16] for r in same[-_HISTORY_LISTED:])
+    return (f"this looks like a retry loop: {len(same) + 1} identical `{v['loop_label']}` in "
+            f"{span} minute{'s' if span != 1 else ''} (the guard let the earlier ones "
+            f"through at {times} UTC). Each run can create another copy. Confirm to run "
+            "it again, or check what the earlier runs left behind first.")
 
 
 def _usd(x: float) -> str:
@@ -997,6 +1159,11 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
             "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
             # Which history check turned this into an ask, when one did.
             **({"history": v["history"]} if v.get("history") else {}),
+            # What loop detection matches on: a hash of the creation and its
+            # inputs, and the human form of it (redacted like the command).
+            **({"loop_key": v["loop_key"],
+                "loop_label": guard_ledger.redact(v.get("loop_label"), limit=200)}
+               if v.get("loop_key") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
