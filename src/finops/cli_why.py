@@ -20,7 +20,8 @@ services, then about two per service (usage types, then resources), and says
 so before the first one. CloudTrail LookupEvents is free.
 
 Exit codes: 0 answered (including "nothing rose"), 1 could not answer (no
-credentials, Cost Explorer denied), 2 usage.
+credentials, Cost Explorer denied, or every service drilled into failed),
+2 usage.
 """
 from __future__ import annotations
 
@@ -157,12 +158,16 @@ def run(args, *, session: Any = None) -> int:
     if ranked["truncated"]:
         block["not_read"].insert(0, "Cost Explorer had more pages of services than were read; "
                                     "smaller services may be missing from the ranking.")
+    # Every service drilled into failed and none answered: that is "could not
+    # answer" (exit 1), not an answer, even though each failure is printed.
+    code = (EXIT_ERROR if results and all(r.get("error") and not r.get("rows")
+                                           for r in results) else EXIT_OK)
 
     if as_json:
-        print(json.dumps({"command": "why", "current": current.as_dict(),
+        print(json.dumps({"command": "why", "ok": code == EXIT_OK, "current": current.as_dict(),
                           "baseline": baseline.as_dict(), "services_ranked": ranked["services"][:10],
                           **block}, indent=2, default=str))
-        return EXIT_OK
+        return code
 
     print()
     if not services:
@@ -191,4 +196,4 @@ def run(args, *, session: Any = None) -> int:
                f"call(s), free."))
     print(_dim("  'likely' means the usage type, region and time line up but no resource id "
                "ties them; 'confirmed' means one does."))
-    return EXIT_OK
+    return code

@@ -216,6 +216,36 @@ def test_resource_data_that_reaches_part_way_back_says_so(billed_stub, no_cur):
     assert any(earliest.isoformat() in n for n in r["notes"])
 
 
+def test_with_no_baseline_read_a_new_resource_ranks_before_steady_big_ones():
+    """30 days against the 30 before: resource-level data (14 days) reads no
+    baseline at all, so a delta is just each resource's cost. Five steady
+    $100/day instances would bury the $50/day one launched on the 20th."""
+    cur, base = dd.windows_for_period(30, TODAY)
+    read = dd.Window(TODAY - timedelta(days=14), cur.end)
+    daily = {}
+    for d in read.dates():
+        for i in range(5):
+            daily.setdefault((f"i-steady{i}", P4D), {})[d] = 100.0
+        if d >= date(2026, 9, 20):
+            daily.setdefault(("i-new", P4D), {})[d] = 50.0
+    rows = dd._resource_rows(daily, base, cur, read)[P4D]
+    assert rows[0]["resource_id"] == "i-new"
+    assert rows[0]["onset"] == "2026-09-20" and rows[0]["new_in_window"]
+    assert rows[0]["no_baseline"] and rows[0]["cost_since_onset_usd"] == 250.0
+    assert all(r["no_baseline"] and r["onset"] is None and not r["new_in_window"]
+               for r in rows[1:])
+
+
+def test_with_a_baseline_read_resources_still_rank_by_delta():
+    cur, base = dd.windows_for_period(7, TODAY)
+    read = dd.Window(base.start, cur.end)
+    daily = {("i-big", P4D): {d: 100.0 for d in read.dates()},
+             ("i-new", P4D): {d: 50.0 for d in cur.dates()}}
+    rows = dd._resource_rows(daily, base, cur, read)[P4D]
+    assert [r["resource_id"] for r in rows] == ["i-new", "i-big"]
+    assert "no_baseline" not in rows[0]
+
+
 def test_cost_explorer_denied_is_reported_not_raised(billed_stub, no_cur):
     cur, base = dd.windows_for_day(date(2026, 9, 21))
     ce = _ce()

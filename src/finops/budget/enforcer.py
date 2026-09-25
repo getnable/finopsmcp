@@ -16,7 +16,9 @@ Two-tier alerting:
 
 What a breach stops is the team's choice, and off by default:
   - `nable budget ci-gate --fail-on-breach` fails a pipeline step (exit 1)
-    when a budget is breached; without the flag it only reports.
+    when a budget is breached, and exits 2 when it cannot check one (no
+    cost data in the period is not $0 spent); without the flag it only
+    reports.
   - The guard hook asks before an agent's priced change that would take a
     budget over its limit, or denies it when the policy says
     `on_budget_breach: deny` (guard.budget_lens reads the summary that
@@ -55,6 +57,62 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+SCOPE_TYPES = ("total", "provider", "account", "team", "service")
+# A budget whose period has no cost rows to read: not "$0 spent, ok", which
+# is what a fresh runner or an account nobody has synced would otherwise say.
+NO_DATA = "no_data"
+# A budget that could not be checked at all (a bad row, a failed query).
+ERROR = "error"
+
+
+def validate_budget(scope_type: Any, limit_usd: Any) -> tuple[str, float]:
+    """(scope_type, limit_usd) checked, or ValueError saying what is wrong.
+    An unknown scope matches no spend and a zero limit divides nothing, so
+    either would read as a budget that is always ok."""
+    kind = str(scope_type or "").strip().lower()
+    if kind not in SCOPE_TYPES:
+        raise ValueError(f"scope_type {scope_type!r} is not one of {', '.join(SCOPE_TYPES)}")
+    if limit_usd is None or limit_usd == "":
+        raise ValueError("limit_usd is missing")
+    try:
+        limit = float(limit_usd)
+    except (TypeError, ValueError):
+        raise ValueError(f"limit_usd {limit_usd!r} is not a number") from None
+    if not limit > 0:
+        raise ValueError(f"limit_usd must be more than 0 (got {limit_usd!r})")
+    return kind, limit
+
+
+def resolve_service(value: str, conn: Any = None) -> str:
+    """A service budget's scope as the name Cost Explorer records ("EC2" ->
+    "Amazon Elastic Compute Cloud - Compute" when that is in the cost
+    history), through the same alias map the connectors use. A name nothing
+    resolves is kept as given."""
+    from ..connectors.universal import _AWS_ALIASES
+    wanted = str(value or "").strip()
+    low = wanted.lower()
+    names: list[str] = []
+    try:
+        from sqlalchemy import select
+
+        from ..storage.db import cost_snapshots, get_engine
+        q = select(cost_snapshots.c.service).distinct()
+        if conn is None:
+            with get_engine().connect() as c:
+                names = [str(r[0]) for r in c.execute(q).fetchall() if r[0]]
+        else:
+            names = [str(r[0]) for r in conn.execute(q).fetchall() if r[0]]
+    except Exception:  # noqa: BLE001 - no history yet is not a reason to refuse
+        names = []
+    for n in names:
+        if n.lower() == low:
+            return n
+    prefix = _AWS_ALIASES.get(low)
+    if not prefix:
+        return wanted
+    hits = sorted(n for n in names if n == prefix or n.startswith(prefix + " - "))
+    return hits[0] if hits else prefix
+
 
 # ── Budget CRUD ───────────────────────────────────────────────────────────────
 
@@ -76,6 +134,9 @@ def create_budget(
     # old configs' one). Refusing it made that tool fail on every call.
     if block_at_pct is not None:
         critical_at_pct = float(block_at_pct)
+    scope_type, limit_usd = validate_budget(scope_type, limit_usd)
+    if scope_type == "service":
+        scope_value = resolve_service(scope_value)
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
         result = conn.execute(insert(budgets).values(
@@ -148,46 +209,50 @@ def _period_dates(period: str) -> tuple[str, str]:
         return (today - timedelta(days=30)).isoformat(), today.isoformat()
 
 
-def _fetch_spend(budget: dict[str, Any], start: str, end: str, conn: Any) -> float:
+def _read_spend(budget: dict[str, Any], start: str, end: str,
+                conn: Any) -> tuple[float, int]:
+    """(spend in the budget's scope, cost rows the period has to read it from).
+
+    The row count is what tells "$0 spent" from "nothing to read". For total,
+    provider and account budgets it counts the rows in scope: a provider or
+    an account with no rows at all has not been synced. For a service budget
+    it counts every cost row in the period, since a service nobody used has
+    no rows of its own and did spend $0. For a team budget it counts every
+    attributed row in the period, for the same reason."""
     from ..storage.db import cost_snapshots, attributed_costs
-    from sqlalchemy import func, select
+    from sqlalchemy import func, or_, select
 
     scope_type  = budget["scope_type"]
     scope_value = budget["scope_value"]
 
-    if scope_type == "total":
-        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
-            cost_snapshots.c.snapshot_date >= start,
-            cost_snapshots.c.snapshot_date <= end,
-        )
-    elif scope_type == "provider":
-        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
-            cost_snapshots.c.snapshot_date >= start,
-            cost_snapshots.c.snapshot_date <= end,
-            cost_snapshots.c.provider == scope_value,
-        )
-    elif scope_type == "account":
-        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
-            cost_snapshots.c.snapshot_date >= start,
-            cost_snapshots.c.snapshot_date <= end,
-            cost_snapshots.c.account_id == scope_value,
-        )
-    elif scope_type == "service":
-        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
-            cost_snapshots.c.snapshot_date >= start,
-            cost_snapshots.c.snapshot_date <= end,
-            cost_snapshots.c.service == scope_value,
-        )
-    elif scope_type == "team":
-        q = select(func.sum(attributed_costs.c.amount_usd)).where(
-            attributed_costs.c.snapshot_date >= start,
-            attributed_costs.c.snapshot_date <= end,
-            attributed_costs.c.team == scope_value,
-        )
+    if scope_type == "team":
+        in_period = (attributed_costs.c.snapshot_date >= start,
+                     attributed_costs.c.snapshot_date <= end)
+        spent = select(func.sum(attributed_costs.c.amount_usd)).where(
+            *in_period, attributed_costs.c.team == scope_value)
+        rows = select(func.count()).select_from(attributed_costs).where(*in_period)
     else:
-        return 0.0
+        in_period = (cost_snapshots.c.snapshot_date >= start,
+                     cost_snapshots.c.snapshot_date <= end)
+        if scope_type == "total":
+            scope: tuple[Any, ...] = ()
+        elif scope_type == "provider":
+            scope = (cost_snapshots.c.provider == scope_value,)
+        elif scope_type == "account":
+            scope = (cost_snapshots.c.account_id == scope_value,)
+        elif scope_type == "service":
+            # "Amazon Elastic Compute Cloud" (an alias's prefix, stored before
+            # any history named the service) also reads "... - Compute".
+            scope = (or_(cost_snapshots.c.service == scope_value,
+                         cost_snapshots.c.service.like(f"{scope_value} - %")),)
+        else:
+            raise ValueError(f"scope_type {scope_type!r} is not one of "
+                             f"{', '.join(SCOPE_TYPES)}")
+        spent = select(func.sum(cost_snapshots.c.amount_usd)).where(*in_period, *scope)
+        counted = () if scope_type == "service" else scope
+        rows = select(func.count()).select_from(cost_snapshots).where(*in_period, *counted)
 
-    return float(conn.execute(q).scalar() or 0.0)
+    return float(conn.execute(spent).scalar() or 0.0), int(conn.execute(rows).scalar() or 0)
 
 
 # ── Budget checker ────────────────────────────────────────────────────────────
@@ -199,22 +264,29 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
       ok       → under alert threshold
       warning  → past alert_at_pct, approaching limit
       exceeded → past critical_at_pct (over budget — alert only)
+      no_data  → no cost rows in the period to read spend from: not $0 spent
+
+    Raises ValueError for a budget that cannot be checked (an unknown
+    scope_type, or a limit that is not more than 0).
     """
     from ..storage.db import get_engine
+    validate_budget(budget["scope_type"], budget["limit_usd"])
     start, end = _period_dates(budget["period"])
     if conn is None:
         with get_engine().connect() as _conn:
-            spent = _fetch_spend(budget, start, end, _conn)
+            spent, rows = _read_spend(budget, start, end, _conn)
     else:
-        spent = _fetch_spend(budget, start, end, conn)
+        spent, rows = _read_spend(budget, start, end, conn)
 
-    limit        = budget["limit_usd"]
+    limit        = float(budget["limit_usd"])
     pct_used     = (spent / limit * 100) if limit else 0.0
     alert_pct    = budget.get("alert_at_pct", 80.0)
     # back-compat: honour block_at_pct from old configs, treat as critical_at_pct
     critical_pct = budget.get("critical_at_pct", budget.get("block_at_pct", 100.0))
 
-    if pct_used >= critical_pct:
+    if not rows:
+        status = NO_DATA      # nothing to read, which is not "ok"
+    elif pct_used >= critical_pct:
         status = "exceeded"   # alert only, never blocks
     elif pct_used >= alert_pct:
         status = "warning"
@@ -238,19 +310,45 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
         "remaining": round(max(0, limit - spent), 2),
         "pct_used": round(pct_used, 1),
         "status": status,
+        "cost_rows": rows,
         "run_rate_monthly": round(run_rate, 2),
         "projected_overage": round(max(0, run_rate - limit), 2),
     }
 
 
-def _spend_through(conn: Any) -> str | None:
-    """The newest cost snapshot date up to today: how current the spend is."""
+def _error_entry(budget: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    """A budget that could not be checked, kept in the results (so a gate and
+    a report both see it) with the numeric fields every reader formats."""
+    try:
+        limit = float(budget.get("limit_usd") or 0.0)
+    except (TypeError, ValueError):
+        limit = 0.0
+    try:
+        start, end = _period_dates(str(budget.get("period") or "monthly"))
+    except Exception:  # noqa: BLE001 - the entry must still be built
+        start = end = None
+    return {
+        "id": budget.get("id"), "name": budget.get("name"),
+        "scope_type": budget.get("scope_type"), "scope_value": budget.get("scope_value"),
+        "period": budget.get("period"), "period_start": start, "period_end": end,
+        "spent": 0.0, "limit": round(limit, 2), "remaining": 0.0, "pct_used": 0.0,
+        "status": ERROR, "error": str(exc), "cost_rows": 0,
+        "run_rate_monthly": 0.0, "projected_overage": 0.0,
+    }
+
+
+def _spend_through(conn: Any, since: str | None = None) -> str | None:
+    """The newest cost snapshot date from `since` (the earliest period start
+    of the budgets checked) up to today: how current the spend is. None when
+    the period has no cost rows, so an old snapshot never reads as current."""
     from sqlalchemy import func, select
 
     from ..storage.db import cost_snapshots
     today = datetime.now().astimezone().date()
     q = select(func.max(cost_snapshots.c.snapshot_date)).where(
         cost_snapshots.c.snapshot_date <= today.isoformat())
+    if since:
+        q = q.where(cost_snapshots.c.snapshot_date >= since)
     got = conn.execute(q).scalar()
     return str(got) if got else None
 
@@ -258,9 +356,11 @@ def _spend_through(conn: Any) -> str | None:
 def check_all_budgets() -> list[dict[str, Any]]:
     """Check all active budgets. Returns list sorted by % used descending.
 
-    Also writes the figures to the budget summary the guard hook reads
-    (budget/summary.py), so every budget check keeps the guard's spend
-    figure current."""
+    A budget that cannot be checked stays in the list with status "error"
+    and the reason, rather than dropping out of it (a gate that counts
+    budgets must see it). Also writes the figures to the budget summary the
+    guard hook reads (budget/summary.py), so every budget check keeps the
+    guard's spend figure current."""
     from ..storage.db import get_engine
     budget_list = list_budgets(active_only=True)
     results: list[dict[str, Any]] = []
@@ -270,10 +370,12 @@ def check_all_budgets() -> list[dict[str, Any]]:
             for b in budget_list:
                 try:
                     results.append(check_budget(b, conn=conn))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - reported per budget
                     log.warning("Budget check failed for %s: %s", b.get("name"), e)
+                    results.append(_error_entry(b, e))
+            starts = [r["period_start"] for r in results if r.get("period_start")]
             try:
-                through = _spend_through(conn)
+                through = _spend_through(conn, min(starts) if starts else None)
             except Exception:  # noqa: BLE001 - a missing date must not fail the check
                 through = None
     results.sort(key=lambda x: x["pct_used"], reverse=True)
@@ -295,6 +397,22 @@ def refresh_summary() -> dict[str, Any]:
 
 
 # ── budget.yml sync ───────────────────────────────────────────────────────────
+
+def _yaml_fields(b: dict[str, Any]) -> dict[str, Any]:
+    """One budget.yml entry as the budgets table's columns, or ValueError."""
+    scope_type, limit = validate_budget(b.get("scope_type", "total"), b.get("limit_usd"))
+    scope_value = str(b.get("scope_value", "*"))
+    if scope_type == "service":
+        scope_value = resolve_service(scope_value)
+    try:
+        alert = float(b.get("alert_at_pct", 80))
+        critical = float(b.get("critical_at_pct", b.get("block_at_pct", 100)))
+    except (TypeError, ValueError):
+        raise ValueError("alert_at_pct and critical_at_pct must be numbers") from None
+    return dict(scope_type=scope_type, scope_value=scope_value,
+                period=b.get("period", "monthly"), limit_usd=limit,
+                alert_at_pct=alert, critical_at_pct=critical)
+
 
 def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     """
@@ -319,11 +437,40 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     if not path.exists():
         return {"error": f"File not found: {yaml_path}"}
 
-    with open(path) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        return {"error": f"Not valid YAML: {' '.join(str(e).split())}"}
+    except (OSError, UnicodeDecodeError) as e:
+        return {"error": f"Could not read the file: {e}"}
 
-    raw_budgets = config.get("budgets", [])
+    if not isinstance(config, dict):
+        return {"error": "Expected a mapping with a `budgets:` list at the top of the file"}
+    raw_budgets = config.get("budgets") or []
+    if not isinstance(raw_budgets, list):
+        return {"error": "`budgets:` must be a list of budgets"}
     if not raw_budgets:
+        return {"error": "No budgets found in file"}
+
+    # Every entry is checked before any is written: half a file synced is a
+    # gate checking budgets nobody meant.
+    fields: list[tuple[str, dict[str, Any]]] = []
+    problems: list[str] = []
+    for i, b in enumerate(raw_budgets, 1):
+        if not isinstance(b, dict):
+            problems.append(f"budget {i} is not a mapping")
+            continue
+        name = str(b.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            fields.append((name, _yaml_fields(b)))
+        except ValueError as e:
+            problems.append(f"{name}: {e}")
+    if problems:
+        return {"error": "Invalid budget(s): " + "; ".join(problems)}
+    if not fields:
         return {"error": "No budgets found in file"}
 
     from ..storage.db import budgets as budgets_table, get_engine
@@ -337,23 +484,10 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
             r.name for r in conn.execute(select(budgets_table.c.name)).fetchall()
         }
 
-    valid = [(b, b.get("name", "")) for b in raw_budgets if b.get("name")]
-
     to_insert = [
-        dict(
-            name=name,
-            scope_type=b.get("scope_type", "total"),
-            scope_value=b.get("scope_value", "*"),
-            period=b.get("period", "monthly"),
-            limit_usd=float(b.get("limit_usd", 0)),
-            alert_at_pct=float(b.get("alert_at_pct", 80)),
-            critical_at_pct=float(b.get("critical_at_pct", b.get("block_at_pct", 100))),
-            created_at=now,
-            updated_at=now,
-            created_by="budget.yml",
-            is_active=True,
-        )
-        for b, name in valid if name not in existing_names
+        dict(name=name, **f, created_at=now, updated_at=now,
+             created_by="budget.yml", is_active=True)
+        for name, f in fields if name not in existing_names
     ]
     created = []
     if to_insert:
@@ -361,24 +495,16 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
             conn.execute(insert(budgets_table), to_insert)
         created = [r["name"] for r in to_insert]
 
-    to_update    = [(b, name) for b, name in valid if name in existing_names]
+    to_update    = [(name, f) for name, f in fields if name in existing_names]
     updated_list = []
     if to_update:
         with engine.begin() as conn:
-            for b, name in to_update:
+            for name, f in to_update:
                 conn.execute(
                     update(budgets_table).where(budgets_table.c.name == name).values(
-                        scope_type=b.get("scope_type", "total"),
-                        scope_value=b.get("scope_value", "*"),
-                        period=b.get("period", "monthly"),
-                        limit_usd=float(b.get("limit_usd", 0)),
-                        alert_at_pct=float(b.get("alert_at_pct", 80)),
-                        critical_at_pct=float(b.get("critical_at_pct", b.get("block_at_pct", 100))),
-                        updated_at=now,
-                        is_active=True,
-                    )
+                        **f, updated_at=now, is_active=True)
                 )
-        updated_list = [name for _, name in to_update]
+        updated_list = [name for name, _ in to_update]
 
     refresh_summary()
     return {
@@ -408,23 +534,27 @@ def ci_gate(
       0  no budget breached (warnings do not fail the step)
       1  at least one budget breached: spend at or past its critical_at_pct
       2  the budgets could not be checked (a gate that cannot see must not
-         pass); without fail_on_breach this is reported and returns 0
+         pass): the check or the budget file failed, or a budget has no cost
+         data in its period (a fresh runner has none, and that is not $0
+         spent) or could not be read. A breach elsewhere still exits 1.
+         Without fail_on_breach this is reported and returns 0
 
     fail_on_exceeded is the old name for fail_on_breach and does the same.
     as_json prints one JSON document on stdout instead of the report:
-    {ok, exit_code, fail_on_breach, breached, warnings, budgets, as_of,
-    spend_through, [sync], [error]}. The check also refreshes the spend
-    summary the guard hook reads.
+    {ok, exit_code, fail_on_breach, breached, warnings, cannot_check,
+    budgets, as_of, spend_through, [sync], [error]}. The check also refreshes
+    the spend summary the guard hook reads.
     """
     import json
 
     fail = bool(fail_on_breach or fail_on_exceeded)
     doc: dict[str, Any] = {"ok": True, "exit_code": 0, "fail_on_breach": fail,
-                           "breached": [], "warnings": [], "budgets": []}
+                           "breached": [], "warnings": [], "cannot_check": [], "budgets": []}
 
     def done(code: int) -> int:
         doc["exit_code"] = code
-        doc["ok"] = code == 0 and not doc.get("error") and not doc["breached"]
+        doc["ok"] = (code == 0 and not doc.get("error") and not doc["breached"]
+                     and not doc["cannot_check"])
         if as_json:
             print(json.dumps(doc, default=str))
         return code
@@ -440,7 +570,10 @@ def ci_gate(
     if budget_yaml:
         if not Path(budget_yaml).exists():
             return failed(f"File not found: {budget_yaml}")
-        synced = sync_from_yaml(budget_yaml)
+        try:
+            synced = sync_from_yaml(budget_yaml)
+        except Exception as e:  # noqa: BLE001 - reported, and fails the step when asked
+            return failed(f"{budget_yaml}: {e}")
         doc["sync"] = synced
         if synced.get("error"):
             return failed(f"{budget_yaml}: {synced['error']}")
@@ -454,10 +587,16 @@ def ci_gate(
     fresh = freshness(read_summary())
     exceeded = [b for b in results if b["status"] == "exceeded"]
     warnings = [b for b in results if b["status"] == "warning"]
+    unchecked = [b for b in results if b["status"] in (NO_DATA, ERROR)]
     doc.update(budgets=results, breached=[b["name"] for b in exceeded],
-               warnings=[b["name"] for b in warnings], as_of=fresh["as_of"],
+               warnings=[b["name"] for b in warnings],
+               cannot_check=[b["name"] for b in unchecked], as_of=fresh["as_of"],
                spend_through=fresh["spend_through"])
-    code = 1 if (fail and exceeded) else 0
+    code = 0
+    if fail and exceeded:
+        code = 1
+    elif fail and unchecked:
+        code = 2
     if as_json:
         return done(code)
 
@@ -465,17 +604,27 @@ def ci_gate(
         print("No budgets configured.")
         return done(code)
 
-    ok = len(results) - len(exceeded) - len(warnings)
+    ok = len(results) - len(exceeded) - len(warnings) - len(unchecked)
     print(f"\n{'─'*60}")
     print(f"  nable budget report, {date.today().isoformat()}")
     print(f"{'─'*60}")
     for b in results:
+        if b["status"] == NO_DATA:
+            print(f"  [no data] {b['name']}: no cost data since {b['period_start']}, "
+                  f"so spend against ${b['limit']:,.0f} cannot be checked")
+            continue
+        if b["status"] == ERROR:
+            print(f"  [error] {b['name']}: could not be checked: {b.get('error')}")
+            continue
         print(f"  [{b['status']}] {b['name']}: ${b['spent']:,.0f} / ${b['limit']:,.0f} "
               f"({b['pct_used']:.0f}%)")
         if b["projected_overage"] > 0:
             print(f"      projected overage: ${b['projected_overage']:,.0f} by end of period")
     print(f"{'─'*60}")
-    print(f"  {ok} OK · {len(warnings)} warnings · {len(exceeded)} exceeded")
+    tally = f"  {ok} OK · {len(warnings)} warnings · {len(exceeded)} exceeded"
+    if unchecked:
+        tally += f" · {len(unchecked)} cannot check"
+    print(tally)
     print(f"{'─'*60}\n")
 
     if exceeded:
@@ -489,4 +638,15 @@ def ci_gate(
             print("   Not failing the step; pass --fail-on-breach to fail it.\n")
     elif warnings:
         print("Budget warning: approaching the limit on some budgets.\n")
+    if unchecked:
+        names = ", ".join(str(b["name"]) for b in unchecked)
+        print(f"Budget cannot check: {names}. No cost data for the period reads as $0 "
+              "spent, which is not the same as within budget. Sync cost data on this "
+              "runner first, or point it at the database that has it.")
+        if fail and not exceeded:
+            print("   Failing the step (--fail-on-breach).\n")
+        elif not fail:
+            print("   Not failing the step; pass --fail-on-breach to fail it.\n")
+        else:
+            print()
     return done(code)

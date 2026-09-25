@@ -7,7 +7,10 @@ service model.
 Invariants under test:
   - for each drill-down row, LookupEvents is asked by resource id and by the
     names of the calls that start that usage type's bill, in a window from
-    24 hours before the onset day to 24 hours after it
+    24 hours before the onset day to the end of it (the span a change can be
+    named in), stretched to a later resource onset
+  - a row is "read" only when every lookup it needed was answered in full;
+    otherwise it is "partly read" or "not read", never "nothing lines up"
   - only creating and modifying calls are kept, and only from the service
     that owns the usage type
   - each change says who (the role behind the session), via what (terraform,
@@ -35,7 +38,7 @@ P4D = "BoxUsage:p4d.24xlarge"
 CI_ROLE = "arn:aws:iam::123456789012:role/ci"
 CI_SESSION = "arn:aws:sts::123456789012:assumed-role/ci/gha-run-77"
 START = datetime(2026, 9, 20, tzinfo=UTC)
-END = datetime(2026, 9, 23, tzinfo=UTC)
+END = datetime(2026, 9, 22, tzinfo=UTC)
 BOX_EVENTS = [n for n, _ in ce.family_events(P4D)]
 
 
@@ -179,6 +182,31 @@ def test_who_launched_what_via_what_and_the_guards_verdict():
     assert got["regions_read"] == ["us-east-1"]
 
 
+@pytest.mark.parametrize("wall", [datetime(2026, 9, 25, 12, 0, tzinfo=UTC),
+                                  datetime(2027, 9, 25, 12, 0, tzinfo=UTC)])
+def test_the_guard_verdict_is_read_whatever_the_wall_clock_says(monkeypatch, wall):
+    """The ledger is read back from the wall clock, and kept to the span the
+    events can match, so an injected `now` far from today still finds it."""
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return wall if tz else wall.replace(tzinfo=None)
+
+    monkeypatch.setattr(gl, "datetime", _Frozen)
+    monkeypatch.setattr(ce, "_wall_clock", lambda: wall)
+    gl.append({"ts": "2026-09-21T03:10:00+00:00", "decision": "allow",
+               "action_type": "infra_apply", "command": "terraform apply -auto-approve",
+               "session": "s1", "monthly_usd": 128000.0})
+    gl.append({"ts": "2026-09-01T03:10:00+00:00", "decision": "allow",
+               "action_type": "infra_apply", "command": "terraform apply",
+               "session": "old", "monthly_usd": 1.0})
+    when = datetime(2026, 9, 21, 3, 12, tzinfo=UTC)
+    ev = {"event_id": "e1", "event": "RunInstances", "via": "terraform", "_when": when}
+    got = ce.guard_verdicts([ev], now=NOW)
+    assert got["e1"]["bucket"] == "seen_and_happened"
+    assert got["e1"]["ledger"]["session"] == "s1"
+
+
 def test_only_changes_from_the_owning_service_are_kept():
     when = datetime(2026, 9, 21, 3, 0, tzinfo=UTC)
     rows = [_row()]
@@ -305,6 +333,102 @@ def test_the_window_stops_at_now():
     start, end = datetime(2026, 9, 24, tzinfo=UTC), NOW
     got, _ = _attach(rows, lambda s: _stub_row(s, start=start, end=end))
     assert got["lookup_calls"] == 1 + len(BOX_EVENTS)
+
+
+def test_the_window_ends_where_a_change_can_still_be_named():
+    """attribute() names a change up to the end of the onset day; reading past
+    it only finds changes that cannot be named."""
+    from datetime import date
+
+    from finops.anomaly import root_cause as rc
+    _, end = ce.window_for(date(2026, 9, 21))
+    assert end == datetime(2026, 9, 22, tzinfo=UTC)
+    row = {"usage_type": P4D, "region": "us-east-1"}
+    last = {"event": "RunInstances", "time": "2026-09-21T23:59:00+00:00",
+            "region": "us-east-1"}
+    assert rc._reason_not_attributed(row, last, {"RunInstances"}, date(2026, 9, 21)) is None
+    after = {**last, "time": end.isoformat()}
+    assert "after" in rc._reason_not_attributed(row, after, {"RunInstances"},
+                                                date(2026, 9, 21))
+    assert ce.window_for(date(2026, 9, 21), until=date(2026, 9, 22))[1] == \
+        datetime(2026, 9, 23, tzinfo=UTC)
+
+
+def test_a_later_resource_onset_stretches_the_window():
+    rows = [_row(resources=[{"resource_id": "i-0p4d1", "onset": "2026-09-22"}])]
+    end = datetime(2026, 9, 23, tzinfo=UTC)
+    got, _ = _attach(rows, lambda s: _stub_row(s, end=end))
+    assert got["row_status"][0]["status"] == ce.READ
+
+
+def test_a_row_read_in_full_is_read():
+    rows = [_row()]
+    got, _ = _attach(rows, lambda s: _stub_row(s))
+    assert got["row_status"] == {0: {"status": ce.READ, "gaps": []}}
+
+
+def test_a_row_cut_short_by_the_call_cap_is_partly_read_and_the_next_not_read():
+    rows = [_row(), _row(usage_type="NatGateway-Hours", resources=[])]
+
+    def stubbing(stub):
+        _stub_row(stub)
+
+    got, _ = _attach(rows, stubbing, max_calls=1 + len(BOX_EVENTS))
+    assert got["row_status"][0]["status"] == ce.READ
+    assert got["row_status"][1]["status"] == ce.NOT_READ
+    assert "cut short" in got["row_status"][1]["gaps"][0]
+    rows = [_row()]
+
+    def short(stub):
+        stub.add_response("lookup_events", {"Events": []}, _params("ResourceName", "i-0p4d1"))
+        stub.add_response("lookup_events", {"Events": []}, _params("EventName", "RunInstances"))
+
+    got, _ = _attach(rows, short, max_calls=2)
+    assert got["row_status"][0]["status"] == ce.PARTLY_READ
+
+
+def test_a_page_cap_leaves_the_row_partly_read(monkeypatch):
+    monkeypatch.setattr(ce, "MAX_PAGES_PER_QUERY", 1)
+    rows = [_row()]
+
+    def stubbing(stub):
+        stub.add_response("lookup_events", {"Events": [], "NextToken": "more"},
+                          _params("ResourceName", "i-0p4d1"))
+        for name in BOX_EVENTS:
+            stub.add_response("lookup_events", {"Events": []}, _params("EventName", name))
+
+    got, _ = _attach(rows, stubbing)
+    assert got["row_status"][0]["status"] == ce.PARTLY_READ
+
+
+def test_a_denied_region_leaves_its_row_not_read_and_the_other_read():
+    bad, good = _client("ap-east-1"), _client("us-east-1")
+    rows = [_row(region="ap-east-1"), _row(resources=[])]
+    with Stubber(bad) as s1, Stubber(good) as s2:
+        s1.add_client_error("lookup_events", service_error_code="AccessDeniedException",
+                            service_message="no", http_status_code=400)
+        _stub_row(s2, resource=None)
+        got = ce.attach(rows, _Session({"ap-east-1": bad, "us-east-1": good}), now=NOW,
+                        sleep=lambda s: None)
+    assert got["row_status"][0]["status"] == ce.NOT_READ
+    assert "denied in ap-east-1" in got["row_status"][0]["gaps"][0]
+    assert got["row_status"][1]["status"] == ce.READ
+
+
+def test_a_usage_type_with_no_known_calls_is_at_best_partly_read():
+    rows = [_row(usage_type="USE1-DataTransfer-Out-Bytes")]
+
+    def stubbing(stub):
+        stub.add_response("lookup_events", {"Events": []}, _params("ResourceName", "i-0p4d1"))
+
+    got, _ = _attach(rows, stubbing)
+    assert got["row_status"][0]["status"] == ce.PARTLY_READ
+    assert "no call is known" in got["row_status"][0]["gaps"][0]
+
+
+def test_too_old_for_cloudtrail_is_not_read():
+    got, _ = _attach([_row(onset="2026-05-01")], lambda s: None)
+    assert got["row_status"][0]["status"] == ce.NOT_READ
 
 
 # ── the guard's words ─────────────────────────────────────────────────────────

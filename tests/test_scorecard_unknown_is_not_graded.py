@@ -95,3 +95,60 @@ def test_waste_with_inputs_that_found_nothing_is_still_scored():
     dim = _score_waste_reduction([], None, None, total_spend=50_000.0)
     assert dim.data_available is True
     assert dim.grade == "A"
+
+
+# ── the trend compares like with like ─────────────────────────────────────────
+
+def _week_old_score(total: float, details: dict) -> None:
+    import json
+    from datetime import date, timedelta
+
+    from finops.storage.db import get_engine, scorecard_history
+    day = (date.today() - timedelta(days=8)).isoformat()  # noqa: DTZ011 - as _persist_score dates it
+    with get_engine().begin() as conn:
+        conn.execute(scorecard_history.insert().values(
+            scope="overall", score_date=day, total_score=total, grade="C",
+            details=json.dumps(details), captured_at=f"{day}T00:00:00Z"))
+
+
+def test_a_trend_over_the_same_dimensions_is_reported():
+    from finops.scoring import scorecard
+    _week_old_score(60.0, {"available_dimensions": ["anomaly_response", "waste_reduction"]})
+    trend, delta = scorecard._get_score_trend(
+        "overall", 70.0, ["waste_reduction", "anomaly_response"])
+    assert trend == "improving" and delta == 10.0
+
+
+def test_a_trend_over_different_dimensions_is_not_comparable():
+    from finops.scoring import scorecard
+    _week_old_score(60.0, {"available_dimensions": ["anomaly_response"]})
+    assert scorecard._get_score_trend("overall", 90.0, ["anomaly_response", "tag_hygiene"]) \
+        == ("not_comparable", 0.0)
+
+
+def test_a_score_saved_without_its_dimensions_is_not_compared():
+    from finops.scoring import scorecard
+    _week_old_score(60.0, {"waste_reduction": 50.0})
+    assert scorecard._get_score_trend("overall", 90.0, ["waste_reduction"]) \
+        == ("not_comparable", 0.0)
+    assert scorecard._get_score_trend("overall", 90.0)[0] == "improving"   # old callers
+
+
+def test_the_scorecard_persists_what_it_measured_and_says_when_it_cannot_compare():
+    import json
+
+    from sqlalchemy import select
+
+    from finops.scoring import scorecard
+    from finops.storage.db import get_engine, scorecard_history
+    _week_old_score(40.0, {"available_dimensions": ["anomaly_response"]})
+    card = scorecard.build_scorecard(idle_resources=[], tag_coverage={"team": 90.0},
+                                     required_tags=["team"])
+    assert card.grade != "N/A"
+    assert card.trend == "not_comparable" and "no trend" in card.summary
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(scorecard_history.c.details)
+                            .order_by(scorecard_history.c.score_date.desc())).fetchall()
+    saved = json.loads(rows[0][0])
+    assert saved["available_dimensions"] == sorted(
+        d.name for d in card.dimensions if d.data_available)

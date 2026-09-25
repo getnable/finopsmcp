@@ -21,6 +21,10 @@ import pytest
 import finops.guard as g
 from finops.budget import summary as bs
 
+# The newest cost day, inside this month's period whatever month it is (a
+# spend_through before the period start reads as no data, not fresh).
+THROUGH = datetime.now().astimezone().date().replace(day=1).isoformat()
+
 
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
@@ -50,7 +54,7 @@ def _budget(name, *, scope_type="total", scope_value="*", spent=100.0, limit=1_0
 
 
 def _summary(*budgets, age_hours=3.0):
-    bs.write_summary(list(budgets), spend_through="2026-09-24",
+    bs.write_summary(list(budgets), spend_through=THROUGH,
                      now=datetime.now(UTC) - timedelta(hours=age_hours))
 
 
@@ -69,7 +73,7 @@ def test_the_doctor_names_the_budgets_it_enforces(machine):
     assert b["state"] == "fresh" and b["age_hours"] == pytest.approx(3.0, abs=0.1)
     assert [e["name"] for e in b["enforced"]] == ["Cloud total", "AWS"]
     assert b["on_breach"] == "ask" and b["on_breach_source"] == "default"
-    assert b["spend_through"] == "2026-09-24"
+    assert b["spend_through"] == THROUGH
 
 
 def test_team_and_account_budgets_need_the_guard_told_which(machine, monkeypatch):
@@ -122,7 +126,7 @@ def test_the_cli_prints_the_budget_section(machine):
     assert "Cloud budgets" in out
     assert "Cloud total (total): $640 of $1,000" in flat
     assert "spend figure from 3 hours ago" in flat
-    assert "cost data through 2026-09-24" in flat
+    assert f"cost data through {THROUGH}" in flat
     assert "a change over budget asks" in flat
 
 

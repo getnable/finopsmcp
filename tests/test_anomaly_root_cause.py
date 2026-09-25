@@ -7,9 +7,12 @@ Invariants under test:
     both are known) for the same instance type
   - "confirmed (resource id match)" needs a resource id on both sides;
     "likely" is everything else that lines up; a change that names other
-    resources than the costing ones is not attributed
+    resources than the costing ones is not attributed, unless none of those
+    could have started the rise (no baseline, or costing before it) or the
+    change is on a group (an ASG, a fleet, an ECS service, a node group),
+    which is at most "likely"
   - a row with no attributed change says so, and says when CloudTrail was
-    not read rather than implying nothing changed
+    not read, or read only in part, rather than implying nothing changed
   - the whole answer, end to end on stubbed Cost Explorer and CloudTrail,
     reads as one line per usage type and lists what could not be read
 """
@@ -97,6 +100,69 @@ def test_a_resources_own_onset_is_the_clock_when_the_change_names_it():
     assert rc.attribute(row)[0]["attribution"] == rc.CONFIRMED
 
 
+def test_resources_that_could_not_have_started_the_rise_do_not_rule_a_change_out():
+    """No baseline read (resource-level data covers 14 days): the steady
+    instances were costing before the rise, so a launch naming another one
+    is not ruled out by them."""
+    steady = [{"resource_id": f"i-steady{i}", "onset": "2026-09-11"} for i in range(5)]
+    row = _row(onset="2026-09-20", instance_type="m5.24xlarge", resources=steady,
+               changes=[_change(time="2026-09-20T03:00:00+00:00", instance_type="m5.24xlarge",
+                                resource_ids=["i-new"], count=1)])
+    [cause] = rc.attribute(row)
+    assert cause["attribution"] == rc.LIKELY and cause["resource_ids"] == ["i-new"]
+    flagged = [{"resource_id": f"i-steady{i}", "onset": None, "no_baseline": True,
+                "new_in_window": False} for i in range(5)]
+    row = _row(onset="2026-09-20", instance_type="m5.24xlarge", resources=flagged,
+               changes=[_change(time="2026-09-20T03:00:00+00:00", instance_type="m5.24xlarge",
+                                resource_ids=["i-new"], count=1)])
+    assert rc.attribute(row)[0]["attribution"] == rc.LIKELY
+    new = {"resource_id": "i-new", "onset": "2026-09-20", "no_baseline": True,
+           "new_in_window": True}
+    row = _row(onset="2026-09-20", instance_type="m5.24xlarge", resources=[new, *flagged],
+               changes=[_change(time="2026-09-20T03:00:00+00:00", instance_type="m5.24xlarge",
+                                resource_ids=["i-new"], count=1)])
+    assert rc.attribute(row)[0]["attribution"] == rc.CONFIRMED
+
+
+def test_a_new_resource_behind_the_rise_still_rules_out_a_launch_of_another():
+    new = {"resource_id": "i-new", "onset": "2026-09-21", "no_baseline": True,
+           "new_in_window": True}
+    row = _row(resources=[new], changes=[_change(resource_ids=["i-0other"])])
+    assert rc.attribute(row) == []
+    assert "names other resources" in row["changes"][0]["not_attributed_because"]
+
+
+@pytest.mark.parametrize("event", sorted(ce.CONTAINER_EVENTS))
+def test_a_change_to_a_group_is_likely_never_confirmed_or_ruled_out(event):
+    """SetDesiredCapacity names the Auto Scaling group, not the instances it
+    launches, so the billed ids cannot confirm it or rule it out."""
+    ch = _change(event=event, resource_ids=["web-asg", "i-0p4d1"], instance_type=None,
+                 time="2026-09-21T02:00:00+00:00")
+    row = _row(usage_type="BoxUsage:m5.large", instance_type="m5.large",
+               resources=[{"resource_id": "i-0aaa", "onset": "2026-09-21"},
+                          {"resource_id": "i-0p4d1", "onset": "2026-09-21"}],
+               changes=[ch])
+    causes = rc.attribute(row)
+    if event not in {n for n, _ in ce.family_events("BoxUsage:m5.large")}:
+        assert causes == [] and "not a call that starts" in ch["not_attributed_because"]
+        return
+    [cause] = causes
+    assert cause["attribution"] == rc.LIKELY and "group" in cause["why_likely"]
+    late = _change(event=event, resource_ids=["web-asg"], instance_type=None,
+                   time="2026-09-22T02:00:00+00:00")
+    assert rc.attribute(_row(changes=[late])) == []
+
+
+def test_the_asg_scale_up_from_the_review_is_likely():
+    ch = _change(event="SetDesiredCapacity", resource_ids=["web-asg"], instance_type=None,
+                 count=40, time="2026-09-21T02:00:00+00:00", who="ops", via="console")
+    row = _row(usage_type="BoxUsage:m5.large", instance_type="m5.large",
+               resources=[{"resource_id": "i-0aaa", "onset": "2026-09-21"},
+                          {"resource_id": "i-0bbb", "onset": "2026-09-21"}], changes=[ch])
+    [cause] = rc.attribute(row)
+    assert cause["attribution"] == rc.LIKELY
+
+
 def test_unknown_instance_type_on_either_side_does_not_block():
     row = _row(resources=[], changes=[_change(instance_type=None)])
     assert rc.attribute(row)[0]["attribution"] == rc.LIKELY
@@ -126,6 +192,19 @@ def test_no_cause_is_said_and_unread_cloudtrail_is_not_passed_off_as_nothing():
     assert "CloudTrail for it was not read" in rc.sentence(EC2, _row(cloudtrail_read=False), [])
     row = _row(changes=[_change(time="2026-09-22T09:00:00+00:00")])
     assert "1 change(s) found nearby, none lines up" in rc.sentence(EC2, row, rc.attribute(row))
+
+
+def test_a_partly_read_row_never_says_nothing_lines_up():
+    row = _row(cloudtrail_read=False, cloudtrail_status=ce.PARTLY_READ,
+               cloudtrail_gaps=["3 of its 7 lookups were cut short by the call or page cap"])
+    text = rc.sentence(EC2, row, [])
+    assert "no change event lines up" not in text
+    assert "CloudTrail for it was partly read (3 of its 7 lookups" in text
+    row["changes"] = [_change(time="2026-09-22T09:00:00+00:00")]
+    text = rc.sentence(EC2, row, rc.attribute(row))
+    assert "partly read" in text and "none of the 1 change(s) found lines up" in text
+    row = _row(cloudtrail_read=True, cloudtrail_status=ce.NOT_READ)
+    assert "CloudTrail for it was not read" in rc.sentence(EC2, row, [])
 
 
 @pytest.mark.parametrize("change, text", [
@@ -249,6 +328,29 @@ def test_explain_end_to_end_confirmed(billed_stub):
     assert r["resource_source"] == "ce_resources"
     assert any("No CUR source" in n for n in r["not_read"])
     assert "24 hours" in r["attribution_rules"]
+
+
+def test_explain_says_cloudtrail_reads_only_this_account(billed_stub):
+    r = _explain(billed_stub)
+    assert rc.ACCOUNT_NOTE in r["not_read"]
+    assert r["rows"][0]["cloudtrail_status"] == ce.READ
+
+
+def test_explain_with_the_call_cap_hit_says_partly_read_not_nothing(billed_stub):
+    cur, base = dd.windows_for_period(7, TODAY)
+    c, t = _ce(), _ct()
+    with billed_stub(c) as s1, Stubber(t) as s2:
+        _stub_ce(s1, cur, base, resources=True)
+        for _ in range(3):
+            s2.add_response("lookup_events", {"Events": []})
+        r = rc.explain(EC2, cur, base, session=_Session(t), meter=dd.Meter(c), today=TODAY,
+                       now=NOW, use_cur=False, sleep=lambda s: None, max_calls=3)
+        s2.assert_no_pending_responses()
+    [line] = r["lines"]
+    assert "no change event lines up" not in line
+    assert "CloudTrail for it was partly read (4 of its 7 lookups" in line
+    assert r["rows"][0]["cloudtrail_status"] == ce.PARTLY_READ
+    assert r["rows"][0]["cloudtrail_read"] is False
 
 
 def test_explain_without_resource_level_data_is_likely_and_says_why(billed_stub):

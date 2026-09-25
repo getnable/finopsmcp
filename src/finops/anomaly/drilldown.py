@@ -40,6 +40,7 @@ RESOURCE_DAYS = 14       # how far back GetCostAndUsageWithResources reads
 TOP_RESOURCES = 5        # resources kept per usage type
 MIN_DELTA_USD = 1.0      # a usage type that moved less than this is noise
 _BASELINE_DAYS = 7       # for a single anomaly day: the week before it
+MIN_BASELINE_DAYS = 3    # fewer baseline days read than this: rank resources by onset
 
 _DENIED = ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation",
            "UnauthorizedAccess", "NotAuthorized")
@@ -302,19 +303,43 @@ def service_deltas(meter: Meter, current: Window, baseline: Window, *,
 
 def _resource_rows(daily: dict[tuple[str, str], dict[date, float]], baseline: Window,
                    current: Window, read: Window) -> dict[str, list[dict[str, Any]]]:
-    """Per usage type, its resources ranked by delta over the days read."""
+    """Per usage type, its resources ranked by delta over the days read.
+
+    With fewer than MIN_BASELINE_DAYS of baseline read (resource-level Cost
+    Explorer data covers 14 days, so a 30-day window has none), a delta is
+    just each resource's current cost, and the steadiest big resource would
+    rank first. Then resources are ranked by onset instead: those whose
+    first costing day falls after the read began (new in the window) first,
+    by their cost since that day, then the rest by cost. Each such row says
+    no_baseline, and only a new one keeps an onset."""
     base_read = [d for d in baseline.dates() if read.start <= d < read.end]
     cur_read = [d for d in current.dates() if read.start <= d < read.end]
+    no_baseline = len(base_read) < MIN_BASELINE_DAYS
     out: dict[str, list[dict[str, Any]]] = {}
     for (rid, utype), series in daily.items():
         d = _deltas(series, baseline, current, base_read, cur_read)
-        start = onset(series, Window(read.start, max(read.start, baseline.end)),
-                      Window(max(read.start, current.start), current.end))
-        out.setdefault(utype, []).append({
-            "resource_id": rid, **d, "onset": start.isoformat() if start else None,
-            "days_read": len(cur_read), "baseline_days_read": len(base_read)})
+        row: dict[str, Any] = {"resource_id": rid, **d}
+        if no_baseline:
+            first = next((day for day in sorted(series)
+                          if read.start <= day < read.end and series[day] > 0), None)
+            new = first is not None and first > read.start
+            row["onset"] = first.isoformat() if new and first else None
+            row["no_baseline"] = True
+            row["new_in_window"] = new
+            row["cost_since_onset_usd"] = round(sum(
+                v for day, v in series.items()
+                if first is not None and first <= day < read.end), 2)
+        else:
+            start = onset(series, Window(read.start, max(read.start, baseline.end)),
+                          Window(max(read.start, current.start), current.end))
+            row["onset"] = start.isoformat() if start else None
+        row.update(days_read=len(cur_read), baseline_days_read=len(base_read))
+        out.setdefault(utype, []).append(row)
     for utype, rows in out.items():
-        rows.sort(key=lambda r: r["delta_usd"], reverse=True)
+        if no_baseline:
+            rows.sort(key=lambda r: (not r["new_in_window"], -r["cost_since_onset_usd"]))
+        else:
+            rows.sort(key=lambda r: r["delta_usd"], reverse=True)
         out[utype] = rows[:TOP_RESOURCES]
     return out
 
@@ -376,8 +401,15 @@ def resources_from_ce(meter: Meter, service: str, current: Window, baseline: Win
     out: dict[str, Any] = {"status": "ok", "by_usage_type": _resource_rows(
         daily, baseline, current, read), "read": read.as_dict()}
     if read.start > baseline.start:
-        out["note"] = (f"Resource-level data covers the last {RESOURCE_DAYS} days, so resource "
-                       f"deltas compare {read.start.isoformat()} onward only.")
+        base_read = max((baseline.end - read.start).days, 0)
+        if base_read < MIN_BASELINE_DAYS:
+            out["note"] = (f"Resource-level data covers the last {RESOURCE_DAYS} days, which "
+                           "leaves no baseline to compare resources with, so they are ranked "
+                           f"by when they started costing after {read.start.isoformat()} "
+                           "(new ones first), not by delta.")
+        else:
+            out["note"] = (f"Resource-level data covers the last {RESOURCE_DAYS} days, so "
+                           f"resource deltas compare {read.start.isoformat()} onward only.")
     if truncated:
         out["truncated"] = True
     return out

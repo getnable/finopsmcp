@@ -268,7 +268,7 @@ def test_the_budget_lens_does_not_import_sqlalchemy(tmp_path):
         "e = date(t.year + (t.month == 12), t.month % 12 + 1, 1) - timedelta(days=1)\n"
         "bs.write_summary([{'name': 'T', 'scope_type': 'total', 'scope_value': '*',"
         " 'period': 'monthly', 'period_start': s.isoformat(), 'period_end': e.isoformat(),"
-        " 'spent': 49999.0, 'limit': 50000.0}])\n"
+        " 'spent': 49999.0, 'limit': 50000.0}], spend_through=t.isoformat())\n"
         f"v = g.gate_command({M5_2XL!r})\n"
         "print(json.dumps({'decision': v and v['decision'],"
         " 'sqlalchemy': 'sqlalchemy' in sys.modules}))\n"

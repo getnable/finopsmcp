@@ -47,6 +47,7 @@ def _over_budget_summary() -> None:
                        "period": "monthly", "period_start": start.isoformat(),
                        "period_end": end.isoformat(), "spent": 49_999.0,
                        "limit": 50_000.0}],
+                     spend_through=today.isoformat(),
                      now=datetime.now(UTC) - timedelta(hours=1))
 
 

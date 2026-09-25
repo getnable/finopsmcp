@@ -60,7 +60,9 @@ def test_enrich_drills_down_only_when_asked(monkeypatch):
     out = impact.enrich(_anomaly(), drill_down=True)
     assert out["root_cause"]["lines"][0].startswith("EC2 +$100/mo")
     [(service, current, baseline, kw)] = calls
-    assert service == EC2 and kw["account_id"] == "123456789012"
+    # The snapshot's account is the one the data was read in (on a payer, the
+    # payer): filtering on it would hide the member accounts' spend.
+    assert service == EC2 and kw["account_id"] is None
     assert (current.start, current.days) == (date(2026, 9, 21), 1)
     assert (baseline.start, baseline.days) == (date(2026, 9, 14), 7)
 
@@ -79,6 +81,14 @@ def test_a_non_account_id_is_not_used_as_a_filter(monkeypatch):
     monkeypatch.setattr(rc, "explain", _fake_explain(calls))
     impact.enrich(_anomaly(account_id="default"), drill_down=True)
     assert calls[0][3]["account_id"] is None
+
+
+def test_only_an_explicit_other_linked_account_is_a_filter(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(rc, "explain", _fake_explain(calls))
+    impact.enrich(_anomaly(linked_account_id="210987654321"), drill_down=True)
+    impact.enrich(_anomaly(linked_account_id="123456789012"), drill_down=True)
+    assert [c[3]["account_id"] for c in calls] == ["210987654321", None]
 
 
 def test_the_next_step_points_at_the_drill_down_for_aws():
@@ -350,6 +360,25 @@ def test_nable_why_cost_explorer_denied_exits_1(billed_stub):
 
     code, _, err = _why(billed_stub, [], stubbing)
     assert code == 1 and "ce:GetCostAndUsage" in err
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_nable_why_exits_1_when_every_service_drill_down_failed(billed_stub, as_json):
+    def stubbing(s1, s2):
+        cur, base = dd.windows_for_period(7)
+        services = [_day(d, [([EC2], 300.0 if d >= cur.start else 10.0)])
+                    for d in base.dates() + cur.dates()]
+        s1.add_response("get_cost_and_usage", {"ResultsByTime": services})
+        s1.add_client_error("get_cost_and_usage", service_error_code="ThrottlingException",
+                            service_message="slow down", http_status_code=400)
+
+    code, out, _ = _why(billed_stub, ["--json"] if as_json else [], stubbing)
+    assert code == 1
+    if as_json:
+        doc = json.loads(out)
+        assert doc["ok"] is False and "ThrottlingException" in doc["lines"][0]
+    else:
+        assert "ThrottlingException" in out
 
 
 def test_nable_why_rejects_a_window_it_cannot_read(billed_stub):
