@@ -314,9 +314,10 @@ def _ends_with_newline(fd: int) -> bool:
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
-def verify(path: Path | None = None) -> dict[str, Any]:
+def verify(path: Path | None = None, *, at_line: int | None = None) -> dict[str, Any]:
     """Walk the chain. ok is False at the first line that does not parse or
-    whose `prev` is not the hash of the line before it."""
+    whose `prev` is not the hash of the line before it. With `at_line`, the
+    chain hash after that line is returned as hash_at (see check())."""
     path = path or ledger_path()
     out: dict[str, Any] = {"ok": True, "records": 0, "head": GENESIS, "path": str(path)}
     if not path.exists():
@@ -324,6 +325,8 @@ def verify(path: Path | None = None) -> dict[str, Any]:
     prev = GENESIS
     with path.open("rb") as fh:
         for n, raw in enumerate(fh, start=1):
+            if n - 1 == at_line:
+                out["hash_at"] = prev
             line = raw.rstrip(b"\n")
             try:
                 rec = json.loads(line)
@@ -341,8 +344,74 @@ def verify(path: Path | None = None) -> dict[str, Any]:
                 return out
             prev = _sha(line)
             out["records"] = n
+    if out["records"] == at_line:
+        out["hash_at"] = prev
     out["head"] = prev
     return out
+
+
+# ── anchor ────────────────────────────────────────────────────────────────────
+# A chain shows an edit in the middle, but not the end being cut off: delete
+# the last ten records, or the whole file, and what is left still verifies.
+# The anchor is the record count and head hash the last clean check saw,
+# kept beside the ledger. A later check that finds fewer records, or a
+# different hash at that record, says so. The anchor sits in the same data
+# directory, so whatever can rewrite the ledger can rewrite the anchor too; it
+# catches a careless or partial edit, and for more, copy the head somewhere
+# the agent cannot write (a ticket, a commit, a log shipper).
+
+ANCHOR_NAME = "guard-ledger.anchor.json"
+
+
+def anchor_path() -> Path:
+    return ledger_path().with_name(ANCHOR_NAME)
+
+
+def read_anchor() -> dict[str, Any] | None:
+    try:
+        a = json.loads(anchor_path().read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(a, dict) or not isinstance(a.get("records"), int):
+        return None
+    return a
+
+
+def save_anchor(result: dict[str, Any]) -> None:
+    """Remember what a check saw: records, head, when. Never raises."""
+    with contextlib.suppress(Exception):
+        path = anchor_path()
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"records": result["records"], "head": result["head"],
+                                   "seen_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                                   "ledger": result.get("path")}) + "\n")
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+
+
+def check(path: Path | None = None) -> dict[str, Any]:
+    """verify(), plus what has changed since the anchor: `warnings` lists
+    records removed from the end (or the file deleted or emptied) and history
+    rewritten before the anchored record. `clean` is True only when the
+    chain verifies and there is no warning."""
+    anchor = read_anchor()
+    at = anchor["records"] if anchor else None
+    res = verify(path, at_line=at)
+    warnings: list[str] = []
+    if anchor and at:
+        seen = anchor.get("seen_at") or "the last check"
+        if res["records"] < at:
+            gone = "the file is empty or gone" if res["records"] == 0 else (
+                f"{at - res['records']} record(s) are gone from the end")
+            warnings.append(f"the ledger had {at} record(s) at {seen} and has "
+                            f"{res['records']} now: {gone}")
+        elif res.get("hash_at") != anchor.get("head"):
+            warnings.append(f"record {at} is not the one seen at {seen}: the history "
+                            "up to it was rewritten")
+    res["anchor"] = anchor
+    res["warnings"] = warnings
+    res["clean"] = bool(res["ok"] and not warnings)
+    return res
 
 
 def recent(minutes: float, *, path: Path | None = None, now: datetime | None = None,

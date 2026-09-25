@@ -2434,23 +2434,37 @@ def _run_guard(parsed) -> None:
 
     if action == "verify-log":
         from . import guard_ledger
-        result = guard_ledger.verify()
+        result = guard_ledger.check()
+        reanchor = getattr(parsed, "guard_reanchor", False)
+        if result["clean"] or reanchor:
+            guard_ledger.save_anchor(result)
         if getattr(parsed, "guard_json", False):
             print(json.dumps(result, indent=2))
         else:
             print()
-            if result["ok"]:
+            if result["clean"]:
                 print(f"  {green('✓')} Decision ledger intact: {result['records']} record(s), "
                       "every one chained to the last.")
                 print(dim(f"  Head: {result['head']}"))
-                print(dim("  A chain cannot show its tail being cut off. Keep the head somewhere"))
-                print(dim("  else (a ticket, a commit) and compare it next time."))
-            else:
+                if result["anchor"]:
+                    print(dim(f"  Nothing removed or rewritten since {result['anchor'].get('seen_at')}"
+                              f" ({result['anchor']['records']} record(s) then)."))
+                print(dim("  The anchor this compares against sits beside the ledger, where an"))
+                print(dim("  agent can write it too. Keep the head somewhere else as well (a"))
+                print(dim("  ticket, a commit) and compare it next time."))
+            elif not result["ok"]:
                 print(f"  {amber('✗')} Decision ledger broken at line {result['broken_at']}: "
                       f"{result['problem']}.")
+            for warning in result["warnings"]:
+                print(f"  {amber('✗')} {warning[0].upper()}{warning[1:]}.")
+            if result["warnings"]:
+                print(dim("  If you rotated or archived the ledger yourself: "
+                          "nable guard verify-log --reanchor"))
+                if reanchor:
+                    print(dim(f"  Re-anchored at {result['records']} record(s)."))
             print(dim(f"  {result['path']}"))
             print()
-        if not result["ok"]:
+        if not result["clean"] and not reanchor:
             raise SystemExit(1)
         return
 
@@ -2602,13 +2616,22 @@ def _guard_report(parsed) -> None:
     import json
 
     from . import guard_ledger
-    from .welcome import bold, cyan, dim
+    from .welcome import amber, bold, cyan, dim
 
     days = getattr(parsed, "guard_days", 30) or 30
     summary = guard_ledger.summarize(days)
+    chain = guard_ledger.check()
+    problems = ([f"it breaks at line {chain['broken_at']}: {chain['problem']}"]
+                if not chain["ok"] else []) + chain["warnings"]
     if getattr(parsed, "guard_json", False):
-        print(json.dumps(summary, indent=2))
+        print(json.dumps({**summary, "ledger_problems": problems}, indent=2))
         return
+    if problems:
+        print()
+        print(f"  {amber('The decision ledger does not verify, so these figures may be incomplete:')}")
+        for p in problems:
+            print(f"    {amber('✗')} {p}")
+        print(dim("  Details: nable guard verify-log"))
     d = summary["by_decision"]
     print()
     print(f"  {bold('nable guard')}: the last {days:g} days, {summary['records']} decision(s)")
@@ -3074,6 +3097,9 @@ def main(args: list[str] | None = None) -> None:
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
                          help="With 'report', 'verify-log' or 'doctor': print JSON")
+    guard_p.add_argument("--reanchor", dest="guard_reanchor", action="store_true",
+                         help="With 'verify-log': accept the ledger as it is now (after you "
+                              "rotated or archived it) as the new anchor")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")

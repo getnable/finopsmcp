@@ -1795,7 +1795,8 @@ def _adapter_rows() -> list[dict[str, Any]]:
 
 def doctor() -> dict[str, Any]:
     """Which surfaces the guard actually covers on this machine, and what it
-    does not. Read-only: it inspects settings files and the ledger, runs
+    does not. Read-only apart from the ledger anchor (guard_ledger.check),
+    which a clean check moves forward: it inspects settings files and the ledger, runs
     nothing, and calls no cloud API."""
     from . import guard_ledger
     from .guard_mcp import MCP_RULES
@@ -1870,10 +1871,14 @@ def doctor() -> dict[str, Any]:
                 "not what is in it)")
     gaps.append("MCP servers outside the recognised table (the guard stays silent on them)")
 
-    ledger = guard_ledger.verify()
+    ledger = guard_ledger.check()
     if not ledger["ok"]:
         fix("nable guard verify-log", f"the decision ledger breaks at line "
             f"{ledger.get('broken_at')}: a record was edited, removed, reordered or torn")
+    for warning in ledger["warnings"]:
+        fix("nable guard verify-log", warning)
+    if ledger["clean"]:
+        guard_ledger.save_anchor(ledger)
     lost = guard_ledger.unrecorded()
     ledger["unrecorded"] = lost
     if lost["count"]:
@@ -1886,7 +1891,7 @@ def doctor() -> dict[str, Any]:
     fixes.append("give agents read-only cloud credentials; keep write access behind a human")
 
     return {
-        "ok": bool(live) and ledger["ok"],
+        "ok": bool(live) and ledger["clean"],
         "surfaces": rows,
         "covered": covered,
         "not_covered": gaps,

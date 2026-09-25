@@ -410,3 +410,106 @@ def test_verify_log_cli_passes_and_fails():
 def test_verify_log_json():
     _three()
     assert json.loads(_cli("verify-log", guard_json=True))["ok"] is True
+
+
+# ── the anchor: what a chain cannot show ──────────────────────────────────────
+
+def _verify_log(**kw):
+    kw.setdefault("guard_json", False)
+    kw.setdefault("guard_reanchor", False)
+    return _cli("verify-log", **kw)
+
+
+def test_a_first_check_anchors_the_head():
+    _three()
+    _verify_log()
+    a = gl.read_anchor()
+    assert a["records"] == 3 and a["head"] == gl.verify()["head"]
+
+
+def test_new_records_after_the_anchor_are_fine():
+    _three()
+    _verify_log()
+    gl.append({"decision": "ask"})
+    assert "Nothing removed or rewritten since" in _verify_log()
+    assert gl.read_anchor()["records"] == 4, "a clean check moves the anchor forward"
+
+
+@pytest.mark.parametrize("damage,said", [
+    (lambda p: p.write_bytes(b"".join(p.read_bytes().splitlines(keepends=True)[:2])),
+     "had 3 record(s)"),
+    (lambda p: p.write_bytes(b""), "the file is empty or gone"),
+    (lambda p: p.unlink(), "the file is empty or gone"),
+])
+def test_records_cut_from_the_end_are_reported(damage, said):
+    _three()
+    _verify_log()
+    damage(gl.ledger_path())
+    assert gl.verify()["ok"], "the chain alone cannot see this"
+    with pytest.raises(SystemExit) as e:
+        _verify_log()
+    assert e.value.code == 1
+    r = gl.check()
+    assert not r["clean"] and said in r["warnings"][0]
+
+
+def test_an_emptied_ledger_is_not_a_check_mark(capsys):
+    _three()
+    _verify_log()
+    gl.ledger_path().write_bytes(b"")
+    from finops import setup_wizard
+    with pytest.raises(SystemExit):
+        setup_wizard._run_guard(argparse.Namespace(guard_action="verify-log", guard_global=False,
+                                                   guard_json=False, guard_reanchor=False))
+    out = capsys.readouterr().out
+    assert "Decision ledger intact" not in out and "empty or gone" in out
+
+
+def test_a_rewritten_head_is_reported():
+    _three()
+    _verify_log()
+    p = gl.ledger_path()
+    lines = p.read_bytes().splitlines(keepends=True)
+    lines[-1] = lines[-1].replace(b'"allow"', b'"deny"')     # the last line: no chain after it
+    p.write_bytes(b"".join(lines))
+    assert gl.verify()["ok"]
+    r = gl.check()
+    assert not r["clean"] and "record 3 is not the one seen" in r["warnings"][0]
+
+
+def test_the_whole_file_regenerated_is_reported():
+    _three()
+    _verify_log()
+    gl.ledger_path().unlink()
+    for d in ("allow", "allow", "allow", "allow"):
+        gl.append({"decision": d})
+    r = gl.check()
+    assert r["ok"] and not r["clean"] and "rewritten" in r["warnings"][0]
+
+
+def test_reanchor_accepts_a_rotated_ledger():
+    _three()
+    _verify_log()
+    gl.ledger_path().unlink()
+    out = _verify_log(guard_reanchor=True)
+    assert "Re-anchored at 0 record(s)" in out
+    assert gl.check()["clean"]
+
+
+def test_doctor_is_not_ok_when_the_ledger_shrank(monkeypatch):
+    _three()
+    _verify_log()
+    gl.ledger_path().write_bytes(b"")
+    d = g.doctor()
+    assert d["ok"] is False
+    assert any("empty or gone" in fix for fix in d["recommendations"])
+
+
+def test_report_warns_on_a_broken_chain():
+    _three()
+    p = gl.ledger_path()
+    p.write_bytes(p.read_bytes().replace(b'"deny"', b'"allow"'))
+    out = _cli("report", guard_days=30, guard_json=False)
+    assert "does not verify" in out and "breaks at line" in out
+    data = json.loads(_cli("report", guard_days=30, guard_json=True))
+    assert data["ledger_problems"]
