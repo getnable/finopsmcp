@@ -248,3 +248,23 @@ def test_arming_registers_exactly_one_atexit_hook(monkeypatch):
     tel.arm_consent_prompt()
     tel.arm_consent_prompt()
     assert len(registered) == 1, f"{len(registered)} hooks registered"
+
+
+# ── The install id is telemetry state: none on disk while telemetry is off ────
+
+def test_install_id_is_not_written_while_telemetry_is_off():
+    """Every CLI command asks for the id (most call sites build it as an
+    argument before _send_event checks consent), so the file used to appear on
+    the very first command of a user who never agreed to anything."""
+    first = tel._get_install_id()
+    assert not tel._ID_FILE.exists(), "an install id was persisted with telemetry off"
+    assert len(first) == 36
+    assert tel._get_install_id() == first, "one process should keep one id"
+
+
+def test_install_id_is_written_once_telemetry_is_on(monkeypatch):
+    monkeypatch.setenv("NABLE_TELEMETRY", "1")
+    monkeypatch.setattr(tel, "is_ci", lambda: False)
+    ident = tel._get_install_id()
+    assert tel._ID_FILE.exists()
+    assert tel._ID_FILE.read_text().strip() == ident

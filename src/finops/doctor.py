@@ -5,7 +5,7 @@ Checks and reports on:
   ✓ Credential storage (keyring vs plain env vars)
   ✓ AWS credential scope (read-only vs over-provisioned)
   ✓ Database encryption and permissions
-  ✓ Telemetry posture (on by default, anonymous; how to opt out)
+  ✓ Telemetry posture (off unless you opt in; anonymous; how to turn it off)
   ✓ Network path (direct to cloud APIs, no proxy)
   ✓ Recent audit log entries
 
@@ -410,10 +410,10 @@ def _check_telemetry() -> dict:
     analytics_vars = [v for v in os.environ if v.upper() in _ANALYTICS_SDK_VARS]
     warnings = [f"External analytics env var detected: {v}" for v in analytics_vars]
     # Ask the telemetry module for ground truth instead of guessing from an env
-    # var. Telemetry ships with a default PostHog key, so it is ON unless the user
-    # opted out (NABLE_NO_TELEMETRY=1, FINOPS_AIRGAP, or an empty key). Reporting
-    # "off" here when it is actually on would be a trust violation for a tool whose
-    # whole pitch is local-first.
+    # var. Telemetry is opt-in: it is ON only after a yes to the one-time prompt
+    # or NABLE_TELEMETRY=1, and NABLE_NO_TELEMETRY / DO_NOT_TRACK / FINOPS_AIRGAP
+    # keep it off. Reporting "off" when it is on (or "default" when the user had
+    # to choose it) would be a trust violation for a local-first tool.
     try:
         from . import telemetry as _tel
         telemetry_on = not _tel._is_opted_out()
@@ -421,14 +421,14 @@ def _check_telemetry() -> dict:
         telemetry_on = False
     if telemetry_on:
         detail = (
-            "Anonymous usage telemetry is ON (default). It sends a random install ID, "
+            "Anonymous usage telemetry is ON (you opted in). It sends a random install ID, "
             "tool names, provider count, and plan tier to PostHog. It never sends cost "
-            "figures, account IDs, or credentials. Opt out any time: export NABLE_NO_TELEMETRY=1. "
+            "figures, account IDs, or credentials. Turn it off any time: export NABLE_NO_TELEMETRY=1. "
             "Cost queries always go straight from your machine to your cloud APIs."
         )
     else:
         detail = (
-            "Usage telemetry is OFF. "
+            "Usage telemetry is OFF (it is opt-in: NABLE_TELEMETRY=1 turns it on). "
             "Cost queries go directly from your machine to your cloud provider APIs."
         )
     return {

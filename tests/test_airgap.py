@@ -17,11 +17,17 @@ def _restore_modules():
     fresh module state. Restore the originals afterward so other test files
     (and finops.server, which holds a reference) keep patching the same module
     objects regardless of execution order."""
+    import finops
     saved = {k: sys.modules.get(k) for k in ("finops.config", "finops.telemetry")}
     yield
     for k, v in saved.items():
         if v is not None:
             sys.modules[k] = v
+            # The re-import also rebinds the package attribute, and
+            # `from . import telemetry` reads that attribute first. Restoring
+            # sys.modules alone left two live telemetry modules, one patched
+            # by later tests and one used by the code under test.
+            setattr(finops, k.rsplit(".", 1)[1], v)
         else:
             sys.modules.pop(k, None)
 
