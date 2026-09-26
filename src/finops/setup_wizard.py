@@ -2755,6 +2755,7 @@ def _guard_doctor(parsed) -> None:
     for c in d["not_covered"]:
         print(f"    - {c}")
     _guard_doctor_budgets(d.get("budgets") or {})
+    _guard_doctor_refresh(d.get("background_refresh") or {})
     led = d["ledger"]
     print()
     if led["ok"]:
@@ -2808,6 +2809,56 @@ def _guard_doctor_budgets(b: dict) -> None:
     how = "stops it" if b.get("on_breach") == "deny" else "asks"
     source = b.get("on_breach_source") or "default"
     print(dim(f"    {fresh}; a change over budget {how} ({source})"))
+
+
+def _guard_doctor_refresh(r: dict) -> None:
+    """The doctor's background refresh section: whether the guard may refresh
+    what it reads without waiting, how old the Cursor read is, and whether the
+    cloud spend figure is refreshed too."""
+    import time
+
+    from .budget.summary import age_words
+    from .welcome import amber, bold, dim
+
+    if not r:
+        return
+    print()
+    state = ("on" if r.get("enabled") else amber("off")
+             + (" (FINOPS_GUARD_BACKGROUND_REFRESH=0)" if r.get("switched_off") else ""))
+    print(f"  {bold('Background refresh')} {state}")
+    cursor = r.get("cursor") or {}
+    busy = ", refreshing in the background" if cursor.get("refreshing") else ""
+    if not cursor.get("enabled"):
+        line = dim("not read (set CURSOR_ADMIN_API_KEY to count a Cursor team's usage)")
+    elif cursor.get("error"):
+        at = time.strftime("%H:%M", time.localtime(cursor["retry_at"]))
+        line = amber(f"last read failed ({cursor['error']}), next try after {at}")
+    elif cursor.get("age_hours") is None:
+        line = amber("no read yet") + busy
+    elif cursor.get("stale"):
+        line = (amber(f"read {age_words(cursor['age_hours'])} ago, past its "
+                      f"{cursor['ttl_hours']:g} hour") + busy)
+    else:
+        line = f"read {age_words(cursor['age_hours'])} ago"
+    print(f"    Cursor usage: {line}")
+    budget = r.get("budget") or {}
+    if budget.get("auto"):
+        line = ("recomputed in the background from the local cost history when stale "
+                "(FINOPS_GUARD_AUTO_REFRESH_BUDGET=1)")
+        if budget.get("refreshing"):
+            line += ", refreshing now"
+        elif budget.get("error"):
+            line += amber(f"; last try failed: {budget['error']}")
+        elif budget.get("note"):
+            line += f"; last try: {budget['note']}"
+    elif budget.get("requested"):
+        line = "auto refresh requested, but background refresh is off"
+    else:
+        line = dim("refreshed by `nable budget refresh` only; "
+                   "FINOPS_GUARD_AUTO_REFRESH_BUDGET=1 recomputes it in the background "
+                   "when stale (off by default: it reads the cost history on this "
+                   "machine and never syncs it)")
+    print(f"    Cloud spend figure: {line}")
 
 
 def _guard_report(parsed) -> None:

@@ -67,9 +67,13 @@ def _no_ambient_agent_usage(monkeypatch, tmp_path_factory):
     rollouts under CODEX_HOME, and Cursor's Admin API when a key is set. A dev
     box with a real ~/.codex, a Codex session id in its environment, or a
     Cursor key must not leak its usage (or a network call) into a unit test.
-    Tests that exercise those readers set their own values on top."""
+    Tests that exercise those readers set their own values on top. The guard's
+    background refresh (background_refresh) is off under pytest unless a test
+    turns it on, so a developer's own setting is cleared too."""
     monkeypatch.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home")))
-    for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL"):
+    for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL",
+                "FINOPS_CURSOR_API_URL", "FINOPS_GUARD_BACKGROUND_REFRESH",
+                "FINOPS_GUARD_AUTO_REFRESH_BUDGET"):
         monkeypatch.delenv(var, raising=False)
 
 

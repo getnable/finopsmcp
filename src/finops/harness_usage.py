@@ -375,12 +375,15 @@ def codex_compressed_skipped(since_epoch: float) -> int:
 # is a team key, so CURSOR_ADMIN_USER_EMAIL narrows it to one person's usage;
 # without that the whole team's usage counts, and status says so. Results are
 # cached for an hour in the data dir. The guard, which asks on every tool call,
-# reads only that cache and never the network (allow_network=False): a fetch
-# there put up to one 5 s timeout per page on a tool call. A failed read is
+# reads only that cache and never the network itself (allow_network=False): a
+# fetch there put up to one 5 s timeout per page on a tool call. When the cache
+# is missing or past the hour it starts a refresh in a detached process
+# (background_refresh) and answers from what the cache has. A failed read is
 # written down too, and the next attempt waits _CURSOR_RETRY_AFTER rather than
 # retrying on every call.
 
 CURSOR_API = "https://api.cursor.com/teams/filtered-usage-events"
+_LOOPBACK = ("127.0.0.1", "localhost", "::1")
 _CURSOR_TTL = 3600
 _CURSOR_RETRY_AFTER = 600
 _CURSOR_PAGE = 1000
@@ -420,11 +423,24 @@ def write_json_atomic(path: Path, data: Any) -> None:
         raise
 
 
+def _cursor_url() -> str:
+    """CURSOR_API, or FINOPS_CURSOR_API_URL (a proxy, or a test's dead address).
+    The key goes with the request, so only https, or plain http to this machine."""
+    url = os.getenv("FINOPS_CURSOR_API_URL", "").strip()
+    if not url:
+        return CURSOR_API
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in _LOOPBACK):
+        return url
+    raise ValueError("FINOPS_CURSOR_API_URL must be https (or http to this machine)")
+
+
 def _cursor_post(body: dict[str, Any]) -> dict[str, Any]:
     """One Admin API call. Separate so tests replace it and never reach the network."""
     import httpx
 
-    resp = httpx.post(CURSOR_API, json=body, timeout=_CURSOR_TIMEOUT,
+    resp = httpx.post(_cursor_url(), json=body, timeout=_CURSOR_TIMEOUT,
                       auth=(os.getenv("CURSOR_ADMIN_API_KEY", "").strip(), ""))
     resp.raise_for_status()
     data = resp.json()
@@ -496,8 +512,10 @@ CURSOR_NOT_READ_BY_GATE = ("the guard reads Cursor usage only from the last Admi
 def cursor_status() -> dict[str, Any]:
     """How the last Cursor read went: enabled, scope, fetched_at, and when it
     applies: error, not_read (why no Cursor usage is counted), stale (an old
-    read served without refreshing), retry_at (a failed read's backoff), and
-    truncated (the Admin API had more pages than were read: a lower bound)."""
+    read served without refreshing), retry_at (a failed read's backoff),
+    truncated (the Admin API had more pages than were read: a lower bound),
+    and refreshing (the guard found the cache old or missing and a background
+    refresh is under way)."""
     return dict(_cursor_status)
 
 
@@ -508,6 +526,48 @@ def _cursor_write(cache: dict[str, Any]) -> None:
         pass
 
 
+def _cursor_read_cache() -> dict[str, Any]:
+    try:
+        cache = json.loads(_cursor_cache_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return cache if isinstance(cache, dict) else {}
+
+
+def cursor_cache_info(now: float | None = None) -> dict[str, Any]:
+    """What the guard finds in the Cursor cache, for `nable guard doctor`:
+    enabled, scope, ttl_hours, and with a key set fetched_at, age_hours and
+    stale (past the TTL, or no read at all), plus error and retry_at while a
+    failed read is backing off."""
+    info: dict[str, Any] = {"enabled": cursor_enabled(), "scope": cursor_email() or "team",
+                            "ttl_hours": _CURSOR_TTL / 3600}
+    if not info["enabled"]:
+        return info
+    now = now or time.time()
+    cache = _cursor_read_cache()
+    if cache.get("email") != cursor_email():
+        cache = {}                 # another scope's read is not this one's
+    fetched = cache.get("fetched_at")
+    if isinstance(fetched, (int, float)) and isinstance(cache.get("events"), list):
+        info.update(fetched_at=fetched, age_hours=round(max(now - fetched, 0) / 3600, 2),
+                    stale=now - fetched >= _CURSOR_TTL)
+    else:
+        info.update(fetched_at=None, age_hours=None, stale=True)
+    failed_at = cache.get("failed_at")
+    if isinstance(failed_at, (int, float)) and now - failed_at < _CURSOR_RETRY_AFTER:
+        info.update(error=str(cache.get("error") or "the last read failed"),
+                    retry_at=failed_at + _CURSOR_RETRY_AFTER)
+    return info
+
+
+def _cursor_refresh_in_background() -> None:
+    """The guard found the cache old or missing: have it refreshed without
+    waiting on it (background_refresh), and say so in cursor_status."""
+    from . import background_refresh
+    if background_refresh.maybe_start(background_refresh.CURSOR):
+        _cursor_status["refreshing"] = True
+
+
 def cursor_responses(since_epoch: float, session_id: str | None = None,
                      month_start: float | None = None, *,
                      allow_network: bool = True) -> list[dict[str, Any]]:
@@ -515,7 +575,9 @@ def cursor_responses(since_epoch: float, session_id: str | None = None,
     key is set. With a session_id, only that conversation's.
 
     allow_network=False (the guard) reads only the cache: an old read is used
-    as it is, and with none cursor_status() says Cursor was not read."""
+    as it is, and with none cursor_status() says Cursor was not read. Either
+    way, outside a failed read's backoff, a background refresh is started for
+    the next call."""
     _cursor_status.clear()
     if not cursor_enabled():
         return []
@@ -528,13 +590,7 @@ def cursor_responses(since_epoch: float, session_id: str | None = None,
     start = (month_start if month_start is not None else since_epoch) - 86400
     start_ms = int(start * 1000)
     _cursor_status.update({"enabled": True, "scope": email or "team"})
-    cache: dict[str, Any] = {}
-    try:
-        cache = json.loads(_cursor_cache_path().read_text())
-        if not isinstance(cache, dict):
-            cache = {}
-    except (OSError, ValueError):
-        cache = {}
+    cache = _cursor_read_cache()
     usable = cache.get("email") == email and isinstance(cache.get("events"), list)
     fresh = (usable
              and isinstance(cache.get("start_ms"), int) and cache["start_ms"] <= start_ms
@@ -548,6 +604,8 @@ def cursor_responses(since_epoch: float, session_id: str | None = None,
             if backing_off:
                 _cursor_status["error"] = str(cache.get("error") or "the last read failed")
                 _cursor_status["retry_at"] = failed_at + _CURSOR_RETRY_AFTER
+            else:
+                _cursor_refresh_in_background()
             if not usable:
                 _cursor_status["not_read"] = (_cursor_status.get("error")
                                               or CURSOR_NOT_READ_BY_GATE)
