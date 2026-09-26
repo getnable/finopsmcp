@@ -5,13 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "finops-mcp"
 version = "0.8.217"
-description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
+description = "Prices what your coding agents are about to do, before they do it: a guard hook for Claude Code, Cursor, Codex CLI, Copilot, Gemini CLI and Cline, plus a local MCP server and CLI for cloud and AI cost."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Chandan Bukkapatnam", email = "chandan@nable.sh" }]
 maintainers = [{ name = "Chandan Bukkapatnam", email = "chandan@nable.sh" }]
 keywords = [
-    "mcp", "finops", "claude", "aws", "azure", "gcp", "cloud-cost",
+    "mcp", "finops", "agent-guard", "claude-code", "codex", "ai-cost", "llm-cost",
+    "claude", "aws", "azure", "gcp", "cloud-cost",
     "cost-optimization", "ai", "llm", "claude-desktop", "cursor",
     "model-context-protocol", "cost-management", "cloud-billing",
     "anomaly-detection", "rightsizing", "kubernetes-cost",
