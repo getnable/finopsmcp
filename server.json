@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.getnable/finops-mcp",
   "title": "nable",
-  "description": "See where your cloud and AI bills go, and spend less. Local-first, in your terminal or editor.",
+  "description": "Prices what your coding agents are about to do, before they do it. Plus local cloud and AI cost.",
   "version": "0.8.217",
   "repository": {
     "url": "https://github.com/getnable/finopsmcp",
