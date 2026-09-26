@@ -125,9 +125,11 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # `--secret KEY` as a flag and its value.
     (re.compile(r"\bpulumi\s+config\s+set\b[^|;&]*"), lambda m: _pulumi_config(m.group(0))),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
+    # Not an identifier those words also name (--key-id arn:..., --secret-id
+    # arn:...): see _flag_value.
     (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|pass|pw|secret|token|key"
                 r"|credential|signature)[A-Za-z0-9-]*)(=|\s+)"
-                r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
+                r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), lambda m: _flag_value(m)),
     # A signed URL's query: ?sig=... (Azure SAS), X-Amz-Signature=..., and the
     # like. Names with a secret word in them are already caught above.
     (re.compile(r"([?&](?:sig|x-amz-signature|x-goog-signature|code)=)[^&\s]+", re.IGNORECASE),
@@ -178,6 +180,25 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
                 rf":\s+){_TAKEN}(\"[^\"]*\"|'[^']*'|[^\s\"',}}\]]+)", re.IGNORECASE),
      r"\1[REDACTED]"),
 ]
+
+# What names a key or a secret without being one: an ARN (arn:aws:kms:...:key/...,
+# arn:aws:secretsmanager:...:secret:prod/db-AbCdEf) or a KMS alias. After a
+# flag that takes an id (--key-id, --kms-key-id), a KMS key id too: a UUID, or
+# mrk- and 32 hex digits for a multi-Region key. A UUID after any other flag
+# stays redacted: plenty of API keys and tokens are UUIDs.
+_IDENTIFIER = re.compile(r"(?:arn:[a-z0-9-]+:[a-z0-9-]+:|alias/)\S", re.IGNORECASE)
+_KEY_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                     r"|mrk-[0-9a-f]{32}", re.IGNORECASE)
+
+
+def _flag_value(m: re.Match[str]) -> str:
+    """A secret-looking flag's value, redacted unless it is an identifier."""
+    flag, sep, value = m.group(1), m.group(2), m.group(3)
+    bare = value.strip("\"'")
+    if _IDENTIFIER.match(bare) or (flag.lower().endswith("-id") and _KEY_ID.fullmatch(bare)):
+        return m.group(0)
+    return f"{flag}{sep}[REDACTED]"
+
 
 # pulumi config set: flags that take a value, so neither is KEY or VALUE.
 _PULUMI_VALUE_FLAGS = frozenset({"-s", "--stack", "-C", "--cwd", "--config-file"})

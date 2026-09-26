@@ -150,6 +150,40 @@ def test_the_calls_that_start_a_usage_types_bill():
     assert not ce.is_change("CreateTags") and not ce.is_change("PutBucketTagging")
 
 
+def test_a_spot_fleet_is_asked_for_on_spot_rows_only():
+    """RequestSpotFleet starts a Spot Fleet's instances. Each name is a
+    LookupEvents call per row, so it is asked for where it starts the bill."""
+    spot = ce.family_events("USE2-SpotUsage:m5.large")
+    assert [n for n, _ in spot] == [*BOX_EVENTS, "RequestSpotFleet"]
+    assert ("RequestSpotFleet", "ec2.amazonaws.com") in spot
+    assert "RequestSpotFleet" not in BOX_EVENTS
+    assert "RequestSpotFleet" not in {n for n, _ in ce.family_events("DedicatedUsage:m5.large")}
+
+
+def test_the_group_events_not_asked_for_are_asked_for_by_what_they_cause():
+    """UpdateNodegroupConfig reaches CloudTrail as the node group's Auto
+    Scaling group update, and a new Auto Scaling group's instances as its
+    RunInstances, which the EC2 rows already ask for."""
+    asked = {n for _, events in ce._FAMILIES for n, _ in events}
+    assert ce.CONTAINER_EVENTS - asked == {"UpdateNodegroupConfig", "CreateAutoScalingGroup"}
+    assert {"UpdateAutoScalingGroup", "RunInstances"} <= set(BOX_EVENTS)
+
+
+def test_a_spot_row_looks_up_the_spot_fleet_call():
+    fleet = _raw("RequestSpotFleet", datetime(2026, 9, 21, 2, 0, tzinfo=UTC), eid="sfr-1")
+    rows = [_row(usage_type="SpotUsage:m5.large", resources=[])]
+
+    def stubbing(stub):
+        for name in [*BOX_EVENTS, "RequestSpotFleet"]:
+            stub.add_response("lookup_events",
+                              {"Events": [fleet] if name == "RequestSpotFleet" else []},
+                              _params("EventName", name))
+
+    got, _ = _attach(rows, stubbing)
+    assert [e["event"] for e in rows[0]["changes"]] == ["RequestSpotFleet"]
+    assert got["row_status"][0]["status"] == ce.READ and got["lookup_calls"] == 7
+
+
 def test_window_and_region():
     from datetime import date
     assert ce.window_for(date(2026, 9, 21)) == (START, END)

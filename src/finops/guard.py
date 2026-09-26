@@ -1542,6 +1542,12 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
             detail = (f"{st.get('billable_tokens_mtd', 0):,} tokens this month, "
                       f"{over} your {budget.get('monthly_tokens', 0):,} budget")
             raise_it = "nable ai-budget --tokens N"
+        # What the figure leaves out or is late on (Cursor usage not read, or
+        # read a while ago), said with it.
+        lens = (st.get("session") if st.get("verdict_basis") == "session"
+                else st.get("month_to_date")) or {}
+        for note in lens.get("source_notes") or []:
+            detail += f". {note.rstrip('.')}"
         if verdict == BUDGET_WARN:
             # Close to the line: say so, alongside, without stopping anything.
             return {
@@ -1706,6 +1712,19 @@ def _budget_scope_words(b: dict[str, Any]) -> str:
     return "total" if kind == "total" else f"{kind} {b.get('scope_value')}"
 
 
+def _refresh_budget_summary(doc: dict[str, Any] | None, state: str) -> bool:
+    """With FINOPS_GUARD_AUTO_REFRESH_BUDGET=1, have a stale or absent spend
+    summary recomputed in the background (background_refresh), for the next
+    priced change. Not when the summary lists no budget: nothing to check.
+    True when a refresh is under way."""
+    if state not in ("stale", "absent") or (doc is not None and not doc.get("budgets")):
+        return False
+    from . import background_refresh
+    if not background_refresh.budget_auto_enabled():
+        return False
+    return background_refresh.maybe_start(background_refresh.BUDGET) is not None
+
+
 def budget_lens(command: str, est: dict[str, Any] | None, *,
                 now: Any = None) -> dict[str, Any] | None:
     """The change against the budget figures on this machine, or None when the
@@ -1720,7 +1739,8 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
       stale      the figures are older than the limit (or from last month)
       absent     there are no figures on this machine
     It is also what the ledger records. Never raises: a summary it cannot read
-    is "absent".
+    is "absent". A stale or absent one carries "refreshing" when a background
+    refresh is under way (_refresh_budget_summary).
     """
     if not est:
         return None
@@ -1741,6 +1761,8 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
             out["max_age_hours"] = fresh["max_age_hours"]
             if fresh["previous_month"]:
                 out["previous_month"] = True
+        if _refresh_budget_summary(doc, fresh["state"]):
+            out["refreshing"] = True
         return out
     when["spend_through"] = fresh["spend_through"]
     today = datetime.now().astimezone().date()
@@ -1910,16 +1932,18 @@ def _budget_skip_note(lens: dict[str, Any] | None) -> str | None:
     """What a verdict on a priced change says when the budget went unchecked."""
     if not lens:
         return None
+    fix = ("it is being refreshed in the background" if lens.get("refreshing")
+           else "`nable budget refresh` updates it")
     if lens["state"] == "stale" and lens.get("previous_month"):
-        return ("Budget not checked: nable's spend figure is from last month; "
-                "`nable budget refresh` updates it.")
+        return f"Budget not checked: nable's spend figure is from last month; {fix}."
     if lens["state"] == "stale":
         return (f"Budget not checked: nable's spend figure is {_summary_age(lens)} old "
                 f"(the guard uses figures up to {lens.get('max_age_hours', 48):g} hours "
-                "old); `nable budget refresh` updates it.")
+                f"old); {fix}.")
     if lens["state"] == "absent":
         return ("Budget not checked: there is no spend figure on this machine yet; "
-                "`nable budget refresh` computes one.")
+                + ("one is being computed in the background." if lens.get("refreshing")
+                   else "`nable budget refresh` computes one."))
     if lens["state"] == "no_data":
         return ("Budget not checked: nable has no cost data for this budget period yet; "
                 "sync cost data, then `nable budget refresh`.")
@@ -3337,8 +3361,10 @@ def _adapter_rows() -> list[dict[str, Any]]:
 def doctor() -> dict[str, Any]:
     """Which surfaces the guard actually covers on this machine, and what it
     does not. Read-only apart from the ledger anchor (guard_ledger.check),
-    which a clean check moves forward: it inspects settings files and the ledger, runs
-    nothing, and calls no cloud API."""
+    which a clean check moves forward: it inspects settings files and the ledger
+    and calls no cloud API. It runs nothing but what the guard itself would
+    start: with a Cursor Admin API key and an old or missing Cursor cache, the
+    background refresh (background_refresh), which it does not wait for."""
     from . import guard_ledger
     from .guard_mcp import MCP_RULES
 
@@ -3481,6 +3507,9 @@ def doctor() -> dict[str, Any]:
     for row in budgets["not_enforced"]:
         gaps.append(f"the '{row['name']}' budget ({row['scope']}): the guard cannot tell "
                     f"which changes are in it; set {row['needs']} where the agent runs")
+    from . import background_refresh
+    refresh = background_refresh.status(start=True)
+    _doctor_cursor(refresh, covered, gaps, fix)
     from .policy import policy_problems
     problems = policy_problems()
     for problem in problems:
@@ -3496,11 +3525,43 @@ def doctor() -> dict[str, Any]:
         "mcp_tools": families,
         "ledger": ledger,
         "budgets": budgets,
+        "background_refresh": refresh,
         "policy_problems": problems,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
     }
+
+
+def _doctor_cursor(refresh: dict[str, Any], covered: list[str], gaps: list[str],
+                   fix: Any) -> None:
+    """The doctor's word on Cursor usage in the AI budget: how old the Admin
+    API read the guard counts is, and what is refreshing it. Nothing without
+    a key: then Cursor usage is not read at all (`nable ai-budget` says so)."""
+    from .budget.summary import age_words
+    cursor = refresh["cursor"]
+    if not cursor.get("enabled"):
+        return
+    what = "Cursor usage in the AI budget"
+    busy = "; a refresh is running in the background" if cursor.get("refreshing") else ""
+    age = cursor.get("age_hours")
+    if cursor.get("error"):
+        counted = (f"counts the read from {age_words(age)} ago" if age is not None
+                   else "counts no Cursor usage")
+        gaps.append(f"{what}: the last Admin API read failed ({cursor['error']}), so the "
+                    f"guard {counted} until one succeeds")
+        fix("nable ai-budget", "reads Cursor usage now, once the key or the network is fixed")
+    elif age is None:
+        gaps.append(f"{what}: no Admin API read yet, so the guard counts none{busy}")
+    elif cursor.get("stale"):
+        gaps.append(f"{what}: the guard is counting an Admin API read {age_words(age)} "
+                    f"old, past the {cursor['ttl_hours']:g} hour it is good for{busy}")
+    else:
+        covered.append(f"{what} (Admin API read {age_words(age)} ago)")
+    if not refresh.get("enabled") and cursor.get("stale"):
+        fix("nable ai-budget", "reads Cursor usage now; background refresh is off "
+            "(FINOPS_GUARD_BACKGROUND_REFRESH=0), so the guard's Cursor figure is only "
+            "as fresh as the last read outside the hook")
 
 
 def _harness_present(name: str) -> bool:

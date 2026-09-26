@@ -655,14 +655,23 @@ def _source_notes(sources: dict[str, Any]) -> list[str]:
     cursor = sources.get(harness_usage.HARNESS_CURSOR)
     if not isinstance(cursor, dict):
         return []
+    # Said when the guard found the cache old or missing and a read is under way.
+    refreshing = "; refreshing in the background" if cursor.get("refreshing") else ""
     if cursor.get("not_read"):
         return [(f"Cursor usage was not read ({cursor['not_read']}), so it is not in "
-                 f"these figures.")]
+                 f"these figures{refreshing}.")]
+    notes = []
+    if cursor.get("stale"):
+        fetched = cursor.get("fetched_at")
+        from .budget.summary import age_words
+        age = (f"{age_words(max(time.time() - fetched, 0) / 3600)} old"
+               if isinstance(fetched, (int, float)) else "past its hour")
+        notes.append(f"The Cursor figure is from an Admin API read {age}{refreshing}.")
     if cursor.get("truncated"):
         cap = harness_usage._CURSOR_MAX_PAGES * harness_usage._CURSOR_PAGE
-        return [(f"The Cursor figure is a lower bound: the Admin API had more usage "
-                 f"events than the {cap:,} a read takes.")]
-    return []
+        notes.append(f"The Cursor figure is a lower bound: the Admin API had more usage "
+                     f"events than the {cap:,} a read takes.")
+    return notes
 
 
 def _rec_epoch(ts: Any) -> float | None:

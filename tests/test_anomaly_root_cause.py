@@ -163,6 +163,19 @@ def test_the_asg_scale_up_from_the_review_is_likely():
     assert cause["attribution"] == rc.LIKELY
 
 
+def test_a_spot_fleet_request_is_likely_for_spot_usage_only():
+    ch = _change(event="RequestSpotFleet", resource_ids=["sfr-1"], instance_type=None,
+                 time="2026-09-21T02:00:00+00:00")
+    row = _row(usage_type="SpotUsage:m5.large", instance_type="m5.large",
+               resources=[{"resource_id": "i-0aaa", "onset": "2026-09-21"}], changes=[ch])
+    [cause] = rc.attribute(row)
+    assert cause["attribution"] == rc.LIKELY and "group" in cause["why_likely"]
+    on_demand = _row(usage_type="BoxUsage:m5.large", instance_type="m5.large",
+                     changes=[dict(ch)])
+    assert rc.attribute(on_demand) == []
+    assert "not a call that starts" in on_demand["changes"][0]["not_attributed_because"]
+
+
 def test_unknown_instance_type_on_either_side_does_not_block():
     row = _row(resources=[], changes=[_change(instance_type=None)])
     assert rc.attribute(row)[0]["attribution"] == rc.LIKELY
