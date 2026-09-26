@@ -223,9 +223,35 @@ def test_secrets_never_reach_the_ledger(raw, gone, kept):
     "aws secretsmanager get-secret-value arn:aws:secretsmanager:us-east-1:1:secret:prod",
     "pulumi config set aws:region us-east-1",
     "aws configure set region us-east-1",
+    # An ARN, an alias or a KMS key id names a key or a secret; it is not one.
+    "aws kms encrypt --key-id arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab --plaintext fileb://x",
+    "aws kms decrypt --key-id=alias/prod-data --ciphertext-blob fileb://x",
+    "aws kms describe-key --key-id 1234abcd-12ab-34cd-56ef-1234567890ab",
+    "aws kms describe-key --key-id mrk-1234abcd12ab34cd56ef1234567890ab",
+    "aws ebs create-volume --kms-key-id 'arn:aws:kms:us-east-1:123456789012:alias/ebs' --size 8",
+    "aws secretsmanager get-secret-value --secret-id arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf",
+    "aws s3 cp x s3://b/x --sse-kms-key-id alias/aws/s3",
 ])
 def test_ordinary_flags_are_left_alone(cmd):
     assert gl.redact(cmd) == cmd
+
+
+@pytest.mark.parametrize("raw, gone, kept", [
+    # A UUID is a key id only after a flag that takes an id: many API keys are UUIDs.
+    ("heroku x --api-key 3f1c2a9e-5b7d-4e8f-9a0b-1c2d3e4f5a6b", "3f1c2a9e", "--api-key [REDACTED]"),
+    ("x --auth-token=3f1c2a9e-5b7d-4e8f-9a0b-1c2d3e4f5a6b", "3f1c2a9e", "--auth-token=[REDACTED]"),
+    # A secret id that is neither an ARN nor an alias is still dropped.
+    ("aws secretsmanager get-secret-value --secret-id prod/db", "prod/db", "--secret-id [REDACTED]"),
+    # A value that only starts like one is not an identifier.
+    ("x --password arn:hunter2", "hunter2", "--password [REDACTED]"),
+    ("x --password alias/", "alias/", "--password [REDACTED]"),
+    ("aws secretsmanager create-secret --kms-key-id alias/k --secret-string hunter2",
+     "hunter2", "--kms-key-id alias/k --secret-string [REDACTED]"),
+])
+def test_only_identifiers_are_kept_after_a_secret_flag(raw, gone, kept):
+    out = gl.redact(raw)
+    assert gone not in out
+    assert kept in out
 
 
 def test_redaction_keeps_what_an_auditor_needs():
