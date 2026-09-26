@@ -64,11 +64,25 @@ _EC2, _ASG = "ec2.amazonaws.com", "autoscaling.amazonaws.com"
 _RDS, _CACHE = "rds.amazonaws.com", "elasticache.amazonaws.com"
 _SM, _ECS = "sagemaker.amazonaws.com", "ecs.amazonaws.com"
 
-# Usage type (region prefix stripped) -> the calls that start its bill.
+_EC2_INSTANCES = (
+    ("RunInstances", _EC2), ("StartInstances", _EC2), ("ModifyInstanceAttribute", _EC2),
+    ("CreateFleet", _EC2), ("UpdateAutoScalingGroup", _ASG), ("SetDesiredCapacity", _ASG))
+
+# Usage type (region prefix stripped) -> the calls that start its bill. Each
+# name is one LookupEvents query per row (the API takes one attribute a call),
+# out of MAX_CALLS for the whole answer, so a name earns its place only where
+# it starts that bill.
+#
+# RequestSpotFleet is asked for on Spot rows only: it is the call that starts
+# a Spot Fleet's instances. UpdateNodegroupConfig is asked for nowhere, though
+# it scales an EKS node group: asking on every EC2 row, the commonest, would
+# cost each one a call, and the scaling it causes is already asked for, since
+# EKS applies it as UpdateAutoScalingGroup on the node group's Auto Scaling
+# group (made by EKS's service-linked role, so the change names that role, not
+# the person who resized the node group).
 _FAMILIES: list[tuple[re.Pattern[str], tuple[tuple[str, str], ...]]] = [
-    (re.compile(r"^(BoxUsage|SpotUsage|DedicatedUsage|HostUsage)"), (
-        ("RunInstances", _EC2), ("StartInstances", _EC2), ("ModifyInstanceAttribute", _EC2),
-        ("CreateFleet", _EC2), ("UpdateAutoScalingGroup", _ASG), ("SetDesiredCapacity", _ASG))),
+    (re.compile(r"^SpotUsage"), (*_EC2_INSTANCES, ("RequestSpotFleet", _EC2))),
+    (re.compile(r"^(BoxUsage|DedicatedUsage|HostUsage)"), _EC2_INSTANCES),
     (re.compile(r"^EBS:Volume"), (
         ("CreateVolume", _EC2), ("ModifyVolume", _EC2), ("RunInstances", _EC2))),
     (re.compile(r"^EBS:Snapshot"), (("CreateSnapshot", _EC2), ("CreateSnapshots", _EC2))),
