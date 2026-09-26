@@ -29,7 +29,7 @@ $ uvx nable guard check --command "terraform destroy -auto-approve"
   ask  nable guard: This would destroy infrastructure (`terraform destroy -auto-approve`). It cannot be undone; confirm to proceed.
 ```
 
-In Claude Code, Cursor and Copilot CLI, `ask` stops the agent until you confirm; Codex CLI, Gemini CLI, Cline and Copilot's cloud agent refuse the command and show the reason ([per-agent table](#agent-guard)). A launch under the threshold stays silent: a `t3.micro` is ~$8/mo, under the default $500/mo (`FINOPS_POLICY_MAX_AUTO_USD`). Restart the agent after installing so it picks up the hook.
+In Claude Code, Cursor and Copilot CLI, `ask` stops the agent until you confirm; Codex CLI, Gemini CLI, Cline and Copilot's cloud agent refuse the command and show the reason (per-agent table under "Guard hook" below). A launch under the threshold stays silent: a `t3.micro` is ~$8/mo, under the default $500/mo (`FINOPS_POLICY_MAX_AUTO_USD`). Restart the agent after installing so it picks up the hook.
 
 What needs a cloud account: pricing and asking do not. The budget stop, `nable guard reconcile` (CloudTrail) and the scan below read your own account, read-only.
 
