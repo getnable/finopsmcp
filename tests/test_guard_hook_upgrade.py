@@ -18,6 +18,7 @@ import json
 import pytest
 
 import finops.guard as g
+import finops.guard_adapters as ga
 
 
 @pytest.fixture
@@ -66,11 +67,32 @@ def test_a_healthy_hook_is_left_byte_for_byte(settings, monkeypatch, tmp_path):
         {"matcher": g._HOOK_MATCHER, "hooks": [{"type": "command",
                                                 "command": f"{exe} guard hook; exit 0",
                                                 "timeout": 10}]},
+    ], "PostToolUse": [
+        {"matcher": g._HOOK_MATCHER, "hooks": [{"type": "command",
+                                                "command": f"{exe} guard hook --post; exit 0",
+                                                "timeout": 10}]},
     ]}}, indent=4)
     settings.write_text(body)
     monkeypatch.setattr("shutil.which", lambda n: None)
     g.install()
     assert settings.read_text() == body, "install rewrote a hook that was fine"
+
+
+def test_a_healthy_hook_from_before_the_post_hook_gains_it_and_nothing_else(
+        settings, monkeypatch, tmp_path):
+    exe = tmp_path / "bin" / "finops"
+    exe.parent.mkdir(parents=True)
+    exe.touch(mode=0o755)
+    pre = [{"matcher": g._HOOK_MATCHER, "hooks": [{"type": "command",
+                                                   "command": f"{exe} guard hook; exit 0",
+                                                   "timeout": 10}]}]
+    settings.write_text(json.dumps({"model": "opus", "hooks": {"PreToolUse": pre}}))
+    monkeypatch.setattr("shutil.which", lambda n: None)
+    g.install()
+    doc = json.loads(settings.read_text())
+    assert doc["hooks"]["PreToolUse"] == pre and doc["model"] == "opus"
+    assert doc["hooks"]["PostToolUse"] == [{"matcher": g._HOOK_MATCHER, "hooks": [
+        {"type": "command", "command": f"{exe} guard hook --post; exit 0", "timeout": 10}]}]
 
 
 def test_a_user_raised_timeout_survives_the_repair(settings, monkeypatch):
@@ -116,12 +138,16 @@ def test_hook_pin_reads_every_form(cmd, pin):
     assert g.hook_pin(cmd) == pin
 
 
-def _legacy_settings(path, command=LEGACY, matcher="Bash"):
-    path.write_text(json.dumps({"hooks": {"PreToolUse": [
+def _legacy_settings(path, command=LEGACY, matcher="Bash", post=False):
+    doc = {"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool check"}]},
         {"matcher": matcher, "hooks": [{"type": "command", "command": command,
                                         "timeout": 30}]},
-    ]}}))
+    ]}}
+    if post:
+        doc["hooks"]["PostToolUse"] = [{"matcher": matcher, "hooks": [
+            {"type": "command", "command": ga.post_hook_command(command), "timeout": 30}]}]
+    path.write_text(json.dumps(doc))
 
 
 def test_install_pins_a_legacy_unpinned_hook_in_place(settings, monkeypatch):
@@ -147,7 +173,7 @@ def test_install_moves_an_older_pin_forward(settings, monkeypatch):
 
 
 def test_a_current_pin_is_left_alone(settings, monkeypatch):
-    _legacy_settings(settings, WRITTEN, matcher=g._HOOK_MATCHER)
+    _legacy_settings(settings, WRITTEN, matcher=g._HOOK_MATCHER, post=True)
     before = settings.read_text()
     _uv_only(monkeypatch)
     g.install()

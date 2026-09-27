@@ -225,8 +225,9 @@ def test_every_version_carrier_agrees_with_the_package():
     weeks stale. packaging/mcpb/manifest.json was the fifth, found by review, and
     the pattern is now obvious enough to enumerate rather than rediscover.
 
-    A new carrier added without a line here is the eighth (the plugin's guard
-    hook, hooks/hooks.json, is the seventh). That is what the docstring is for.
+    A new carrier added without a line here is the ninth (the plugin's guard
+    hook, hooks/hooks.json, is the seventh, and its post hook in the same file
+    the eighth). That is what the docstring is for.
     """
     import json
     import pathlib
@@ -257,6 +258,10 @@ def test_every_version_carrier_agrees_with_the_package():
         # and a bump that missed it would judge commands with the old guard.
         "plugins/nable/hooks/hooks.json": guard_adapters.uvx_release(
             _json("plugins/nable/hooks/hooks.json")["hooks"]["PreToolUse"][0]["hooks"][0]["command"]),
+        # The eighth: the same file's post hook, which records how each ask
+        # was answered, runs the release it pins too.
+        "plugins/nable/hooks/hooks.json (PostToolUse)": guard_adapters.uvx_release(
+            _json("plugins/nable/hooks/hooks.json")["hooks"]["PostToolUse"][0]["hooks"][0]["command"]),
     }
 
     wrong = {k: v for k, v in carriers.items() if v != pkg}

@@ -430,6 +430,42 @@ def _routed_labels(labels: list[str], route: Any) -> list[str]:
     return [*labels, tag]
 
 
+def _approvals(finding: dict[str, Any] | None, action_class: str, team: str = "") -> Any:
+    """The approval chain the org confirmed for this class of change over
+    what the ticket is about (org_owner.Approvals), or None. Never raises."""
+    try:
+        from ..org_owner import approvals_for
+        return approvals_for([finding or {}], action_class,
+                             teams=[team] if team else ())
+    except Exception as e:  # noqa: BLE001 - watchers are a nicety
+        log.debug("ticket approvals skipped: %s", e)
+        return None
+
+
+def _approval_body(body: str, approvals: Any) -> str:
+    """The body with the approval chain named before the footer."""
+    if approvals is None:
+        return body
+    line = f"**Approval:** {_sanitize_field(approvals.words(), 400)}"
+    at = body.rfind(_FOOTER)
+    if at < 0:
+        return f"{body.rstrip()}\n\n{line}\n"
+    return f"{body[:at].rstrip()}\n\n{line}\n{body[at:]}"
+
+
+_APPROVAL_LABEL = "needs-approval"
+
+
+def _watchers(approvals: Any, provider: str) -> list[str]:
+    """The approvers a tracker can add as watchers (Jira) or subscribers
+    (Linear), by their ids there. GitHub issues have no watchers: the
+    approval shows in the body and a label."""
+    if approvals is None:
+        return []
+    ids = {"jira": approvals.jira, "linear": approvals.linear}.get(provider) or []
+    return [i for i in (_sanitize_field(x, 128).strip() for x in ids) if i and " " not in i]
+
+
 def _assignee(route: Any, provider: str) -> str | None:
     """The person a confirmed fact names for this tracker ("github:login"),
     or None. Never a guess: an unconfirmed owner, or people without the
@@ -447,15 +483,15 @@ def _assignee(route: Any, provider: str) -> str | None:
 def _post_routed(url: str, payload: dict[str, Any], without: dict[str, Any] | None,
                  **kwargs: Any) -> httpx.Response:
     """POST `payload`. When the tracker refuses it (400 or 422) and `without`
-    is the same payload minus the org model's assignee, send that once:
-    routing may change a ticket's fields, never cost the ticket."""
+    is the same payload minus the org model's assignee and watchers, send
+    that once: routing may change a ticket's fields, never cost the ticket."""
     try:
         return http_with_retry("POST", url, json=payload, **kwargs)
     except httpx.HTTPStatusError as e:
         if without is None or e.response.status_code not in (400, 422):
             raise
-        log.warning("Ticket tracker refused the owner's assignee (%s); creating the "
-                    "ticket without it", e.response.status_code)
+        log.warning("Ticket tracker refused the org model's assignee or watchers (%s); "
+                    "creating the ticket without them", e.response.status_code)
         return http_with_retry("POST", url, json=without, **kwargs)
 
 
@@ -464,7 +500,7 @@ def _post_routed(url: str, payload: dict[str, Any], without: dict[str, Any] | No
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _post_jira(title: str, body: str, priority: str, labels: list[str],
-               assignee: str | None = None) -> str | None:
+               assignee: str | None = None, watchers: list[str] | None = None) -> str | None:
     base_url = _env("JIRA_BASE_URL").rstrip("/")
     token = _env("JIRA_API_TOKEN")
     email_addr = _env("JIRA_USER_EMAIL")
@@ -510,10 +546,18 @@ def _post_jira(title: str, body: str, priority: str, labels: list[str],
             timeout=15,
         )
         key = r.json()["key"]
-        return f"{base_url}/browse/{key}"
     except Exception as e:
         log.error("Jira ticket creation failed: %s", e)
         return None
+    for account in watchers or []:
+        # The approvers the org confirmed, as watchers of the issue just made,
+        # on the same Jira. A refusal costs the watcher, never the ticket.
+        try:
+            http_with_retry("POST", f"{base_url}/rest/api/3/issue/{key}/watchers",
+                            json=account, auth=(email_addr, token), timeout=15)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Jira refused a watcher for %s: %s", key, e)
+    return f"{base_url}/browse/{key}"
 
 
 _LINEAR_CREATE_ISSUE = """
@@ -527,7 +571,7 @@ mutation CreateIssue($input: IssueCreateInput!) {
 
 
 def _post_linear(title: str, body: str, priority: str, labels: list[str],
-                 assignee: str | None = None) -> str | None:
+                 assignee: str | None = None, watchers: list[str] | None = None) -> str | None:
     api_key = _env("LINEAR_API_KEY")
     team_id = _env("LINEAR_TEAM_ID")
 
@@ -548,9 +592,13 @@ def _post_linear(title: str, body: str, priority: str, labels: list[str],
     if assignee_id:
         variables["input"]["assigneeId"] = assignee_id  # type: ignore[index]
     without = None
-    if assignee:
+    if assignee or watchers:
         without = {"query": _LINEAR_CREATE_ISSUE, "variables": json.loads(json.dumps(variables))}
+    if assignee:
         variables["input"]["assigneeId"] = assignee  # type: ignore[index]
+    if watchers:
+        # The approvers the org confirmed, subscribed to the issue.
+        variables["input"]["subscriberIds"] = list(watchers)  # type: ignore[index]
 
     try:
         r = _post_routed(
@@ -616,12 +664,16 @@ def _post_github(title: str, body: str, priority: str, labels: list[str],
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _dispatch(title: str, body: str, priority: str, labels: list[str],
-              route: Any = None) -> str | None:
+              route: Any = None, approvals: Any = None) -> str | None:
     """Route ticket to the configured provider. Returns URL or None.
 
     `route` (org_owner.Owner, from _route) names the owner: it adds the owner
     line to the body, a team label, and an assignee where a confirmed fact
-    names one for the provider. It changes fields, never the destination."""
+    names one for the provider. `approvals` (org_owner.Approvals, from
+    _approvals) names the approval chain the org confirmed for this class of
+    change: an approval line, a needs-approval label, and the approvers as
+    watchers where the tracker has them (Jira watchers, Linear subscribers).
+    Both change fields, never the destination."""
     preferred = _env("FINOPS_TICKET_PROVIDER", "").lower()
 
     providers = {
@@ -640,10 +692,19 @@ def _dispatch(title: str, body: str, priority: str, labels: list[str],
     if route is not None:
         body = _routed_body(body, route)
         labels = _routed_labels(labels, route)
+    if approvals is not None:
+        body = _approval_body(body, approvals)
+        if _APPROVAL_LABEL not in labels:
+            labels = [*labels, _APPROVAL_LABEL]
     for name, fn in ordered:
+        extra: dict[str, Any] = {}
         who = _assignee(route, name)
-        url = fn(title, body, priority, labels, assignee=who) if who else \
-            fn(title, body, priority, labels)
+        if who:
+            extra["assignee"] = who
+        watchers = _watchers(approvals, name)
+        if watchers:
+            extra["watchers"] = watchers
+        url = fn(title, body, priority, labels, **extra)
         if url:
             log.info("Created %s ticket: %s", name, url)
             return url
@@ -661,7 +722,8 @@ def create_ticket(anomaly: dict[str, Any]) -> str | None:
     Backward-compatible with the original signature.
     """
     title, body, priority, labels = _anomaly_ticket(anomaly)
-    url = _dispatch(title, body, priority, labels, route=_route(anomaly))
+    url = _dispatch(title, body, priority, labels, route=_route(anomaly),
+                    approvals=_approvals(anomaly, "ticket"))
     if url:
         _persist_ticket(anomaly, url)
     return url
@@ -670,7 +732,8 @@ def create_ticket(anomaly: dict[str, Any]) -> str | None:
 def create_rightsizing_ticket(rec: dict[str, Any]) -> str | None:
     """Create a ticket for a rightsizing recommendation."""
     title, body, priority, labels = _rightsizing_ticket(rec)
-    return _dispatch(title, body, priority, labels, route=_route(rec))
+    return _dispatch(title, body, priority, labels, route=_route(rec),
+                     approvals=_approvals(rec, "rightsizing"))
 
 
 def create_kubernetes_waste_ticket(finding: dict[str, Any]) -> str | None:
@@ -686,7 +749,8 @@ def create_kubernetes_waste_ticket(finding: dict[str, Any]) -> str | None:
         detail        free-text summary
     """
     title, body, priority, labels = _kubernetes_waste_ticket(finding)
-    return _dispatch(title, body, priority, labels, route=_route(finding))
+    return _dispatch(title, body, priority, labels, route=_route(finding),
+                     approvals=_approvals(finding, "idle_cleanup"))
 
 
 def create_scorecard_ticket(dim: dict[str, Any], team: str = "") -> str | None:
@@ -700,7 +764,8 @@ def create_scorecard_ticket(dim: dict[str, Any], team: str = "") -> str | None:
         issues        list of human-readable issue strings
     """
     title, body, priority, labels = _scorecard_ticket(dim, team)
-    return _dispatch(title, body, priority, labels, route=_route(dim, team=team))
+    return _dispatch(title, body, priority, labels, route=_route(dim, team=team),
+                     approvals=_approvals(dim, "ticket", team=team))
 
 
 def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
@@ -714,7 +779,8 @@ def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
         recommendation            human-readable recommendation text
     """
     title, body, priority, labels = _commitment_gap_ticket(gap)
-    return _dispatch(title, body, priority, labels, route=_route(gap))
+    return _dispatch(title, body, priority, labels, route=_route(gap),
+                     approvals=_approvals(gap, "purchase_commitment"))
 
 
 def create_custom_ticket(
@@ -723,11 +789,14 @@ def create_custom_ticket(
     priority: str = "medium",
     labels: list[str] | None = None,
     subject: dict[str, Any] | None = None,
+    action_class: str = "ticket",
 ) -> str | None:
     """Create a ticket with arbitrary title and body. Used for ad-hoc findings.
-    `subject` (account_id, namespace, tags, team) routes it to the owner."""
+    `subject` (account_id, namespace, tags, team) routes it to the owner, and
+    to the approval chain the org confirmed for `action_class` there."""
     return _dispatch(title, body, priority, labels or ["finops"],
-                     route=_route(subject) if subject else None)
+                     route=_route(subject) if subject else None,
+                     approvals=_approvals(subject, action_class) if subject else None)
 
 
 def create_tickets_for_unnotified(limit: int = 20) -> list[str]:
@@ -784,6 +853,8 @@ def create_github_pr(
     head: str,
     base: str = "main",
     token: str | None = None,
+    reviewers: list[str] | None = None,
+    team_reviewers: list[str] | None = None,
 ) -> dict:
     """Open a GitHub Pull Request via the GitHub API.
 
@@ -794,9 +865,15 @@ def create_github_pr(
         head:   Branch name to merge from.
         base:   Target branch (default: "main").
         token:  GitHub token. Falls back to GITHUB_TOKEN env var.
+        reviewers, team_reviewers:
+                GitHub logins and team slugs to request reviews from (an
+                approval chain the org confirmed). Requested on the new PR,
+                on the same repository; a refusal (a login that is not a
+                collaborator, say) is logged and never costs the PR.
 
-    Returns the parsed JSON response from the GitHub API.
-    Raises on HTTP error after retries.
+    Returns the parsed JSON response from the GitHub API, with
+    `nable_review_request` {reviewers, team_reviewers, error} when reviews
+    were asked for. Raises on HTTP error after retries (of the PR itself).
     """
     resolved_token = token or _env("GITHUB_TOKEN")
     if not resolved_token:
@@ -809,18 +886,38 @@ def create_github_pr(
         "base": base,
     }
 
+    headers = {
+        "Authorization": f"Bearer {resolved_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
     r = http_with_retry(
         "POST",
         f"https://api.github.com/repos/{_check_repo(repo)}/pulls",
         json=payload,
-        headers={
-            "Authorization": f"Bearer {resolved_token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
+        headers=headers,
         timeout=15,
     )
-    return r.json()
+    pr = r.json()
+    people = [_sanitize_field(x, 100) for x in reviewers or [] if str(x).strip()]
+    teams = [_sanitize_field(x, 100) for x in team_reviewers or [] if str(x).strip()]
+    number = pr.get("number") if isinstance(pr, dict) else None
+    if (people or teams) and isinstance(number, int):
+        asked: dict[str, Any] = {"reviewers": people, "team_reviewers": teams, "error": None}
+        try:
+            http_with_retry(
+                "POST",
+                f"https://api.github.com/repos/{_check_repo(repo)}/pulls/{number}"
+                "/requested_reviewers",
+                json={"reviewers": people, "team_reviewers": teams},
+                headers=headers,
+                timeout=15,
+            )
+        except Exception as e:  # noqa: BLE001 - the PR stands without its reviewers
+            log.warning("GitHub refused the review requests for PR #%s: %s", number, e)
+            asked["error"] = str(e)[:300]
+        pr["nable_review_request"] = asked
+    return pr
 
 
 def list_configured_providers() -> list[str]:

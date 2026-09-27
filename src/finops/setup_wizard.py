@@ -2426,7 +2426,8 @@ def _run_guard(parsed) -> None:
         # Machine path: the agent harness invokes this on every shell command.
         from .guard_plugin import run_hook
         raise SystemExit(run_hook(getattr(parsed, "guard_harness", None),
-                                  getattr(parsed, "guard_via", None)))
+                                  getattr(parsed, "guard_via", None),
+                                  post=bool(getattr(parsed, "guard_post", False))))
 
     # Any agent but Claude Code, or every agent found here: guard_adapters owns
     # those files.
@@ -2442,6 +2443,12 @@ def _run_guard(parsed) -> None:
 
     if action in ("on", "off"):
         _guard_switch(action == "off")
+        return
+
+    if action == "approve":
+        code = _guard_approve(parsed)
+        if code:
+            raise SystemExit(code)
         return
 
     if action == "install" and not getattr(parsed, "guard_force", False):
@@ -2784,6 +2791,50 @@ def _run_guard(parsed) -> None:
     print()
 
 
+def _guard_approve(parsed) -> int:
+    """`nable guard approve [ID] [--as WHO]`: a person lets one call a
+    deny-only harness (Codex CLI, Gemini CLI, Cline, the Copilot cloud agent)
+    was stopped on run once (guard_approvals). With no id, the approvals
+    waiting. A human decision: without a terminal it needs --as, the same
+    rule as `nable org confirm`, and the guard asks (or, in those harnesses,
+    denies) when an agent runs it."""
+    from . import guard_approvals as ga
+    from .org.cli import _need_human, _who
+    from .welcome import cyan, dim, green
+
+    aid = (getattr(parsed, "guard_target", None) or "").strip()
+    if not aid:
+        rows = ga.waiting()
+        if not rows:
+            print("\n  No approvals waiting. A deny in Codex CLI, Gemini CLI, Cline or the "
+                  "Copilot cloud agent names one when a person may approve it.\n")
+            return 0
+        print()
+        for r in rows:
+            state = ("used " + str(r["used_at"]) if r.get("used_at") else
+                     f"approved by {r['approved_by']}" if r.get("approved_by") else "waiting")
+            usd = f", ~${r['monthly_usd']:,.0f}/mo" if r.get("monthly_usd") else ""
+            print(f"  {cyan(r['id'])}  {r.get('harness')}  {state}, expires {r['expires_at']}")
+            print(f"    {r.get('call')}{usd}")
+            print(dim(f"    in {r.get('cwd') or '(no directory given)'}"))
+        print()
+        return 0
+    who = _who(getattr(parsed, "guard_as", None))
+    if who is None:
+        return _need_human()
+    try:
+        r = ga.approve(aid, who)
+    except ga.ApprovalError as e:
+        print(f"nable guard approve: {e}", file=sys.stderr)
+        return 1
+    print()
+    print(f"  {green('✓')} Approved once, by {who}: {r.get('call')}")
+    print(dim(f"    {r.get('harness')}, in {r.get('cwd') or '(no directory given)'}; the "
+              f"identical call is allowed once until {r['expires_at']}."))
+    print()
+    return 0
+
+
 def _guard_switch(off: bool) -> None:
     """`nable guard off` / `nable guard on`: every guard hook on this machine,
     the Claude Code plugin's included (Claude Code cannot turn one plugin's
@@ -3098,6 +3149,17 @@ def _guard_report(parsed) -> None:
     if d.get("fail_open"):
         errs = ", ".join(f"{k} x{v}" for k, v in summary["fail_open_errors"].items())
         print(f"    failed open     {d['fail_open']:>6}   ({errs})")
+    asks = summary.get("asks") or {}
+    if d.get("ask"):
+        print()
+        print(f"  {bold('How the asks were answered')}: {asks.get('approved', 0)} approved, "
+              f"{asks.get('declined', 0)} declined, {asks.get('unknown', 0)} unknown")
+        for row in (asks.get("by_class") or [])[:8]:
+            print(f"    {row['action_type']:<22} {row['scope']:<28} {row['approved']:>3} approved"
+                  f"  {row['declined']:>3} declined  {row['unknown']:>3} unknown")
+        if asks.get("unknown"):
+            print(dim("  Unknown: still waiting, or asked where no post hook records the answer "
+                      "(nable guard install adds it; nable learn infer reads the rest)."))
     print()
     print(f"  Escalated or blocked: ~${summary['usd_per_month_escalated_or_blocked']:,.0f}/mo "
           "at stake (list-price estimates)")
@@ -3514,8 +3576,8 @@ def main(args: list[str] | None = None) -> None:
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
             ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs", "budget"]),
-            ("start here", ["welcome", "connect", "org", "setup", "doctor", "tools", "serve",
-                            "upgrade"]),
+            ("start here", ["welcome", "connect", "org", "learn", "setup", "doctor", "tools",
+                            "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
                                      "modal", "together", "replicate", "cohere", "mistral"]),
@@ -3632,6 +3694,8 @@ def main(args: list[str] | None = None) -> None:
     _add_budget_parser(sub)
     from .org.cli import add_parser as _add_org_parser
     _add_org_parser(sub)
+    from .cli_learn import add_parser as _add_learn_parser
+    _add_learn_parser(sub)
     from .cli_pricing import add_parser as _add_pricing_parser
     _add_pricing_parser(sub)
     from .packs.cli import add_parser as _add_pack_parser
@@ -3731,8 +3795,15 @@ def main(args: list[str] | None = None) -> None:
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
                                                   "try", "report", "verify-log", "doctor",
-                                                  "reconcile", "export", "on", "off"],
+                                                  "reconcile", "export", "on", "off",
+                                                  "approve"],
                          nargs="?", default="status")
+    guard_p.add_argument("guard_target", nargs="?", default=None, metavar="ID",
+                         help="With 'approve': the approval id a deny showed (none: list "
+                              "the approvals waiting)")
+    guard_p.add_argument("--as", dest="guard_as", default=None, metavar="WHO",
+                         help="With 'approve': who approves (default on a terminal: git "
+                              "user.email, then $USER). Without a terminal it is required")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
@@ -3744,6 +3815,9 @@ def main(args: list[str] | None = None) -> None:
                               "With 'hook': the payload format (detected when omitted)")
     guard_p.add_argument("--via", dest="guard_via", choices=["plugin"], default=None,
                          help="With 'hook': the hook was started by the nable Claude Code plugin")
+    guard_p.add_argument("--post", dest="guard_post", action="store_true",
+                         help="With 'hook': the post hook, run after a tool call to record "
+                              "how an ask was answered")
     guard_p.add_argument("--all", dest="guard_all", action="store_true",
                          help="With 'install'/'uninstall': every supported agent found on this machine")
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
@@ -3819,7 +3893,8 @@ def main(args: list[str] | None = None) -> None:
     if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
         from .guard_plugin import run_hook
         raise SystemExit(run_hook(getattr(parsed, "guard_harness", None),
-                                  getattr(parsed, "guard_via", None)))
+                                  getattr(parsed, "guard_via", None),
+                                  post=bool(getattr(parsed, "guard_post", False))))
 
     # Answer commands own their whole output: no setup banner ahead of `scan`,
     # its branded first line must be the first thing on screen (and in --json
@@ -3832,7 +3907,7 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why", "budget", "org", "pricing", "pack"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget", "org", "learn", "pricing", "pack"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -4092,6 +4167,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "org":
         from .org.cli import run as _org_run
         raise SystemExit(_org_run(parsed))
+    elif parsed.cmd == "learn":
+        from .cli_learn import run as _learn_run
+        raise SystemExit(_learn_run(parsed))
     elif parsed.cmd == "pricing":
         from .cli_pricing import run as _pricing_run
         raise SystemExit(_pricing_run(parsed))

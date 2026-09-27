@@ -255,13 +255,17 @@ def editor_target(tool_name: Any, tool_input: Any, cwd: Any = None):
 # ── The hook ───────────────────────────────────────────────────────────────────
 
 def run_hook(harness: str | None = None, via: str | None = None, stdin: Any = None,
-             stdout: Any = None, stderr: Any = None) -> int:
-    """`finops guard hook [--via plugin]`. Always exits 0.
+             stdout: Any = None, stderr: Any = None, *, post: bool = False) -> int:
+    """`finops guard hook [--via plugin] [--post]`. Always exits 0.
 
     The guard itself is imported only when something is left to judge, so the
     silent answers cost a JSON parse and a few file reads: the guard is off,
     a settings hook judges this call instead, or it is a Claude Code file
-    edit to an ordinary file."""
+    edit to an ordinary file. `post` is the post hook (guard_outcome), which
+    never imports the guard at all."""
+    if post:
+        from .guard_outcome import run_post
+        return run_post(harness, stdin, stdout)
     plugin = via == VIA_PLUGIN
     if plugin and is_off():
         return 0                        # silence is Claude Code's allow
@@ -286,13 +290,21 @@ def run_hook(harness: str | None = None, via: str | None = None, stdin: Any = No
     return judge(harness, io.StringIO(raw), stdout, stderr)
 
 
-def parse_hook_args(argv: list[str]) -> tuple[str | None, str | None] | None:
-    """(harness, via) from the arguments after `guard hook`, or None when they
-    are anything else (argparse then answers as it always has)."""
+POST_FLAG = "--post"
+
+
+def parse_hook_args(argv: list[str]) -> tuple[str | None, str | None, bool] | None:
+    """(harness, via, post) from the arguments after `guard hook`, or None
+    when they are anything else (argparse then answers as it always has)."""
     harness = via = None
+    post = False
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg == POST_FLAG:
+            post = True
+            i += 1
+            continue
         name, eq, value = arg.partition("=")
         if name not in ("--harness", VIA_FLAG):
             return None
@@ -310,7 +322,7 @@ def parse_hook_args(argv: list[str]) -> tuple[str | None, str | None] | None:
         else:
             return None
         i += 1
-    return harness, via
+    return harness, via, post
 
 
 def hook_main(argv: list[str]) -> int | None:
@@ -322,4 +334,5 @@ def hook_main(argv: list[str]) -> int | None:
     parsed = parse_hook_args(argv)
     if parsed is None:
         return None
-    return run_hook(*parsed)
+    harness, via, post = parsed
+    return run_hook(harness, via, post=post)

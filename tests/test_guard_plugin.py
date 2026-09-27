@@ -189,11 +189,14 @@ def test_the_real_cli_accepts_the_plugins_command_line(tmp_path):
 
 
 @pytest.mark.parametrize("argv,expected", [
-    ([], (None, None)),
-    (["--via", "plugin"], (None, "plugin")),
-    (["--via=plugin"], (None, "plugin")),
-    (["--harness", "cursor", "--via", "plugin"], ("cursor", "plugin")),
-    (["--harness=claude"], ("claude", None)),
+    ([], (None, None, False)),
+    (["--via", "plugin"], (None, "plugin", False)),
+    (["--via=plugin"], (None, "plugin", False)),
+    (["--harness", "cursor", "--via", "plugin"], ("cursor", "plugin", False)),
+    (["--harness=claude"], ("claude", None, False)),
+    (["--via", "plugin", "--post"], (None, "plugin", True)),
+    (["--post"], (None, None, True)),
+    (["--post=1"], None),
     (["--via", "other"], None),
     (["--via"], None),
     (["--harness", "nope"], None),

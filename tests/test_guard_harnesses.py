@@ -239,7 +239,7 @@ def test_copilot_cloud_agent_ask_becomes_a_deny_that_says_why(var, monkeypatch):
     _, body, _ = _run(_copilot(ASK_CMD))
     assert body["permissionDecision"] == "deny"
     assert "cloud agent has no one to ask" in body["permissionDecisionReason"]
-    assert "run the command yourself" in body["permissionDecisionReason"]
+    assert "nable guard approve " in body["permissionDecisionReason"]
 
 
 def test_copilot_deny(monkeypatch):
@@ -386,7 +386,9 @@ def test_a_harness_that_cannot_ask_does_not_say_confirm_to_proceed(payload, fiel
         body = body[key]
     assert "confirm to proceed" not in body.lower()
     assert "It cannot be undone." in body and why in body
-    assert body.endswith("run the command yourself.")
+    # The way through is a person's one-time approval, offered last.
+    assert body.index(why) < body.index("nable guard approve ")
+    assert "run the command yourself" not in body
 
 
 def test_a_budget_ask_reads_as_a_sentence_where_it_cannot_ask():

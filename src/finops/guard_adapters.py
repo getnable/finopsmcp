@@ -20,12 +20,20 @@ Claude Code itself is guard.py's, and the nable Claude Code plugin ships the
 same hook (plugins/nable/hooks/hooks.json, written from plugin_hooks here);
 guard_plugin.py is what that hook runs first.
 
+Beside each pre hook that can ask, a post hook records how the ask was
+answered (guard_outcome.py, `finops guard hook --post`): Claude Code's
+PostToolUse (settings and plugin), Cursor's afterShellExecution, Copilot's
+postToolUse. Codex, Gemini CLI and Cline document a post event but cannot
+ask, so every ask there is a deny and there is nothing to record.
+
 Where each protocol is written down, so the next person can re-check it when a
 harness changes:
 
   Cursor  https://cursor.com/docs/hooks (payload, response, exit codes)
           https://github.com/cursor/cookbook/tree/main/hooks (first-party
-          hooks.json and a beforeShellExecution script answering "allow")
+          hooks.json and a beforeShellExecution script answering "allow";
+          the same hooks.json registers afterShellExecution, whose payload
+          audit-log.sh reads: command, output, duration)
   Codex   https://github.com/openai/codex, in codex-rs/:
           hooks/src/events/pre_tool_use.rs  (stdin payload, accepted output)
           config/src/hook_config.rs          (hooks.json schema)
@@ -35,7 +43,8 @@ harness changes:
           features/src/lib.rs                (hooks are Stable, on by default)
   Copilot https://docs.github.com/en/copilot/reference/hooks-reference, source
           github/docs content/copilot/reference/hooks-reference.md (locations,
-          file format, camelCase preToolUse payload, permissionDecision output,
+          file format, camelCase preToolUse and postToolUse payloads,
+          permissionDecision output,
           "ask" treated as "deny" under the cloud agent, fail-closed exit codes,
           progress lines, COPILOT_HOME, the cloud agent's environment) and
           content/copilot/tutorials/copilot-cli-hooks.md (toolArgs arrives as
@@ -115,6 +124,9 @@ _LABEL_WIDTH = max(len(v) for v in LABELS.values())
 # Cursor names its events itself, so these alone identify a Cursor payload.
 _CURSOR_SHELL = "beforeShellExecution"
 _CURSOR_MCP = "beforeMCPExecution"
+# The post hook's event (guard_outcome): shell commands only. The cookbook
+# names afterShellExecution; afterMCPExecution is not in the sources above.
+_CURSOR_POST = "afterShellExecution"
 # Cursor's documented neutral answer. Its own cookbook audit hook returns
 # exactly this for a command it has no opinion on.
 _CURSOR_ALLOW = {"permission": "allow"}
@@ -208,11 +220,22 @@ _CONFIRM_RES = (
 )
 
 
+# The sentence guard._out_of_band appends when a person can approve the
+# blocked call once from their own terminal.
+_APPROVE_ONCE = " A person can approve it once with `nable guard approve "
+_RUN_IT_YOURSELF = " If you intend it, run the command yourself."
+
+
 def _cannot_ask(reason: str, why: str) -> str:
     """`reason` without its request for a confirmation, then `why` the
-    harness blocked the command instead."""
+    harness blocked the command instead. When the reason offers a one-time
+    approval, `why` goes before that offer and drops its own advice to run
+    the command by hand: the approval is the way through."""
     for pattern, repl in _CONFIRM_RES:
         reason = pattern.sub(repl, reason)
+    head, sep, offer = reason.partition(_APPROVE_ONCE)
+    if sep:
+        return head.rstrip() + why.removesuffix(_RUN_IT_YOURSELF) + sep + offer.rstrip()
     return reason.rstrip() + why
 
 
@@ -742,16 +765,28 @@ def plugin_hook_command(version: str = guard.__version__) -> str:
                       f"{guard._HOOK_CMD} {guard_plugin.VIA_FLAG} {guard_plugin.VIA_PLUGIN}")
 
 
+def plugin_post_command(version: str = guard.__version__) -> str:
+    """The plugin's post hook (guard_outcome): the same release and flags as
+    its PreToolUse hook, with --post, fail-safe the same way."""
+    return post_hook_command(plugin_hook_command(version))
+
+
 def plugin_hooks(version: str = guard.__version__) -> dict[str, Any]:
     """plugins/nable/hooks/hooks.json, as it should read for `version`: the
-    matcher and timeout `nable guard install` writes for Claude Code."""
+    matcher and timeout `nable guard install` writes for Claude Code, on
+    PreToolUse (the verdict) and PostToolUse (how an ask was answered)."""
     cmd = plugin_hook_command(version)
+    post = plugin_post_command(version)
     return {"description": "nable guard: prices and checks infrastructure changes in Bash and "
-                           "MCP tool calls before they run, and asks before an edit to the "
-                           "guard's own files (nable guard off pauses it)",
+                           "MCP tool calls before they run, asks before an edit to the "
+                           "guard's own files, and records how each ask was answered "
+                           "(nable guard off pauses it)",
             "hooks": {"PreToolUse": [{
         "matcher": guard._HOOK_MATCHER,
         "hooks": [{"type": "command", "command": cmd, "timeout": guard._timeout_for(cmd)}],
+    }], "PostToolUse": [{
+        "matcher": guard._HOOK_MATCHER,
+        "hooks": [{"type": "command", "command": post, "timeout": guard._timeout_for(post)}],
     }]}}
 
 
@@ -991,6 +1026,117 @@ def _hooks_obj(doc: dict, path: Path, *, create: bool) -> dict | None:
     return hooks
 
 
+# ── Claude Code's post hook, in its settings ──────────────────────────────────
+# PostToolUse, with the matcher the PreToolUse hook has, running the same
+# program with --post (guard_outcome): after a tool call the guard asked about
+# went ahead, it records that the person approved. guard.install() adds it
+# beside the PreToolUse hook (claude_post_install) and uninstall() removes it
+# (claude_post_uninstall); the settings file's PreToolUse hook stays guard.py's.
+# PostToolUseFailure is not written: a Claude Code that predates it rejects
+# the hook event, and with it the file's PreToolUse hook.
+_POST_EVENT = "PostToolUse"
+_POST_FLAG = guard_plugin.POST_FLAG
+
+
+def post_hook_command(cmd: str) -> str:
+    """The post hook for a PreToolUse hook command: the same program and
+    pin, `--post`, and the fail-safe wrapper (an older nable rejects the flag
+    with exit 2, which the wrapper turns into 0)."""
+    return guard._fail_safe(f"{guard._bare(cmd)} {_POST_FLAG}")
+
+
+def _claude_post_list(settings: dict, path: Path, *, create: bool) -> list | None:
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        if hooks is not None:
+            raise _refuse(path, f"has a 'hooks' value that is a {type(hooks).__name__}, "
+                                "not an object")
+        if not create:
+            return None
+        hooks = settings["hooks"] = {}
+    post = hooks.get(_POST_EVENT)
+    if post is None:
+        if not create:
+            return None
+        post = hooks[_POST_EVENT] = []
+    elif not isinstance(post, list):
+        raise _refuse(path, f"has a 'hooks.{_POST_EVENT}' value that is a "
+                            f"{type(post).__name__}, not an array")
+    return post
+
+
+def claude_post_install(settings: dict, path: Path, pre_cmd: str) -> bool:
+    """Our PostToolUse entry beside the PreToolUse one, on the same program:
+    added when missing, and repaired the way the PreToolUse hook is when it
+    is dead, unpinned or pinned to another release (guard._stale), or not
+    fail-safe. A live one written some other way is left as found. True when
+    something changed."""
+    want = post_hook_command(pre_cmd)
+    post = _claude_post_list(settings, path, create=True)
+    ours = list(guard._our_hooks(post))
+    if not ours:
+        post.append({"matcher": guard._HOOK_MATCHER,
+                     "hooks": [{"type": "command", "command": want,
+                                "timeout": guard._timeout_for(want)}]})
+        return True
+    changed = False
+    for _entry, h in ours:
+        cmd = h.get("command")
+        if cmd != want and (guard._stale(cmd) or not guard.is_fail_safe(cmd)):
+            h["command"] = want
+            old = h.get("timeout")
+            h["timeout"] = (max(old, guard._timeout_for(want)) if isinstance(old, int)
+                            else guard._timeout_for(want))
+            changed = True
+    return changed
+
+
+def claude_post_uninstall(settings: dict, path: Path) -> bool:
+    post = _claude_post_list(settings, path, create=False)
+    if not post:
+        return False
+    kept, removed = [], False
+    for entry in post:
+        hooks = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(hooks, list):
+            kept.append(entry)
+            continue
+        inner = [h for h in hooks
+                 if not (isinstance(h, dict) and guard._is_our_command(h.get("command")))]
+        if len(inner) == len(hooks):
+            kept.append(entry)
+            continue
+        removed = True
+        if inner:
+            entry["hooks"] = inner
+            kept.append(entry)
+    if removed:
+        if kept:
+            settings["hooks"][_POST_EVENT] = kept
+        else:
+            del settings["hooks"][_POST_EVENT]
+        if not settings["hooks"]:
+            settings.pop("hooks", None)
+    return removed
+
+
+def post_hook_missing(path: Path) -> bool:
+    """True when our PreToolUse hook is in `path` without a post hook that
+    runs (an install from before the post hook, or a dead or unwrapped one).
+    A post hook pinned to another release is a re-pin, like the PreToolUse
+    hook's. Read-only; False on anything odd."""
+    try:
+        s = json.loads(path.read_text())
+        pre = list(guard._our_hooks((s.get("hooks") or {}).get("PreToolUse") or []))
+        if not pre:
+            return False
+        post = list(guard._our_hooks((s.get("hooks") or {}).get(_POST_EVENT) or []))
+        return not any(guard._command_runs(h["command"]) and guard.is_fail_safe(h["command"])
+                       for _e, h in post)
+    except (OSError, ValueError, TypeError, AttributeError, KeyError, IndexError):
+        return False
+
+
 # ── Cursor: {"version": 1, "hooks": {"beforeShellExecution": [{command, ...}],
 #                                    "beforeMCPExecution": [{command, ...}]}} ──
 
@@ -1030,6 +1176,7 @@ def _cursor_install(doc: dict, path: Path, cmd: str, stale: tuple[str, ...] = ()
     stale = _wrapped(stale, _fail_safe) + (cmd,)
     cmd = _fail_safe(cmd)
     outcomes = []
+    shell_cmd = cmd
     for event in _CURSOR_EVENTS:
         entries = _cursor_entries(doc, path, create=True, event=event)
         ours = [e for e in entries if isinstance(e, dict) and _is_ours(e.get("command"))]
@@ -1040,12 +1187,43 @@ def _cursor_install(doc: dict, path: Path, cmd: str, stale: tuple[str, ...] = ()
             outcomes.append("new")
         else:
             outcomes.append(_repair(ours, cmd, stale=stale))
+            if event == _CURSOR_SHELL:
+                shell_cmd = ours[0]["command"]
+    post = _cursor_post_install(doc, path, shell_cmd)
+    if post != "already" and all(o == "already" for o in outcomes):
+        outcomes.append("repaired")    # an install from before the post hook gains it
     return _merge_outcomes(outcomes)
+
+
+def _post_stale(cmd: Any) -> bool:
+    """A post hook entry of ours to rewrite: dead, not fail-safe, or pinned
+    somewhere install would move a PreToolUse hook from. A live one written
+    some other way is left as found, as _repair leaves a pre hook."""
+    return (not isinstance(cmd, str) or not _runnable(cmd) or not guard.is_fail_safe(cmd)
+            or _needs_repin(cmd))
+
+
+def _cursor_post_install(doc: dict, path: Path, shell_cmd: str) -> str:
+    """Our afterShellExecution entry (guard_outcome), on the program the
+    beforeShellExecution entry runs: "new", "repaired" (a dead or stale one
+    rewritten), or "already"."""
+    want = post_hook_command(shell_cmd)
+    entries = _cursor_entries(doc, path, create=True, event=_CURSOR_POST)
+    ours = [e for e in entries if isinstance(e, dict) and _is_ours(e.get("command"))]
+    if not ours:
+        entries.append({"command": want, "timeout": _hook_timeout(), "failClosed": False})
+        return "new"
+    changed = False
+    for e in ours:
+        if e.get("command") != want and _post_stale(e.get("command")):
+            e["command"], e["timeout"] = want, _hook_timeout()
+            changed = True
+    return "repaired" if changed else "already"
 
 
 def _cursor_uninstall(doc: dict, path: Path) -> bool:
     removed = False
-    for event in _CURSOR_EVENTS:
+    for event in (*_CURSOR_EVENTS, _CURSOR_POST):
         entries = _cursor_entries(doc, path, create=False, event=event)
         if not entries:
             continue
@@ -1279,23 +1457,61 @@ def _copilot_install(doc: dict, path: Path, cmd: str) -> str:
         entries.append({"type": "command", "command": _fail_safe(cmd),
                         "matcher": "|".join(_COPILOT_SHELLS),
                         "timeoutSec": _hook_timeout()})
+        outcome = "new"
+        pre_cmd = _fail_safe(cmd)
+    else:
+        outcome = _repair(ours, _fail_safe(cmd), timeout_key="timeoutSec", stale=(cmd,),
+                          command_key=_copilot_key)
+        pre_cmd = ours[0].get(_copilot_key(ours[0])) or _fail_safe(cmd)
+    post = _copilot_post_install(doc, path, pre_cmd)
+    return "repaired" if post != "already" and outcome == "already" else outcome
+
+
+# The post hook's event (guard_outcome). postToolUse fires after a tool call
+# that succeeded; postToolUseFailure is newer and not written, for the reason
+# guard.py gives for Claude Code's: a release that predates an event may
+# reject the file, and the preToolUse hook with it.
+_COPILOT_POST = "postToolUse"
+
+
+def _copilot_post_install(doc: dict, path: Path, pre_cmd: str) -> str:
+    """Our postToolUse entry on the preToolUse entry's program: "new",
+    "repaired" (moved with it) or "already"."""
+    want = post_hook_command(pre_cmd)
+    hooks = _hooks_obj(doc, path, create=True)
+    entries = _list_at(hooks, _COPILOT_POST, path, f"hooks.{_COPILOT_POST}", create=True)
+    ours = [e for e in entries if _copilot_is_ours(e)]
+    if not ours:
+        entries.append({"type": "command", "command": want,
+                        "matcher": "|".join(_COPILOT_SHELLS), "timeoutSec": _hook_timeout()})
         return "new"
-    return _repair(ours, _fail_safe(cmd), timeout_key="timeoutSec", stale=(cmd,),
-                   command_key=_copilot_key)
+    changed = False
+    for e in ours:
+        key = _copilot_key(e)
+        if e.get(key) != want and _post_stale(e.get(key)):
+            e[key], e["timeoutSec"] = want, _hook_timeout()
+            changed = True
+    return "repaired" if changed else "already"
 
 
 def _copilot_uninstall(doc: dict, path: Path) -> bool:
-    entries = _copilot_entries(doc, path, create=False)
-    if not entries:
-        return False
-    kept = [e for e in entries if not _copilot_is_ours(e)]
-    if len(kept) == len(entries):
-        return False
-    if kept:
-        doc["hooks"]["preToolUse"] = kept
-    else:
-        del doc["hooks"]["preToolUse"]
-    return True
+    removed = False
+    _copilot_entries(doc, path, create=False)    # refuses a version it does not know
+    hooks = _hooks_obj(doc, path, create=False)
+    for event in ("preToolUse", _COPILOT_POST):
+        entries = (_list_at(hooks, event, path, f"hooks.{event}", create=False)
+                   if hooks is not None else None)
+        if not entries:
+            continue
+        kept = [e for e in entries if not _copilot_is_ours(e)]
+        if len(kept) == len(entries):
+            continue
+        removed = True
+        if kept:
+            doc["hooks"][event] = kept
+        else:
+            del doc["hooks"][event]
+    return removed
 
 
 def _copilot_is_empty(doc: dict) -> bool:
@@ -1515,7 +1731,8 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
         # and re-pins an unpinned uvx one, or one pinned to another release,
         # in place, so read all three before it writes to report what it did.
         already = guard.is_installed(path)
-        repair = bool(guard.broken_hook_command(path) or guard.blocking_hook_command(path))
+        repair = bool(guard.broken_hook_command(path) or guard.blocking_hook_command(path)
+                      or post_hook_missing(path))
         repin = bool(guard.unpinned_hook_command(path)
                      or guard.pinned_elsewhere_hook_command(path))
         guard.install(global_scope)

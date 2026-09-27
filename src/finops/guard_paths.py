@@ -48,6 +48,8 @@ _LEDGER_FILES = (
     ("budget-summary.json", "the budget summary the guard checks spend against"),
     ("org-model-cache.json", "the guard's cache of the org model"),
     ("packs-guard-cache.json", "the guard's cache of pack rules and price books"),
+    # guard_approvals.STORE_NAME: an approval written here lets a call through.
+    ("guard-approvals.json", "the one-time approvals for calls the guard stopped"),
 )
 # Directories beside the ledger: facts derived from the org model's files,
 # keyed on their content (written into, they would be read as facts).

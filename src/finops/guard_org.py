@@ -22,6 +22,12 @@ What each fact may change, following "guesses may restrict, never enable":
                environment the command touches (confirmed environment facts
                only) replaces max_auto_monthly_usd and the velocity cap, up or
                down: a human set it. A proposed threshold is never read.
+  freeze       while a freeze covers the command's scope (the org, the team
+               scope, a confirmed environment, an account it names), a
+               priced change or a one-way door asks, or with mode deny is
+               denied, whatever the thresholds say. A proposed freeze, or one
+               from a repo nobody trusted, only asks: it may restrict, and a
+               guess never stops a command outright.
 
 "Confirmed" here is strict (OrgModel queries with strict=True): a fact from
 a repo's nable.org/ that no person has trusted (`nable org trust --here`)
@@ -66,7 +72,7 @@ def load_model(cwd: str | None):
 # a stale or broken cache is a miss, and a hit is exactly what a fresh read
 # of the same files returns.
 _CACHE_NAME = "org-model-cache.json"
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 
 def _stamp(p: Path) -> list[int] | None:
@@ -323,3 +329,60 @@ def whose(t: dict[str, Any], name: str) -> str:
     words = "for the org" if kind == "org" else f"for {kind} {ident}"
     where = (t.get("files") or {}).get(name)
     return f"{words} (in {where})" if where else words
+
+
+def _now():
+    """The time a freeze is judged at (tests move it)."""
+    from datetime import UTC, datetime
+    return datetime.now(UTC)
+
+
+def _when_words(text: str) -> str:
+    """"2026-12-01 00:00 (UTC-05:00)": a freeze's end as the person wrote
+    it, offset included, so nobody has to guess which midnight."""
+    from .org.model import parse_when
+    dt = parse_when(text)
+    off = dt.strftime("%z")
+    off = f"UTC{off[:3]}:{off[3:5]}" if off not in ("+0000", "-0000") else "UTC"
+    return f"{dt.strftime('%Y-%m-%d %H:%M')} ({off})"
+
+
+def _scope_words(subject: Any) -> str:
+    if subject.kind == "org":
+        return "the whole org"
+    if subject.kind in ("team", "environment"):
+        return f"{subject.kind} {subject.id}"
+    return f"account {subject.id}"
+
+
+def freeze(model, team: str | None, subs: list[str]) -> dict[str, Any] | None:
+    """The change freeze in force now over what a command touches, or None:
+    the org, the team whose budgets apply (`team`, the verdict's team
+    scope), the environments its subjects are confirmed to be in, and the
+    accounts it names. The strictest one answers: a sure (confirmed and
+    trusted) deny, else an ask. A proposed freeze, or a confirmed one from a
+    repo's nable.org/ nobody trusted, only ever asks: a guess may restrict,
+    never stop outright.
+
+    {decision, mode, sure, key, subject, reason, end, words, file}."""
+    if not model.by_kind("freeze"):
+        return None
+    from .org.model import ACCOUNT_KINDS
+    accounts = [s for s in subs if s.partition(":")[0] in ACCOUNT_KINDS]
+    hits = model.freezes_at(_now(), team=team, envs=confirmed_envs(model, subs),
+                            accounts=accounts, strict=True)
+    if not hits:
+        return None
+    f, sure = hits[0]
+    mode = str(f.value.get("mode") or "ask")
+    decision = "deny" if sure and mode == "deny" else "ask"
+    end = _when_words(str(f.value["end"]))
+    how = ""
+    if not sure:
+        how = (" (from an org model this repo ships, not trusted, so it only asks)"
+               if f.confirmed else " (proposed, not confirmed, so it only asks)")
+    words = (f"A change freeze is in force for {_scope_words(f.subject)} until {end}: "
+             f"{str(f.value.get('reason') or '').rstrip('.')}{how}.")
+    return {"decision": decision, "mode": mode, "sure": sure, "key": f.key,
+            "subject": str(f.subject), "reason": str(f.value.get("reason") or ""),
+            "end": str(f.value["end"]), "words": words, "file": f.file or ""}

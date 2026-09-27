@@ -358,3 +358,141 @@ def signal_for(signal: dict, source: str, bucket: str | None = None) -> dict:
         "confidence_multiplier": _confidence_multiplier(PRIOR_ACT_RATE, None),
         "why": f"No decisions on {source} recs yet, using the standard ranking (global default).",
     }
+
+
+# ── The guard's asks ──────────────────────────────────────────────────────────
+# The same idea as customer_signal(), fed by the other place a person decides:
+# the guard's asks (guard_ledger, with the post hook's outcomes). An ask that
+# ran was approved; one that did not was declined (guard_ledger.ask_outcomes).
+# Rolled up per inference key, the unit a threshold can be learned for:
+#
+#   (action_type, door, team, env)
+#
+# team is the team the guard judged the command under (FINOPS_GUARD_TEAM, or
+# the confirmed owner of the working directory's repo path: the team whose
+# threshold the guard reads, guard._with_scope), else the confirmed owner of
+# what the command touched (the ask's `owner`), else None (unscoped); env is
+# the one confirmed environment it touched, "mixed" for several, None for
+# none. A proposal names the narrowest of these the evidence came from, so a
+# yes never reaches further than what was approved. Plain
+# counting over the ledger, like the rest of this module: no model, the same
+# ledger always gives the same answer, and every figure comes with the asks
+# behind it. policy_inference.infer_guard_facts turns it into proposals.
+
+GUARD_LOOKBACK_DAYS = 90
+# A destroy of what an approved creation made, this soon after it, is a revert.
+REVERT_WINDOW_HOURS = 24
+
+
+def guard_key(rec: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
+    """(action_type, door, team, env) for one verdict record."""
+    scope = rec.get("scope") if isinstance(rec.get("scope"), dict) else {}
+    envs = [e for e in (scope.get("envs") or []) if isinstance(e, str)]
+    env = envs[0] if len(envs) == 1 else ("mixed" if envs else None)
+    team = scope.get("team") if isinstance(scope.get("team"), str) else None
+    owner = rec.get("owner") if isinstance(rec.get("owner"), dict) else {}
+    if not team and owner.get("confirmed") is True and isinstance(owner.get("team"), str):
+        team = owner["team"]
+    return (str(rec.get("action_type") or "unknown"), str(rec.get("door") or "two_way"),
+            team or None, env)
+
+
+def _tool_family(command: Any) -> str:
+    """What a command acts on, coarsely, so a destroy can be matched to the
+    creation it undoes: the IaC tool (terraform, pulumi, cdk, sam), a
+    CloudFormation stack by name, an AWS, gcloud or az service, kubectl or a
+    Helm release. Coarse on purpose: a false match costs a proposal (the
+    safe direction), a missed one would let a revert pass unseen."""
+    import re
+    words = str(command or "").split()
+    for i, w in enumerate(words):
+        base = w.rsplit("/", 1)[-1]
+        if base in ("terraform", "tofu", "terragrunt"):
+            return "terraform"
+        if base in ("pulumi", "cdk", "sam", "kubectl", "doctl"):
+            return base
+        if base == "helm":
+            rel = [x for x in words[i + 1:] if not x.startswith("-")]
+            return f"helm:{rel[1]}" if len(rel) > 1 else "helm"
+        if base in ("aws", "gcloud", "az") and i + 1 < len(words):
+            svc = words[i + 1]
+            if base == "aws" and svc == "cloudformation":
+                m = re.search(r"--stack-name(?:=|\s+)(\S+)", " ".join(words[i:]))
+                return f"cloudformation:{m.group(1)}" if m else "cloudformation"
+            return f"{base}:{svc}"
+    return words[0] if words else ""
+
+
+def _pos(x: Any) -> float:
+    return float(x) if isinstance(x, (int, float)) and x > 0 else 0.0
+
+
+def guard_signal(records: list[dict[str, Any]] | None = None, *,
+                 days: float = GUARD_LOOKBACK_DAYS, now: Any = None) -> list[dict[str, Any]]:
+    """How the guard's asks were answered, per inference key, most asks first.
+
+    `records` is guard_ledger.read(days, outcomes=True) (read when None).
+    Each entry: the key's parts; asks, approved, declined, unknown; and for
+    the asks the price threshold caused (rule "threshold", the only asks a
+    threshold fact can stop, outside a change freeze), `approvals` and `declines` as [ts, monthly_usd]
+    pairs, oldest first; `reverts`, approved creations of this key undone by
+    a destroy in the same scope within REVERT_WINDOW_HOURS, with one example.
+    A repeat of the same command from the same session within ten minutes is
+    one decision asked twice (guard_ledger._repeats) and is counted once."""
+    from datetime import UTC, datetime, timedelta
+
+    from ... import guard_ledger
+    if records is None:
+        records = guard_ledger.read(days, outcomes=True)
+    now = now or datetime.now(UTC)
+    answers = guard_ledger.ask_outcomes(records, now=now)
+    verdicts = [r for r in records if not guard_ledger.is_outcome(r)]
+    repeats = guard_ledger._repeats(verdicts)
+
+    # Destroys that went ahead (or may have): what counts against a creation.
+    destroys: list[tuple[datetime, tuple, str, str]] = []
+    for r in verdicts:
+        if r.get("door") != "one_way":
+            continue
+        d = r.get("decision")
+        if d == "deny" or (d == "ask" and answers.get(r.get("_hash") or "") == "declined"):
+            continue
+        ts = guard_ledger._ts(r)
+        if ts is not None:
+            k = guard_key(r)
+            destroys.append((ts, (k[2], k[3]), _tool_family(r.get("command")),
+                             str(r.get("command") or "")))
+
+    out: dict[tuple, dict[str, Any]] = {}
+    for i, r in enumerate(verdicts):
+        if r.get("decision") != "ask" or i in repeats:
+            continue
+        key = guard_key(r)
+        e = out.setdefault(key, {
+            "action_type": key[0], "door": key[1], "team": key[2], "env": key[3],
+            "asks": 0, "approved": 0, "declined": 0, "unknown": 0,
+            "approvals": [], "declines": [], "reverts": 0, "revert_example": None})
+        answer = answers.get(r.get("_hash") or "", "unknown")
+        e["asks"] += 1
+        e[answer] += 1
+        ts = guard_ledger._ts(r)
+        usd = _pos(r.get("monthly_usd"))
+        # An ask during a change freeze answers the freeze as much as the
+        # price, so it is no evidence about the threshold either way.
+        if ts is None or r.get("rule") != "threshold" or not usd or r.get("freeze"):
+            continue
+        if answer == "approved":
+            e["approvals"].append([ts.isoformat(timespec="seconds"), usd])
+            fam = _tool_family(r.get("command"))
+            for dts, scope, dfam, dcmd in destroys:
+                if (scope == (key[2], key[3]) and dfam == fam
+                        and timedelta(0) < dts - ts <= timedelta(hours=REVERT_WINDOW_HOURS)):
+                    e["reverts"] += 1
+                    e["revert_example"] = e["revert_example"] or {
+                        "created": str(r.get("command") or ""), "destroyed": dcmd,
+                        "hours_later": round((dts - ts).total_seconds() / 3600, 1)}
+                    break
+        elif answer == "declined":
+            e["declines"].append([ts.isoformat(timespec="seconds"), usd])
+    return sorted(out.values(), key=lambda e: (-e["asks"], e["action_type"], e["door"],
+                                               e["team"] or "", e["env"] or ""))

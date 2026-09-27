@@ -414,6 +414,11 @@ def test_a_hand_written_matcher_is_left_alone(settings):
     body = json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash|Write", "hooks": [{"type": "command",
                                              "command": g._UVX_HOOK_CMD + "; exit 0",
+                                             "timeout": 30}]}],
+        # The post hook a current install has beside it; its matcher is theirs too.
+        "PostToolUse": [
+        {"matcher": "Bash|Write", "hooks": [{"type": "command",
+                                             "command": g._UVX_HOOK_CMD + " --post; exit 0",
                                              "timeout": 30}]}]}}, indent=2)
     settings.write_text(body)
     g.install()

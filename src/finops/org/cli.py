@@ -15,8 +15,20 @@
   nable org reject KEY... [--as WHO]    (and the same bulk flags)
   nable org set owner --subject aws_account:123 --team payments [--channel ...]
   nable org set threshold --subject team:payments --max-auto-usd 200
+  nable org set freeze --scope environment:prod --start 2026-11-27T00:00-05:00
+                       --end 2026-12-01T00:00-05:00 --reason "Black Friday" [--mode deny]
+                                 a change freeze: priced changes and one-way doors
+                                 in that scope ask (or are denied) until it ends
+  nable org set approval --scope team:payments --action-class rightsizing
+                         --approver github:alice --approver team:platform [--min 1]
+                                 who reviews that class of change: nable's pull
+                                 requests request them, its tickets add them
   nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
+                                 (init and questions first read the guard's
+                                 decision ledger and propose the thresholds
+                                 what people keep deciding supports:
+                                 nable learn infer --dry-run shows why)
   nable org export [--format json|yaml] [--out PATH]
 
 Confirming, rejecting and `set` are the human path the whole model rests on.
@@ -46,7 +58,7 @@ def add_parser(sub) -> None:
         "org",
         help="The org model: who owns what, proposed by nable, confirmed by you",
         description="Facts about this org (owners, teams, environments, tag keys, "
-                    "accounts, thresholds) as plain YAML you own. nable and your agents "
+                    "accounts, thresholds, freezes, approval chains) as plain YAML you own. nable and your agents "
                     "propose; only a person confirms.",
     )
     common = argparse.ArgumentParser(add_help=False)
@@ -94,12 +106,39 @@ def add_parser(sub) -> None:
                             "(account, tag_key, ...)")
 
     x = osub.add_parser("set", parents=[common], help="State a fact directly (confirmed)")
-    x.add_argument("org_set_kind", choices=["owner", "environment", "team", "threshold"],
-                   metavar="KIND", help="owner | environment | team | threshold")
-    x.add_argument("--subject", dest="org_subject", default=None, metavar="KIND:ID",
+    x.add_argument("org_set_kind", choices=["owner", "environment", "team", "threshold",
+                                             "freeze", "approval"],
+                   metavar="KIND", help="owner | environment | team | threshold | freeze | "
+                                        "approval")
+    x.add_argument("--subject", "--scope", dest="org_subject", default=None, metavar="KIND:ID",
                    help="e.g. aws_account:123456789012, repo_path:infra/payments "
                         "(owner, environment); team:payments, environment:prod or org:org "
-                        "(threshold)")
+                        "(threshold, freeze; an account too for a freeze); team:payments or "
+                        "environment:prod (approval)")
+    x.add_argument("--start", dest="org_start", default=None, metavar="WHEN",
+                   help="freeze: when it starts, ISO 8601 (2026-11-27T00:00-05:00); without "
+                        "an offset, in --tz or this machine's time zone")
+    x.add_argument("--end", dest="org_end", default=None, metavar="WHEN",
+                   help="freeze: when it ends, the same way")
+    x.add_argument("--tz", dest="org_tz", default=None, metavar="ZONE",
+                   help="freeze: the time zone of a --start or --end written without an "
+                        "offset (America/New_York)")
+    x.add_argument("--reason", dest="org_reason", default=None,
+                   help="freeze: why, shown in every ask or deny it causes")
+    x.add_argument("--mode", dest="org_mode", choices=["ask", "deny"], default=None,
+                   help="freeze: ask (default) or deny")
+    x.add_argument("--action-class", dest="org_action_classes", action="append", default=None,
+                   metavar="CLASS", help="approval: a class of change (rightsizing, "
+                                         "delete_resource, ..., or '*'); repeatable")
+    x.add_argument("--approver", dest="org_approvers", action="append", default=None,
+                   metavar="KIND:ID", help="approval: github:LOGIN, team:SLUG (a GitHub "
+                                           "team), jira:ACCOUNT_ID, linear:USER_ID or "
+                                           "email:ADDRESS; repeatable")
+    x.add_argument("--min", dest="org_min", type=int, default=None, metavar="N",
+                   help="approval: how many of them must approve (default 1)")
+    x.add_argument("--change-ticket", dest="org_change_ticket", action="store_true",
+                   help="approval: a change ticket is required; nable's pull requests "
+                        "carry a place for its link")
     x.add_argument("--max-auto-usd", dest="org_max_auto", type=float, default=None,
                    metavar="USD", help="threshold: the most a change may add per month "
                                        "and run without asking")
@@ -196,8 +235,13 @@ def _status(parsed, org) -> int:
     exists = m.dir.is_dir()
     loose = m.without_repo()
     untrusted = [layer for layer in m.layers if not layer.trusted]
+    freezes = _freeze_rows(m)
+    approvals = [f for f in m.by_kind("approval") if f.live]
     if getattr(parsed, "org_json", False):
         print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
+                          "freezes": [{**f.summary(), "state": state, "applies_as": how}
+                                      for f, state, how in freezes],
+                          "approvals": [f.summary() for f in approvals],
                           "layers": [layer.to_dict() for layer in m.layers],
                           "counts": m.status_counts(), "by_kind": m.kind_counts(),
                           "coverage": cov, "stale": [f.summary() for f in stale],
@@ -223,6 +267,22 @@ def _status(parsed, org) -> int:
     for kind, kc in sorted(m.kind_counts().items()):
         print(f"    {kind}: " + ", ".join(f"{n} {s}" for s, n in kc.items() if n))
     print(f"  coverage: {cov['summary']}")
+    if freezes:
+        print(f"  freezes: {len(freezes)}")
+        for f, state, how in freezes:
+            v = f.value
+            print(f"    {f.key}  {f.subject}  {v['start']} to {v['end']}  {state}, "
+                  f"{how}: {v['reason']}")
+    if approvals:
+        print(f"  approvals: {len(approvals)}")
+        for f in approvals:
+            v = f.value
+            sure = "confirmed" if m._sure(f, True) else (
+                "proposed" if not f.confirmed else "not trusted, names nobody")
+            print(f"    {f.key}  {f.subject}  {', '.join(v['action_classes'])}: "
+                  f"{v.get('min', 1)} of {', '.join(v['approvers'])}"
+                  + (", change ticket required" if v.get("change_ticket") else "")
+                  + f"  ({sure})")
     if cov["basis"] == "subjects" and cov["subjects"]["total"]:
         s = cov["subjects"]
         print(f"    subjects: {s['confirmed_owner']} of {s['total']} with a confirmed owner, "
@@ -248,6 +308,31 @@ def _status(parsed, org) -> int:
     for w in m.warnings:
         print(f"  warning: {w}", file=sys.stderr)
     return 0
+
+
+def _freeze_rows(m) -> list[tuple[Any, str, str]]:
+    """(fact, "in force" | "upcoming", what the guard does with it) for each
+    live freeze that has not ended, the soonest to end first."""
+    from datetime import UTC, datetime
+
+    from .model import FactError, parse_when
+    now = datetime.now(UTC)
+    rows = []
+    for f in m.freezes():
+        try:
+            start = parse_when(f.value.get("start"))
+            end = parse_when(f.value.get("end"))
+        except FactError:
+            continue
+        if end <= now:
+            continue
+        sure = m._sure(f, True)
+        mode = f.value.get("mode", "ask")
+        how = (("denies" if mode == "deny" else "asks") if sure
+               else "asks (proposed" + (", not trusted" if f.confirmed else "")
+               + ": a guess may only ask)")
+        rows.append((f, "in force" if start <= now else "upcoming", how))
+    return rows
 
 
 def _review(parsed, org) -> int:
@@ -350,7 +435,12 @@ def _set(parsed, org) -> int:
     kind = parsed.org_set_kind
     people = [p.strip() for p in (parsed.org_people or "").split(",") if p.strip()]
     value: dict[str, Any]
-    if kind == "threshold":
+    if kind in ("freeze", "approval"):
+        built = _policy_value(parsed, kind)
+        if isinstance(built, int):
+            return built
+        subject, value = parsed.org_subject, built
+    elif kind == "threshold":
         if not parsed.org_subject:
             print("set threshold needs --subject team:TEAM, environment:ENV or org:org",
                   file=sys.stderr)
@@ -395,6 +485,64 @@ def _set(parsed, org) -> int:
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
     return 0
+
+
+def _when(raw: str, zone: str | None) -> str:
+    """An ISO 8601 time with its UTC offset: as written when it has one,
+    else read in `zone` (an IANA name) or this machine's time zone."""
+    from datetime import datetime
+    dt = datetime.fromisoformat(raw.strip())
+    if dt.tzinfo is None:
+        if zone:
+            from zoneinfo import ZoneInfo
+            dt = dt.replace(tzinfo=ZoneInfo(zone))
+        else:
+            dt = dt.astimezone()
+    return dt.isoformat()
+
+
+def _policy_value(parsed, kind: str) -> dict[str, Any] | int:
+    """The value of a freeze or approval fact from the flags, or an exit
+    code (the problem printed)."""
+    if not parsed.org_subject:
+        what = ("org:org, team:TEAM, environment:ENV or aws_account:ID" if kind == "freeze"
+                else "team:TEAM or environment:ENV")
+        print(f"set {kind} needs --scope {what}", file=sys.stderr)
+        return 2
+    if kind == "freeze":
+        missing = [n for n, v in (("--start", parsed.org_start), ("--end", parsed.org_end),
+                                  ("--reason", parsed.org_reason)) if not v]
+        if missing:
+            print(f"set freeze needs {', '.join(missing)}", file=sys.stderr)
+            return 2
+        try:
+            if parsed.org_tz:
+                from zoneinfo import ZoneInfo
+                ZoneInfo(parsed.org_tz)          # a zone nobody can read is refused
+            return {"start": _when(parsed.org_start, parsed.org_tz),
+                    "end": _when(parsed.org_end, parsed.org_tz),
+                    "reason": parsed.org_reason, "mode": parsed.org_mode or "ask"}
+        except (ValueError, KeyError) as e:
+            # An unknown --tz is a ZoneInfoNotFoundError, which is a KeyError.
+            print(f"Not set: {e}", file=sys.stderr)
+            return 1
+    from ..policy import ONE_WAY_DOORS, TWO_WAY_DOORS
+    classes = [c.strip() for c in parsed.org_action_classes or [] if c.strip()]
+    if not classes or not parsed.org_approvers:
+        print("set approval needs --action-class CLASS and --approver KIND:ID (each "
+              "repeatable)", file=sys.stderr)
+        return 2
+    known = {*TWO_WAY_DOORS, *ONE_WAY_DOORS, "*"}
+    unknown = [c for c in classes if c.lower() not in known]
+    if unknown:
+        print(f"Not set: {unknown[0]!r} is not an action class nable knows ("
+              f"{', '.join(sorted(known - {'*'}))}, or '*')", file=sys.stderr)
+        return 1
+    value: dict[str, Any] = {"action_classes": classes, "approvers": list(parsed.org_approvers),
+                             "min": parsed.org_min if parsed.org_min is not None else 1}
+    if parsed.org_change_ticket:
+        value["change_ticket"] = True
+    return value
 
 
 def _qualified(org, s, org_dir):
@@ -444,9 +592,36 @@ def _trust(parsed, org) -> int:
     return 0
 
 
+def _learn(d, *, out=None) -> None:
+    """Read the guard's decision ledger for what people keep deciding and
+    propose the thresholds it supports (learning.policy_inference): the
+    proposals then come up as questions like any other. Proposals only, and
+    never on the hook path. A ledger or model that cannot be read costs the
+    lessons, never the questions."""
+    out = out or sys.stdout
+    try:
+        from ..recommendations.learning.policy_inference import propose_guard_facts
+        from .store import _data_dir, resolve_dir
+        if d is None and resolve_dir(None)[1] == "repo":
+            # As init does: never into a repo's tracked files unasked; the
+            # data dir's model is read under the repo's.
+            d = _data_dir() / "org"
+        got = propose_guard_facts(d)
+    except Exception as e:  # noqa: BLE001 - lessons are optional; questions are not
+        print(f"  (the guard's ledger was not read for lessons: {type(e).__name__}: {e})",
+              file=sys.stderr)
+        return
+    new = [p for p in got["proposals"] if p.get("result") in ("added", "conflict")]
+    if new:
+        print(f"  learned from the guard's asks: {len(new)} threshold proposal(s), asked below "
+              "(nable learn infer --dry-run shows the evidence)", file=out)
+
+
 def _questions(parsed, org) -> int:
+    as_json = getattr(parsed, "org_json", False)
+    _learn(parsed.org_dir, out=sys.stderr if as_json else sys.stdout)
     qs = org.questions(parsed.org_limit, model=org.load(parsed.org_dir))
-    if getattr(parsed, "org_json", False):
+    if as_json:
         print(json.dumps({"questions": [q.to_dict() for q in qs]}, default=str))
         return 0
     if not qs:
@@ -627,6 +802,7 @@ def _init(parsed, org) -> int:
           "FINOPS_REQUIRED_TAGS/FINOPS_PROTECTED_TAGS)")
     if not getattr(parsed, "org_no_adapters", False):
         _print_runs(org.run_adapters(d, repos=getattr(parsed, "org_repos", None) or ()))
+    _learn(d)
     m = org.load(d)
     qs = org.questions(parsed.org_limit, model=m)
     if not qs:
