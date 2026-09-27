@@ -237,7 +237,7 @@ def test_advice_is_cut_to_the_coverage_target(packs_env, first_party_key, tmp_pa
     # 4,000 of the 6,000, two thirds of the purchase.
     assert cut["bounds"]["cut"] and cut["bounds"]["factor"] == pytest.approx(2 / 3, abs=1e-3)
     assert cut["commitment_per_month"] == pytest.approx(raw["commitment_per_month"] * 2 / 3,
-                                                        abs=0.01)
+                                                        rel=2e-3)
     assert cut["monthly_savings"] < raw["monthly_savings"]
     assert f"bound {PID}:default-bounds" in cut["description"]
     assert after["commitment_bounds"]["coverage_target_pct"] == 80
@@ -296,8 +296,8 @@ def test_the_database_plan_is_bounded_too(installed, monkeypatch):
     monkeypatch.setattr(dsp, "_get_database_sp_coverage", lambda *_a: 70.0)
     r = dsp.recommend_database_savings_plans()
     # 70% covered, 1,500 uncovered: 80% leaves room for 500 of it, a third.
-    assert r["bounds"]["cut"] and r["bounds"]["factor"] == pytest.approx(1 / 3, abs=1e-3)
-    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.30 / 3, abs=0.01)
+    assert r["bounds"]["cut"] and r["bounds"]["factor"] == pytest.approx(1 / 3, abs=2e-3)
+    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.30 / 3, rel=5e-3)
     monkeypatch.setattr(dsp, "_get_database_sp_coverage", lambda *_a: 85.0)
     r = dsp.recommend_database_savings_plans()
     assert r["bounds"]["dropped"] and r["finding"] is None

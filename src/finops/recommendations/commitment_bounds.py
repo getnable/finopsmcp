@@ -45,6 +45,8 @@ log = logging.getLogger(__name__)
 PURCHASE_TYPES = ("savings_plan", "database_savings_plan", "reserved_instance",
                   "committed_use_discount", "reservation")
 _MONTH = timedelta(days=30.4375)
+# Half the last decimal place coverage figures are rounded to.
+_COVERAGE_ROUNDING = 0.05
 
 
 @dataclass
@@ -209,13 +211,18 @@ def judge(bounds: Bounds, view: dict[str, Any], *, now: datetime | None = None) 
             j.reasons.append(f"its effect on coverage is unknown, and coverage is bounded at "
                              f"{target:g}%")
             j.by.append(bounds.by["coverage_target_pct"])
-        elif now_pct >= target:
+        elif now_pct + _COVERAGE_ROUNDING >= target:
+            # Coverage comes rounded to one decimal place (79.9 is anything
+            # up to 79.95): it is read at the top of that range, so rounding
+            # never leaves more room under the target than there is.
             j.action = "drop"
             j.reasons.append(f"coverage is already {now_pct:g}%, at or over the {target:g}% "
-                             "target")
+                             "target" if now_pct >= target else
+                             f"coverage is already {now_pct:g}%, within rounding of the "
+                             f"{target:g}% target")
             j.by.append(bounds.by["coverage_target_pct"])
         else:
-            c, t = now_pct / 100.0, target / 100.0
+            c, t = (now_pct + _COVERAGE_ROUNDING) / 100.0, target / 100.0
             covered = covers * c / (1.0 - c)
             allowed = t * (covered + covers) - covered
             if allowed < covers:

@@ -128,7 +128,7 @@ def test_a_purchase_over_the_coverage_target_is_cut_to_it():
     # 40% covered: covering the whole baseline would reach 100%. To stop at
     # 80%, keep (0.8 * total - covered) / baseline = 2/3 of it.
     assert f == pytest.approx(2 / 3, abs=1e-3)
-    assert cut["commitment_per_month"] == pytest.approx(rec["commitment_per_month"] * 2 / 3, abs=0.01)
+    assert cut["commitment_per_month"] == pytest.approx(rec["commitment_per_month"] * 2 / 3, rel=2e-3)
     assert cut["monthly_savings"] < rec["monthly_savings"]
     assert "80% target" in cut["description"] and "io.github.example/p:house-bounds" in \
         cut["description"]
@@ -170,6 +170,19 @@ def test_a_blackout_the_term_would_run_into_drops_it_and_a_region_nable_cannot_p
     assert cb.judge(b, view, now=NOW).action == "cut"
     later = datetime(2027, 5, 1, tzinfo=UTC)
     assert cb.judge(b, cb.compute_view(_rec()), now=later).action == "cut"
+
+
+def test_a_coverage_figure_rounded_down_never_loosens_the_cut():
+    # Coverage reaches judge() at one decimal place: 79.9 is anything from
+    # 79.85 to 79.95. Near the target the room left is small, and reading
+    # 79.9 as exact would allow two thirds more than the bound does at 79.95.
+    covers = 1000.0
+    view = {**cb.compute_view(_rec()), "coverage_pct_now": 79.9, "covers_monthly_usd": covers}
+    j = cb.judge(_bounds(NO_BLACKOUT), view, now=NOW)
+    c = 0.7995
+    covered = covers * c / (1 - c)
+    room = 0.8 * (covered + covers) - covered
+    assert j.action == "cut" and j.factor * covers <= room + 1e-9
 
 
 def test_no_coverage_figure_never_loosens_a_coverage_target():
