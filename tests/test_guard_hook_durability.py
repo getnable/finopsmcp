@@ -119,7 +119,7 @@ def test_the_uvx_form_is_healthy_whenever_uv_exists(settings, monkeypatch):
     settings.write_text("{}")
     g.install()
     assert json.loads(settings.read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"] \
-        == g._UVX_HOOK_CMD
+        == g._UVX_HOOK_CMD + "; exit 0"
     monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/uvx" if n == "uvx" else None)
     assert g.broken_hook_command(settings) is None
 

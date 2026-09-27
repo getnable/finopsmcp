@@ -2995,6 +2995,35 @@ def hook_surfaces(path: Path) -> dict[str, bool]:
 _PYPI_NAME = "finops-mcp"
 _UVX_HOOK_CMD = f"uvx --from {_PYPI_NAME}=={__version__} finops guard hook"
 
+# Claude Code blocks the tool call when a PreToolUse hook exits 2, and uvx
+# exits 2 when it cannot reach the package index (the first call after an
+# install moves the pin to a new release, offline or in a sandbox without
+# network, or after `uv cache clean`), before nable runs at all. A bare command
+# in settings.json then stops every Bash and MCP call. So the settings hook
+# ends in `; exit 0`, which means the same in sh, Git Bash and PowerShell, the
+# shells Claude Code runs hooks in. `finops guard hook` always exits 0 itself,
+# and its verdict is on stdout, which the suffix leaves alone. Releases before
+# this wrote the bare command; install wraps it in place.
+_FAIL_SAFE_SUFFIX = "; exit 0"
+# Also `|| exit 0` (the Codex spelling) and a trailing `;`: a command that
+# already ends in one of these exits 0 whatever the launcher does.
+_FAIL_SAFE_RE = re.compile(r"\s*(?:;|\|\|)\s*exit\s+0\s*;?\s*$")
+
+
+def is_fail_safe(cmd: Any) -> bool:
+    """Does this hook command exit 0 however its launcher fails?"""
+    return isinstance(cmd, str) and _FAIL_SAFE_RE.search(cmd) is not None
+
+
+def _bare(cmd: str) -> str:
+    """A hook command without the fail-safe wrapper, however it was spelled."""
+    return _FAIL_SAFE_RE.sub("", cmd)
+
+
+def _fail_safe(cmd: str) -> str:
+    """The Claude Code settings hook for `cmd`: wrapped once, never twice."""
+    return f"{_bare(cmd)}{_FAIL_SAFE_SUFFIX}"
+
 
 def hook_pin(cmd: str) -> str | None:
     """How a hook command is pinned.
@@ -3057,7 +3086,11 @@ def _hook_command() -> str:
     with command-not-found on every Bash call. A persistent binary is best. An
     ephemeral one is worse than none, because it fails open and lies about it, so
     those fall through to the uvx form, which re-resolves at run time (to this
-    release, see _UVX_HOOK_CMD, not to whatever PyPI has that day)."""
+    release, see _UVX_HOOK_CMD, not to whatever PyPI has that day).
+
+    This is the bare command. Each harness wraps it the way its shell and its
+    exit-code rules need: _claude_hook_command for Claude Code's settings,
+    guard_adapters for the others."""
     import shutil
     found = shutil.which("finops")
     if found and not _is_ephemeral(found):
@@ -3065,6 +3098,19 @@ def _hook_command() -> str:
         # but user venvs can).
         return f'"{found}" guard hook' if " " in found else f"{found} guard hook"
     return _UVX_HOOK_CMD
+
+
+def _claude_hook_command() -> str:
+    """What install writes into Claude Code's settings: _hook_command, fail-safe
+    (see _FAIL_SAFE_SUFFIX). The binary form gets the suffix too: a missing
+    binary exits 127, which Claude Code only reports, but one form is simpler
+    to recognise than two, and a wrapper script there could exit 2."""
+    return _fail_safe(_hook_command())
+
+
+def hook_form() -> str:
+    """"uvx" or "binary": which form install writes on this machine."""
+    return "uvx" if _bare(_hook_command()) == _UVX_HOOK_CMD else "binary"
 
 
 def _settings_path(global_scope: bool) -> Path:
@@ -3205,13 +3251,35 @@ def pinned_elsewhere_hook_command(path: Path) -> str | None:
     return None
 
 
+def blocking_hook_command(path: Path) -> str | None:
+    """Our installed hook command, when it is the bare form releases before
+    the fail-safe wrapper wrote: a uvx that cannot reach the package index
+    exits 2 and Claude Code blocks the tool call (see _FAIL_SAFE_SUFFIX).
+    None when the hook is absent or already fail-safe."""
+    for _entry, h in _read_our_hooks(path):
+        if not is_fail_safe(h["command"]):
+            return h["command"]
+    return None
+
+
 def _stale(cmd: str) -> bool:
-    """Should install() rewrite this existing hook command in place?
+    """Should install() point this existing hook command at a new one?
 
     Dead, unpinned, or pinned to a release other than the one running the
     install. Re-running install is an explicit choice of release, so the pin
-    follows it; a healthy binary-path hook is never touched."""
+    follows it; a healthy binary-path hook keeps its program (see _upgraded)."""
     return not _command_runs(cmd) or hook_pin(cmd) in ("unpinned", "other")
+
+
+def _upgraded(cmd: str) -> str | None:
+    """The command install() writes over this existing one of ours, or None
+    to leave it as found. A stale one is re-resolved; a healthy one in the
+    bare form keeps its program and gains the fail-safe wrapper."""
+    if _stale(cmd):
+        return _claude_hook_command()
+    if not is_fail_safe(cmd):
+        return _fail_safe(cmd)
+    return None
 
 
 def _widen_matcher(pre: list, entry: dict, hook: dict) -> bool:
@@ -3240,9 +3308,9 @@ def install(global_scope: bool = False) -> Path:
     the 0.8.195 changelog told every uvx user the same. Both were promises this
     function did not keep: it returned early on any existing entry, so the dead
     hook stayed dead and the telemetry counted it as "repaired". Our own entry
-    is now rewritten in place when it is stale, or when its matcher predates
-    MCP coverage, keeping its position and every other hook in the file
-    exactly as found."""
+    is now rewritten in place when it is stale, when it predates the fail-safe
+    wrapper, or when its matcher predates MCP coverage, keeping its position
+    and every other hook in the file exactly as found."""
     path = _settings_path(global_scope)
     settings = _load_settings(path)
     pre = _hook_list(settings, path, create=True)
@@ -3251,9 +3319,9 @@ def install(global_scope: bool = False) -> Path:
         changed = False
         for entry, h in ours:
             changed = _widen_matcher(pre, entry, h) or changed
-            if not _stale(h["command"]):
+            cmd = _upgraded(h["command"])
+            if cmd is None:
                 continue
-            cmd = _hook_command()
             h["command"] = cmd
             old = h.get("timeout")
             h["timeout"] = max(old, _timeout_for(cmd)) if isinstance(old, int) else _timeout_for(cmd)
@@ -3261,7 +3329,7 @@ def install(global_scope: bool = False) -> Path:
         if not changed:
             return path
     else:
-        cmd = _hook_command()
+        cmd = _claude_hook_command()
         pre.append({
             "matcher": _HOOK_MATCHER,
             "hooks": [{"type": "command", "command": cmd, "timeout": _timeout_for(cmd)}],
@@ -3380,7 +3448,7 @@ def doctor() -> dict[str, Any]:
             cmd = ours[0][1]["command"]
             surf = hook_surfaces(p)
             row.update(command=cmd, runs=_command_runs(cmd), pin=hook_pin(cmd) or "binary",
-                       bash=surf["bash"], mcp=surf["mcp"])
+                       bash=surf["bash"], mcp=surf["mcp"], fail_safe=is_fail_safe(cmd))
         rows.append(row)
     adapter_rows = _adapter_rows()
     rows += adapter_rows
@@ -3426,6 +3494,9 @@ def doctor() -> dict[str, Any]:
         elif r.get("pin") == "other":
             fix(f"nable guard install{flag}", "pins the hook to this release instead of "
                 f"another release ({hook_release(r['command']) or 'unknown'})")
+        if r.get("fail_safe") is False:
+            fix(f"nable guard install{flag}", "lets tool calls through when the hook cannot "
+                "start (uvx offline exits 2, which blocks every Bash and MCP call)")
 
     for name, (label, what) in _ADAPTER_SURFACES.items():
         mine = [r for r in adapter_rows if r["harness"] == name]

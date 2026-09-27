@@ -52,7 +52,7 @@ def test_reinstalling_repairs_a_dead_hook_in_place(settings, monkeypatch):
     assert len(pre) == 2, "repair must rewrite, not append a second guard"
     assert pre[0]["hooks"][0]["command"] == "other-tool check"
     ours = pre[1]["hooks"][0]
-    assert ours["command"] == g._UVX_HOOK_CMD
+    assert ours["command"] == g._UVX_HOOK_CMD + "; exit 0"
     assert ours["timeout"] == 30, "the uvx form needs its longer cold-cache timeout"
     assert g.broken_hook_command(settings) is None
     assert json.loads(settings.read_text())["model"] == "opus"
@@ -64,7 +64,7 @@ def test_a_healthy_hook_is_left_byte_for_byte(settings, monkeypatch, tmp_path):
     exe.touch(mode=0o755)
     body = json.dumps({"hooks": {"PreToolUse": [
         {"matcher": g._HOOK_MATCHER, "hooks": [{"type": "command",
-                                                "command": f"{exe} guard hook",
+                                                "command": f"{exe} guard hook; exit 0",
                                                 "timeout": 10}]},
     ]}}, indent=4)
     settings.write_text(body)
@@ -94,6 +94,7 @@ from finops import __version__
 
 LEGACY = "uvx --from finops-mcp finops guard hook"
 PINNED = f"uvx --from finops-mcp=={__version__} finops guard hook"
+WRITTEN = PINNED + "; exit 0"           # what install writes: pinned and fail-safe
 
 
 def test_the_uvx_fallback_is_pinned_to_this_release(monkeypatch):
@@ -134,7 +135,7 @@ def test_install_pins_a_legacy_unpinned_hook_in_place(settings, monkeypatch):
     pre = _pre(settings)
     assert len(pre) == 2
     assert pre[0]["hooks"][0]["command"] == "other-tool check"
-    assert pre[1]["hooks"][0]["command"] == PINNED
+    assert pre[1]["hooks"][0]["command"] == WRITTEN
     assert g.unpinned_hook_command(settings) is None
 
 
@@ -142,11 +143,11 @@ def test_install_moves_an_older_pin_forward(settings, monkeypatch):
     _legacy_settings(settings, "uvx --from finops-mcp==0.0.1 finops guard hook")
     _uv_only(monkeypatch)
     g.install()
-    assert _pre(settings)[1]["hooks"][0]["command"] == PINNED
+    assert _pre(settings)[1]["hooks"][0]["command"] == WRITTEN
 
 
 def test_a_current_pin_is_left_alone(settings, monkeypatch):
-    _legacy_settings(settings, PINNED, matcher=g._HOOK_MATCHER)
+    _legacy_settings(settings, WRITTEN, matcher=g._HOOK_MATCHER)
     before = settings.read_text()
     _uv_only(monkeypatch)
     g.install()
@@ -183,7 +184,7 @@ def test_status_flags_an_unpinned_global_hook_and_names_the_scope(tmp_path, monk
 def test_install_reports_and_counts_a_repin(settings, monkeypatch):
     events = []
     monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: events.append((e, p)))
-    _legacy_settings(settings)
+    _legacy_settings(settings, LEGACY + "; exit 0")
     _uv_only(monkeypatch)
     out = _run("install")
     assert f"pinned to finops-mcp=={__version__}" in out
@@ -220,7 +221,7 @@ def test_install_pins_every_unpinned_spelling(settings, monkeypatch, cmd):
     _uv_only(monkeypatch)
     assert g.unpinned_hook_command(settings) == cmd
     g.install()
-    assert _pre(settings)[1]["hooks"][0]["command"] == PINNED
+    assert _pre(settings)[1]["hooks"][0]["command"] == WRITTEN
 
 
 OLD_PIN = "uvx --from finops-mcp==0.0.1 finops guard hook"
@@ -241,12 +242,12 @@ def test_status_says_when_the_hook_runs_another_release(tmp_path, monkeypatch):
 def test_install_says_it_re_pinned_another_release(settings, monkeypatch):
     events = []
     monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: events.append((e, p)))
-    _legacy_settings(settings, OLD_PIN, matcher=g._HOOK_MATCHER)
+    _legacy_settings(settings, OLD_PIN + "; exit 0", matcher=g._HOOK_MATCHER)
     _uv_only(monkeypatch)
     out = _run("install")
     assert f"re-pinned from finops-mcp==0.0.1 to finops-mcp=={__version__}" in out
     assert [p["outcome"] for e, p in events if e == "guard_installed"] == ["repinned"]
-    assert _pre(settings)[1]["hooks"][0]["command"] == PINNED
+    assert _pre(settings)[1]["hooks"][0]["command"] == WRITTEN
 
 
 def test_doctor_offers_to_re_pin_another_release(settings, monkeypatch):

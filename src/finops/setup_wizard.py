@@ -2474,6 +2474,9 @@ def _run_guard(parsed) -> None:
         was_unpinned = bool(guard.unpinned_hook_command(guard._settings_path(global_scope)))
         # Or pinned to another release: install moves the pin to this one.
         pinned_elsewhere = guard.pinned_elsewhere_hook_command(guard._settings_path(global_scope))
+        # Or the bare form releases before the fail-safe wrapper wrote, which
+        # blocks every tool call when uvx cannot start. install() wraps it.
+        was_blocking = bool(guard.blocking_hook_command(guard._settings_path(global_scope)))
         try:
             path = guard.install(global_scope)
         except OSError as e:
@@ -2489,9 +2492,10 @@ def _run_guard(parsed) -> None:
         # commands, no cost data. Honors NABLE_NO_TELEMETRY like everything else.
         _fire_telemetry("guard_installed", {
             "scope": scope,
-            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned or pinned_elsewhere
+            "outcome": ("repaired" if was_broken or was_blocking
+                        else "repinned" if was_unpinned or pinned_elsewhere
                         else ("already" if already else "new")),
-            "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
+            "hook_form": guard.hook_form(),
         })
         print()
         if was_broken:
@@ -2503,10 +2507,15 @@ def _run_guard(parsed) -> None:
             print(f"  {green('✓')} Guard re-pinned from "
                   f"finops-mcp=={guard.hook_release(pinned_elsewhere) or 'another release'} "
                   f"to finops-mcp=={guard.__version__} → {path}")
+        elif was_blocking:
+            print(f"  {green('✓')} Guard repaired: a hook that cannot start no longer blocks "
+                  f"tool calls → {path}")
         elif already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
             print(f"  {green('✓')} Agent cost guardrail installed → {path}")
+        if was_blocking and not was_broken and (was_unpinned or pinned_elsewhere):
+            print(dim("    A hook that cannot start (uvx offline) no longer blocks tool calls."))
         print()
         print(f"  {bold('What it does:')} before your agent runs an infra-mutating command")
         print("  (terraform destroy, kubectl delete, aws ec2 terminate-instances, a")
@@ -2672,6 +2681,7 @@ def _run_guard(parsed) -> None:
     stale: list[bool] = []
     unpinned: list[bool] = []
     elsewhere: list[tuple[bool, str]] = []
+    blocking: list[bool] = []
     narrow: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
@@ -2691,6 +2701,9 @@ def _run_guard(parsed) -> None:
                 release = guard.hook_release(guard.pinned_elsewhere_hook_command(p) or "")
                 elsewhere.append((is_global, release or "another release"))
                 state = amber(f"installed, pinned to {release or 'another release'}")
+            elif guard.blocking_hook_command(p):
+                blocking.append(is_global)
+                state = amber("installed, blocks tool calls when it cannot start")
             elif not guard.hook_surfaces(p)["mcp"]:
                 narrow.append(is_global)
                 state = amber("installed, Bash only")
@@ -2739,6 +2752,11 @@ def _run_guard(parsed) -> None:
         print(f"  {amber(f'The hook runs finops-mcp {runs}, not this one ({guard.__version__}).')}")
         print(dim("  Re-pin it to this release in place:"))
         _fix([is_global for is_global, _ in elsewhere])
+    if blocking:
+        print(f"  {amber('A hook that fails to start can block every Bash and MCP call.')}")
+        print(dim("  uvx exits 2 when it cannot reach PyPI, which Claude Code reads as a block."))
+        print(dim("  Make it fail safe in place:"))
+        _fix(blocking)
     if narrow:
         print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
         print(dim("  The hook only sees Bash. Widen it in place:"))

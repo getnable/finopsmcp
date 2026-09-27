@@ -77,8 +77,12 @@ payload it does not recognise stays silent, which both harnesses read as allow.
 uvx itself can fail the same way: it exits 2 when it cannot reach PyPI or
 resolve the package, before nable runs at all. So every harness that blocks on
 a failed hook gets the command wrapped to exit 0 whatever the launcher does
-(_fail_safe): Cursor and Codex block on exit 2, Copilot and Gemini CLI on any
-exit they do not read as a warning. Cline's script exits 0 itself.
+(_fail_safe): Claude Code, Cursor and Codex block on exit 2, Copilot and
+Gemini CLI on any exit they do not read as a warning. Cline's script exits 0
+itself. guard._hook_command is the bare command every harness starts from,
+and each wraps it once, its own way: Claude Code's settings hook and the rest
+with `; exit 0` (guard._fail_safe), Codex with `|| exit 0`. A command already
+wrapped either way is unwrapped first, so none ends up wrapped twice.
 
 Fails open everywhere, like the Claude hook: an adapter error allows the
 command and says why on stderr. stdout carries the harness's JSON and nothing
@@ -689,7 +693,8 @@ def detected() -> list[str]:
 def hook_command(harness: str, global_scope: bool = True) -> str:
     """The command a harness runs. The same as Claude Code's, on purpose (see
     the module docstring), except that Cursor and Cline get an absolute uvx in
-    the user's own (global) config.
+    the user's own (global) config. Bare, like guard._hook_command: the
+    installer for each harness adds the fail-safe wrapper its shell needs.
 
     Cursor is a desktop app, and an app started from the Dock does not always
     see the PATH a terminal does. A bare `uvx` it cannot find is a hook that
@@ -707,7 +712,7 @@ def hook_command(harness: str, global_scope: bool = True) -> str:
     `& "C:\\Program Files\\uv\\uvx.exe" ...`. sh, bash and Codex's cmd.exe
     keep the plain quoted form.
     """
-    cmd = guard._hook_command()
+    cmd = guard._bare(guard._hook_command())
     if global_scope and harness in ("cursor", "cline") and cmd.startswith("uvx "):
         uvx = shutil.which("uvx")
         if uvx and not guard._is_ephemeral(uvx):
@@ -1208,8 +1213,10 @@ def _fail_safe(cmd: str) -> str:
     an older nable rejecting its arguments would otherwise stop every shell
     command. The trailing `exit 0` means the same in bash, sh and PowerShell,
     the shells these harnesses run hooks in (Cursor, Copilot and Gemini CLI
-    use PowerShell on Windows)."""
-    return f"{cmd}; exit 0"
+    use PowerShell on Windows). Claude Code's settings hook is wrapped the
+    same way (guard._fail_safe, which this is), and a command already wrapped
+    is not wrapped again."""
+    return guard._fail_safe(cmd)
 
 
 def _fail_safe_cmd_exe(cmd: str) -> str:
@@ -1217,8 +1224,9 @@ def _fail_safe_cmd_exe(cmd: str) -> str:
     cmd.exe on Windows (COMSPEC /C, codex-rs hooks/src/engine/command_runner.rs)
     and `$SHELL -lc` elsewhere. cmd.exe does not split commands on `;`: the
     `; exit 0` would reach nable as arguments and fail every call. `||` means
-    "on failure" in cmd.exe and in every POSIX shell."""
-    return f"{cmd} || exit 0"
+    "on failure" in cmd.exe and in every POSIX shell. A `; exit 0` already
+    on the command is taken off first, for the same reason."""
+    return f"{guard._bare(cmd)} || exit 0"
 
 
 def _wrapped(stale: tuple[str, ...], wrap: Any) -> tuple[str, ...]:
@@ -1502,15 +1510,15 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
     "new", "already", "repaired". Raises SystemExit when it refuses a file."""
     path = hooks_path(harness, global_scope)
     if harness == "claude":
-        # guard.install repairs a dead entry and re-pins an unpinned uvx one, or
-        # one pinned to another release, in place, so read both before it
-        # writes to report what it did.
+        # guard.install repairs a dead entry, wraps a bare one to fail safe,
+        # and re-pins an unpinned uvx one, or one pinned to another release,
+        # in place, so read all three before it writes to report what it did.
         already = guard.is_installed(path)
-        broken = bool(guard.broken_hook_command(path))
+        repair = bool(guard.broken_hook_command(path) or guard.blocking_hook_command(path))
         repin = bool(guard.unpinned_hook_command(path)
                      or guard.pinned_elsewhere_hook_command(path))
         guard.install(global_scope)
-        return ("repaired" if broken else "repinned" if repin
+        return ("repaired" if repair else "repinned" if repin
                 else "already" if already else "new"), path
     if harness == "cline":
         # Refuse before resolving the command: nothing on Windows would use it,
@@ -1762,7 +1770,7 @@ def cli(action: str, *, harness: str | None, everything: bool, global_scope: boo
                 outcome, path = install(name, global_scope)
                 _fire_telemetry("guard_installed", {
                     "scope": scope, "outcome": outcome, "harness": name,
-                    "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
+                    "hook_form": guard.hook_form(),
                 })
                 verb = {"new": "installed", "already": "already installed",
                         "repaired": "repaired",
