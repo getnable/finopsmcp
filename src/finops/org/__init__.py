@@ -11,6 +11,8 @@ confirmed fact). They live in `nable.org/` (see store.py for where that is).
     org.team_for_tags({"Team": "pay"})       # through tag_key and tag_alias facts
     org.propose(org.make_fact("owner", "repo_path:infra/payments",
                               {"team": "payments"}, source="codeowners:infra/payments/"))
+    org.run_adapters()                        # CODEOWNERS, Terraform, AWS Organizations,
+                                              # tags, workload: proposals only
 
 Importing this package costs the standard library only: PyYAML loads on the
 first read, SQLAlchemy only inside coverage(). The guard hook imports it.
@@ -36,31 +38,37 @@ from .model import (
     fact_key,
     subject_of,
 )
-from .questions import Question, questions
+from .questions import Question, bulk_facts, questions
 from .store import (
     ADAPTERS,
     ORG_DIR_NAME,
+    AdapterRun,
     OrgError,
     confirm,
+    confirm_many,
     export,
     git_root,
     import_legacy,
     load,
     make_fact,
     propose,
+    propose_many,
     reject,
+    reject_many,
     repo_path_of,
     resolve_dir,
+    run_adapters,
     set_fact,
 )
 
 __all__ = [
     "ADAPTERS", "CANONICAL_TAG_KEYS", "ENVIRONMENTS", "FACT_KINDS", "FILE_FOR_KIND",
-    "ORG_DIR_NAME", "STATUSES", "SUBJECT_KINDS", "Fact", "FactError", "OrgError", "OrgModel",
-    "Question", "Resolved", "Subject", "confirm", "coverage", "environment_of", "export",
-    "fact_key", "git_root", "import_legacy", "legacy_facts", "load", "make_fact", "owner_of",
-    "propose", "questions", "reject", "repo_path_of", "resolve_dir", "set_fact", "subject_of",
-    "team_for_tags", "threshold_for",
+    "ORG_DIR_NAME", "STATUSES", "SUBJECT_KINDS", "AdapterRun", "Fact", "FactError", "OrgError",
+    "OrgModel", "Question", "Resolved", "Subject", "bulk_facts", "confirm", "confirm_many",
+    "coverage", "environment_of", "export", "fact_key", "git_root", "import_legacy",
+    "legacy_facts", "load", "make_fact", "owner_of", "propose", "propose_many", "questions",
+    "reject", "reject_many", "repo_path_of", "resolve_dir", "run_adapters", "set_fact",
+    "subject_of", "team_for_tags", "threshold_for",
 ]
 
 

@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """`nable org`: the org model from the terminal, and the human side of it.
 
-  nable org init [--here]        create the directory, import what nable already
-                                 knows, ask the top questions (on a terminal)
+  nable org init [--here] [--repo PATH]... [--no-adapters]
+                                 create the directory, import what nable already
+                                 knows, run the adapters (CODEOWNERS, Terraform,
+                                 AWS Organizations, tags, workload), ask the top
+                                 questions (on a terminal)
   nable org status [--json]      where it lives, counts, coverage, stale, conflicts
   nable org review [--kind K]    proposals waiting for a human, with their keys
   nable org confirm KEY... [--as WHO]
-  nable org reject KEY... [--as WHO]
+  nable org confirm --owner-bulk TEAM | --env-bulk ENV | --kind-bulk KIND [--as WHO]
+  nable org reject KEY... [--as WHO]    (and the same bulk flags)
   nable org set owner --subject aws_account:123 --team payments [--channel ...]
   nable org questions [--limit N] [--json]
   nable org export [--format json|yaml] [--out PATH]
@@ -48,6 +52,11 @@ def add_parser(sub) -> None:
     x.add_argument("--limit", dest="org_limit", type=int, default=10, metavar="N")
     x.add_argument("--as", dest="org_as", default=None, metavar="WHO",
                    help="Who is answering (default: git user.email, then $USER)")
+    x.add_argument("--repo", dest="org_repos", action="append", default=None,
+                   metavar="PATH", help="Another repo for the adapters to read (repeatable); "
+                   "the repo you are in is always read")
+    x.add_argument("--no-adapters", dest="org_no_adapters", action="store_true",
+                   help="Do not run the adapters: import and ask only")
 
     x = osub.add_parser("status", parents=[common], help="Location, counts, coverage, "
                         "stale facts and conflicts")
@@ -59,9 +68,18 @@ def add_parser(sub) -> None:
 
     for name, verb in (("confirm", "Confirm"), ("reject", "Reject")):
         x = osub.add_parser(name, parents=[common], help=f"{verb} facts by key (a human decision)")
-        x.add_argument("org_keys", nargs="+", metavar="KEY")
+        x.add_argument("org_keys", nargs="*", metavar="KEY")
         x.add_argument("--as", dest="org_as", default=None, metavar="WHO",
                        help="Who decided (default on a terminal: git user.email, then $USER)")
+        x.add_argument("--owner-bulk", dest="org_owner_bulk", default=None, metavar="TEAM",
+                       help=f"{verb} every uncontested proposal that TEAM owns something "
+                            "(owner, team and team alias facts), as `nable org questions` "
+                            "lists them")
+        x.add_argument("--env-bulk", dest="org_env_bulk", default=None, metavar="ENV",
+                       help=f"{verb} every uncontested proposal that something is ENV")
+        x.add_argument("--kind-bulk", dest="org_kind_bulk", default=None, metavar="KIND",
+                       help=f"{verb} every uncontested proposal of one kind "
+                            "(account, tag_key, ...)")
 
     x = osub.add_parser("set", parents=[common], help="State a fact directly (confirmed)")
     x.add_argument("org_set_kind", choices=["owner", "environment", "team"], metavar="KIND",
@@ -207,10 +225,36 @@ def _review(parsed, org) -> int:
     return 0
 
 
+def _bulk_keys(parsed, org) -> tuple[list[str], str] | None:
+    """The keys a --*-bulk flag names, and what it was, or None without one."""
+    for attr, name in (("org_owner_bulk", "owner"), ("org_env_bulk", "env"),
+                       ("org_kind_bulk", "kind")):
+        val = getattr(parsed, attr, None)
+        if val:
+            facts = org.bulk_facts(org.load(parsed.org_dir), **{name: val})
+            return [f.key for f in facts], f"--{name}-bulk {val}"
+    return None
+
+
 def _decide(parsed, org, verb: str) -> int:
     who = _who(parsed.org_as)
     if who is None:
         return _need_human()
+    bulk = _bulk_keys(parsed, org)
+    if bulk is None and not parsed.org_keys:
+        print(f"nable org {verb}: give KEY..., or --owner-bulk TEAM, --env-bulk ENV "
+              "or --kind-bulk KIND", file=sys.stderr)
+        return 2
+    if bulk is not None:
+        keys, what = bulk
+        if not keys:
+            print(f"  {what}: nothing proposed to {verb}", file=sys.stderr)
+            return 1
+        many = org.confirm_many if verb == "confirm" else org.reject_many
+        done = many(keys, who, parsed.org_dir)
+        print(f"  {what}: {len(done)} fact(s) {done[0].status} by {who}")
+        for f in done:
+            print(f"    {f.key}  {f.fact} {f.subject} {f.value}")
     fn = org.confirm if verb == "confirm" else org.reject
     code = 0
     for key in parsed.org_keys:
@@ -301,10 +345,46 @@ def _ask(prompt: str) -> str | None:
         return None
 
 
+def _one_by_one(q, org, d, who: str) -> bool:
+    """A bulk question answered item by item: y, n or s(kip) each. False
+    when the person quits."""
+    m = org.load(d)
+    from .questions import describe
+    for key in q.keys:
+        found = m.find(key)
+        if not found:
+            continue
+        ans = _ask(f"     {describe(found[0])}? [Y/n/s/q] ")
+        if ans is None or ans.lower() == "q":
+            return False
+        ans = (ans or "y").lower()[:1]
+        if ans == "y":
+            org.confirm(key, who, d)
+        elif ans == "n":
+            org.reject(key, who, d)
+    return True
+
+
 def _interview(qs, org, d, who: str) -> None:
-    """Ask each question: y/n/edit with the default shown. 'q' stops."""
+    """Ask each question: y/n/edit with the default shown. 'q' stops. A bulk
+    question's yes confirms every fact it lists, its no rejects them all, and
+    edit walks through them one at a time."""
     for i, q in enumerate(qs, 1):
         print(f"\n  {i}. {q.text}")
+        if q.kind == "bulk":
+            ans = _ask("     yes / no / edit, one by one [Y/n/e/q] ")
+            if ans is None or ans.lower() == "q":
+                return
+            ans = (ans or q.default).lower()[:1]
+            if ans == "y":
+                org.confirm_many(q.keys, who, d)
+                print(f"     Confirmed {len(q.keys)} fact(s).")
+            elif ans == "n":
+                org.reject_many(q.keys, who, d)
+                print(f"     Rejected {len(q.keys)} fact(s); they will not be proposed again.")
+            elif ans == "e" and not _one_by_one(q, org, d, who):
+                return
+            continue
         if q.kind == "unowned":
             team = _ask("     Team (blank to skip, q to stop): ")
             if team is None or team.lower() == "q":
@@ -343,6 +423,32 @@ def _interview(qs, org, d, who: str) -> None:
             print(f"     Recorded: {fact['subject']} is owned by {team}.")
 
 
+_RESULT = {"added": "new", "duplicate": "already there", "suppressed_rejected":
+           "rejected before, not asked again", "conflict": "beside a confirmed fact",
+           "invalid": "invalid, skipped"}
+
+
+def _print_runs(runs) -> None:
+    """What each adapter proposed: counts, and the top items by dollars."""
+    from .questions import describe
+    if not runs:
+        return
+    print("  adapters (they only propose; nothing here is confirmed until you say so):")
+    for run in runs:
+        if run.error:
+            print(f"    {run.id}: failed, {run.error}")
+            continue
+        if not run.facts:
+            print(f"    {run.id}: nothing to propose")
+            continue
+        counts = ", ".join(f"{n} {_RESULT.get(k, k)}" for k, n in sorted(run.counts.items()))
+        print(f"    {run.id}: {len(run.facts)} proposed ({counts})")
+        for f in run.top(3):
+            usd = _fmt_usd(f.dollars_monthly)
+            print(f"      {describe(f)}" + (f"  {usd}" if usd else "") +
+                  f"  (confidence {f.confidence:.2f})")
+
+
 def _init(parsed, org) -> int:
     if parsed.org_here:
         root = org.git_root()
@@ -357,15 +463,14 @@ def _init(parsed, org) -> int:
                   file=sys.stderr)
     else:
         d, _ = org.resolve_dir(parsed.org_dir)
-    from .store import ensure_dir, run_adapters
+    from .store import ensure_dir
     made = ensure_dir(d)
     print(f"Org model: {d}" + (f" (created {len(made)} files)" if made else ""))
     added = org.import_legacy(d)
     print(f"  imported {added} fact(s) nable already had (tag_rules.yaml, accounts.yaml, "
           "FINOPS_REQUIRED_TAGS/FINOPS_PROTECTED_TAGS)")
-    counts = run_adapters(d)
-    if counts:
-        print("  adapters: " + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())))
+    if not getattr(parsed, "org_no_adapters", False):
+        _print_runs(org.run_adapters(d, repos=getattr(parsed, "org_repos", None) or ()))
     m = org.load(d)
     qs = org.questions(parsed.org_limit, model=m)
     if not qs:
