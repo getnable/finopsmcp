@@ -467,7 +467,10 @@ def _write_out(path: str, text: str) -> None:
     from .errors import PackError
     _not_a_guard_file(path)
     real = os.path.realpath(os.path.expanduser(path))
-    fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    try:
+        fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    except OSError as e:
+        raise PackError(f"--out {path}: {e.strerror or e}") from None
     try:
         st = os.fstat(fd)
         if stat.S_ISREG(st.st_mode):

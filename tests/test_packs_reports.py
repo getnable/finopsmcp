@@ -136,6 +136,10 @@ def test_out_refuses_the_guards_files_however_they_are_reached(packs_env, tmp_pa
         assert "never writes" in capsys.readouterr().err, target
     assert gl.ledger_path().read_bytes() == before
     assert not (tmp_path / "budget.yml").exists()
+    # A file that cannot be opened is an error, not a traceback.
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "brief", "--out", str(tmp_path / "no-dir" / "r.md")])
+    assert ei.value.code == 1 and "--out" in capsys.readouterr().err
     assert not (tmp_path / "other" / "nable.org" / "freezes.yaml").exists()
 
 
