@@ -445,17 +445,41 @@ def _pairs(raw: list[str] | None, flag: str) -> dict[str, str]:
 
 def _not_a_guard_file(path: str) -> None:
     """Refuse to write a report over one of the guard's own files (the
-    ledger it reports on, the installed packs, the org model, the policy):
-    `--out` is not a way around the guard's protected paths."""
+    ledger it reports on, the installed packs, the org model, the policy, a
+    budget file): `--out` is not a way around the guard's protected paths.
+    The path is read as open() reads it, symlinks resolved and case folded
+    where the disk folds it (guard_paths.match_file)."""
     from .. import guard_paths
     from .errors import PackError
-    target = os.path.realpath(os.path.expanduser(path))
-    for p in guard_paths.protected(os.getcwd()):
-        if p.whole:
-            continue
-        if target == p.path or (p.tree and target.startswith(p.path.rstrip(os.sep) + os.sep)):
-            raise PackError(f"--out {path}: that is {p.what}, which a report never writes "
-                            "over; choose another file")
+    hit = guard_paths.match_file(path, os.getcwd())
+    if hit is not None:
+        raise PackError(f"--out {path}: that is {hit.what}, which a report never writes "
+                        "over; choose another file")
+
+
+def _write_out(path: str, text: str) -> None:
+    """Write `text` to the file _not_a_guard_file cleared: the resolved path,
+    never through a symlink put there since, and never a file with another
+    name (a hard link to the ledger is the ledger)."""
+    import stat
+
+    from .errors import PackError
+    _not_a_guard_file(path)
+    real = os.path.realpath(os.path.expanduser(path))
+    fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            if st.st_nlink > 1:
+                raise PackError(f"--out {path}: that file has other names (hard links), and "
+                                "a report never writes through one; choose another file")
+            os.ftruncate(fd, 0)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1
+            fh.write(text)
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _report(parsed, as_json: bool) -> int:
@@ -474,10 +498,8 @@ def _report(parsed, as_json: bool) -> int:
     text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
     body = {"ok": True, **r}
     if parsed.pack_out:
-        _not_a_guard_file(parsed.pack_out)
         out = json.dumps(body, indent=2, default=str) if as_json else text
-        with open(parsed.pack_out, "w", encoding="utf-8") as fh:
-            fh.write(out if out.endswith("\n") else out + "\n")
+        _write_out(parsed.pack_out, out if out.endswith("\n") else out + "\n")
         print(f"Wrote {r['report']} of {r['pack']} to {parsed.pack_out}")
         return EXIT_OK
     # On a terminal, nothing a template or the data under it holds can drive it.

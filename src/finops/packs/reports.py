@@ -42,6 +42,10 @@ from typing import Any
 from .errors import PackError, PolicyRefusal
 
 _SET_KEY = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
+# The values render() fills itself: the period read, when, which report, and
+# the record --each is on. An evidence report that says another period than
+# the one it read would be forged, so --set never stands in for them.
+_CORE_KEYS = frozenset({"generated_at", "since", "until", "pack", "report", "item"})
 MAX_SET_VALUE = 200
 DEFAULT_AI_DAYS = 30
 
@@ -283,6 +287,8 @@ def _set_values(sets: dict[str, str] | None) -> dict[str, str]:
             raise PackError(f"--set {k!r}: a name is lowercase letters, digits and _")
         if k in roots:
             raise PackError(f"--set {k}: {k} is a data scope, which only nable fills")
+        if k in _CORE_KEYS:
+            raise PackError(f"--set {k}: {k} is what the report read or when, which nable fills")
         v = str(v)
         if len(v) > MAX_SET_VALUE or any(ord(c) < 32 for c in v):
             raise PackError(f"--set {k}: the value must be one line of at most "

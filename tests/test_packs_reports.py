@@ -15,6 +15,7 @@ What has to stay true:
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, date, datetime
 
 import pytest
@@ -112,6 +113,55 @@ def test_out_never_writes_over_the_guards_own_files(packs_env, tmp_path, capsys)
     with pytest.raises(SystemExit) as ei:
         main(["pack", "report", pid, "brief", "--out", str(tmp_path / "brief.md")])
     assert ei.value.code == 0 and (tmp_path / "brief.md").read_text().startswith("# ")
+
+
+def test_out_refuses_the_guards_files_however_they_are_reached(packs_env, tmp_path, capsys,
+                                                               monkeypatch):
+    # A hard link to the ledger outside the data dir, a symlink to it, a
+    # budget file and another repo's org model are the guard's files too.
+    pid = _install(tmp_path)
+    gl.append({"decision": "allow", "command": "ls"})
+    before = gl.ledger_path().read_bytes()
+    hard = tmp_path / "hard-link.md"
+    os.link(gl.ledger_path(), hard)
+    soft = tmp_path / "soft-link.md"
+    soft.symlink_to(gl.ledger_path())
+    (tmp_path / "other" / "nable.org").mkdir(parents=True)
+    targets = (hard, soft, tmp_path / "budget.yml",
+               tmp_path / "other" / "nable.org" / "freezes.yaml")
+    for target in targets:
+        with pytest.raises(SystemExit) as ei:
+            main(["pack", "report", pid, "brief", "--out", str(target)])
+        assert ei.value.code == 1, target
+        assert "never writes" in capsys.readouterr().err, target
+    assert gl.ledger_path().read_bytes() == before
+    assert not (tmp_path / "budget.yml").exists()
+    assert not (tmp_path / "other" / "nable.org" / "freezes.yaml").exists()
+
+
+def test_out_refuses_the_guards_files_on_a_case_insensitive_disk(packs_env, tmp_path, capsys,
+                                                                  monkeypatch):
+    # guard_paths folds case on macOS and Windows; --out must compare the same
+    # way, or /Users/Alice/... never equals the folded /users/alice/...
+    from finops import guard_paths
+    org_dir = tmp_path / "Org"
+    org_dir.mkdir()
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(org_dir))
+    monkeypatch.setattr(guard_paths, "_FOLD", True)
+    pid = _install(tmp_path)
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "brief", "--out", str(org_dir / "freezes.yaml")])
+    assert ei.value.code == 1 and "never writes" in capsys.readouterr().err
+    assert not (org_dir / "freezes.yaml").exists()
+
+
+def test_set_cannot_stand_in_for_what_nable_fills(packs_env, tmp_path):
+    # The period, the time it was made and the report's own name are nable's:
+    # an evidence report that claims another period than it read is forged.
+    pid = _install(tmp_path, text="${since} ${until} ${generated_at} ${pack} ${report}")
+    for key in ("since", "until", "generated_at", "pack", "report", "item"):
+        with pytest.raises(PackError, match="nable fills"):
+            reports.render(pid, "brief", sets={key: "2020-01-01"})
 
 
 def test_evidence_from_an_empty_ledger_says_so():
