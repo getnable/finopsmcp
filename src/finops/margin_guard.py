@@ -190,7 +190,7 @@ COSTS: dict = {
     # Support: founder or engineer time, $60 an hour loaded. Assumption.
     "support_usd_per_minute": 1.00,
     # License issuing, the Stripe webhook and the email login for a local plan.
-    "license_infra_usd": Range(0.02, 0.05, 0.10),
+    "selfhost_infra_usd": Range(0.02, 0.05, 0.10),
 }
 
 
@@ -519,7 +519,7 @@ def plan_cogs(plan: Plan | str, case: str, billing: str = "monthly",
     out["payment"] = _payment(p, case, billing)
     out["support"] = _driver(p, "support_min_month", case) * k["support_usd_per_minute"]
     if not p.hosted:
-        out["license_infra"] = k["license_infra_usd"].at(case)
+        out["selfhost_infra"] = k["selfhost_infra_usd"].at(case)
         return out
 
     accounts = _driver(p, "accounts", case)

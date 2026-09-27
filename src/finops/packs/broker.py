@@ -207,7 +207,7 @@ def _vault_get(name: str) -> str | None:
         return None
 
 
-def secret_key(pack_id: str, name: str) -> str:
+def vault_entry_name(pack_id: str, name: str) -> str:
     """The vault key a pack's secret lives under: pack:<namespace>/<name>:<NAME>.
     A namespace of its own, so a pack never reads nable's provider keys (or
     another pack's) by declaring the same name."""
@@ -217,7 +217,7 @@ def secret_key(pack_id: str, name: str) -> str:
 def secret_value(pack_id: str, name: str) -> str | None:
     """A pack's secret, from its own vault namespace only. Never from nable's
     environment or its provider keys: `nable pack secret set` stores it."""
-    return _vault_get(secret_key(pack_id, name))
+    return _vault_get(vault_entry_name(pack_id, name))
 
 
 def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | None]:
@@ -250,11 +250,11 @@ def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
         raise PackError(why)
     try:
         from ..security.vault import Vault
-        Vault.default().store(secret_key(pack_id, name), value)
+        Vault.default().store(vault_entry_name(pack_id, name), value)
     except Exception as err:  # noqa: BLE001 - the vault says why; never the value
         raise PackError(f"The secret could not be stored in nable's vault "
                         f"({type(err).__name__})") from None
-    return {"pack": pack_id, "name": name, "key": secret_key(pack_id, name), "note": note}
+    return {"pack": pack_id, "name": name, "vault_entry": vault_entry_name(pack_id, name), "note": note}
 
 
 def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
@@ -265,7 +265,7 @@ def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
     try:
         from ..security.vault import Vault, _vault_dir
         if (_vault_dir() / "vault.db").is_file():
-            removed = Vault.default().delete(secret_key(pack_id, name))
+            removed = Vault.default().delete(vault_entry_name(pack_id, name))
     except Exception as err:  # noqa: BLE001
         raise PackError(f"nable's vault could not be read ({type(err).__name__})") from None
     return {"pack": pack_id, "name": name, "removed": removed}

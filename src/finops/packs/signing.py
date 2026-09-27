@@ -384,5 +384,5 @@ def keygen(out: str | Path, *, passphrase: bytes | None = None) -> dict[str, str
     except OSError as e:
         raise SignatureError(f"the key could not be written to {p} "
                              f"({e.strerror or type(e).__name__})") from None
-    return {"private_key_path": str(p), "public_key_path": str(pub_path), "public_key": pub,
+    return {"signing_key_file": str(p), "verify_key_file": str(pub_path), "public_key": pub,
             "key_id": key_id(b64decode(pub))}

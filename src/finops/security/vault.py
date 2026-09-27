@@ -312,7 +312,7 @@ class Vault:
         count = 0
         for key_name, encrypted_value in rows:
             if key_name.startswith("pack:"):
-                # A pack's own secret (finops.packs.broker.secret_key): the
+                # A pack's own secret (finops.packs.broker.vault_entry_name): the
                 # broker hands it to that pack only, never to nable's env.
                 continue
             try:

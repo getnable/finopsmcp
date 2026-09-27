@@ -603,9 +603,9 @@ def example_pack(code_env, tmp_path, monkeypatch):
     inst.install(str(src), yes=True)
     pid = "com.example/example-csv-connector"
     # As `nable pack secret set` stores them: in the pack's own vault entries.
-    vault = {broker.secret_key(pid, "EXAMPLE_COSTS_CSV"):
+    vault = {broker.vault_entry_name(pid, "EXAMPLE_COSTS_CSV"):
              str(EXAMPLE_CODE_PACK / "samples" / "costs.csv"),
-             broker.secret_key(pid, "EXAMPLE_OWNERS_CSV"):
+             broker.vault_entry_name(pid, "EXAMPLE_OWNERS_CSV"):
              str(EXAMPLE_CODE_PACK / "samples" / "owners.csv")}
     monkeypatch.setattr(broker, "_vault_get", vault.get)
     monkeypatch.setenv("FINOPS_ORG_DIR", str(tmp_path / "org"))

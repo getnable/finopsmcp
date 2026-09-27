@@ -278,7 +278,7 @@ def _keygen(parsed, as_json: bool) -> int:
                 return EXIT_FAIL
             passphrase = a.encode("utf-8")
         else:
-            _err(f"--encrypt needs a terminal or {PASSPHRASE_ENV}; no key was written.")
+            _err("--encrypt needs a terminal or NABLE_PACK_KEY_PASSPHRASE; no key was written.")
             return EXIT_FAIL
     r = keygen(parsed.pack_out, passphrase=passphrase)
     r["name"] = parsed.pack_key_name
@@ -286,9 +286,9 @@ def _keygen(parsed, as_json: bool) -> int:
                f"      key: {r['public_key']}\n")
     r["policy_snippet"] = snippet
     _out({"ok": True, **r}, as_json,
-         f"Wrote the private key to {r['private_key_path']} (mode 0600). Keep it offline or in "
+         f"Wrote the private key to {r['signing_key_file']} (mode 0600). Keep it offline or in "
          f"a secrets manager; anyone holding it can sign packs your machines trust.\n"
-         f"Public key {r['key_id']} in {r['public_key_path']}. To trust it, add to the org "
+         f"Public key {r['key_id']} in {r['verify_key_file']}. To trust it, add to the org "
          f"policy file (nable.policy.yaml):\n\n{snippet}")
     return EXIT_OK
 
@@ -321,7 +321,7 @@ def _secret(parsed, as_json: bool) -> int:
         value = _read_secret_value(parsed.secret_name)
         r = broker.set_secret(parsed.pack_id, parsed.secret_name, value)
         del value
-        text = (f"Stored {r['name']} for {r['pack']} in nable's vault (key {r['key']}).")
+        text = (f"Stored {r['name']} for {r['pack']} in nable's vault (entry {r['vault_entry']}).")
     else:
         r = broker.remove_secret(parsed.pack_id, parsed.secret_name)
         text = (f"Removed {r['name']} for {r['pack']}." if r["removed"]
