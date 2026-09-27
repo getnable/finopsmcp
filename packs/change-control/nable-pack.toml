@@ -2,8 +2,9 @@
 # templates and a skill, which nable validates and nothing in them runs. One
 # org-context adapter carries code (nable_change_control/approvals.py): the
 # broker runs it out of process with no network, no secrets and no data
-# scopes; it reads the CODEOWNERS file and the GitHub exports you point it at,
-# and every fact it returns lands as a proposal a person confirms.
+# scopes; it reads the CODEOWNERS file and the GitHub exports you point it at
+# itself (not through repo.files, so it declares no repo_files), and every
+# fact it returns lands as a proposal a person confirms.
 # Check it with:
 #   nable pack validate packs/change-control
 [pack]

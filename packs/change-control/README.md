@@ -95,8 +95,11 @@ The pack opens no ticket itself: it declares no `act`, so it cannot.
 | `max_autonomy = "L1"` | it recommends; it proposes no action |
 
 The adapter reads the CODEOWNERS file and the JSON exports you point it at,
-and nothing else it is given. The broker runs it out of process in a scrubbed
-environment.
+and nothing else it is given. It reads them itself, from the directory it is
+pointed at (`repo`, or where nable ran), not through the `repo.files` data
+scope, so it declares no `repo.files` and no `repo_files`. The broker runs it
+out of process in a scrubbed environment; like any code pack on a laptop it
+can read what your user can, which is what its signature vouches for.
 
 ## Secrets
 

@@ -202,8 +202,9 @@ call the broker:
    pack's requests unanswered at once, and an output cap; stderr goes, truncated and with
    credential values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
 4. answers `data.read` only for declared `read_data` scopes (`focus.cost`,
-   `org.owners`, `org.environments`, and `repo.files` from the repos an
-   adapter call names, today; the other scopes say they are not available
+   `org.owners`, `org.environments`, and `repo.files` (only the files the
+   manifest's `repo_files` declares) from the repos an adapter call names,
+   today; the other scopes say they are not available
    yet). `ledger.guard` and `recommendations` are not handed to code: nable
    reads them in its own process, for report templates and commitment
    bounds;
@@ -352,7 +353,7 @@ the org signs it or allowlists its digest.
 | `io.github.getnable/change-control` ("Change control (SOC 2)", `packs/change-control`) | Guard rules that ask about deploys and deny teardowns during a change freeze, and always deny admin merges, force pushes to protected branches and branch protection changes; freeze-window templates as proposed org facts; an adapter that proposes approval chains from CODEOWNERS and exported GitHub branch protection and environment settings; CC8.1 change-management evidence and change tickets from the guard ledger, as markdown and JSON. Evidence, not a certification. | `read_data = ["ledger.guard"]`, `write_org = ["proposals"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no network, no secrets |
 | `io.github.getnable/commitments-bounds` ("Commitments with bounds", `packs/commitments-bounds`) | Commitment bounds (coverage target, longest term, payment options, migration blackouts) that cut nable's commitment advice to them; guard rules that ask before every commitment purchase on AWS, Google Cloud and Azure and name the bound it would breach. Never buys anything. | `read_data = ["recommendations"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
 | `io.github.getnable/ai-spend` ("AI spend", `packs/ai-spend`) | A policy that flags AI spend without `feature:` or `customer:` request tags; guard rules that make every GPU or accelerator launch ask (AWS p, g, trn, inf and dl families, GCP a2, a3, a4, g2 and TPU types, Azure N-series); the skill `check-ai-budget` for coding agents; a report of AI spend by vendor, model, feature and customer. | `read_data = ["focus.cost"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
-| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `BACKSTAGE_TOKEN`) and settings (`GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`), `max_autonomy = "L1"` |
+| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]` with `repo_files = ["catalog-info.yaml", "catalog-info.yml"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `BACKSTAGE_TOKEN`) and settings (`GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`), `max_autonomy = "L1"` |
 
 Each pack's README says what it reads, its secrets, settings and network, and
 why.
@@ -362,8 +363,45 @@ why.
 An adapter that declares `read_data = ["repo.files"]` gets, in its context,
 each repo `nable org init` (or `nable pack run`) reads: a name, a label and
 the `repo_path` subject prefix, not where the repo is on this machine (every
-adapter's context does carry `cwd`, the directory nable ran in). It asks
-nable for files by plain name (`{"names": ["catalog-info.yaml"]}`, never a path or a glob);
-nable walks the repos itself, skips `.git`, `node_modules`, vendored and
-build trees and every symlink, and caps the count and size of what it hands
-over.
+adapter's context does carry `cwd`, the directory nable ran in).
+
+The manifest names the files it reads, in `repo_files`, which `repo.files`
+requires (and which needs `repo.files`):
+
+```toml
+[capabilities]
+read_data  = ["repo.files"]
+repo_files = ["catalog-info.yaml", "catalog-info.yml", ".github/CODEOWNERS"]
+```
+
+Each entry is a plain file name, found anywhere in the repo
+(`catalog-info.yaml`), a path from the repo's root (`.github/CODEOWNERS`,
+`docs/CODEOWNERS`), or a simple glob of either with `*` and `?` (a `*`
+never crosses a `/`; `**`, `..`, absolute paths and other glob syntax are
+refused). They are shown at install and in `nable pack audit`, and an update
+that adds one waits for a person to approve it. Under
+`packs.allowed_capabilities`, `repo_files` is a list of globs like the
+other keys.
+
+The adapter asks nable for files by what it declared (`{"names":
+["catalog-info.yaml"]}`): an entry it declared, or a name or path with no
+glob that a declared entry covers. Anything else is refused. nable walks
+the repos itself, skips `.git`, `node_modules`, vendored and build trees and
+every symlink, and caps the count and size of what it hands over.
+
+Some files are never read, declared or not: Terraform state (`*.tfstate`,
+`*.tfstate.*`), private keys and key stores (`id_rsa*`, `id_dsa*`,
+`id_ecdsa*`, `id_ed25519*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
+`*.keystore`), dotenv files (`.env`, `.env.*`, `*.env`), credential files
+(`credentials`, `credentials.*`, `*.credentials`, `.netrc`,
+`.git-credentials`, `.npmrc`, `.pypirc`, `.htpasswd`) and kubeconfigs
+(`kubeconfig`, `*.kubeconfig`). Validation refuses a `repo_files` entry
+that could name one (so `*` is refused), and the broker skips them in its
+walk whatever the manifest says. The list is short on purpose and is no
+promise that nothing else in a repo is sensitive: `repo_files` is what
+limits a pack to the files it needs.
+
+A pack that reads files itself (change-control reads the CODEOWNERS file of
+the directory it is pointed at) does not go through this scope, and the
+laptop sandbox does not stop it (see below): that is part of what signing
+vouches for.

@@ -71,7 +71,6 @@ import logging
 import math
 import os
 import queue
-import re
 import shutil
 import signal
 import stat
@@ -648,10 +647,13 @@ def _data_org_environments(query: dict[str, Any]) -> dict[str, Any]:
 
 
 # repo.files: files a pack names, from the repos the call names (an adapter
-# call from `nable org init` names the repos init reads). Plain file names
-# only, never a path or a glob, so a pack cannot ask for ~/.ssh/id_rsa or
-# ../../anything; the walk never follows a symlink and skips vendored and
-# generated trees. Bounded in count, size and time.
+# call from `nable org init` names the repos init reads). Only what its
+# manifest declares in repo_files (names, repo-relative paths, simple
+# globs), never an absolute path or a .., so a pack cannot ask for
+# ~/.ssh/id_rsa or ../../anything, and never a sensitive file
+# (capabilities.SENSITIVE_FILES: state, keys, .env, credentials), declared or
+# not. The walk never follows a symlink and skips vendored and generated
+# trees. Bounded in count, size and time.
 REPO_FILE_NAMES_MAX = 16
 REPO_FILE_MAX_BYTES = 256 * 1024
 REPO_FILES_MAX = 500
@@ -661,7 +663,6 @@ _REPO_SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", ".terraform"
                              "venv", "__pycache__", "vendor", "dist", "build", ".tox",
                              ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache", ".next",
                              ".idea", "target"})
-_REPO_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _read_repo_file(path: Path) -> bytes | None:
@@ -696,13 +697,22 @@ def _read_repo_file(path: Path) -> bytes | None:
         os.close(fd)
 
 
-def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]:
+def _data_repo_files(query: dict[str, Any], repos: list[Path],
+                     declared: tuple[str, ...] = ()) -> dict[str, Any]:
     names = query.get("names")
     if not isinstance(names, list) or not 1 <= len(names) <= REPO_FILE_NAMES_MAX or not all(
-            isinstance(n, str) and _REPO_FILE_NAME.match(n) and ".." not in n for n in names):
+            isinstance(n, str) and caps_mod.repo_file_syntax(n) is None for n in names):
         raise _RpcError(-32602, f"repo.files takes {{names: [...]}}: 1 to {REPO_FILE_NAMES_MAX} "
-                        "plain file names such as catalog-info.yaml, never a path or a glob")
-    wanted = set(names)
+                        "file names or repo-relative paths such as catalog-info.yaml or "
+                        ".github/CODEOWNERS, as the manifest's repo_files declares them")
+    for n in names:
+        if not caps_mod.repo_file_covered(n, declared):
+            raise _RpcError(-32001, f"{n} is not in the pack's declared repo_files "
+                            f"({', '.join(declared) or 'none'})")
+        if caps_mod.is_sensitive_file(n):
+            raise _RpcError(-32001, f"{n} is a sensitive file, which is never read, whatever "
+                            "repo_files declares")
+    wanted = list(dict.fromkeys(names))
     files: list[dict[str, Any]] = []
     total = seen = 0
     truncated = False
@@ -716,9 +726,11 @@ def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]
                 truncated = True
                 break
             for fn in sorted(filenames):
-                if fn not in wanted:
-                    continue
                 path = Path(dirpath) / fn
+                rel = path.relative_to(root).as_posix()
+                if caps_mod.is_sensitive_file(fn) or not any(
+                        caps_mod.repo_file_matches(w, rel) for w in wanted):
+                    continue
                 raw = _read_repo_file(path)
                 if raw is None:
                     continue
@@ -726,8 +738,7 @@ def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]
                     truncated = True
                     break
                 total += len(raw)
-                files.append({"repo": i, "path": path.relative_to(root).as_posix(),
-                              "text": raw.decode("utf-8", "replace")})
+                files.append({"repo": i, "path": rel, "text": raw.decode("utf-8", "replace")})
             if truncated:
                 break
     return {"files": files, "truncated": truncated}
@@ -752,7 +763,8 @@ def read_data(prep: Prepared, params: dict[str, Any], repos: list[Path] | None =
                         f"packs yet (available: {', '.join(sorted(DATA_SCOPES))})")
     try:
         if scope == "repo.files":
-            return _data_repo_files(query, list(repos or ()))
+            return _data_repo_files(query, list(repos or ()),
+                                    tuple(prep.capabilities.get("repo_files") or ()))
         return fn(query)
     except _RpcError:
         raise

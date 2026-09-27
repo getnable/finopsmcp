@@ -50,6 +50,15 @@ All notable changes to finops-mcp (nable).
   and `GITHUB_ORG`, `GITHUB_API_URL` and `BACKSTAGE_URL` as settings (set
   `GITHUB_ORG` with `nable pack setting set`; a value stored earlier with
   `nable pack secret set` keeps working).
+- **`repo.files` reads only what a pack declares.** A pack that declares the
+  `repo.files` data scope now names the files it reads in
+  `[capabilities].repo_files` (plain names, repo-relative paths such as
+  `.github/CODEOWNERS`, or simple `*` and `?` globs), shown at install and in
+  audit and diffed on update; the broker refuses a request for anything
+  else. Terraform state, private keys, `.env` files, credential files and
+  kubeconfigs are never read, declared or not, and a `repo_files` entry
+  that could name one is refused at validation. `org-bootstrap` declares
+  `catalog-info.yaml` and `catalog-info.yml`.
 
 ## 0.10.0
 

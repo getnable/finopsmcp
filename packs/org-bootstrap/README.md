@@ -92,7 +92,9 @@ skipped. Entities outside Backstage's default namespace keep it
 
 ## What it reads
 
-- `repo.files` (declared in `read_data`): nable itself finds the files named
+- `repo.files` (declared in `read_data`, with `repo_files = ["catalog-info.yaml",
+  "catalog-info.yml"]`, so nable refuses a request for any other file):
+  nable itself finds the files named
   `catalog-info.yaml` or `catalog-info.yml` in the repos `nable org init`
   reads, skipping `.git`, `node_modules`, vendored and build directories and
   every symlink, and hands their text to the adapter. The pack is not told

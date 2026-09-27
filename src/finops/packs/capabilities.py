@@ -27,6 +27,13 @@ capability is one nobody can review, so it is one nobody can approve.
                   put a setting's value in what it proposes. A setting name
                   that looks like a credential (*_TOKEN, *_KEY, *PASSWORD*,
                   *SECRET*, ...) is refused, and so is a name declared as both
+    repo_files    the files a pack reads through the repo.files data scope:
+                  plain names (found anywhere in the repo), relative paths
+                  (.github/CODEOWNERS), or simple globs of either with * and
+                  ?. Required with repo.files and only with it. A name that
+                  is sensitive (state files, private keys, .env, credentials
+                  files: SENSITIVE_FILES) is refused even when declared, and
+                  the broker never hands one over
     network       host[:port] egress allowlist; empty means none
     write_org     "proposals" only: a pack may propose org facts, never confirm
     act           "pr" and "ticket"; "execute" is first-party only
@@ -137,8 +144,8 @@ _METADATA_HOSTS = frozenset({
     "metadata", "instance-data", "instance-data.ec2.internal",
 })
 
-LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "settings", "network",
-                              "write_org", "act", "pricing")
+LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "settings", "repo_files",
+                              "network", "write_org", "act", "pricing")
 SCALAR_KEYS: tuple[str, ...] = ("guard", "max_autonomy")
 KEYS: tuple[str, ...] = LIST_KEYS + SCALAR_KEYS
 
@@ -227,6 +234,82 @@ def check_secret(value: str, *, first_party: bool = False) -> str | None:
     return None
 
 
+# repo_files: what no pack reads from a repository, declared or not. Short on
+# purpose: file names that hold credentials or state whatever the repo is
+# (Terraform state, private keys, dotenv files, credential and token files).
+# Matched, lowercased, against a file's name; a declared glob that could
+# match one of SENSITIVE_EXAMPLES is refused too, so `*` is.
+SENSITIVE_FILES: tuple[str, ...] = (
+    "*.tfstate", "*.tfstate.*", ".env", ".env.*", "*.env", "id_rsa*", "id_dsa*", "id_ecdsa*",
+    "id_ed25519*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "credentials",
+    "credentials.*", "*.credentials", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
+    "kubeconfig", "*.kubeconfig", ".htpasswd")
+SENSITIVE_EXAMPLES: tuple[str, ...] = (
+    "terraform.tfstate", "terraform.tfstate.backup", ".env", ".env.local", "prod.env", "id_rsa",
+    "id_ed25519", "server.pem", "server.key", "cert.p12", "credentials", "credentials.json",
+    ".netrc", ".git-credentials", ".npmrc", ".pypirc", "kubeconfig", ".htpasswd")
+MAX_REPO_FILES = 32
+_REPO_PART = re.compile(r"^[A-Za-z0-9._*?-]{1,128}$")
+
+
+def is_sensitive_file(name: str) -> bool:
+    """Whether a file name (the last part of a path) is one no pack reads."""
+    base = name.rsplit("/", 1)[-1].lower()
+    return any(fnmatch.fnmatchcase(base, pat) for pat in SENSITIVE_FILES)
+
+
+def repo_file_syntax(value: str) -> str | None:
+    """Why `value` is not a repo_files pattern, or None: a relative POSIX
+    path of plain parts, each letters, digits, `.`, `_`, `-` and the globs
+    `*` and `?`; no `..`, no `**`."""
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return "must be a file name, a relative path or a simple glob, 1 to 256 characters"
+    parts = value.split("/")
+    if value.startswith("/") or any(p in ("", ".", "..") for p in parts) \
+            or not all(_REPO_PART.match(p) for p in parts):
+        return ("must be a file name or a relative path inside the repo (catalog-info.yaml, "
+                ".github/CODEOWNERS), with only * and ? as globs and no .. or empty parts")
+    if any("**" in p for p in parts):
+        return "** is not a glob here: name the directory, or use a plain name for anywhere"
+    return None
+
+
+def check_repo_file(value: str) -> str | None:
+    """Why a repo_files entry is refused, or None: repo_file_syntax, and
+    never a name or a glob that could name a sensitive file."""
+    why = repo_file_syntax(value)
+    if why:
+        return why
+    last = value.split("/")[-1]
+    if is_sensitive_file(last) or any(fnmatch.fnmatchcase(x, last)
+                                      for x in SENSITIVE_EXAMPLES):
+        return (f"{value!r} could name a sensitive file (Terraform state, a private key, "
+                ".env, a credentials file), which no pack reads")
+    return None
+
+
+def repo_file_matches(pattern: str, path: str) -> bool:
+    """Whether a repo-relative POSIX `path` matches a repo_files pattern: a
+    pattern without a / matches the file's name anywhere; one with a /
+    matches the path part by part (a * never crosses a /)."""
+    if "/" not in pattern:
+        return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pattern)
+    pp, parts = pattern.split("/"), path.split("/")
+    return len(pp) == len(parts) and all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, pp))
+
+
+def repo_file_covered(request: str, declared: tuple[str, ...] | list[str]) -> bool:
+    """Whether a pack's request for `request` stays inside what it declared:
+    the request is a declared entry, or a name or path with no glob that a
+    declared entry matches."""
+    if request in declared:
+        return True
+    if any(c in request for c in "*?"):
+        return False
+    return any(("/" not in d or "/" in request) and repo_file_matches(d, request)
+               for d in declared)
+
+
 def check_setting(value: str, *, first_party: bool = False) -> str | None:
     """Why a settings name is refused, or None. The same names as a secret,
     minus any that reads as a credential and every cloud credential name."""
@@ -289,6 +372,17 @@ def validate(raw: Any, *, first_party: bool) -> tuple[dict[str, Any], list[Probl
                                     f"{a} is above {ceiling}, the ceiling for {who}"))
         else:
             out["max_autonomy"] = a
+    if "repo.files" in out.get("read_data", ()) and not out.get("repo_files"):
+        problems.append(Problem("capabilities.repo_files",
+                                "read_data lists repo.files, so repo_files must list the files it "
+                                "reads (names, relative paths or simple globs, e.g. "
+                                '["catalog-info.yaml", ".github/CODEOWNERS"])'))
+    elif out.get("repo_files") and "repo.files" not in out.get("read_data", ()):
+        problems.append(Problem("capabilities.repo_files",
+                                "lists files, but read_data does not list repo.files"))
+    if len(out.get("repo_files", ())) > MAX_REPO_FILES:
+        problems.append(Problem("capabilities.repo_files",
+                                f"lists more than {MAX_REPO_FILES} entries"))
     both = set(out.get("secrets", ())) & set(out.get("settings", ()))
     if both:
         problems.append(Problem("capabilities.settings",
@@ -314,6 +408,8 @@ def _check_value(key: str, v: str, *, first_party: bool) -> str | None:
         return check_setting(v, first_party=first_party)
     if key == "network":
         return check_network(v)
+    if key == "repo_files":
+        return check_repo_file(v)
     if key == "write_org":
         return None if v in WRITE_ORG else "the only value is \"proposals\""
     if key == "pricing":
@@ -345,6 +441,9 @@ def describe(key: str, value: str) -> str:
                 "pack proposes")
     if key == "read_cloud":
         return f"{value}: may call this read-only cloud API"
+    if key == "repo_files":
+        return (f"{value}: may read files matching this from the repositories it is run for "
+                "(nable reads them and hands over the text)")
     if key == "max_autonomy":
         return f"{value}: the most autonomy any action it proposes can have"
     return value

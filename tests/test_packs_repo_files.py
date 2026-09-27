@@ -13,10 +13,13 @@ from finops.org.model import OrgModel
 from finops.packs import broker, capabilities
 from finops.packs.broker import RepoRef, _RpcError
 
+CATALOG = ("catalog-info.yaml", "catalog-info.yml")
 
-def _prep(scopes=("repo.files",)) -> broker.Prepared:
+
+def _prep(scopes=("repo.files",), files=CATALOG) -> broker.Prepared:
     return broker.Prepared("io.github.example/p", "io.github.example", "p", "1.0.0", "adapters",
-                           "a", "m:f", Path("/nonexistent"), {"read_data": tuple(scopes)},
+                           "a", "m:f", Path("/nonexistent"),
+                           {"read_data": tuple(scopes), "repo_files": tuple(files)},
                            broker.signing.UNSIGNED, True, "community")
 
 
@@ -43,8 +46,92 @@ def repo(tmp_path) -> Path:
 
 def test_the_scope_is_in_the_vocabulary():
     assert "repo.files" in capabilities.READ_DATA_SCOPES
-    _, problems = capabilities.validate({"read_data": ["repo.files"]}, first_party=False)
+    _, problems = capabilities.validate({"read_data": ["repo.files"],
+                                         "repo_files": ["catalog-info.yaml"]}, first_party=False)
     assert problems == []
+
+
+def test_the_scope_needs_the_files_it_reads_declared():
+    # review: repo.files read any plainly named file, terraform.tfstate or
+    # id_rsa included. A pack now names the files (or simple globs) it reads.
+    _, problems = capabilities.validate({"read_data": ["repo.files"]}, first_party=True)
+    assert [p.field for p in problems] == ["capabilities.repo_files"]
+    _, problems = capabilities.validate({"repo_files": ["CODEOWNERS"]}, first_party=True)
+    assert [p.field for p in problems] == ["capabilities.repo_files"]
+    got, problems = capabilities.validate(
+        {"read_data": ["repo.files"],
+         "repo_files": ["catalog-info.yaml", ".github/CODEOWNERS", "docs/*.md", "*/CODEOWNERS"]},
+        first_party=False)
+    assert problems == [] and got["repo_files"] == (
+        "*/CODEOWNERS", ".github/CODEOWNERS", "catalog-info.yaml", "docs/*.md")
+    for bad in ("../x", "/etc/passwd", "a//b", "**/x", "a/[x]", "a/./b", "", "a\\b", "~/.ssh"):
+        _, problems = capabilities.validate({"read_data": ["repo.files"], "repo_files": [bad]},
+                                            first_party=True)
+        assert problems, bad
+
+
+@pytest.mark.parametrize("name", [
+    "terraform.tfstate", "prod.tfstate.backup", "id_rsa", "id_ed25519", ".env", ".env.local",
+    "server.pem", "tls.key", "keystore.p12", "credentials", "credentials.json", ".netrc",
+    ".git-credentials", ".npmrc", ".pypirc", "kubeconfig", "*", "*.tfstate", "secrets/*",
+    "infra/terraform.tfstate", ".aws/credentials", "id_*"])
+def test_a_sensitive_file_is_refused_even_when_declared(name):
+    _, problems = capabilities.validate({"read_data": ["repo.files"], "repo_files": [name]},
+                                        first_party=True)
+    assert problems and "sensitive" in problems[0].reason, name
+
+
+def test_repo_files_are_shown_diffed_and_need_approval_again():
+    assert "catalog-info.yaml" in capabilities.describe("repo_files", "catalog-info.yaml")
+    d = capabilities.diff({"read_data": ("repo.files",), "repo_files": ("catalog-info.yaml",)},
+                          {"read_data": ("repo.files",),
+                           "repo_files": ("catalog-info.yaml", "CODEOWNERS")})
+    assert d["added"] == {"repo_files": ["CODEOWNERS"]}
+
+
+def test_the_broker_refuses_a_file_the_pack_did_not_declare(repo):
+    (repo / "terraform.tfstate").write_text('{"secret": "state"}')
+    (repo / ".github").mkdir()
+    (repo / ".github" / "CODEOWNERS").write_text("* @acme/platform")
+    (repo / "CODEOWNERS").write_text("* @acme/root")
+    for names in (["terraform.tfstate"], ["catalog-info.yaml", "id_rsa"], ["CODEOWNERS"],
+                  ["*.yaml"], ["svc/a/other.yaml"]):
+        with pytest.raises(_RpcError) as ei:
+            broker.read_data(_prep(), {"scope": "repo.files", "query": {"names": names}},
+                             [repo])
+        assert ei.value.code == -32001 and "repo_files" in ei.value.message, names
+    # A declared name covers that name at any one path.
+    got = broker.read_data(_prep(), {"scope": "repo.files",
+                                     "query": {"names": ["svc/a/catalog-info.yaml"]}}, [repo])
+    assert [f["path"] for f in got["files"]] == ["svc/a/catalog-info.yaml"]
+    # A path pattern reads that path only; a plain name, that name anywhere.
+    got = broker.read_data(_prep(files=(".github/CODEOWNERS",)), {
+        "scope": "repo.files", "query": {"names": [".github/CODEOWNERS"]}}, [repo])
+    assert [f["path"] for f in got["files"]] == [".github/CODEOWNERS"]
+    got = broker.read_data(_prep(files=("CODEOWNERS",)), {
+        "scope": "repo.files", "query": {"names": ["CODEOWNERS"]}}, [repo])
+    assert [f["path"] for f in got["files"]] == ["CODEOWNERS", ".github/CODEOWNERS"]
+    # A declared glob may be asked for as declared, or by a name it covers.
+    got = broker.read_data(_prep(files=("catalog-info.*",)), {
+        "scope": "repo.files", "query": {"names": ["catalog-info.yml"]}}, [repo])
+    assert [f["path"] for f in got["files"]] == ["svc/b/catalog-info.yml"]
+    got = broker.read_data(_prep(files=("catalog-info.*",)), {
+        "scope": "repo.files", "query": {"names": ["catalog-info.*"]}}, [repo])
+    assert "svc/b/catalog-info.yml" in [f["path"] for f in got["files"]]
+
+
+def test_the_broker_never_hands_over_a_sensitive_file_even_if_declared(repo):
+    # An index or manifest that got past validation still cannot read one.
+    (repo / "svc" / "a" / "terraform.tfstate").write_text("state")
+    (repo / "svc" / "a" / ".env").write_text("TOKEN=x")
+    with pytest.raises(_RpcError):
+        broker.read_data(_prep(files=("terraform.tfstate",)), {
+            "scope": "repo.files", "query": {"names": ["terraform.tfstate"]}}, [repo])
+    got = broker.read_data(_prep(files=("*",)), {
+        "scope": "repo.files", "query": {"names": ["*"]}}, [repo])
+    paths = [f["path"] for f in got["files"]]
+    assert "svc/a/catalog-info.yaml" in paths
+    assert not any(p.endswith(("terraform.tfstate", ".env")) for p in paths)
 
 
 def test_repo_files_returns_named_files_and_nothing_else(repo):
@@ -57,7 +144,7 @@ def test_repo_files_returns_named_files_and_nothing_else(repo):
 
 
 def test_repo_files_refuses_paths_globs_and_undeclared_packs(repo):
-    for names in (["../etc/passwd"], ["svc/a/catalog-info.yaml"], ["*.yaml"], [".ssh"], [],
+    for names in (["../etc/passwd"], ["/etc/passwd"], ["a//b"], ["**/x"], [],
                   ["a"] * 17, "catalog-info.yaml", [1]):
         with pytest.raises(_RpcError) as ei:
             broker.read_data(_prep(), {"scope": "repo.files", "query": {"names": names}},

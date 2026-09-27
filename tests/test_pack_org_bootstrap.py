@@ -197,6 +197,7 @@ def test_the_pack_validates_as_nable_pack_validate_does(capsys):
     assert warning.startswith(f"install will refuse it: {PID} says it is first-party")
     assert r["capabilities"] == {
         "read_data": ["repo.files"],
+        "repo_files": ["catalog-info.yaml", "catalog-info.yml"],
         "secrets": CREDENTIALS, "settings": SETTINGS,
         "network": ["api.github.com"], "write_org": ["proposals"], "max_autonomy": "L1"}
     assert not any(p.suffix == ".pyc" or p.name == "__pycache__" for p in PACK.rglob("*"))
