@@ -16,6 +16,7 @@ What has to stay true:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -42,6 +43,14 @@ def _env(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("FINOPS_ACCOUNTS_FILE", str(tmp_path / "none.yaml"))
     monkeypatch.setattr(T.time, "sleep", lambda *_: None)
+    # `nable org trust` writes the trusted-repo list under HOME: never the
+    # developer's real one.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("FINOPS_PROFILE", raising=False)
+    monkeypatch.delenv("FINOPS_DATA_DIR", raising=False)
+    db = sys.modules.get("finops.storage.db")
+    if db is not None:                      # it caches the data dir it first saw
+        monkeypatch.setattr(db, "_DATA_DIR", None)
 
 
 def _capture(monkeypatch, reply, refuse=None):
