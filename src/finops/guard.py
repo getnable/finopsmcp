@@ -3275,7 +3275,7 @@ def _unchecked_verdict(tool_name: str, why: str) -> dict[str, Any]:
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                   harness: str = "claude-code", session_id: str | None = None,
-                  record: bool = True) -> dict[str, Any] | None:
+                  record: bool = True, cwd: str | None = None) -> dict[str, Any] | None:
     """Evaluate an MCP tool call against the policy gate. PUBLIC ENTRY POINT.
 
     `tool_name` is the harness's full name (`mcp__<server>__<tool>` in Claude
@@ -3295,7 +3295,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     returns None and is not recorded: the guard never asks about a tool it
     does not understand. One with more command lines than the guard judges,
     or one nested too deep, is asked about instead of passed. Recording and
-    fail-open as gate_command.
+    fail-open as gate_command. `cwd` is where the agent works: a one-time
+    approval (guard_approvals) is bound to it, as a shell command's is.
     """
     summary = tool_name
     try:
@@ -3363,7 +3364,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         answer, recorded = _against_budget(worst, stop)
         if record:
             answer, recorded = _out_of_band(answer, recorded, kind="mcp",
-                                            text=(tool_name, arguments), cwd=None,
+                                            text=(tool_name, arguments),
+                                            cwd=cwd if isinstance(cwd, str) else None,
                                             harness=harness, session_id=session_id,
                                             tool=tool_name)
             if stop is not None:

@@ -342,6 +342,23 @@ def test_a_codex_mcp_call_gets_an_id_too(work):
     assert _records()[-1]["approved_out_of_band"]["id"] == aid
 
 
+def test_an_mcp_approval_is_bound_to_its_directory_too(work, tmp_path):
+    """An MCP shell server runs its command where the agent works: approving
+    `terraform destroy` through it in one project must not let the same call
+    through in another. The MCP door recorded no directory, so it did."""
+    args = {"command": DESTROY}
+    other = tmp_path / "other"
+    other.mkdir()
+
+    def call(cwd):
+        return _hook({"hook_event_name": "PreToolUse", "turn_id": "t1", "session_id": "s1",
+                      "tool_name": "mcp__shell__run", "tool_input": args, "cwd": str(cwd)})
+    aid = approval_id(codex_reason(call(work)))
+    assert cli_approve(aid, "--as", "maria") == 0
+    assert approval_id(codex_reason(call(other))) != aid
+    assert call(work) is None                              # where it was approved, once
+
+
 # ── never for a deny that is policy ───────────────────────────────────────────
 
 POLICY_NOTE = "cannot let it through"
