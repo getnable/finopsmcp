@@ -133,6 +133,19 @@ nable org export --format json
 
 What a person confirms changes what nable does: guard asks name the owner ("Owned by payments (#payments-oncall)"), the guard takes the team for team budgets and per-team thresholds from the repo you work in, tickets carry the owner's team and channel, findings carry an owner, and attribution and prod or non-prod detection use your confirmed facts before any guess. Agents, adapters and the MCP tools can only propose; confirming takes a person at the CLI or a merged pull request. A guess may make nable more careful, never less. A `nable.org/` that arrives inside a cloned repo is read on top of your own model, and until you `nable org trust` it, its owners are shown as likely and its thresholds may only lower yours.
 
+## It stops asking the same thing twice
+
+The guard records how each ask was answered (Claude Code, Cursor and Copilot report when an asked command ran). When people keep approving the same kind of change in the same scope, at least 5 times over a week with nothing declined or reverted, nable proposes a threshold for that scope and shows the evidence: "approved 6 times since Sep 19, max $1,121/mo, none declined or reverted". A person confirms it with `nable org confirm`, and from then on that change goes through without a prompt. Repeated declines propose asking sooner. One-way doors always ask.
+
+```bash
+nable learn infer --dry-run    # what nable would propose, and why
+nable guard report             # asks approved, declined and unknown, per action and scope
+nable org set freeze --scope environment:prod --start 2026-11-26T00:00-05:00 --end 2026-12-01T00:00-05:00 --reason "Black Friday"
+nable guard approve <id>       # let one blocked command through, once, from your own terminal
+```
+
+Change freezes and approval chains are org facts too: during a freeze every priced change and one-way door in its scope asks (or is denied, if you confirmed the freeze in deny mode), and remediation pull requests and tickets go to the approvers you named. Agents that cannot pause to ask (Codex CLI, Gemini CLI, Cline, the Copilot cloud agent) get a deny with an approval id; a person runs `nable guard approve <id>` and the identical command runs once within 15 minutes.
+
 ## Packs
 
 Packs extend nable with an org's own rules: policies, guard rules that can only tighten, remediation playbooks, price books, report templates, coding-agent skills, and (sandboxed) connectors, org adapters and ticket or Slack sinks. Each declares what it may read, which secrets it gets and which hosts it may reach in `nable-pack.toml`; you see that at install, and an update that asks for more waits for your approval again.
