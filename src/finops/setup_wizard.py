@@ -3408,6 +3408,10 @@ def main(args: list[str] | None = None) -> None:
         """argparse with two DX fixes: grouped --help instead of a 45-command
         wall, and a did-you-mean error instead of dumping every choice."""
 
+        # Internal commands, registered and runnable but left out of --help:
+        # `pricing` is the founder's margin table, not something a user needs.
+        _HIDDEN = frozenset({"pricing"})
+
         # Ordered groups. A command registered but not listed here auto-renders
         # under "other", so new subcommands can never silently vanish from help.
         _GROUPS = [
@@ -3457,7 +3461,7 @@ def main(args: list[str] | None = None) -> None:
                     lines.append(f"  {n:<16} {helps.get(n, '')}")
                     seen.add(n)
                 lines.append("")
-            leftovers = [n for n in registered if n not in seen]
+            leftovers = [n for n in registered if n not in seen and n not in self._HIDDEN]
             if leftovers:
                 lines.append("other")
                 for n in leftovers:
@@ -3532,6 +3536,8 @@ def main(args: list[str] | None = None) -> None:
     _add_budget_parser(sub)
     from .org.cli import add_parser as _add_org_parser
     _add_org_parser(sub)
+    from .cli_pricing import add_parser as _add_pricing_parser
+    _add_pricing_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3728,7 +3734,7 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why", "budget", "org"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget", "org", "pricing"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -3988,6 +3994,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "org":
         from .org.cli import run as _org_run
         raise SystemExit(_org_run(parsed))
+    elif parsed.cmd == "pricing":
+        from .cli_pricing import run as _pricing_run
+        raise SystemExit(_pricing_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
