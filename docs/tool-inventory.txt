@@ -87,6 +87,8 @@ get_llm_unit_economics_full
 get_marketplace_costs
 get_nable_roi
 get_org_cost_summary
+get_org_coverage
+get_org_model
 get_ou_cost_breakdown
 get_rds_rightsizing_recommendations
 get_resource_cost_breakdown_aws
@@ -120,6 +122,7 @@ list_connected_providers
 list_idle_resources
 list_kubernetes_contexts
 list_org_accounts
+list_org_questions
 list_profiles
 list_report_subscriptions
 list_savings_recommendations
@@ -128,6 +131,7 @@ list_views
 mark_recommendation_acted_on
 open_rightsizing_pr
 open_terraform_tag_pr
+propose_org_fact
 publish_cost_report_to_notion
 push_weekly_insight
 recommend_bedrock_model_routing

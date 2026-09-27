@@ -3414,7 +3414,8 @@ def main(args: list[str] | None = None) -> None:
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
             ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs", "budget"]),
-            ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
+            ("start here", ["welcome", "connect", "org", "setup", "doctor", "tools", "serve",
+                            "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
                                      "modal", "together", "replicate", "cohere", "mistral"]),
@@ -3529,6 +3530,8 @@ def main(args: list[str] | None = None) -> None:
     _add_why_parser(sub)
     from .budget.cli import add_parser as _add_budget_parser
     _add_budget_parser(sub)
+    from .org.cli import add_parser as _add_org_parser
+    _add_org_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3725,7 +3728,7 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why", "budget"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget", "org"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -3982,6 +3985,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "budget":
         from .budget.cli import run as _budget_run
         raise SystemExit(_budget_run(parsed))
+    elif parsed.cmd == "org":
+        from .org.cli import run as _org_run
+        raise SystemExit(_org_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
