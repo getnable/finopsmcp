@@ -2,6 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.218
+
+- **The Claude Code plugin turns the guard on.** `/plugin install nable@nable`
+  now installs the guard hook with the MCP server, no second step. When
+  `nable guard install` has already put the hook in your settings, the
+  plugin's copy stands aside, so each command is judged and recorded once.
+  `nable guard off` / `on` (or `FINOPS_GUARD=off`) pauses every nable hook,
+  and an agent that runs `nable guard off` itself is asked about first.
+  Adds `/nable:guard` and a cost skill that tells Claude when to use nable
+  and how to answer a guard ask.
+- **Cursor spend stays current in the guard.** When the guard's copy of
+  Cursor Admin API usage is over an hour old, it refreshes it in the
+  background and answers from the copy it has, saying how old it is. The
+  hook never waits on the network (`FINOPS_GUARD_BACKGROUND_REFRESH=0` turns
+  the refresh off). `FINOPS_GUARD_AUTO_REFRESH_BUDGET=1` does the same for
+  the cloud-budget figure, from local cost history, with no billed calls.
+- The README and package descriptions lead with the guard, with real output
+  for an 8-GPU launch and a `terraform destroy`. New `docs/guard-demo.tape`
+  and a launch video script in `docs/LAUNCH-DEMO.md`.
+- Fixed: ledger redaction kept secrets but also hid ARNs and KMS aliases;
+  `nable why` now looks up Spot Fleet and Spot request launches on Spot
+  rows; Gemini uninstall no longer removes a `BeforeTool` list nable did not
+  create; Cursor on Windows gets a hook line PowerShell can run.
+
 ## 0.8.217
 
 Found by running 30 personas through the real CLI, MCP server and guard

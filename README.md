@@ -29,6 +29,15 @@ $ uvx nable guard check --command "terraform destroy -auto-approve"
   ask  nable guard: This would destroy infrastructure (`terraform destroy -auto-approve`). It cannot be undone; confirm to proceed.
 ```
 
+Using the Claude Code plugin? Installing it turns the guard on, no second step:
+
+```text
+/plugin marketplace add getnable/finopsmcp
+/plugin install nable@nable
+```
+
+`nable guard off` (or `FINOPS_GUARD=off`) pauses every nable hook and `nable guard on` resumes it; an agent that tries `nable guard off` itself is asked about first.
+
 In Claude Code, Cursor and Copilot CLI, `ask` stops the agent until you confirm; Codex CLI, Gemini CLI, Cline and Copilot's cloud agent refuse the command and show the reason (per-agent table under "Guard hook" below). A launch under the threshold stays silent: a `t3.micro` is ~$8/mo, under the default $500/mo (`FINOPS_POLICY_MAX_AUTO_USD`). Restart the agent after installing so it picks up the hook.
 
 What needs a cloud account: pricing and asking do not. The budget stop, `nable guard reconcile` (CloudTrail) and the scan below read your own account, read-only.
@@ -92,6 +101,8 @@ Infracost prices an infrastructure change in the pull request; nable's guard pri
 ## Agent guard
 
 `nable guard install` adds a hook to Claude Code (and `--all` to every supported agent it finds: Cursor, Codex CLI, GitHub Copilot, Gemini CLI, Cline) that checks each infrastructure command, or MCP call in Claude Code, Cursor and Codex, before it runs: a one-way door (destroy, terminate, a commitment) asks you first, and a launch is priced at list price so a ~$128k/mo `run-instances` (8x p4d.24xlarge) asks instead of passing. It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
+
+**AI budgets that stay current.** When a Claude Code, Codex or Cursor spend cap is set, the guard weighs each call against it. Cursor usage comes from its Admin API (`CURSOR_ADMIN_API_KEY`): the hook never waits on the network, and when its copy is over an hour old it refreshes it in the background and says so (`FINOPS_GUARD_BACKGROUND_REFRESH=0` turns that off). `FINOPS_GUARD_AUTO_REFRESH_BUDGET=1` does the same for the cloud-budget figure, recomputing it from local cost history with no billed calls.
 
 **Stops tied to the budget.** A priced change is also checked against the cloud budgets you set (the `set_budget` tool or a `budget.yml`): when month-to-date spend plus the change's cost for the rest of the month would take a budget over its limit, the guard asks, naming the budget, the spend so far, the change's monthly figure and the projected overage. `on_budget_breach: deny` in `nable.policy.yaml` (in nable's data directory, `~/.finops` by default, or at `FINOPS_POLICY_FILE`) makes that a hard stop; `FINOPS_GUARD_STOP_ON_BUDGET=1` or `=0` overrides it for one session or CI run. Total, provider and service budgets apply from the command itself; team and account budgets apply when `FINOPS_GUARD_TEAM` or `FINOPS_GUARD_ACCOUNT` names them where the agent runs. The hook reads a small spend summary rather than the database: every budget check writes it, `nable budget refresh` is the one to schedule, and a figure older than 48 hours (`FINOPS_GUARD_BUDGET_MAX_AGE_HOURS`) or from last month is not used, which the verdict on a priced change says. `nable guard doctor` lists the budgets the guard enforces, the ones it cannot place a change in, and the age of its figure.
 
