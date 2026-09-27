@@ -101,8 +101,8 @@ guess never stops a command outright; when the guard cannot tell whether a
 freeze is in force, the rule asks. The freeze a rule applied under is kept
 in the ledger with the verdict.
 
-A rule that matches at the verdict the guard already gave (both ask) adds
-its reason to that ask without changing the decision, so a pack can say
+A rule that matches at the verdict the guard already gave (an ask or a
+deny) adds its reason to it without changing the decision, so a pack can say
 which of its bounds a call would breach.
 
 **Price books** need `pricing = ["override"]` in `[capabilities]`, which is
@@ -136,9 +136,11 @@ commitment_bounds:
         regions: [eu-west-1]
 ```
 
-nable applies them as a post-filter to every commitment purchase it
-recommends (the Compute and Database Savings Plan advice and the "if you
-bought more" projection). A purchase past the coverage target is cut to the
+nable applies them as a post-filter to the commitment purchases it
+recommends itself (the Compute and Database Savings Plan advice and the "if
+you bought more" projection). Google Cloud Recommender and Azure Advisor
+purchase advice is shown as the provider gave it and is not bounded yet; the
+guard still asks before any purchase on those clouds. A purchase past the coverage target is cut to the
 amount that reaches it; one with a longer term, another payment option, or a
 term that would run into a blackout over its scope is dropped, with the
 bound named. Bounds only restrict: several packs' bounds combine to the

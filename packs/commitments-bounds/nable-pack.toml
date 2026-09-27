@@ -1,5 +1,5 @@
 # Commitments with bounds. A data pack: nable validates everything here and
-# nothing here runs. Its commitment bounds cut every commitment purchase nable
+# nothing here runs. Its commitment bounds cut the commitment purchases nable
 # recommends down to them (never up), and its guard rules ask before any
 # purchase an agent tries, naming the bound it would breach. nable never buys
 # a commitment. Check it with:
@@ -8,7 +8,7 @@
 name        = "commitments-bounds"
 namespace   = "io.github.getnable"
 version     = "1.0.0"
-description = "Commitments with bounds: a coverage target, a longest term, the payment options allowed and migration blackouts, applied to every commitment recommendation; purchases always ask; nable never buys"
+description = "Commitments with bounds: a coverage target, a longest term, the payment options allowed and migration blackouts, applied to nable's commitment advice; purchases always ask; nable never buys"
 license     = "Apache-2.0"
 nable_api   = ">=1.0,<2.0"
 maintainers = ["@getnable"]

@@ -3,9 +3,10 @@
 
 A policy pack may declare `commitment_bounds` (finops.packs.content): a
 coverage target, a longest term, the payment options allowed, and migration
-blackouts. This module is the post-filter those declarations name. Every
-commitment purchase nable recommends passes through it before anyone sees
-it, and it only ever restricts:
+blackouts. This module is the post-filter those declarations name. The
+commitment purchases nable recommends itself (the Compute Savings Plan
+advice and its projection, the Database Savings Plan advice) pass through it
+before anyone sees them, and it only ever restricts:
 
   coverage target   a recommendation that would take coverage past the target
                     is cut down to the amount that reaches it; one that starts
@@ -23,6 +24,10 @@ target, the shortest term, the payment options every pack allows, every
 blackout. When an installed pack that provides policies cannot be loaded,
 its bounds are unknown, so purchase advice is withheld rather than given
 without them.
+
+Not bounded yet: purchase advice a provider computes and nable passes on as
+given (Google Cloud Recommender committed-use findings, Azure Advisor
+reservation recommendations).
 
 nable never buys a commitment. The bounds shape advice, and the guard asks
 before any purchase an agent tries (the pack's guard rules name the bound).

@@ -16,13 +16,16 @@ the org's bounds, and says which bound when it does not.
 | `payment_options` | no-upfront | dropped |
 | `blackouts` | none | dropped when its term would run into a migration blackout over its scope |
 
-nable applies these as a post-filter to every commitment purchase it
-recommends: the Compute Savings Plan advice and its "if you bought more"
-projection in `get_commitment_analysis`, and the Database Savings Plan
-advice in `recommend_database_savings_plans`. A cut recommendation keeps its
-shape with smaller figures and a `bounds` entry saying what was cut and by
-which bound; a dropped one is listed under `cut_by_bounds` with why. Warnings
-about unused commitments pass through untouched.
+nable applies these as a post-filter to the commitment purchases it
+recommends itself: the Compute Savings Plan advice and its "if you bought
+more" projection in `get_commitment_analysis`, and the Database Savings Plan
+advice in `recommend_database_savings_plans`. Google Cloud Recommender and
+Azure Advisor purchase advice is shown as the provider gave it and is not
+bounded yet; the guard rules below still ask before any such purchase. A cut
+recommendation keeps its shape with smaller figures and a `bounds` entry
+saying what was cut and by which bound; a dropped one is listed under
+`cut_by_bounds` with why. Warnings about unused commitments pass through
+untouched.
 
 Bounds only restrict. Bounds from several packs combine to the strictest. A
 figure nable does not have never loosens one: a scope nable cannot pin down

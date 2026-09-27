@@ -1,5 +1,6 @@
-# The most a commitment recommendation may be. nable applies these to every
-# commitment purchase it recommends (finops.recommendations.commitment_bounds):
+# The most a commitment recommendation may be. nable applies these to the
+# commitment purchases it recommends itself, the Compute and Database Savings
+# Plan advice (finops.recommendations.commitment_bounds):
 #
 #   coverage_target_pct  a purchase that would take coverage of eligible
 #                        spend past the target is cut to the amount that
