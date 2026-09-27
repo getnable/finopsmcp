@@ -95,6 +95,20 @@ def test_the_cli_renders_and_refuses(packs_env, tmp_path, capsys):
     assert ei.value.code == 1 and "--since" in capsys.readouterr().err
 
 
+def test_out_never_writes_over_the_guards_own_files(packs_env, tmp_path, capsys):
+    pid = _install(tmp_path)
+    gl.append({"decision": "allow", "command": "ls"})
+    before = gl.ledger_path().read_bytes()
+    for target in (gl.ledger_path(), packs_env.root / "index.json"):
+        with pytest.raises(SystemExit) as ei:
+            main(["pack", "report", pid, "brief", "--out", str(target)])
+        assert ei.value.code == 1 and "never writes over" in capsys.readouterr().err
+    assert gl.ledger_path().read_bytes() == before
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "brief", "--out", str(tmp_path / "brief.md")])
+    assert ei.value.code == 0 and (tmp_path / "brief.md").read_text().startswith("# ")
+
+
 def test_evidence_from_an_empty_ledger_says_so():
     ev = change_evidence.build(model=None, policies=[])
     assert ev["counts"]["changes"] == 0 and ev["ledger"]["chain_ok"]

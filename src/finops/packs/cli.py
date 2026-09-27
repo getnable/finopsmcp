@@ -432,6 +432,21 @@ def _pairs(raw: list[str] | None, flag: str) -> dict[str, str]:
     return out
 
 
+def _not_a_guard_file(path: str) -> None:
+    """Refuse to write a report over one of the guard's own files (the
+    ledger it reports on, the installed packs, the org model, the policy):
+    `--out` is not a way around the guard's protected paths."""
+    from .. import guard_paths
+    from .errors import PackError
+    target = os.path.realpath(os.path.expanduser(path))
+    for p in guard_paths.protected(os.getcwd()):
+        if p.whole:
+            continue
+        if target == p.path or (p.tree and target.startswith(p.path.rstrip(os.sep) + os.sep)):
+            raise PackError(f"--out {path}: that is {p.what}, which a report never writes "
+                            "over; choose another file")
+
+
 def _report(parsed, as_json: bool) -> int:
     from ..guard_ledger import parse_since
     from .errors import PackError
@@ -447,6 +462,7 @@ def _report(parsed, as_json: bool) -> int:
     text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
     body = {"ok": True, **r}
     if parsed.pack_out:
+        _not_a_guard_file(parsed.pack_out)
         out = json.dumps(body, indent=2, default=str) if as_json else text
         with open(parsed.pack_out, "w", encoding="utf-8") as fh:
             fh.write(out if out.endswith("\n") else out + "\n")
