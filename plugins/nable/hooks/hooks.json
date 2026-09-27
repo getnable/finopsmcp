@@ -1,5 +1,5 @@
 {
-  "description": "nable guard: prices and checks infrastructure changes in Bash and MCP tool calls before they run, and asks before an edit to the guard's own files (nable guard off pauses it)",
+  "description": "nable guard: prices and checks infrastructure changes in Bash and MCP tool calls before they run, asks before an edit to the guard's own files, and records how each ask was answered (nable guard off pauses it)",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,18 @@
           {
             "type": "command",
             "command": "uvx --python 3.12 --from finops-mcp==0.9.0 finops guard hook --via plugin; exit 0",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.*|Write|Edit|MultiEdit|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --python 3.12 --from finops-mcp==0.9.0 finops guard hook --via plugin --post; exit 0",
             "timeout": 30
           }
         ]

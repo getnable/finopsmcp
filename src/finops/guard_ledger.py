@@ -26,6 +26,17 @@ credential (`AWS_SECRET_ACCESS_KEY=... terraform apply`, a bearer token in a
 curl, a password flag), and an audit log is exactly the file that gets shared
 with the people who should never see one. redact() errs toward removing too
 much: a lost detail in a summary costs nothing, a leaked key costs a rotation.
+
+Two kinds of record share the chain. A verdict (no `kind`) is what the guard
+answered before a tool call. An outcome (`kind: "outcome"`) is what the post
+hook saw after one (guard_outcome.py): `outcome: "ran"`, linked to the ask it
+answers by `verdict`, the sha256 of that ask's line, which is also what the
+next line's `prev` holds. An ask is the human's to answer after the hook has
+exited, so the outcome is how the ledger learns the answer: an ask with a
+`ran` was approved. read() and recent() leave outcomes out unless asked, so
+every reader of verdicts reads what it always did; ask_outcomes() derives
+approved, declined and unknown when the ledger is read (a decline is never
+written: it is the absence of a `ran`).
 """
 from __future__ import annotations
 
@@ -50,6 +61,10 @@ _LOCK_WAIT_S = 0.2
 GENESIS = "0" * 64
 SCHEMA = 1
 DECISIONS = ("allow", "warn", "ask", "deny", "fail_open")
+# What an outcome record carries in `kind`, and the one outcome it records.
+OUTCOME = "outcome"
+RAN = "ran"
+ASK_OUTCOMES = ("approved", "declined", "unknown")
 
 # Tests point this at a throwaway file (tests/conftest.py); nothing else sets it.
 _path_override: Path | None = None
@@ -94,6 +109,22 @@ def ledger_path() -> Path:
 
 # ── redaction ─────────────────────────────────────────────────────────────────
 
+class _LazyRe:
+    """re.compile, deferred to the first use. The patterns below cost ~5 ms
+    to compile, which the post hook (guard_outcome) would pay on every tool
+    call although it only redacts when it has an ask to answer."""
+
+    __slots__ = ("_args", "_re")
+
+    def __init__(self, *args: Any) -> None:
+        self._args, self._re = args, None
+
+    def __getattr__(self, name: str) -> Any:
+        if self._re is None:
+            self._re = re.compile(*self._args)
+        return getattr(self._re, name)
+
+
 # PASS and PW catch the short spellings (db_pass=, admin_pw=) and, yes, also
 # `bypass=`: a lost detail in a summary costs nothing, a leaked password does.
 _SECRET_WORD = (r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PASS|PW|CREDENTIAL|AUTH"
@@ -103,69 +134,69 @@ _SECRET_WORD = (r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PASS|PW|CREDENT
 _TAKEN = r"(?!\s*(?:\[REDACTED|(?:bearer|basic|digest)\s))"
 _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # PEM private keys, whole block (or to the end if the block is cut off).
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
+    (_LazyRe(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
                 re.DOTALL), "[REDACTED-PRIVATE-KEY]"),
     # NAME=value where NAME mentions a key, secret, token or password:
     # AWS_SECRET_ACCESS_KEY=..., GITHUB_TOKEN="...", db_password='...'.
     # The name may be the secret word alone (`password=...`, `--set
     # db.password=...`): the lookbehind anchors it without spending a character.
-    (re.compile(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
+    (_LazyRe(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1=[REDACTED]"),
     # `aws configure set aws_secret_access_key VALUE`: the value, whatever it
     # starts with (a secret key can start with "/", which reads as a path).
-    (re.compile(r"(\baws\s+configure\s+set\s+(?:--profile\s+\S+\s+)?"
+    (_LazyRe(r"(\baws\s+configure\s+set\s+(?:--profile\s+\S+\s+)?"
                 r"\S*(?:secret|token|password)\S*\s+)(\"[^\"]*\"|'[^']*'|\S+)",
                 re.IGNORECASE), r"\1[REDACTED]"),
     # `aws ssm put-parameter --value ...`: the value of a parameter is often a
     # secret whatever --type says, so it is always dropped.
-    (re.compile(r"(\baws\s+ssm\s+put-parameter\b[^|;&]*?(?<!\S)--value)(\s+|=)"
+    (_LazyRe(r"(\baws\s+ssm\s+put-parameter\b[^|;&]*?(?<!\S)--value)(\s+|=)"
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
     # `pulumi config set [--secret] KEY VALUE`: VALUE, when --secret says it is
     # one or KEY names one. Runs before the flag rule below, which reads
     # `--secret KEY` as a flag and its value.
-    (re.compile(r"\bpulumi\s+config\s+set\b[^|;&]*"), lambda m: _pulumi_config(m.group(0))),
+    (_LazyRe(r"\bpulumi\s+config\s+set\b[^|;&]*"), lambda m: _pulumi_config(m.group(0))),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
     # Not an identifier those words also name (--key-id arn:..., --secret-id
     # arn:...): see _flag_value.
-    (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|pass|pw|secret|token|key"
+    (_LazyRe(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|pass|pw|secret|token|key"
                 r"|credential|signature)[A-Za-z0-9-]*)(=|\s+)"
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), lambda m: _flag_value(m)),
     # A signed URL's query: ?sig=... (Azure SAS), X-Amz-Signature=..., and the
     # like. Names with a secret word in them are already caught above.
-    (re.compile(r"([?&](?:sig|x-amz-signature|x-goog-signature|code)=)[^&\s]+", re.IGNORECASE),
+    (_LazyRe(r"([?&](?:sig|x-amz-signature|x-goog-signature|code)=)[^&\s]+", re.IGNORECASE),
      r"\1[REDACTED]"),
     # The attached password of the MySQL clients: mysql -uroot -phunter2.
-    (re.compile(r"(\b(?:mysql|mysqldump|mysqladmin|mysqlsh|mariadb)\b[^|;&]*?(?<!\S)-p)"
+    (_LazyRe(r"(\b(?:mysql|mysqldump|mysqladmin|mysqlsh|mariadb)\b[^|;&]*?(?<!\S)-p)"
                 r"(?=\S)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1[REDACTED]"),
     # -p <password> on a registry or cloud login: az login -u x -p y,
     # docker login -p y (the long --password form is caught above).
-    (re.compile(r"(\b(?:az|docker|podman|oras|skopeo|registry)\s+login\b[^|;&]*?(?<!\S)-p)"
+    (_LazyRe(r"(\b(?:az|docker|podman|oras|skopeo|registry)\s+login\b[^|;&]*?(?<!\S)-p)"
                 r"(\s+|=)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1\2[REDACTED]"),
     # user:password handed to a client: curl -u admin:hunter2, --user a:b.
-    (re.compile(r"((?<!\S)(?:-u|--user|--proxy-user)(?:\s+|=)[^:\s]+:)(\S+)"),
+    (_LazyRe(r"((?<!\S)(?:-u|--user|--proxy-user)(?:\s+|=)[^:\s]+:)(\S+)"),
      r"\1[REDACTED]"),
     # Tokens with a published prefix, whatever their length or mix.
-    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{6,}"), "[REDACTED-SLACK-TOKEN]"),
-    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})"),
+    (_LazyRe(r"\bxox[abposr]-[A-Za-z0-9-]{6,}"), "[REDACTED-SLACK-TOKEN]"),
+    (_LazyRe(r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})"),
      "[REDACTED-GITHUB-TOKEN]"),
-    (re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"), "[REDACTED-API-KEY]"),
-    (re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}"), "[REDACTED-GITLAB-TOKEN]"),
-    (re.compile(r"\bdop_v1_[A-Fa-f0-9]{32,}"), "[REDACTED-DIGITALOCEAN-TOKEN]"),
-    (re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{12,}"), "[REDACTED-API-KEY]"),
-    (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"), "[REDACTED-API-KEY]"),
-    (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
+    (_LazyRe(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"), "[REDACTED-API-KEY]"),
+    (_LazyRe(r"\bglpat-[A-Za-z0-9_-]{16,}"), "[REDACTED-GITLAB-TOKEN]"),
+    (_LazyRe(r"\bdop_v1_[A-Fa-f0-9]{32,}"), "[REDACTED-DIGITALOCEAN-TOKEN]"),
+    (_LazyRe(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{12,}"), "[REDACTED-API-KEY]"),
+    (_LazyRe(r"\bAIza[0-9A-Za-z_-]{30,}"), "[REDACTED-API-KEY]"),
+    (_LazyRe(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
      "[REDACTED-AWS-KEY-ID]"),
-    (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),
+    (_LazyRe(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),
     # A password embedded in a URL, before the @.
     # Anchored where a scheme can start, so a long run of letters is one start,
     # not one per letter (redact must stay linear: see _REDACT_INPUT_MAX).
-    (re.compile(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
+    (_LazyRe(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
      r"\1[REDACTED]@"),
     # The rules below run last, so a bearer or prefixed token above has
     # already taken its part; they leave a value that starts with one alone.
     # A header whose name says it carries a credential: -H "X-Api-Key: ...",
     # --header 'PRIVATE-TOKEN: ...', -H "Cookie: ...". The whole quoted value.
-    (re.compile(rf"((?<!\S)(?:-H|--header)(?:\s+|=)[\"'][^\"':]*"
+    (_LazyRe(rf"((?<!\S)(?:-H|--header)(?:\s+|=)[\"'][^\"':]*"
                 rf"(?:key|token|auth|secret|passw|cookie|signature)[^\"':]*:\s*){_TAKEN}"
                 r"[^\"']+", re.IGNORECASE), r"\1[REDACTED]"),
     # KEY: value where KEY names a secret, the JSON and YAML spelling:
@@ -173,10 +204,10 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # A key right after `:` or `/` is part of an ARN or a path
     # (arn:aws:secretsmanager:...:secret:name), not a key; an unquoted key
     # needs a space after its colon, as YAML does, so host:port stays.
-    (re.compile(rf"(?<![A-Za-z0-9_.:/-])(\\?[\"'])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*)"
+    (_LazyRe(rf"(?<![A-Za-z0-9_.:/-])(\\?[\"'])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*)"
                 rf"(\\?[\"']\s*:\s*){_TAKEN}(\\?\"[^\"\\]*\\?\"|'[^']*'|[^\s\"',}}\]]+)",
                 re.IGNORECASE), r"\1\2\3[REDACTED]"),
-    (re.compile(rf"(?<![A-Za-z0-9_.:/\\-])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*"
+    (_LazyRe(rf"(?<![A-Za-z0-9_.:/\\-])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*"
                 rf":\s+){_TAKEN}(\"[^\"]*\"|'[^']*'|[^\s\"',}}\]]+)", re.IGNORECASE),
      r"\1[REDACTED]"),
 ]
@@ -186,8 +217,8 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
 # flag that takes an id (--key-id, --kms-key-id), a KMS key id too: a UUID, or
 # mrk- and 32 hex digits for a multi-Region key. A UUID after any other flag
 # stays redacted: plenty of API keys and tokens are UUIDs.
-_IDENTIFIER = re.compile(r"(?:arn:[a-z0-9-]+:[a-z0-9-]+:|alias/)\S", re.IGNORECASE)
-_KEY_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_IDENTIFIER = _LazyRe(r"(?:arn:[a-z0-9-]+:[a-z0-9-]+:|alias/)\S", re.IGNORECASE)
+_KEY_ID = _LazyRe(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
                      r"|mrk-[0-9a-f]{32}", re.IGNORECASE)
 
 
@@ -223,7 +254,7 @@ def _pulumi_config(segment: str) -> str:
 # Long high-entropy runs: base64 or url-safe tokens (AWS secret keys, GitHub
 # and Slack tokens, JWT segments). A run counts when it mixes upper case, lower
 # case and digits, which a hex digest, a path or a resource name rarely does.
-_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_-]{32,}={0,2}")
+_LONG_TOKEN_RE = _LazyRe(r"[A-Za-z0-9+/_-]{32,}={0,2}")
 
 
 def _long_token(m: re.Match[str]) -> str:
@@ -521,16 +552,21 @@ def check(path: Path | None = None) -> dict[str, Any]:
 
 
 def recent(minutes: float, *, path: Path | None = None, now: datetime | None = None,
-           max_bytes: int = _RECENT_MAX_BYTES) -> list[dict[str, Any]]:
+           max_bytes: int = _RECENT_MAX_BYTES, outcomes: bool = False,
+           hashes: bool = False) -> list[dict[str, Any]]:
     """Records from the last `minutes`, oldest first, read from the END of the file.
 
-    This is the hook's read (the velocity cap and loop detection in guard.py),
-    so it never scans the file: it reads backwards in chunks and stops at the
-    first record older than the window. Records are appended in time order
-    under a lock, so everything before that one is older too. `max_bytes`
-    bounds the read whatever the window holds; a window that does not fit is
-    answered from its newest part. Unreadable lines are skipped. Raises on an
-    unreadable file: the caller decides what a failed read means."""
+    This is the hook's read (the velocity cap and loop detection in guard.py,
+    and the post hook's search for the ask it answers), so it never scans the
+    file: it reads backwards in chunks and stops at the first record older
+    than the window. Records are appended in time order under a lock, so
+    everything before that one is older too. `max_bytes` bounds the read
+    whatever the window holds; a window that does not fit is answered from its
+    newest part. Unreadable lines are skipped. Raises on an unreadable file:
+    the caller decides what a failed read means.
+
+    Verdicts only, unless `outcomes`. `hashes` adds `_hash` to each record:
+    the sha256 of its line, what an outcome's `verdict` names."""
     path = path or ledger_path()
     since = (now or datetime.now(UTC)) - timedelta(minutes=minutes)
     if _symlink_target(path) is not None:
@@ -562,6 +598,10 @@ def recent(minutes: float, *, path: Path | None = None, now: datetime | None = N
                 if rec[0] < since:
                     out.reverse()
                     return out
+                if not outcomes and is_outcome(rec[1]):
+                    continue
+                if hashes:
+                    rec[1]["_hash"] = _sha(raw)
                 out.append(rec[1])
     # A line cut off by max_bytes is left unread rather than guessed at.
     out.reverse()
@@ -579,8 +619,18 @@ def _parse_recent(raw: bytes) -> tuple[datetime, dict[str, Any]] | None:
     return (ts, rec) if ts.tzinfo is not None else None
 
 
-def read(days: float | None = None, path: Path | None = None) -> list[dict[str, Any]]:
-    """Records newer than `days` (all when None), skipping unreadable lines."""
+def is_outcome(rec: Any) -> bool:
+    """An outcome record (what the post hook saw), not a verdict."""
+    return isinstance(rec, dict) and rec.get("kind") == OUTCOME
+
+
+def read(days: float | None = None, path: Path | None = None, *,
+         outcomes: bool = False) -> list[dict[str, Any]]:
+    """Records newer than `days` (all when None), skipping unreadable lines.
+
+    Verdicts only, unless `outcomes`: then outcome records too, and every
+    record carries `_hash` (the sha256 of its line), which is how an outcome
+    names the ask it answers (ask_outcomes)."""
     path = path or ledger_path()
     if not path.exists():
         return []
@@ -595,9 +645,109 @@ def read(days: float | None = None, path: Path | None = None) -> list[dict[str, 
                 continue
             if ts.tzinfo is None:
                 continue                   # not a time append() wrote; cannot be compared
-            if since is None or ts >= since:
-                out.append(rec)
+            if since is not None and ts < since:
+                continue
+            if outcomes:
+                rec["_hash"] = _sha(raw.rstrip(b"\n"))
+            elif is_outcome(rec):
+                continue
+            out.append(rec)
     return out
+
+
+# ── ask outcomes ──────────────────────────────────────────────────────────────
+# An ask is answered by a person after the hook has exited. The post hook
+# (guard_outcome.py) records `ran` when the tool call went ahead, which for an
+# ask means the person approved it. A decline leaves nothing to record, so it
+# is derived here: an ask with no `ran` once its session has been quiet for
+# DECLINE_AFTER. That reading is only fair where a post hook was there to
+# record a `ran`: an older install, a harness without one, or a tool its post
+# hook does not see would turn every approval into a "decline". So an ask is
+# read as declined only when its harness has recorded at least one outcome in
+# the records read, and only for the tools that harness's post hook covers;
+# anything else is unknown. A tool call that fails after the person approved
+# it is the one blind spot left: Claude Code reports it as PostToolUseFailure,
+# which nable does not install (an older Claude Code rejects a hook event it
+# does not know, which would take the guard's PreToolUse down with it), so
+# that approval reads as a decline. Declines only ever hold a threshold where
+# it is or propose asking earlier, which a person confirms, so the error runs
+# toward caution.
+
+DECLINE_AFTER = timedelta(minutes=30)
+# The tools each harness's post hook sees ("*" is every tool its pre hook
+# sees). Cursor's is afterShellExecution only: its MCP calls stay unknown.
+POST_SURFACES: dict[str, tuple[str, ...]] = {
+    "claude-code": ("*",),
+    "cursor": ("shell",),
+    "copilot": ("bash", "powershell"),
+}
+
+
+def _ts(rec: dict[str, Any]) -> datetime | None:
+    try:
+        ts = datetime.fromisoformat(rec["ts"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return ts if ts.tzinfo is not None else None
+
+
+def _post_covers(harness: Any, tool: Any) -> bool:
+    tools = POST_SURFACES.get(str(harness))
+    return tools is not None and ("*" in tools or tool in tools)
+
+
+def ask_outcomes(recs: list[dict[str, Any]], *, now: datetime | None = None
+                 ) -> dict[str, str]:
+    """{`_hash` of each ask in `recs`: "approved" | "declined" | "unknown"}.
+
+    `recs` is read(..., outcomes=True): verdicts and outcomes, with hashes.
+    Approved: an outcome says it ran. Declined: no `ran`, the harness's post
+    hook is known to work (it recorded an outcome in `recs`) and covers the
+    tool, and the ask's session has had no activity for DECLINE_AFTER.
+    Unknown: anything else, including an ask still waiting for its answer."""
+    now = now or datetime.now(UTC)
+    ran: set[str] = set()
+    working: set[str] = set()
+    last: dict[Any, datetime] = {}
+    for r in recs:
+        ts = _ts(r)
+        if is_outcome(r):
+            if r.get("outcome") == RAN and isinstance(r.get("verdict"), str):
+                ran.add(r["verdict"])
+            working.add(str(r.get("harness")))
+        if ts is not None and r.get("session"):
+            key = (r.get("harness"), r.get("session"))
+            if key not in last or ts > last[key]:
+                last[key] = ts
+    out: dict[str, str] = {}
+    for r in recs:
+        h = r.get("_hash")
+        if is_outcome(r) or r.get("decision") != "ask" or not isinstance(h, str):
+            continue
+        if h in ran:
+            out[h] = "approved"
+            continue
+        ts = _ts(r)
+        quiet_since = ts
+        if ts is not None and r.get("session"):
+            quiet_since = max(ts, last.get((r.get("harness"), r.get("session")), ts))
+        if (ts is not None and str(r.get("harness")) in working
+                and _post_covers(r.get("harness"), r.get("tool"))
+                and now - quiet_since >= DECLINE_AFTER):
+            out[h] = "declined"
+        else:
+            out[h] = "unknown"
+    return out
+
+
+def scope_label(rec: dict[str, Any]) -> str:
+    """"team:payments env:prod", "env:prod" or "unscoped": the scope the
+    guard judged a verdict in (guard._with_scope), as the report shows it."""
+    s = rec.get("scope") if isinstance(rec.get("scope"), dict) else {}
+    bits = [f"team:{s['team']}"] if s.get("team") else []
+    envs = s.get("envs") if isinstance(s.get("envs"), list) else []
+    bits += [f"env:{'+'.join(str(e) for e in envs)}"] if envs else []
+    return " ".join(bits) or "unscoped"
 
 
 # Two identical commands from the same session this close together are one
@@ -686,7 +836,8 @@ def export_records(since: datetime | None = None,
     return out
 
 
-_CEF_SEVERITY = {"deny": 8, "fail_open": 7, "ask": 5, "warn": 3, "allow": 1}
+_CEF_SEVERITY = {"deny": 8, "fail_open": 7, "ask": 5, "warn": 3, "allow": 1,
+                 f"{OUTCOME}:{RAN}": 1}
 
 
 def _cef_header(value: Any) -> str:
@@ -700,7 +851,9 @@ def _cef_value(value: Any) -> str:
 
 def to_cef(rec: dict[str, Any], version: str) -> str:
     """One ArcSight CEF line for an exported record."""
-    decision = rec.get("decision") or ("unparseable" if rec.get("unparseable") else "unknown")
+    decision = rec.get("decision") or (
+        "unparseable" if rec.get("unparseable")
+        else f"{OUTCOME}:{rec.get('outcome')}" if is_outcome(rec) else "unknown")
     action = rec.get("action_type") or ""
     chain = rec.get("chain") or {}
     ext: list[tuple[str, Any]] = []
@@ -735,10 +888,15 @@ def summarize(days: float = 30, path: Path | None = None, *,
     `session` limits everything to one session's records. Dollar sums count
     cost increases only, once per decision: a repeat of the same command from
     the same session within ten minutes is counted in the decisions but not
-    summed again (repeats_not_summed)."""
-    recs = read(days, path)
+    summed again (repeats_not_summed).
+
+    `asks` is how the asks were answered (ask_outcomes): approved, declined
+    and unknown in all, and per action class and scope, most asks first."""
+    everything = read(days, path, outcomes=True)
     if session is not None:
-        recs = [r for r in recs if r.get("session") == session]
+        everything = [r for r in everything if r.get("session") == session]
+    answers = ask_outcomes(everything)
+    recs = [r for r in everything if not is_outcome(r)]
     repeats = _repeats(recs)
     by_decision = {d: 0 for d in DECISIONS}
     by_harness: dict[str, int] = {}
@@ -780,6 +938,22 @@ def summarize(days: float = 30, path: Path | None = None, *,
     priced = [r for i, r in enumerate(recs) if r.get("decision") in ("ask", "deny")
               and i not in repeats and _positive(r.get("monthly_usd"))]
     top = sorted(priced, key=lambda r: -r["monthly_usd"])[:5]
+    asks: dict[str, Any] = {k: 0 for k in ASK_OUTCOMES}
+    by_class: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in recs:
+        answer = answers.get(r.get("_hash") or "")
+        if answer is None:
+            continue
+        asks[answer] += 1
+        key = (str(r.get("action_type") or "unknown"), scope_label(r))
+        row = by_class.setdefault(key, {"action_type": key[0], "scope": key[1],
+                                        **{k: 0 for k in ASK_OUTCOMES}})
+        row[answer] += 1
+    asks["by_class"] = sorted(by_class.values(),
+                              key=lambda x: (-sum(x[k] for k in ASK_OUTCOMES),
+                                             x["action_type"], x["scope"]))
+    for r in recs:
+        r.pop("_hash", None)
     return {
         "days": days,
         "records": len(recs),
@@ -791,6 +965,7 @@ def summarize(days: float = 30, path: Path | None = None, *,
         "usd_order_ceilings_escalated_or_blocked": round(committed, 2),
         "fail_open_errors": errors,
         "repeats_not_summed": len(repeats),
+        "asks": asks,
         "session": session,
         "by_session": dict(sorted(
             by_session.items(),

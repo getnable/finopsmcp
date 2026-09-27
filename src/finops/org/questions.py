@@ -23,6 +23,8 @@ live proposal about the same subject says something else (contested: a
 person should see both), when a confirmed fact already answers (a
 conflict), when it is a threshold or an approval chain (default no: each
 is a person's call), when it is a freeze (default yes: it only restricts),
+when it was inferred from what people decided (its evidence is the
+question; default no when it would loosen the guard, yes when it tightens),
 or when an agent proposed a team or a tag alias (it would route every
 fact of that team, so it is never waved through with others).
 
@@ -53,6 +55,9 @@ from itertools import pairwise
 from typing import Any
 
 from .model import ACCOUNT_KINDS, Fact, OrgModel
+
+# The source prefix of a fact the learning loop inferred ("inference:guard-ledger").
+INFERENCE_PREFIX = "inference:"
 
 
 @dataclass
@@ -182,9 +187,10 @@ def _fact_tier(f: Fact) -> int:
 
 def bulk_ok(f: Fact) -> bool:
     """Whether a proposal may be decided with others: never a threshold,
-    a freeze or an approval chain, never a team or tag alias an agent
-    proposed."""
-    if f.fact in ("threshold", "freeze", "approval"):
+    """Whether a proposal may be decided with others: never a threshold,
+    a freeze or an approval chain, never anything inferred (its evidence is
+    the question), never a team or tag alias an agent proposed."""
+    if f.fact in ("threshold", "freeze", "approval") or f.source.startswith(INFERENCE_PREFIX):
         return False
     return not (f.fact in ("team", "tag_alias") and f.source.startswith("agent:"))
 
@@ -335,6 +341,38 @@ def _bulk_question(model: OrgModel, group: str, facts: list[Fact], usd,
                     items=[f"{f.key}  {describe(f)}" for f in facts])
 
 
+# ── inferred facts ────────────────────────────────────────────────────────────
+# A fact the learning loop inferred from what people decided (the guard's
+# asks: finops.recommendations.learning.policy_inference) is always asked on
+# its own, with its evidence as the question, and says which way it moves the
+# guard. Loosening (a higher threshold: fewer asks) defaults to no, so a
+# person says yes on purpose; tightening (asking sooner) defaults to yes, the
+# same as any restriction a guess may make.
+
+
+def inferred(f: Fact) -> bool:
+    return f.source.startswith(INFERENCE_PREFIX) and f.status == "proposed"
+
+
+def direction(f: Fact) -> str:
+    """"tighten" or "loosen" (the default: a fact that does not say is
+    treated as the one that needs a deliberate yes)."""
+    ev = f.extra.get("evidence") if isinstance(f.extra.get("evidence"), dict) else {}
+    return "tighten" if ev.get("direction") == "tighten" else "loosen"
+
+
+def _inferred_question(f: Fact, usd: float | None) -> Question:
+    note = str(f.extra.get("note") or f"{describe(f)}.").strip()
+    way = direction(f)
+    return Question(kind="confirm", default="y" if way == "tighten" else "n", key=f.key,
+                    subject=str(f.subject),
+                    text=(f"{note} Learned by {f.source}, confidence {f.confidence:.2f}; "
+                          f"a yes can be undone with nable org reject {f.key}."),
+                    command=f"nable org confirm {f.key}", dollars_monthly=usd,
+                    confidence=f.confidence, fact=f.summary(),
+                    no_command=f"nable org reject {f.key}")
+
+
 # ── questions ─────────────────────────────────────────────────────────────────
 
 def questions(limit: int = 10, *, model: OrgModel | None = None,
@@ -389,7 +427,11 @@ def questions(limit: int = 10, *, model: OrgModel | None = None,
             no_command=f"nable org confirm {other.key}")))
     for f in singles:
         d = usd(f)
-        if f.key in conflicted:
+        if inferred(f):
+            # Its note says what it replaces ("asks now above $500/mo"), and
+            # a yes supersedes the confirmed threshold like any confirm.
+            out.append((_fact_tier(f), _inferred_question(f, d)))
+        elif f.key in conflicted:
             w = conflicted[f.key]
             d = d if d is not None else usd(w)
             out.append((_fact_tier(f), Question(

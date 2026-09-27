@@ -111,6 +111,7 @@ What happened afterwards (setup_wizard's `nable guard ...`):
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import functools
 import json
 import os
@@ -2346,6 +2347,7 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
                     org=_OrgLens(command, cwd, on=False))
         return {**v, "_org_error": err}
     v = _with_owner(v, org)
+    v = _with_scope(v, org)
     if org.error is not None:
         v = {**v, "_org_error": org.error}
     elif org.on and org._memo.get("thresholds"):
@@ -2353,6 +2355,27 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         # ledger keeps which figures, from which scope and which file.
         v = {**v, "org_thresholds": org._memo["thresholds"]}
     return v
+
+
+def _with_scope(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
+    """An ask or a deny on a priced change or a one-way door keeps the scope
+    it was judged in: the team whose thresholds apply (FINOPS_GUARD_TEAM, or
+    the confirmed owner of the working directory's repo path) and the
+    confirmed environments the command touches. The learning loop reads it
+    from the ledger: a threshold it proposes names this scope, so a person's
+    yes changes exactly the verdicts it was learned from."""
+    if v.get("decision") not in ("ask", "deny") or not org.on:
+        return v
+    if v.get("door") != "one_way" and not v.get("estimate"):
+        return v
+    team = org.team()[0]
+
+    def envs() -> list[str]:
+        from . import guard_org
+        m = org._model()
+        return guard_org.confirmed_envs(m, org._subjects()) if m is not None else []
+    found = org._get("envs", envs, [])
+    return {**v, "scope": {"team": team, "envs": sorted(found)}}
 
 
 def _with_owner(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
@@ -2479,11 +2502,13 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                                    f"{_cost_line(est)}. "
                                    f"{_budget_reason(lens, hard=hard, why=why, undo=undo)}",
                                    est=est)
-                return verdict(
+                # `rule` tells the learning loop an ask the threshold caused
+                # (the only kind a threshold fact can stop) from the rest.
+                return {**verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
                     f"{_cost_line(est)}. "
                     f"{gate.get('reason', 'a human must review this action.')}",
-                    est=est)
+                    est=est), "rule": gate.get("rule")}
         cost = f" {_cost_line(est)}." if est else ""
         if _strict():
             return verdict("ask", "this changes infrastructure and therefore the "
@@ -3369,7 +3394,7 @@ _BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session
 # surely. Any call asks.
 _CLOUD_BUDGET_TOOLS = ("set_budget", "delete_budget", "sync_budgets_from_yaml")
 _CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change", "org_change",
-                 "pack_change", "protected_write")
+                 "pack_change", "protected_write", "learning_change")
 # Verdicts on an MCP call that the infrastructure it amounts to is judged
 # with: a change to the guard or its files, and code too long to read.
 _JUDGED_WITH = (*_CHANGE_TYPES, "oversize_command")
@@ -3474,6 +3499,18 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
     (_PythonApiCall("guard-off-api", r"finops(?:\.guard_plugin|\.guard)?(?![\w.-])",
                     r"set_off|uninstall"),
      "guard_change", "turning the guard off"),
+    # Rolling a learned lesson back, or restoring one, is a person's call too
+    # (learning.ledger takes the same HumanDecision), and it changes what
+    # nable proposes and how it ranks. Reading (list, show, infer) is silent.
+    (_VerbWithFlag("learn-decide", _NABLE, rf"(?<!\S)learn{_END}",
+                   rf"\s(?:rollback|restore){_END}"),
+     "learning_change", "rolling back or restoring a learned lesson for a person"),
+    (_VerbWithFlag("learn-decide-module", r"(?<![\w.-])finops\.cli_learn(?![\w.])",
+                   rf"(?<!\S)(?:rollback|restore){_END}", r""),
+     "learning_change", "rolling back or restoring a learned lesson for a person"),
+    (_PythonApiCall("learn-decide-api", r"finops\.(?:recommendations\.learning|cli_learn)"
+                                        r"(?![\w-])", r"rollback|restore"),
+     "learning_change", "rolling back or restoring a learned lesson for a person"),
     # Installing a pack grants it capabilities (and may add code the broker
     # runs); updating one can change its rules; removing a guard-rule pack
     # takes its asks and denies away; a signature or a key made here is what
@@ -4416,6 +4453,10 @@ def _policy_version() -> str:
 
 # Ledger writes held back while a hook answers (see answer_first).
 _PENDING: list[dict[str, Any]] | None = None
+# The tool call a Claude Code hook is judging (its payload's tool_use_id),
+# recorded with the verdict so the post hook's outcome can name its ask.
+_TOOL_USE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "nable_tool_use_id", default=None)
 
 
 @contextlib.contextmanager
@@ -4519,6 +4560,16 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
                if v.get("approved_out_of_band") else {}),
             # The one-time approval a deny-only harness's deny carried.
             **({"approval_id": v["approval_id"]} if v.get("approval_id") else {}),
+            # What the learning loop reads: the gate rule behind an ask, the
+            # scope it was judged in, and the harness's id for the tool call,
+            # which the post hook's outcome links back to (guard_outcome).
+            **({"rule": v["rule"]} if v.get("rule") else {}),
+            **({"scope": {"team": guard_ledger.redact(v["scope"]["team"], limit=100)
+                          if v["scope"].get("team") else None,
+                          "envs": [guard_ledger.redact(e, limit=40)
+                                   for e in v["scope"].get("envs") or []]}}
+               if isinstance(v.get("scope"), dict) else {}),
+            **({"tool_use_id": _TOOL_USE_ID.get()} if _TOOL_USE_ID.get() else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
@@ -4567,8 +4618,11 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
 
 def _run_hook(stdin: Any, stdout: Any) -> int:
     tool: Any = None
+    token = None
     try:
         payload = json.load(stdin)
+        from .guard_outcome import tool_use_id
+        token = _TOOL_USE_ID.set(tool_use_id(payload.get("tool_use_id")))
         tool = payload.get("tool_name")
         tool_input = payload.get("tool_input") or {}
         session_id = payload.get("session_id") or None
@@ -4608,6 +4662,9 @@ def _run_hook(stdin: Any, stdout: Any) -> int:
         # But a fail-open is exactly what an audit should be able to count.
         _record_fail_open(exc, harness="claude-code", tool=tool, command=None)
         return 0
+    finally:
+        if token is not None:
+            _TOOL_USE_ID.reset(token)
 
 
 def _flush(stdout: Any) -> None:
@@ -5014,14 +5071,18 @@ def install(global_scope: bool = False) -> Path:
             old = h.get("timeout")
             h["timeout"] = max(old, _timeout_for(cmd)) if isinstance(old, int) else _timeout_for(cmd)
             changed = True
-        if not changed:
-            return path
+        pre_cmd = ours[0][1]["command"]
     else:
-        cmd = _claude_hook_command()
+        pre_cmd = _claude_hook_command()
         pre.append({
             "matcher": _HOOK_MATCHER,
-            "hooks": [{"type": "command", "command": cmd, "timeout": _timeout_for(cmd)}],
+            "hooks": [{"type": "command", "command": pre_cmd, "timeout": _timeout_for(pre_cmd)}],
         })
+        changed = True
+    from .guard_adapters import claude_post_install
+    changed = claude_post_install(settings, path, pre_cmd) or changed
+    if not changed:
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
     return path
@@ -5032,8 +5093,13 @@ def uninstall(global_scope: bool = False) -> bool:
     path = _settings_path(global_scope)
     settings = _load_settings(path)
     pre = _hook_list(settings, path, create=False)
+    # The post hook goes with it, whatever state the PreToolUse list is in.
+    from .guard_adapters import claude_post_uninstall
+    post_removed = claude_post_uninstall(settings, path)
     if not pre:
-        return False
+        if post_removed:
+            path.write_text(json.dumps(settings, indent=2) + "\n")
+        return post_removed
     removed = False
     kept = []
     for entry in pre:
@@ -5059,8 +5125,9 @@ def uninstall(global_scope: bool = False) -> bool:
             del settings["hooks"]["PreToolUse"]
         if not settings.get("hooks"):
             settings.pop("hooks", None)
+    if removed or post_removed:
         path.write_text(json.dumps(settings, indent=2) + "\n")
-    return removed
+    return removed or post_removed
 
 
 # ── Doctor ─────────────────────────────────────────────────────────────────────
