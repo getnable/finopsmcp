@@ -245,3 +245,11 @@ def test_a_broken_freeze_lookup_is_a_recorded_fail_open(monkeypatch):
     monkeypatch.setattr(guard_org, "freeze", boom)
     assert g.gate_command(M5_LARGE) is None
     assert {"decision": "fail_open", "check": "org"}.items() <= _records()[-2].items()
+
+
+def test_the_guard_names_the_org_dir_as_the_org_store_does():
+    from finops.org import store
+    assert g._ORG_DIR_NAME == store.ORG_DIR_NAME
+    assert g._in_org_dir("/repo/nable.org/freezes.yaml")
+    assert not g._in_org_dir("/repo/not-nable.org.d/freezes.yaml")
+    assert not g._in_org_dir("/home/u/.finops/org/freezes.yaml")

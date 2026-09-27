@@ -2276,7 +2276,7 @@ class _OrgLens:
         # Name the file when the figure came from a repo's nable.org/, so a
         # person can see a repo set it; the user's own org dir goes unnamed.
         where = (t.get("files") or {}).get(name) or ""
-        if "nable.org" not in Path(where).parts:
+        if not _in_org_dir(where):
             t = {**t, "files": {}}
         return guard_org.whose(t, name)
 
@@ -2297,6 +2297,18 @@ class _OrgLens:
                 return None
             return guard_org.freeze(m, self.team()[0], self._subjects())
         return self._get("freeze", find, None)
+
+
+# org.store.ORG_DIR_NAME, kept here so the hook's fast path need not import
+# the org package (tests/test_guard_freeze.py checks the two agree).
+_ORG_DIR_NAME = "nable.org"
+
+
+def _in_org_dir(path: str) -> bool:
+    """Whether a file sits in a `nable.org/` folder (a repo's org model, as
+    opposed to the user's own org dir in the data directory): a whole path
+    part, never a substring."""
+    return any(part == _ORG_DIR_NAME for part in Path(path).parts)
 
 
 def _with_freeze(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
@@ -2324,7 +2336,7 @@ def _with_freeze(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
         closing = " Confirm to proceed."
     reason = f"nable guard: {fz['words']} {body}".rstrip() + closing
     field = {k: fz[k] for k in ("key", "subject", "reason", "end", "mode", "sure")}
-    if fz.get("file") and "nable.org" in Path(fz["file"]).parts:
+    if fz.get("file") and _in_org_dir(fz["file"]):
         field["file"] = fz["file"]
     return {**v, "decision": decision, "reason": reason, "freeze": field}
 
