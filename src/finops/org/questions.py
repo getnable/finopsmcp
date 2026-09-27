@@ -187,7 +187,6 @@ def _fact_tier(f: Fact) -> int:
 
 def bulk_ok(f: Fact) -> bool:
     """Whether a proposal may be decided with others: never a threshold,
-    """Whether a proposal may be decided with others: never a threshold,
     a freeze or an approval chain, never anything inferred (its evidence is
     the question), never a team or tag alias an agent proposed."""
     if f.fact in ("threshold", "freeze", "approval") or f.source.startswith(INFERENCE_PREFIX):

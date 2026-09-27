@@ -220,7 +220,18 @@ def test_codex_ask_becomes_a_deny_that_says_why():
     out = body["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny"
     assert "cannot pause" in out["permissionDecisionReason"]
-    assert "run the command yourself" in out["permissionDecisionReason"]
+    # A person can let it through once from their own terminal; that offer
+    # replaces the advice to run the command by hand.
+    assert "nable guard approve " in out["permissionDecisionReason"]
+
+
+def test_without_an_approval_the_deny_still_says_run_it_yourself():
+    """When no one-time approval could be offered (its store was locked),
+    the harness's own advice stays."""
+    from finops import guard_adapters as ga
+    got = ga.codex_response({"decision": "ask", "reason": "nable guard: destroys 3 resources."})
+    reason = got["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "cannot pause" in reason and reason.endswith("run the command yourself.")
 
 
 def test_codex_over_budget_notice_warns_instead_of_stopping(monkeypatch):

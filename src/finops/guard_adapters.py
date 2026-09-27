@@ -220,11 +220,22 @@ _CONFIRM_RES = (
 )
 
 
+# The sentence guard._out_of_band appends when a person can approve the
+# blocked call once from their own terminal.
+_APPROVE_ONCE = " A person can approve it once with `nable guard approve "
+_RUN_IT_YOURSELF = " If you intend it, run the command yourself."
+
+
 def _cannot_ask(reason: str, why: str) -> str:
     """`reason` without its request for a confirmation, then `why` the
-    harness blocked the command instead."""
+    harness blocked the command instead. When the reason offers a one-time
+    approval, `why` goes before that offer and drops its own advice to run
+    the command by hand: the approval is the way through."""
     for pattern, repl in _CONFIRM_RES:
         reason = pattern.sub(repl, reason)
+    head, sep, offer = reason.partition(_APPROVE_ONCE)
+    if sep:
+        return head.rstrip() + why.removesuffix(_RUN_IT_YOURSELF) + sep + offer.rstrip()
     return reason.rstrip() + why
 
 

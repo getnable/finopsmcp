@@ -297,6 +297,20 @@ def test_gemini_and_cline_denies_carry_an_id(work):
                                  "parameters": {"command": DESTROY}}}) == {"cancel": False}
 
 
+def test_the_deny_says_why_then_offers_the_approval_without_saying_run_it_yourself(work):
+    """The harness's reason for blocking comes before the offer, and its
+    advice to run the command by hand is dropped: the approval is the way."""
+    reason = codex_reason(codex(DESTROY, work))
+    assert "run the command yourself" not in reason
+    assert reason.index("Codex hooks cannot pause") < reason.index(APPROVE_RE)
+    assert reason.rstrip().endswith("within 15 minutes.")
+    gem = _hook({"hook_event_name": "BeforeTool", "session_id": "s2",
+                 "tool_name": "run_shell_command", "tool_input": {"command": DESTROY},
+                 "cwd": str(work)})
+    assert "run the command yourself" not in gem["reason"]
+    assert gem["reason"].index("so nable blocked it.") < gem["reason"].index(APPROVE_RE)
+
+
 def test_copilot_only_under_the_cloud_agent(work, monkeypatch):
     payload = {"toolName": "bash", "toolArgs": json.dumps({"command": DESTROY}),
                "cwd": str(work), "sessionId": "s"}
