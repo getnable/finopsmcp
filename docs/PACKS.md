@@ -208,3 +208,31 @@ def deliver(ctx, payload):           # sink: a receipt dict
 manifest does not declare. Print freely: stdout is not the protocol channel.
 `sdk.Context.for_testing(...)` lets a pack's own tests call its entry points
 without the broker.
+
+## First-party packs: AI spend and org bootstrap
+
+Two packs in `packs/`, under nable's namespace `io.github.getnable`. Each
+README says what the pack reads, its secrets and its network.
+
+| Pack | Kind | What it adds |
+|---|---|---|
+| `packs/ai-spend` | data | a policy that flags AI spend without `feature:` or `customer:` request tags; guard rules that make every GPU or accelerator launch ask (AWS p, g, trn, inf and dl families, GCP a2, a3, a4, g2 and TPU types, Azure N-series; tighten-only); the skill `check-ai-budget` for coding agents; a report of AI spend by vendor, model, feature and customer |
+| `packs/org-bootstrap` | code: two adapters | `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub (`api.github.com`) |
+
+Both ship as `support = "community"` until nable's first-party key is
+published: a first-party claim needs that key's signature. The org-bootstrap
+code runs only when an org signs it or allowlists its digest.
+
+Two small additions to the pack API came with them:
+
+- The `repo.files` data scope. An adapter that declares it gets, in its
+  context, each repo `nable org init` reads (a name, a label and the
+  `repo_path` subject prefix, never a local path), and can ask nable for
+  files by plain name (`{"names": ["catalog-info.yaml"]}`). nable walks the
+  repos itself, skips `.git`, `node_modules`, vendored and build trees and
+  every symlink, and caps the count and size of what it hands over.
+- `nable pack report <ns/name> [<report>] [--days N]` fills an installed
+  pack's report template from data nable already has. Each top-level
+  placeholder name is a source in `finops/packs/reports.py` (`ai` today: AI
+  spend by vendor, model and request tag), and a source runs only when the
+  pack declares the `read_data` scope it reads (`focus.cost` for `ai`).
