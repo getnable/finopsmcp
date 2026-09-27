@@ -62,6 +62,16 @@ def _guard_switch_sandbox(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _org_model_sandbox(monkeypatch, tmp_path_factory):
+    """The guard, tickets, findings, attribution and the workload classifier
+    read the org model (finops.org), which lives in the developer's data dir
+    or a repo's nable.org/. A developer with one must not change what the
+    suite sees, so FINOPS_ORG_DIR points at an empty directory. Tests of the
+    org model set or clear it themselves."""
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(tmp_path_factory.mktemp("org-model")))
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_service_creds(monkeypatch):
     """Unit tests must not inherit the developer's live service credentials.
 

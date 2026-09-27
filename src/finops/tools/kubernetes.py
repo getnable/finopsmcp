@@ -285,7 +285,11 @@ async def get_kubernetes_costs(
 
         # Rightsizing opportunities
         if report.rightsizing_opportunities:
-            result["rightsizing_opportunities"] = report.rightsizing_opportunities[:10]
+            from ..org_owner import annotate
+            # Each with its namespace's owner when the org model names one.
+            result["rightsizing_opportunities"] = annotate(
+                [dict(r) for r in report.rightsizing_opportunities[:10]],
+                context={"cluster": report.cluster})
             result["total_recoverable_usd"] = round(
                 sum(r["potential_savings_usd"] for r in report.rightsizing_opportunities), 2
             )

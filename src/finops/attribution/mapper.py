@@ -19,6 +19,19 @@ Example tag_rules.yaml:
     platform: [infra, infrastructure, platform-eng]
     data: [analytics, ml, ml-platform, data-eng]
     frontend: [fe, web, ui]
+
+On top of this file, the org model's confirmed facts (finops.org, the files in
+nable.org/) add to it:
+  tag_key facts    the keys that mean team, environment or service, read as
+                   rules of the default priority (100), after this file's
+                   rules of the same priority
+  tag_alias facts  value aliases for team, environment and service; a
+                   confirmed alias wins over this file's for the same value
+  team facts       a team's name and aliases, as team aliases
+Proposed facts are never read, and neither are facts that came from this file
+(legacy:tag_rules.yaml, whether read in memory or imported by `nable org
+init`), so nothing is counted twice. With no org model the mapping is exactly
+this file's.
 """
 from __future__ import annotations
 
@@ -41,10 +54,11 @@ class _Compiled:
     into a single {variant_lower: canonical} lookup so alias resolution is a dict
     hit instead of a scan over every alias list on every entry."""
 
-    __slots__ = ("rules", "alias_lookup")
+    __slots__ = ("rules", "alias_lookup", "field_aliases")
 
-    def __init__(self, cfg: dict) -> None:
-        raw_rules: list[dict] = cfg.get("rules", []) or []
+    def __init__(self, cfg: dict, org: dict | None = None) -> None:
+        org = org or {}
+        raw_rules: list[dict] = list(cfg.get("rules", []) or []) + list(org.get("rules") or [])
         # Sort by priority (lower = higher priority) ONCE, then normalize the fields
         # the per-entry loop reads so it never lowercases the same literals again.
         self.rules: list[tuple[str, str, str, str]] = [
@@ -62,7 +76,11 @@ class _Compiled:
             lookup[str(canonical).lower()] = canonical
             for v in variants or []:
                 lookup[str(v).lower()] = canonical
+        field_aliases = {k: dict(v) for k, v in (org.get("aliases") or {}).items()}
+        lookup.update(field_aliases.pop("team", {}))
         self.alias_lookup = lookup
+        # environment and service value aliases, from the org model only.
+        self.field_aliases = field_aliases
 
 
 def _load_rules() -> dict:
@@ -70,8 +88,7 @@ def _load_rules() -> dict:
     if _RULES_CACHE is not None:
         return _RULES_CACHE
 
-    raw = os.environ.get("FINOPS_TAG_RULES", "")
-    path = Path(raw).expanduser() if raw else Path.home() / ".finops" / "tag_rules.yaml"
+    path = _rules_path()
 
     if not path.exists():
         _RULES_CACHE = {"rules": [], "team_aliases": {}}
@@ -83,10 +100,63 @@ def _load_rules() -> dict:
     return _RULES_CACHE
 
 
+def _rules_path() -> Path:
+    raw = os.environ.get("FINOPS_TAG_RULES", "")
+    return Path(raw).expanduser() if raw else Path.home() / ".finops" / "tag_rules.yaml"
+
+
+_ORG_FIELDS = ("team", "environment", "service")
+
+
+def _org_layer() -> dict:
+    """{"rules": [...], "aliases": {field: {value_lower: canonical}}} from the
+    org model's confirmed facts, {} with none. Never raises: an org model that
+    cannot be read leaves the mapping to tag_rules.yaml alone."""
+    try:
+        from .. import org
+        from ..org.model import ranked
+        model = org.load(legacy=False)
+    except Exception:  # noqa: BLE001 - attribution must not depend on it
+        return {}
+    rules_file = _rules_path().exists()
+
+    def usable(f) -> bool:
+        # A fact imported from tag_rules.yaml is that file's rule again, and
+        # the file itself is read above while it exists.
+        return f.confirmed and not (rules_file and f.source.startswith("legacy:tag_rules"))
+
+    rules: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    aliases: dict[str, dict[str, str]] = {}
+    for f in ranked(model.by_kind("tag_key")):
+        field = f.value.get("canonical")
+        if not usable(f) or field not in _ORG_FIELDS:
+            continue
+        for k in f.value.get("keys") or []:
+            if (k.lower(), field) not in seen:
+                seen.add((k.lower(), field))
+                rules.append({"tag_key": k, "maps_to_field": field, "priority": 100})
+    # Winner last, so it is the one left in the lookup.
+    for f in reversed(ranked(model.by_kind("tag_alias"))):
+        field = f.value.get("canonical_key")
+        if usable(f) and field in _ORG_FIELDS:
+            aliases.setdefault(field, {})[f.subject.id.lower()] = str(f.value["canonical_value"])
+    for f in reversed(ranked(model.by_kind("team"))):
+        if not usable(f):
+            continue
+        team = aliases.setdefault("team", {})
+        for name in [f.subject.id, f.value.get("name"), *(f.value.get("aliases") or [])]:
+            if name:
+                team[str(name).lower()] = f.subject.id
+    if not rules and not aliases:
+        return {}
+    return {"rules": rules, "aliases": aliases}
+
+
 def _compiled() -> _Compiled:
     global _COMPILED
     if _COMPILED is None:
-        _COMPILED = _Compiled(_load_rules())
+        _COMPILED = _Compiled(_load_rules(), _org_layer())
     return _COMPILED
 
 
@@ -144,10 +214,9 @@ def tags_to_attribution(tags: dict[str, str]) -> dict[str, str]:
 
         if maps_to_field == "team":
             result["team"] = _resolve_alias(resolved, compiled.alias_lookup)
-        elif maps_to_field == "service":
-            result["service"] = resolved
-        elif maps_to_field == "environment":
-            result["environment"] = resolved
+        elif maps_to_field in ("service", "environment"):
+            result[maps_to_field] = compiled.field_aliases.get(maps_to_field, {}).get(
+                resolved.lower(), resolved)
         else:
             continue  # unknown target field, not a decision
 

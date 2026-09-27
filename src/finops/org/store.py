@@ -108,6 +108,19 @@ def resolve_dir(dir: str | os.PathLike | None = None) -> tuple[Path, str]:
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
+def safe_yaml(text: str) -> Any:
+    """yaml.safe_load, through libyaml's CSafeLoader where PyYAML has it: the
+    same safe constructor on a C parser, about ten times faster. The guard
+    hook reads the model inside its ~100 ms, and the pure-Python parser took
+    about 100 ms for a few hundred facts on its own."""
+    import yaml
+    try:
+        from yaml import CSafeLoader as SafeLoader
+    except ImportError:                  # PyYAML built without libyaml
+        from yaml import SafeLoader
+    return yaml.load(text, Loader=SafeLoader)
+
+
 class _File:
     """One org file as read: its top comment block, its facts, the entries
     that did not parse (kept verbatim), and whether it is safe to rewrite."""
@@ -126,7 +139,7 @@ class _File:
         import yaml
         try:
             text = self.path.read_text(encoding="utf-8")
-            data = yaml.safe_load(text)
+            data = safe_yaml(text)
         except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
             self.error = f"{self.path.name}: not readable as YAML ({type(e).__name__}); ignored"
             _warn(warnings, self.error)

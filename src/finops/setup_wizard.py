@@ -2855,6 +2855,7 @@ def _guard_doctor(parsed) -> None:
     for c in d["not_covered"]:
         print(f"    - {c}")
     _guard_doctor_budgets(d.get("budgets") or {})
+    _guard_doctor_org(d.get("org") or {})
     _guard_doctor_refresh(d.get("background_refresh") or {})
     led = d["ledger"]
     print()
@@ -2875,6 +2876,46 @@ def _guard_doctor(parsed) -> None:
     for fix in d["recommendations"]:
         print(f"    {cyan('->')} {fix}")
     print()
+
+
+def _guard_doctor_org(o: dict) -> None:
+    """The doctor's org model section: loaded or not, where, how much of it
+    a person has confirmed, and whether the guard scopes this directory to a
+    team from it."""
+    from .welcome import amber, bold, dim
+
+    print()
+    print(f"  {bold('Org model')} (owners, team scope and thresholds in guard asks)")
+    if o.get("error"):
+        print(f"    {amber('could not be read: ' + o['error'])}; the guard judges without it")
+        return
+    if not o.get("loaded"):
+        print(f"    {dim('none yet (nable org init)')}")
+        if o.get("dir"):
+            print(dim(f"    would be read from {o['dir']}"))
+        return
+    where = {"FINOPS_ORG_DIR": "FINOPS_ORG_DIR", "repo": "this repo",
+             "data_dir": "nable data dir", "argument": "argument"}.get(
+        o.get("dir_source") or "", o.get("dir_source") or "")
+    legacy = f", {o['legacy']} from tag_rules.yaml / accounts.yaml" if o.get("legacy") else ""
+    print(f"    {o.get('confirmed', 0)} confirmed, {o.get('proposed', 0)} proposed{legacy}")
+    exists = "" if o.get("exists") else ", not created yet"
+    print(dim(f"    {o.get('dir')} ({where}{exists})"))
+    team, source = o.get("team"), o.get("team_source")
+    if team and source == "FINOPS_GUARD_TEAM":
+        print(f"    team scope: {team} (FINOPS_GUARD_TEAM, which wins over the org model)")
+    elif team:
+        print(f"    team scope: {team} ({source}); its team budgets and thresholds apply here")
+    else:
+        print(f"    team scope: {dim('none')} (no confirmed owner of this repo path, and "
+              "FINOPS_GUARD_TEAM is unset)")
+    t = o.get("thresholds") or {}
+    for name, label in (("max_auto_monthly_usd", "auto threshold"),
+                        ("velocity_cap_usd", "velocity cap")):
+        if name in t:
+            print(f"    {label}: ${t[name]:,.0f}/mo ({(t.get('scope') or {}).get(name, '')})")
+    if o.get("warnings"):
+        print(f"    {amber(str(o['warnings']) + ' warning(s)')} (nable org status lists them)")
 
 
 def _guard_doctor_budgets(b: dict) -> None:
