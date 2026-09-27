@@ -75,11 +75,18 @@ _CORE: frozenset[str] = frozenset({
     "get_cost_summary",
     "get_agent_team",
     "get_ai_budget_status",
+    # The org model needs no provider: it starts from files nable already has
+    # (tag_rules.yaml, accounts.yaml) and from what agents propose. Tier 2, so
+    # these cost no tokens until named (what_can_nable_do lists them).
+    "get_org_coverage",
+    "get_org_model",
     "list_accounts",
     "list_connected_providers",
+    "list_org_questions",
     "list_profiles",
     "list_vault_credentials",
     "nable_setup_status",
+    "propose_org_fact",
     "set_ai_budget",
     "what_can_nable_do",
     "whoami",
@@ -533,6 +540,8 @@ WRITE_TOOLS: frozenset[str] = frozenset({
     "fetch_invoice_emails",
     # Changes the cap the guard enforces on the calling agent itself.
     "set_ai_budget",
+    # Writes a proposed fact to the org model files. Never a confirmed one.
+    "propose_org_fact",
 })
 # The subset that removes/revokes something (destructiveHint = true). Additive
 # writes (create/set/send/pin/open-PR) are writes but NOT destructive.

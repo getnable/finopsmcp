@@ -269,6 +269,20 @@ CATALOG: list[dict[str, Any]] = [
                   "get_saas_spend_summary", "get_marketplace_costs"],
     },
     {
+        "id": "org",
+        "title": "Know who owns what",
+        "gate": lambda c: True,
+        "count": 4,
+        "blurb": "An org model you own as YAML: owners, teams, environments. Agents propose, people confirm.",
+        "asks": [
+            ("Who owns this account?", "confirmed owners first, guesses marked as guesses"),
+            ("How much of our spend has an owner?", "by team, with the biggest unowned accounts"),
+            ("CODEOWNERS says payments owns infra/payments; remember that",
+             "saved as a proposal a person confirms"),
+        ],
+        "tools": ["get_org_model", "get_org_coverage", "list_org_questions", "propose_org_fact"],
+    },
+    {
         "id": "share",
         "title": "Share & automate",
         "gate": lambda c: True,
