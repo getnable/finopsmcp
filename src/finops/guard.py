@@ -2713,8 +2713,8 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
 
 # The same changes made from the shell: `nable ai-budget --spend-cap ...`,
 # `nable budget ci-gate --budget-file ...` (it syncs the file's budgets
-# first), and taking the guard out (`nable guard uninstall`, `nable
-# uninstall`). An agent stopped by a budget could otherwise lift it, or remove
+# first), and taking the guard out (`nable guard uninstall`, `nable guard
+# off`, `nable uninstall`). An agent stopped by a budget could otherwise lift it, or remove
 # the hook, in one command. `budget status` and `refresh` only read.
 _NABLE = r"(?<![\w-])(?:nable|finops)\s"
 _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for r, action, what in (
@@ -2727,6 +2727,8 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
      "budget_change", "changing the cloud budgets the guard checks changes against"),
     (_VerbWithFlag("guard-uninstall", _NABLE, rf"(?<!\S)guard{_END}", rf"\suninstall{_END}"),
      "guard_change", "removing the guard's own hook"),
+    (_VerbWithFlag("guard-off", _NABLE, rf"(?<!\S)guard{_END}", rf"\soff{_END}"),
+     "guard_change", "turning the guard off"),
     (_VerbWithFlag("nable-uninstall", _NABLE, rf"(?<!\S)uninstall{_END}", r""),
      "guard_change", "uninstalling nable, the guard's hook with it"),
 )}

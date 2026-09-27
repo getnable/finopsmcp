@@ -409,6 +409,8 @@ def test_an_agent_changing_a_cloud_budget_is_asked_about(tool, args):
     ("nable guard --harness cursor uninstall", "guard_change"),
     ("uvx --from finops-mcp finops guard uninstall", "guard_change"),
     ("nable uninstall --yes", "guard_change"),
+    ("nable guard off", "guard_change"),
+    ("uvx --from finops-mcp finops guard off", "guard_change"),
 ])
 def test_the_same_changes_from_the_shell_ask(cmd, action):
     v = g.gate_command(cmd)
@@ -419,6 +421,7 @@ def test_the_same_changes_from_the_shell_ask(cmd, action):
 @pytest.mark.parametrize("cmd", [
     "nable ai-budget", "nable ai-budget --json --month", "nable budget",
     "nable budget refresh", "nable budget ci-gate --fail-on-breach", "nable guard status",
+    "nable guard on",
     "pip uninstall foo; nable guard status",
     'git commit -m "docs: nable guard uninstall removes the hook"',
     'echo "raise it with nable ai-budget --spend-cap 5"',
