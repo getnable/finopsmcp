@@ -3130,9 +3130,19 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = ()
         for c in commands:
             results += _pack_command_results(base, rules, tighten, c, freeze_of)
         if tool is not None:
-            first = next(iter(commands), None)
+            every = tuple(commands) or (None,)
+
+            def call_freeze() -> dict[str, Any] | None:
+                # The call is under a freeze when any command it amounts to
+                # is; a sure one over any of them outranks a guess.
+                found = None
+                for c in every:
+                    fz = freeze_of(c)
+                    if fz and (found is None or (fz.get("sure") and not found.get("sure"))):
+                        found = fz
+                return found
             results.append(tighten(base, rules, tool=tool, args=args,
-                                   freeze=(lambda: freeze_of(first)) if freeze_of else None))
+                                   freeze=call_freeze if freeze_of else None))
         for t in results:
             if VERDICT_ORDER.index(t["verdict"]) > VERDICT_ORDER.index(worst):
                 worst = t["verdict"]

@@ -199,3 +199,22 @@ def test_a_pack_reason_joins_the_guards_own_ask(packs_env, tmp_path):
     assert v["decision"] == "ask"
     assert v["reason"].startswith(base["reason"].rstrip())
     assert "Destroys are change requests under CC8.1 (rule ask-destroy-always" in v["reason"]
+
+
+def test_an_mcp_rule_during_a_freeze_sees_the_freeze_over_any_command_it_runs(monkeypatch):
+    # An MCP call that amounts to several commands is under a freeze when any
+    # of them is: the freeze over the second command counts as much as one
+    # over the first.
+    rule = GuardRule("m1", "mcp", re.compile(r"^mcp__ops__run\b"), "deny", "No runs in a freeze.",
+                     pack="p", during="freeze")
+    monkeypatch.setattr(gpk, "state", lambda: {"rules": [rule], "guard_problems": []})
+    sure = {"sure": True, "words": "A change freeze is in force for environment prod.",
+            "key": "k9"}
+    monkeypatch.setattr(g, "_freeze_lookup",
+                        lambda cwd: lambda command: sure if command == "deploy prod" else None)
+    v, error, _ = g._with_packs(None, commands=("echo staging", "deploy prod"),
+                                tool="mcp__ops__run", args={})
+    assert error is None and v is not None and v["decision"] == "deny"
+    assert v["freeze"]["key"] == "k9"
+    v, _, _ = g._with_packs(None, commands=("echo staging",), tool="mcp__ops__run", args={})
+    assert v is None
