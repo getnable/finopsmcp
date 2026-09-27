@@ -17,6 +17,14 @@ highest confidence, then the newest. Rejected and expired facts are ignored.
 A confirmed fact past its review_after is "stale": still used, flagged, asked
 again.
 
+Freezes and approval chains are policy too. A freeze (a window with a UTC
+offset on each end, a reason, and a mode: ask or deny) only restricts, so
+every live freeze counts, a proposal included, and a proposal may only make
+the guard ask. An approval chain names who reviews a class of change on a
+team or an environment; only a confirmed one names anybody. Several of
+either may hold for one subject: a freeze's slot is its start, an approval's
+its action classes.
+
 A repo_path subject names a path inside one repo. In a `nable.org/` stored at
 the root of that repo the path may be bare ("infra/payments"); anywhere else
 (the nable data dir, FINOPS_ORG_DIR) it carries the repo it is in:
@@ -33,6 +41,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -41,7 +50,8 @@ from typing import Any
 
 log = logging.getLogger("finops.org")
 
-FACT_KINDS = ("owner", "team", "environment", "tag_key", "tag_alias", "account", "threshold")
+FACT_KINDS = ("owner", "team", "environment", "tag_key", "tag_alias", "account", "threshold",
+              "freeze", "approval")
 # "environment" is a subject too, so a threshold can be scoped to one (policy.yaml).
 SUBJECT_KINDS = ("aws_account", "gcp_project", "azure_subscription", "k8s_namespace",
                  "repo_path", "service", "tag_value", "resource", "team", "org",
@@ -51,6 +61,15 @@ STATUSES = ("proposed", "confirmed", "rejected", "expired")
 LIVE = ("confirmed", "proposed")
 ENVIRONMENTS = ("prod", "nonprod", "dr", "sandbox", "shared", "unknown")
 CANONICAL_TAG_KEYS = ("team", "environment", "service", "cost_center", "owner")
+# A change freeze covers the whole org, a team, an environment or one account.
+FREEZE_SUBJECTS = ("org", "team", "environment", *ACCOUNT_KINDS)
+FREEZE_MODES = ("ask", "deny")
+# An approval chain is a team's or an environment's.
+APPROVAL_SUBJECTS = ("team", "environment")
+# Who an approval names: a GitHub login ("github:alice"), a GitHub team slug
+# in the repo's organisation ("team:platform"), a Jira account id, a Linear
+# user id, or an email address (shown, never sent to).
+APPROVER_KINDS = ("github", "team", "jira", "linear", "email")
 
 # One file per fact kind, so a diff reads as "ownership changed" or "a tag
 # alias was added" and never both at once.
@@ -62,6 +81,8 @@ FILE_FOR_KIND = {
     "tag_alias": "tags.yaml",
     "account": "accounts.yaml",
     "threshold": "policy.yaml",
+    "freeze": "freezes.yaml",
+    "approval": "approvals.yaml",
 }
 KNOWN_FILES = tuple(sorted(set(FILE_FOR_KIND.values())))
 HEADER = "# nable org model v1"
@@ -202,7 +223,45 @@ def core_value(fact: str, value: dict[str, Any]) -> tuple:
         return tuple(_low(v.get(n)) for n in ("name", "business_unit", "cost_center"))
     if fact == "threshold":
         return tuple(v.get(n) for n in ("max_auto_monthly_usd", "velocity_cap_usd"))
+    if fact == "freeze":
+        return (_utc_text(v.get("start")), _utc_text(v.get("end")), _low(v.get("mode") or "ask"),
+                _low(v.get("reason")))
+    if fact == "approval":
+        return (many("action_classes"), many("approvers"), v.get("min", 1),
+                bool(v.get("change_ticket")))
     return (json.dumps(v, sort_keys=True, default=str),)
+
+
+def parse_when(v: Any, name: str = "time") -> datetime:
+    """An aware datetime from an ISO 8601 string (or a datetime YAML already
+    read) that carries a UTC offset: "2026-11-27T00:00:00-05:00" or
+    "...T05:00:00Z". A time without one could be any of 24 hours, so it is
+    refused rather than read as some zone. Raises FactError."""
+    if isinstance(v, datetime):
+        dt = v
+    elif isinstance(v, str) and v.strip():
+        try:
+            dt = datetime.fromisoformat(v.strip())
+        except ValueError:
+            raise FactError(f"{name} {v!r} is not an ISO 8601 date and time") from None
+    else:
+        raise FactError(f"{name} must be an ISO 8601 date and time with a UTC offset")
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise FactError(f"{name} {v!s} has no UTC offset: write it as 2026-11-27T00:00:00-05:00 "
+                        "or 2026-11-27T05:00:00Z")
+    return dt
+
+
+def _utc_text(v: Any) -> str:
+    """The instant `v` names, in UTC, as text ("" when it names none): what
+    two spellings of one time are compared by."""
+    try:
+        return parse_when(v).astimezone(UTC).isoformat()
+    except FactError:
+        return _low(v)
+
+
+_ACTION_CLASS_RE = r"^(?:\*|[a-z][a-z0-9_]{0,63})$"
 
 
 def _str_list(v: Any, name: str) -> list[str]:
@@ -287,6 +346,55 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
             raise FactError("value needs max_auto_monthly_usd or velocity_cap_usd")
         for n in present:
             v[n] = _number(v[n], f"value.{n}")
+    elif kind == "freeze":
+        if subject.kind not in FREEZE_SUBJECTS:
+            raise FactError(f"a freeze fact's subject.kind must be one of "
+                            f"{', '.join(FREEZE_SUBJECTS)}")
+        start = parse_when(v.get("start"), "value.start")
+        end = parse_when(v.get("end"), "value.end")
+        if end <= start:
+            raise FactError("value.end must be after value.start")
+        # Kept in the offset it was written in (a person reads it), compared in UTC.
+        v["start"], v["end"] = start.isoformat(), end.isoformat()
+        _req_str(v, "reason")
+        v["reason"] = v["reason"].strip()
+        mode = v.get("mode") if v.get("mode") is not None else "ask"
+        if mode not in FREEZE_MODES:
+            raise FactError(f"value.mode must be one of {', '.join(FREEZE_MODES)}")
+        v["mode"] = mode
+    elif kind == "approval":
+        if subject.kind not in APPROVAL_SUBJECTS:
+            raise FactError(f"an approval fact's subject.kind must be one of "
+                            f"{', '.join(APPROVAL_SUBJECTS)}")
+        classes = [c.lower() for c in _str_list(v.get("action_classes"), "value.action_classes")]
+        if not classes:
+            raise FactError("value.action_classes is empty")
+        bad = [c for c in classes if not re.match(_ACTION_CLASS_RE, c)]
+        if bad:
+            raise FactError(f"value.action_classes: {bad[0]!r} is not an action class "
+                            "(rightsizing, delete_resource, ..., or *)")
+        v["action_classes"] = list(dict.fromkeys(classes))
+        approvers = _str_list(v.get("approvers"), "value.approvers")
+        if not approvers:
+            raise FactError("value.approvers is empty")
+        for a in approvers:
+            k, sep, ident = a.partition(":")
+            if not sep or k.strip().lower() not in APPROVER_KINDS or not ident.strip() \
+                    or any(c.isspace() for c in ident.strip()):
+                raise FactError(f"value.approvers: {a!r} is not kind:id with kind one of "
+                                f"{', '.join(APPROVER_KINDS)}")
+        v["approvers"] = list(dict.fromkeys(
+            f"{a.partition(':')[0].strip().lower()}:{a.partition(':')[2].strip()}"
+            for a in approvers))
+        least = v.get("min") if v.get("min") is not None else 1
+        if isinstance(least, bool) or not isinstance(least, int) or least < 1:
+            raise FactError("value.min must be a whole number of 1 or more")
+        if least > len(v["approvers"]):
+            raise FactError(f"value.min {least} is more than the {len(v['approvers'])} "
+                            "approver(s) named")
+        v["min"] = least
+        if v.get("change_ticket") is not None and not isinstance(v["change_ticket"], bool):
+            raise FactError("value.change_ticket must be true or false")
     else:
         raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
     return v
@@ -354,7 +462,13 @@ class Fact:
             disc = str(self.value.get("canonical", ""))
         elif self.fact == "tag_alias":
             disc = str(self.value.get("canonical_key", ""))
-        sid = self.subject.id.lower() if self.subject.kind == "tag_value" else self.subject.id
+        elif self.fact == "freeze":
+            # One window per start: a subject may have several freezes, and a
+            # person moving the end of one replaces it.
+            disc = _utc_text(self.value.get("start"))
+        elif self.fact == "approval":
+            disc = ",".join(sorted(str(c) for c in self.value.get("action_classes") or []))
+        sid =self.subject.id.lower() if self.subject.kind == "tag_value" else self.subject.id
         return (self.fact, self.subject.kind, sid, disc)
 
     @property
@@ -1086,3 +1200,80 @@ class OrgModel:
             if named:
                 out["files"] = named
         return out
+
+    # ── freezes and approval chains ───────────────────────────────────────────
+
+    def _team_is(self, name: str, team: str | None, strict: bool) -> bool:
+        """Whether team `name` (a fact's subject) is `team`, read through
+        confirmed team and alias facts only."""
+        if not team:
+            return False
+        a = self.canonical_team(name, confirmed_only=True, strict=strict)[0]
+        b = self.canonical_team(team, confirmed_only=True, strict=strict)[0]
+        return a.strip().lower() == b.strip().lower()
+
+    def freezes_at(self, at: datetime | None = None, *, team: str | None = None,
+                   envs: Iterable[str] = (), accounts: Iterable[str] = (),
+                   strict: bool = False) -> list[tuple[Fact, bool]]:
+        """The live freeze facts in force at `at` (default now) over this
+        scope: the org, the team, any of the environments, any of the account
+        subjects ("aws_account:123..."). (fact, sure) pairs, sure first, then
+        deny before ask, then the latest end: a fact is sure when it is
+        confirmed (under `strict`, also trusted); anything else is a
+        proposal, which may only make the guard ask.
+
+        Every live fact counts, not only each slot's winner: a freeze is a
+        restriction, and a proposal or an untrusted repo's word that outranks
+        a confirmed freeze in its slot must not take that freeze away."""
+        now = (at or datetime.now(UTC)).astimezone(UTC)
+        env_set = {e.strip().lower() for e in envs if e}
+        acct_set = {str(a).strip() for a in accounts if a}
+        out: list[tuple[Fact, bool]] = []
+        for f in self.by_kind("freeze"):
+            if not f.live:
+                continue
+            try:
+                start = parse_when(f.value.get("start")).astimezone(UTC)
+                end = parse_when(f.value.get("end")).astimezone(UTC)
+            except FactError:
+                continue
+            if not start <= now < end:
+                continue
+            s = f.subject
+            covers = (s.kind == "org"
+                      or (s.kind == "team" and self._team_is(s.id, team, strict))
+                      or (s.kind == "environment" and s.id.strip().lower() in env_set)
+                      or (s.kind in ACCOUNT_KINDS and str(s) in acct_set))
+            if covers:
+                out.append((f, self._sure(f, strict)))
+        out.sort(key=lambda fs: (_utc_text(fs[0].value.get("end")), fs[0].key), reverse=True)
+        out.sort(key=lambda fs: (not fs[1], fs[0].value.get("mode") != "deny"))
+        return out
+
+    def freezes(self, *, live_only: bool = True) -> list[Fact]:
+        """Every freeze fact, the soonest to end first."""
+        facts = [f for f in self.by_kind("freeze") if f.live or not live_only]
+        return sorted(facts, key=lambda f: (_utc_text(f.value.get("end")), f.key))
+
+    def approvals_for(self, action_class: str, *, team: str | None = None,
+                      envs: Iterable[str] = (), strict: bool = True) -> list[Fact]:
+        """The confirmed approval facts (under `strict`, trusted too) for
+        `action_class` over the team and the environments: what a pull
+        request requests reviews from and a ticket adds watchers from. A
+        proposal names nobody: review requests go to people a person
+        named. The winner of each slot, team facts first."""
+        wanted = (action_class or "").strip().lower()
+        env_set = {e.strip().lower() for e in envs if e}
+        slots: dict[tuple, list[Fact]] = {}
+        for f in self.by_kind("approval"):
+            if not self._sure(f, strict):
+                continue
+            classes = [str(c).lower() for c in f.value.get("action_classes") or []]
+            if wanted not in classes and "*" not in classes:
+                continue
+            s = f.subject
+            if (s.kind == "team" and self._team_is(s.id, team, strict)) or \
+                    (s.kind == "environment" and s.id.strip().lower() in env_set):
+                slots.setdefault(f.slot, []).append(f)
+        out = [w for w in (pick(fs) for fs in slots.values()) if w is not None]
+        return sorted(out, key=lambda f: (f.subject.kind != "team", str(f.subject), f.key))

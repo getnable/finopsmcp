@@ -2444,6 +2444,12 @@ def _run_guard(parsed) -> None:
         _guard_switch(action == "off")
         return
 
+    if action == "approve":
+        code = _guard_approve(parsed)
+        if code:
+            raise SystemExit(code)
+        return
+
     if action == "install" and not getattr(parsed, "guard_force", False):
         # The nable Claude Code plugin already runs the guard. A settings hook
         # as well would only stand aside for it (or it for the settings hook),
@@ -2782,6 +2788,50 @@ def _run_guard(parsed) -> None:
     print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
     print(dim("  check_action_policy before acting."))
     print()
+
+
+def _guard_approve(parsed) -> int:
+    """`nable guard approve [ID] [--as WHO]`: a person lets one call a
+    deny-only harness (Codex CLI, Gemini CLI, Cline, the Copilot cloud agent)
+    was stopped on run once (guard_approvals). With no id, the approvals
+    waiting. A human decision: without a terminal it needs --as, the same
+    rule as `nable org confirm`, and the guard asks (or, in those harnesses,
+    denies) when an agent runs it."""
+    from . import guard_approvals as ga
+    from .org.cli import _need_human, _who
+    from .welcome import cyan, dim, green
+
+    aid = (getattr(parsed, "guard_target", None) or "").strip()
+    if not aid:
+        rows = ga.waiting()
+        if not rows:
+            print("\n  No approvals waiting. A deny in Codex CLI, Gemini CLI, Cline or the "
+                  "Copilot cloud agent names one when a person may approve it.\n")
+            return 0
+        print()
+        for r in rows:
+            state = ("used " + str(r["used_at"]) if r.get("used_at") else
+                     f"approved by {r['approved_by']}" if r.get("approved_by") else "waiting")
+            usd = f", ~${r['monthly_usd']:,.0f}/mo" if r.get("monthly_usd") else ""
+            print(f"  {cyan(r['id'])}  {r.get('harness')}  {state}, expires {r['expires_at']}")
+            print(f"    {r.get('call')}{usd}")
+            print(dim(f"    in {r.get('cwd') or '(no directory given)'}"))
+        print()
+        return 0
+    who = _who(getattr(parsed, "guard_as", None))
+    if who is None:
+        return _need_human()
+    try:
+        r = ga.approve(aid, who)
+    except ga.ApprovalError as e:
+        print(f"nable guard approve: {e}", file=sys.stderr)
+        return 1
+    print()
+    print(f"  {green('✓')} Approved once, by {who}: {r.get('call')}")
+    print(dim(f"    {r.get('harness')}, in {r.get('cwd') or '(no directory given)'}; the "
+              f"identical call is allowed once until {r['expires_at']}."))
+    print()
+    return 0
 
 
 def _guard_switch(off: bool) -> None:
@@ -3731,8 +3781,15 @@ def main(args: list[str] | None = None) -> None:
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
                                                   "try", "report", "verify-log", "doctor",
-                                                  "reconcile", "export", "on", "off"],
+                                                  "reconcile", "export", "on", "off",
+                                                  "approve"],
                          nargs="?", default="status")
+    guard_p.add_argument("guard_target", nargs="?", default=None, metavar="ID",
+                         help="With 'approve': the approval id a deny showed (none: list "
+                              "the approvals waiting)")
+    guard_p.add_argument("--as", dest="guard_as", default=None, metavar="WHO",
+                         help="With 'approve': who approves (default on a terminal: git "
+                              "user.email, then $USER). Without a terminal it is required")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
