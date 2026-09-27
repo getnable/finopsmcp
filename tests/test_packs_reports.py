@@ -155,6 +155,22 @@ def test_out_refuses_the_guards_files_on_a_case_insensitive_disk(packs_env, tmp_
     assert not (org_dir / "freezes.yaml").exists()
 
 
+def test_out_writes_nothing_that_can_drive_a_terminal(packs_env, tmp_path, capsys):
+    # A proposal a pack adapter made can carry an escape sequence; the file a
+    # person later cats shows it as text, as the terminal output does.
+    from finops import org
+    org.propose(org.make_fact("approval", "team:platform",
+                              {"action_classes": ["*"], "approvers": ["team:x\x1b[2Jwiped"],
+                               "min": 1}, source="pack:io.github.example/evil:a"))
+    pid = _install(tmp_path, text="${ledger.guard.tables.approval_chains}\n")
+    target = tmp_path / "chains.md"
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "brief", "--out", str(target)])
+    assert ei.value.code == 0
+    text = target.read_text()
+    assert "wiped" in text and "\x1b" not in text and "\\x1b[2J" in text
+
+
 def test_set_cannot_stand_in_for_what_nable_fills(packs_env, tmp_path):
     # The period, the time it was made and the report's own name are nable's:
     # an evidence report that claims another period than it read is forged.

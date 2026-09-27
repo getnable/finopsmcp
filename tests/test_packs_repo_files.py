@@ -100,6 +100,24 @@ def test_repo_files_reads_no_more_than_its_limit(repo, monkeypatch):
     assert all(len(f["text"]) <= broker.REPO_FILE_MAX_BYTES for f in got["files"])
 
 
+def test_pack_run_prints_nothing_an_adapter_returns_that_can_drive_a_terminal(
+        monkeypatch, tmp_path, capsys):
+    from finops import org
+    from finops.setup_wizard import main
+    fact = org.make_fact("approval", "team:platform",
+                         {"action_classes": ["*"], "approvers": ["team:x"], "min": 1},
+                         source="pack:io.github.example/p:\x1b]0;owned\x07a")
+    monkeypatch.setattr(broker, "prepare", lambda *a, **kw: _prep())
+    monkeypatch.setattr(broker, "propose_facts", lambda *a, **kw: broker.RunResult(
+        "io.github.example/p", "a", "adapters", "adapter.propose", [fact],
+        problems=["fact[1] dropped: bad \x1b[2J value"]))
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "run", "io.github.example/p", "a"])
+    out = capsys.readouterr().out
+    assert ei.value.code == 0 and "owned" in out and "\x1b" not in out and "\x07" not in out
+
+
 def test_repo_files_stops_at_its_limits(repo, monkeypatch):
     monkeypatch.setattr(broker, "REPO_FILES_MAX", 1)
     got = broker.read_data(_prep(), {"scope": "repo.files",

@@ -426,7 +426,8 @@ def _run_code(parsed, as_json: bool) -> int:
     if prep.kind == "connectors":
         body["output"] = body["output"][:50]
         body["output_truncated"] = len(r.output) > 50
-    _out(body, as_json, "\n".join(lines))
+    # What the pack returned (sources, values, problems) cannot drive the terminal.
+    _out(body, as_json, safe_text("\n".join(lines)))
     return EXIT_OK
 
 
@@ -498,7 +499,8 @@ def _report(parsed, as_json: bool) -> int:
     text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
     body = {"ok": True, **r}
     if parsed.pack_out:
-        out = json.dumps(body, indent=2, default=str) if as_json else text
+        # A file is cat-ed to a terminal later: it holds no more than stdout would.
+        out = json.dumps(body, indent=2, default=str) if as_json else safe_text(text)
         _write_out(parsed.pack_out, out if out.endswith("\n") else out + "\n")
         print(f"Wrote {r['report']} of {r['pack']} to {parsed.pack_out}")
         return EXIT_OK
