@@ -397,6 +397,20 @@ def test_nable_org_init_runs_the_pack_and_asks_about_what_it_proposed(bootstrap,
     assert facts and all(not f.confirmed for f in facts)
 
 
+def test_nable_pack_run_shows_the_proposals_for_the_repo_it_runs_in(bootstrap, monkeypatch,
+                                                                    capsys):
+    bootstrap.install()
+    monkeypatch.chdir(bootstrap.repo / "services")
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "run", PID, "backstage", "--json"])
+    body = json.loads(capsys.readouterr().out)
+    assert ei.value.code == 0 and body["summary"] == {"facts": 6}
+    assert {f["subject"] for f in body["output"]} >= {"service:checkout",
+                                                       "repo_path:shop//services/checkout"}
+    assert body["network"]["observed"] == []
+    assert org.load().facts == []          # shown, not written
+
+
 def test_org_init_proposes_github_teams_and_the_token_never_leaks(bootstrap, api,
                                                                     monkeypatch, capsys):
     github_routes(api)
