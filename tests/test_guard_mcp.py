@@ -322,10 +322,15 @@ def test_the_hook_still_ignores_non_mcp_tools():
     ("mcp__aws-mcp__aws___call_aws", True),
     ("BashOutput", False),       # unanchored "Bash|mcp__.*" would spawn the hook here
     ("KillBash", False),
-    ("Edit", False),
+    ("Edit", True),              # the file tools, for edits to the guard's own files
+    ("Write", True),
+    ("MultiEdit", True),
+    ("NotebookEdit", True),
+    ("NotebookRead", False),
     ("Read", False),
+    ("WebFetch", False),
 ])
-def test_the_matcher_is_exactly_bash_and_mcp(tool, covered):
+def test_the_matcher_is_exactly_bash_mcp_and_the_file_tools(tool, covered):
     assert g.matcher_covers(g._HOOK_MATCHER, tool) is covered
 
 
@@ -352,20 +357,20 @@ def settings(tmp_path, monkeypatch):
     return p
 
 
-def test_a_fresh_install_covers_bash_and_mcp(settings):
+def test_a_fresh_install_covers_bash_mcp_and_the_file_tools(settings):
     g.install()
-    assert g.hook_surfaces(settings) == {"bash": True, "mcp": True}
+    assert g.hook_surfaces(settings) == {"bash": True, "mcp": True, "editor": True}
 
 
 def test_an_old_bash_only_entry_is_widened_in_place(settings):
     settings.write_text(json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": g._UVX_HOOK_CMD,
                                        "timeout": 30}]}]}}))
-    assert g.hook_surfaces(settings) == {"bash": True, "mcp": False}
+    assert g.hook_surfaces(settings) == {"bash": True, "mcp": False, "editor": False}
     g.install()
     pre = json.loads(settings.read_text())["hooks"]["PreToolUse"]
     assert len(pre) == 1 and pre[0]["matcher"] == g._HOOK_MATCHER
-    assert g.hook_surfaces(settings) == {"bash": True, "mcp": True}
+    assert g.hook_surfaces(settings) == {"bash": True, "mcp": True, "editor": True}
 
 
 def test_a_shared_entry_keeps_its_matcher_and_ours_moves_out(settings):
@@ -413,7 +418,7 @@ def test_a_hand_written_matcher_is_left_alone(settings):
     settings.write_text(body)
     g.install()
     assert settings.read_text() == body
-    assert g.hook_surfaces(settings) == {"bash": True, "mcp": False}
+    assert g.hook_surfaces(settings) == {"bash": True, "mcp": False, "editor": False}
 
 
 # ── an agent changing its own budget ──────────────────────────────────────────

@@ -1,9 +1,9 @@
 {
-  "description": "nable guard: prices and checks infrastructure changes in Bash and MCP tool calls before they run (nable guard off pauses it)",
+  "description": "nable guard: prices and checks infrastructure changes in Bash and MCP tool calls before they run, and asks before an edit to the guard's own files (nable guard off pauses it)",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|mcp__.*)$",
+        "matcher": "^(Bash|mcp__.*|Write|Edit|MultiEdit|NotebookEdit)$",
         "hooks": [
           {
             "type": "command",

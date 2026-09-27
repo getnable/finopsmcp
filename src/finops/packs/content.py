@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import math
 import re
 import string
@@ -41,13 +40,18 @@ from typing import Any
 import yaml
 
 from .errors import Problem
+from .rules import (  # noqa: F401  (re-exported: finops.packs.content.tighten)
+    GUARD_TARGETS,
+    GUARD_VERDICTS,
+    MAX_MATCH_INPUT,
+    VERDICT_ORDER,
+    GuardRule,
+    tighten,
+)
 
 MAX_CONTENT_BYTES = 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
 MAX_REGEX_LEN = 500
-# What a regex condition or guard pattern reads of its input, at most. Keeps a
-# bad pattern's worst case bounded by the input rather than by the caller.
-MAX_MATCH_INPUT = 4096
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")
 _PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$")
@@ -63,10 +67,6 @@ OPS = ("eq", "ne", "in", "not_in", "regex", "gt", "gte", "lt", "lte", "exists")
 APPLIES_TO = ("finding", "action")
 POLICY_ACTIONS = ("flag", "escalate", "block")
 SEVERITIES = ("info", "low", "medium", "high", "critical")
-GUARD_TARGETS = ("command", "mcp")
-GUARD_VERDICTS = ("ask", "deny")
-# Most permissive first. tighten() only ever moves right.
-VERDICT_ORDER = ("allow", "warn", "ask", "deny")
 IAC_KINDS = ("terraform", "helm", "kubernetes", "cloudformation", "cdk", "pulumi")
 UNITS = ("hour", "month", "gb", "gb-month", "request", "1k-requests", "1m-requests",
          "1k-tokens", "1m-tokens", "seat-month", "unit")
@@ -359,36 +359,7 @@ def parse_policies(doc: Any, rel: str, problems: list[Problem]) -> list[PolicyRu
 
 # ── guard rules ───────────────────────────────────────────────────────────────
 
-@dataclass(frozen=True)
-class GuardRule:
-    """A pattern the guard may use to tighten a verdict, never to loosen one."""
-
-    id: str
-    target: str
-    pattern: re.Pattern[str]
-    verdict: str
-    reason: str
-    price_hint: dict[str, Any] | None = None
-    pack: str = ""
-
-    def matches_command(self, command: str) -> bool:
-        return self.target == "command" and isinstance(command, str) \
-            and self.pattern.search(command[:MAX_MATCH_INPUT]) is not None
-
-    def matches_tool(self, tool: str, args: Any = None) -> bool:
-        """MCP calls are matched as "<tool name> <args as sorted JSON>"."""
-        if self.target != "mcp" or not isinstance(tool, str):
-            return False
-        try:
-            blob = json.dumps(args if args is not None else {}, sort_keys=True, default=str)
-        except (TypeError, ValueError):
-            blob = ""
-        return self.pattern.search(f"{tool} {blob}"[:MAX_MATCH_INPUT]) is not None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "pack": self.pack, "target": self.target,
-                "pattern": self.pattern.pattern, "verdict": self.verdict,
-                "reason": self.reason, "price_hint": self.price_hint}
+# GuardRule lives in rules.py, with tighten(): the guard's hook reads both.
 
 
 def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[GuardRule]:
@@ -438,30 +409,6 @@ def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[Guard
                 hint = {"monthly_usd": usd, "note": note} if usd is not None else None
         if len(problems) == n and rx is not None:
             out.append(GuardRule(rid, target, rx, verdict, reason, hint))
-    return out
-
-
-def tighten(verdict: str, rules: list[GuardRule], *, command: str | None = None,
-            tool: str | None = None, args: Any = None) -> dict[str, Any]:
-    """The verdict after pack guard rules, which is never looser than `verdict`.
-
-    For the guard's later wiring: it passes its own verdict in and takes the
-    stricter of the two out. Packs can move allow to ask and ask to deny; they
-    cannot move anything the other way, and a verdict this does not know (for
-    example fail_open) passes through untouched."""
-    out = {"verdict": verdict, "rules": []}
-    if verdict not in VERDICT_ORDER:
-        return out
-    best = VERDICT_ORDER.index(verdict)
-    for r in rules:
-        hit = (command is not None and r.matches_command(command)) or \
-              (tool is not None and r.matches_tool(tool, args))
-        if not hit:
-            continue
-        out["rules"].append({"id": r.id, "pack": r.pack, "verdict": r.verdict,
-                             "reason": r.reason, "price_hint": r.price_hint})
-        best = max(best, VERDICT_ORDER.index(r.verdict))
-    out["verdict"] = VERDICT_ORDER[best]
     return out
 
 

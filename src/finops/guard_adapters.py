@@ -747,7 +747,8 @@ def plugin_hooks(version: str = guard.__version__) -> dict[str, Any]:
     matcher and timeout `nable guard install` writes for Claude Code."""
     cmd = plugin_hook_command(version)
     return {"description": "nable guard: prices and checks infrastructure changes in Bash and "
-                           "MCP tool calls before they run (nable guard off pauses it)",
+                           "MCP tool calls before they run, and asks before an edit to the "
+                           "guard's own files (nable guard off pauses it)",
             "hooks": {"PreToolUse": [{
         "matcher": guard._HOOK_MATCHER,
         "hooks": [{"type": "command", "command": cmd, "timeout": guard._timeout_for(cmd)}],
@@ -1649,6 +1650,36 @@ def plugin_status(global_scope: bool = False) -> dict[str, Any]:
             "off": guard_plugin.off_reason()}
 
 
+def plugin_sees_editor() -> bool | None:
+    """Whether the installed nable plugin's hook sees Claude Code's file
+    tools: its hooks.json under Claude Code's plugins directory, read for the
+    matcher. None when it cannot be found (an unusual layout), or when
+    Claude Code keeps several releases of it that disagree (which one runs
+    is Claude Code's to say). Read-only, bounded, never raises; for the
+    doctor, not the hook."""
+    found: set[bool] = set()
+    try:
+        root = guard_plugin.claude_user_dir() / "plugins"
+        seen = 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            seen += 1
+            if seen > 2000:
+                break
+            dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
+            if "hooks.json" not in filenames or Path(dirpath).name != "hooks":
+                continue
+            doc = json.loads((Path(dirpath) / "hooks.json").read_text(encoding="utf-8"))
+            for group in ((doc.get("hooks") or {}).get("PreToolUse") or []):
+                cmds = [h.get("command") for h in group.get("hooks") or [] if isinstance(h, dict)]
+                if any(isinstance(c, str) and guard_plugin._VIA_PLUGIN_RE.search(c)
+                       and "finops" in c for c in cmds):
+                    found.add(all(guard_plugin.matcher_covers(group.get("matcher"), t)
+                                  for t in guard_plugin.EDITOR_TOOLS))
+    except Exception:
+        return None
+    return found.pop() if len(found) == 1 else None
+
+
 def _drop(items: list[str], unwanted: Any) -> list[str]:
     return [i for i in items if not unwanted(i)]
 
@@ -1664,15 +1695,38 @@ def with_plugin(report: dict[str, Any]) -> dict[str, Any]:
     if enabled:
         rows = report["surfaces"]
         at = sum(1 for r in rows if r.get("harness") == "claude-code")
+        editor = plugin_sees_editor()
         rows.insert(at, {"harness": "claude-code", "scope": "plugin", "path": str(enabled),
                          "installed": True, "runs": ps["runs"], "via": "plugin",
-                         "bash": True, "mcp": True})
+                         "bash": True, "mcp": True, "editor": editor})
         if ps["runs"]:
             # The plugin sees Bash and MCP calls whether or not a settings hook
             # does, so neither gap the settings rows reported is one now.
+            settings_editor = [c for c in report["covered"]
+                               if c.startswith("Claude Code: Write, Edit")]
             report["covered"] = _drop(report["covered"], lambda c: c.startswith("Claude Code:"))
             report["covered"][:0] = ["Claude Code: Bash commands (via the Claude Code plugin)",
                                      "Claude Code: MCP tool calls (via the Claude Code plugin)"]
+            if editor:
+                report["covered"].insert(2, "Claude Code: Write, Edit, MultiEdit and "
+                                            "NotebookEdit on the guard's own files (via the "
+                                            "Claude Code plugin)")
+                report["not_covered"] = _drop(
+                    report["not_covered"],
+                    lambda c: c.startswith("Claude Code (") and "does not see Write" in c)
+                report["recommendations"] = _drop(
+                    report["recommendations"],
+                    lambda f: f.endswith("(widens the hook to Claude Code's file tools)"))
+                report["editor_tools"] = {**report.get("editor_tools", {}),
+                                          "claude-code": "covered"}
+            elif settings_editor:
+                report["covered"][2:2] = settings_editor
+            elif editor is False:
+                report["not_covered"].insert(0, "Claude Code (plugin): file edits to the guard's "
+                                                "own files (the installed plugin's hook predates "
+                                                "them)")
+                report["recommendations"].insert(0, "update the nable plugin in Claude Code "
+                                                    "(/plugin), so its hook sees file edits")
             report["not_covered"] = _drop(
                 report["not_covered"],
                 lambda c: c == "Claude Code: no working guard hook"

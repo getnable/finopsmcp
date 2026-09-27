@@ -140,12 +140,13 @@ def test_the_hook_is_pinned_to_the_plugins_release_and_its_interpreter():
     assert f"--python {python} " in cmd, "a second interpreter means a second uvx environment"
 
 
-def test_the_hook_matches_bash_and_mcp_exactly_as_the_installer_does():
+def test_the_hook_matches_bash_mcp_and_the_file_tools_exactly_as_the_installer_does():
     [group] = _hooks_json()["hooks"]["PreToolUse"]
     assert group["matcher"] == g._HOOK_MATCHER
-    for tool in ("Bash", "mcp__aws-api__call_aws", "mcp__plugin_nable_nable__get_cost_summary"):
+    for tool in ("Bash", "mcp__aws-api__call_aws", "mcp__plugin_nable_nable__get_cost_summary",
+                 *gp.EDITOR_TOOLS):
         assert gp.matcher_covers(group["matcher"], tool)
-    for tool in ("BashOutput", "KillBash", "Read", "Edit", "WebFetch"):
+    for tool in ("BashOutput", "KillBash", "Read", "WebFetch", "NotebookRead", "Glob"):
         assert not gp.matcher_covers(group["matcher"], tool)
 
 
