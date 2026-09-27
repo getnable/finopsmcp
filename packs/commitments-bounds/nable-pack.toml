@@ -1,0 +1,34 @@
+# Commitments with bounds. A data pack: nable validates everything here and
+# nothing here runs. Its commitment bounds cut every commitment purchase nable
+# recommends down to them (never up), and its guard rules ask before any
+# purchase an agent tries, naming the bound it would breach. nable never buys
+# a commitment. Check it with:
+#   nable pack validate packs/commitments-bounds
+[pack]
+name        = "commitments-bounds"
+namespace   = "io.github.getnable"
+version     = "1.0.0"
+description = "Commitments with bounds: a coverage target, a longest term, the payment options allowed and migration blackouts, applied to every commitment recommendation; purchases always ask; nable never buys"
+license     = "Apache-2.0"
+nable_api   = ">=1.0,<2.0"
+maintainers = ["@getnable"]
+support     = "first-party"
+repository  = "https://github.com/getnable/packs"
+status      = "active"
+
+# read_data: its bounds are applied to nable's savings recommendations. No
+# network, no secrets, no act, no pricing: it proposes nothing and buys
+# nothing.
+[capabilities]
+read_data    = ["recommendations"]
+guard        = "tighten-only"
+max_autonomy = "L1"
+
+[provides]
+policies    = ["policies/*.yaml"]
+guard_rules = ["guard/*.yaml"]
+skills      = ["skills/commitments-bounds/SKILL.md"]
+
+[compat]
+clouds    = ["aws", "gcp", "azure"]
+harnesses = ["claude-code", "cursor", "codex", "copilot", "gemini", "cline"]
