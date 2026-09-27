@@ -970,3 +970,42 @@ def test_bulk_interview_yes_no_and_edit(odir, monkeypatch, capsys):
     assert st == {"555555555555": "confirmed", "666666666666": "rejected",
                   "333333333333": "rejected", "444444444444": "rejected",
                   "111111111111": "confirmed", "222222222222": "confirmed"}
+
+
+def test_installed_pack_adapters_run_after_the_built_in_ones(monkeypatch, tmp_path):
+    """Adapters from installed packs (finops.packs.org_adapters) run in the
+    same init, and what they return is written as a proposal like any other."""
+    from finops import org, packs
+    from finops.org import store
+
+    calls = []
+
+    class FakePackAdapter:
+        name = "pack:io.example/owners/csv"
+
+        def __call__(self, ctx=None):
+            calls.append(ctx)
+            f = org.make_fact("owner", {"kind": "aws_account", "id": "999999999999"},
+                              {"team": "research"}, source="pack:io.example/owners:csv",
+                              confidence=0.7)
+            return [f]
+
+    monkeypatch.setattr(store, "ADAPTERS", [])
+    monkeypatch.setattr(packs, "org_adapters", lambda: [FakePackAdapter()])
+    runs = store.run_adapters(tmp_path / "org")
+    assert [r.id for r in runs] == ["pack:io.example/owners/csv"]
+    assert calls and runs[0].results == ["added"]
+    fact = org.load(tmp_path / "org").by_kind("owner")[0]
+    assert fact.status == "proposed" and fact.source.startswith("pack:")
+
+
+def test_a_broken_pack_install_never_stops_init(monkeypatch, tmp_path):
+    from finops import packs
+    from finops.org import store
+
+    def boom():
+        raise RuntimeError("index unreadable")
+
+    monkeypatch.setattr(store, "ADAPTERS", [])
+    monkeypatch.setattr(packs, "org_adapters", boom)
+    assert store.run_adapters(tmp_path / "org") == []

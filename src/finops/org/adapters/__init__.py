@@ -75,7 +75,9 @@ ADAPTERS: list[Adapter | Callable[[AdapterContext], Iterable[Fact]]] = [
 
 
 def adapter_id(a: Adapter | Callable[..., Any]) -> str:
-    return a.id if isinstance(a, Adapter) else getattr(a, "__name__", "adapter")
+    if isinstance(a, Adapter):
+        return a.id
+    return getattr(a, "__name__", None) or getattr(a, "name", None) or "adapter"
 
 
 @dataclass

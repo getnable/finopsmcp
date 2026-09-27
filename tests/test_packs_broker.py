@@ -466,10 +466,12 @@ def test_the_example_adapter_feeds_org_init_as_proposals(example_pack, monkeypat
                               source="someone"))
     adapters = broker.org_adapters()
     assert [a.name for a in adapters] == [f"pack:{example_pack}/csv-owners"]
-    # How the org adapters builder will wire it: pack adapters beside ADAPTERS.
-    monkeypatch.setattr(org_store, "ADAPTERS", [*org_store.ADAPTERS, *adapters])
-    counts = org_store.run_adapters()
-    assert counts == {"added": 2}
+    # org init runs installed pack adapters after the built-in ones; only the
+    # pack's are wanted here.
+    monkeypatch.setattr(org_store, "ADAPTERS", [])
+    runs = org_store.run_adapters()
+    assert [r.id for r in runs] == [f"pack:{example_pack}/csv-owners"]
+    assert runs[0].error is None and runs[0].results.count("added") == 2
     props = [f for f in org.load().proposals("owner") if f.source.startswith("pack:")]
     assert sorted(str(f.subject) for f in props) == ["repo_path:infra/analytics",
                                                      "service:snowflake"]

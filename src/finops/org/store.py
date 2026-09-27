@@ -592,6 +592,19 @@ class AdapterRun:
                                           str(f.subject)))[:n]
 
 
+def _pack_adapters() -> list[Any]:
+    """Org-context adapters from installed packs (finops.packs.org_adapters):
+    each runs out of process through the pack broker and only proposes. A
+    broken pack install never stops init; it just adds no adapters."""
+    try:
+        from .. import packs
+        return list(packs.org_adapters())
+    except Exception as e:  # noqa: BLE001 - packs are optional
+        import logging
+        logging.getLogger("finops.org").warning("pack adapters not loaded: %s", e)
+        return []
+
+
 def run_adapters(dir: str | os.PathLike | None = None, *,
                  repos: Iterable[str | os.PathLike] | None = None,
                  data: Any = None, only: Iterable[str] | None = None) -> list[AdapterRun]:
@@ -616,7 +629,7 @@ def run_adapters(dir: str | os.PathLike | None = None, *,
     ctx = AdapterContext(model=load(dir), repos=roots, data=data)
     wanted = set(only) if only is not None else None
     runs: list[AdapterRun] = []
-    for adapter in ADAPTERS:
+    for adapter in [*ADAPTERS, *_pack_adapters()]:
         run = AdapterRun(adapter_id(adapter))
         if wanted is not None and run.id not in wanted:
             continue
