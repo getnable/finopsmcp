@@ -827,3 +827,80 @@ def test_repeated_approvals_become_one_threshold_that_stops_the_ask_once_confirm
     assert last["decision"] == "warn" and last["org_thresholds"]["max_auto_monthly_usd"] == 1200
     # And nothing more is proposed: the threshold in force covers what was approved.
     assert pi.propose_guard_facts()["proposals"] == []
+
+
+# ── review: a team threshold outranks an environment's ───────────────────────
+# OrgModel.threshold_for lets the narrower scope win: org, then environment,
+# then team. So a team threshold replaces a lower environment threshold for
+# that team's commands, and an inferred team proposal reaches every
+# environment the team works in.
+
+def _set_threshold(subject: str, **value) -> None:
+    org.set_fact(org.make_fact("threshold", subject, value, source="human"), human("maria"))
+
+
+def test_a_tighter_team_threshold_never_lifts_a_lower_environment_threshold(clock):
+    """prod asks above $100; payments declines three $700 launches in dev.
+    Half of dev's $500 is $250, and a team:payments $250 would have lifted
+    payments' prod from $100 to $250, offered with a default of yes."""
+    _set_threshold("environment:prod", max_auto_monthly_usd=100)
+    for day in (6, 4, 2):
+        _ask_at(clock, day, answer="none", team="payments", envs=("dev",), usd=700.0)
+    _ask_at(clock, 1, team="payments", envs=("dev",))      # a post hook works here
+    clock(0)
+    got = _infer()
+    for p in got["proposals"]:
+        if p["subject"] == "team:payments":
+            assert p["value"]["max_auto_monthly_usd"] <= 100, p
+    assert any("environment prod" in n["why"] for n in got["not_yet"]), got["not_yet"]
+
+
+def test_a_team_loosening_from_one_environment_does_not_lift_another(clock):
+    """Approvals in dev only: a team:payments $1,200 would also let payments'
+    prod changes up to $1,200 run unasked, where prod asks above $100 and
+    nothing was approved."""
+    _set_threshold("environment:prod", max_auto_monthly_usd=100)
+    for day in (10, 8, 6, 4, 2):
+        _ask_at(clock, day, team="payments", envs=("dev",))
+    clock(0)
+    got = _infer()
+    assert got["proposals"] == [], got["proposals"]
+    assert any("environment prod" in n["why"] for n in got["not_yet"]), got["not_yet"]
+
+
+def test_the_threshold_in_force_is_the_one_the_asks_were_judged_under(clock):
+    """Approvals of $300 launches in prod, which asks above $100: they are
+    evidence against $100, not against the org's $500."""
+    _set_threshold("environment:prod", max_auto_monthly_usd=100)
+    for day in (10, 8, 6, 4, 2):
+        _ask_at(clock, day, team="payments", envs=("prod",), usd=300.0)
+    clock(0)
+    [p] = _infer()["proposals"]
+    assert p["subject"] == "team:payments" and p["direction"] == "loosen"
+    assert p["current_usd"] == 100.0 and p["value"]["max_auto_monthly_usd"] == 300.0
+    assert "asks now above $100/mo" in p["note"]
+
+
+def test_a_proposal_keeps_the_velocity_cap_of_the_threshold_it_replaces(clock):
+    """Confirming a proposal expires the confirmed fact in its slot. Without
+    the old velocity cap, a tightening of the per-change figure would have
+    raised the velocity cap to four times the new figure."""
+    _set_threshold("team:payments", max_auto_monthly_usd=1000, velocity_cap_usd=800)
+    _ask_at(clock, 9, team="payments", usd=1500.0)
+    for day in (6, 4, 2):
+        _ask_at(clock, day, answer="none", team="payments", usd=1500.0)
+    clock(0)
+    [p] = _infer()["proposals"]
+    assert p["direction"] == "tighten"
+    assert p["value"] == {"max_auto_monthly_usd": 500.0, "velocity_cap_usd": 800.0}
+
+
+def test_a_proposal_that_says_tighten_but_raises_the_figure_defaults_to_no():
+    """The interview reads the direction from the model, not from what the
+    proposal says about itself (a repo's nable.org/ can ship any evidence)."""
+    _set_threshold("team:search", max_auto_monthly_usd=200)
+    liar = _propose("team:search", 5000, "tighten")
+    honest = _propose("team:payments", 250, "tighten")
+    qs = {q.key: q for q in org.questions(20, include_spend=False)}
+    assert qs[liar].default == "n"
+    assert qs[honest].default == "y"

@@ -1209,6 +1209,38 @@ class OrgModel:
                 out["files"] = named
         return out
 
+    def threshold_envs(self) -> list[str]:
+        """The environments a confirmed threshold fact names."""
+        return sorted({f.subject.id for f in self.by_kind("threshold")
+                       if f.confirmed and f.subject.kind == "environment"})
+
+    def threshold_floor(self, subject: Subject | str, default: float,
+                        name: str = "max_auto_monthly_usd") -> tuple[float, str | None]:
+        """(the lowest `name` a confirmed threshold on `subject` would take
+        the place of, the environment it is in force for, or None).
+
+        A figure at or below it only ever tightens; above it, it loosens
+        somewhere. The narrower scope wins (threshold_for), so a team's
+        threshold replaces every environment's for that team's commands: its
+        floor is the lowest over the team alone and the team in each
+        environment a confirmed threshold names. An environment's or the
+        org's replaces only its own figure. `default` is the policy's."""
+        s = subject_of(subject)
+        team = s.id if s.kind == "team" else None
+        env = s.id if s.kind == "environment" else None
+        ceiling = {name: float(default)}
+
+        def at(e: str | None) -> float:
+            t = self.threshold_for(team, e, strict=True, ceiling=ceiling)
+            return float(t.get(name, default))
+        low, where = at(env), None
+        if team is not None:
+            for e in self.threshold_envs():
+                got = at(e)
+                if got < low:
+                    low, where = got, e
+        return low, where
+
     # ── freezes and approval chains ───────────────────────────────────────────
 
     def _team_is(self, name: str, team: str | None, strict: bool) -> bool:

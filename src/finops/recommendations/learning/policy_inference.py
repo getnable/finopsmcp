@@ -220,14 +220,52 @@ def _covers(subject: str, key: dict[str, Any]) -> bool:
     return True                                    # org: everything without a narrower one
 
 
-def _in_force(model: Any, subject: str, policy: dict[str, Any]) -> float:
-    """The max_auto_monthly_usd the guard applies in `subject` today."""
+def _in_force(model: Any, subject: str, policy: dict[str, Any],
+              env: str | None = None) -> float:
+    """The max_auto_monthly_usd the guard applies in `subject` today, for a
+    team in `env` when one is given: the figure its asks were judged
+    against (a team with no threshold of its own asks at its environment's)."""
     kind, _, ident = subject.partition(":")
+    default = float(policy.get("max_auto_monthly_usd", 500.0))
+    if kind == "environment":
+        env = ident
+    elif kind != "team" or env == "mixed":
+        env = None
     t = {}
     if model is not None:
-        t = model.threshold_for(ident if kind == "team" else None,
-                                ident if kind == "environment" else None, strict=True)
-    return float(t.get("max_auto_monthly_usd", policy.get("max_auto_monthly_usd", 500.0)))
+        t = model.threshold_for(ident if kind == "team" else None, env, strict=True,
+                                ceiling={"max_auto_monthly_usd": default})
+    return float(t.get("max_auto_monthly_usd", default))
+
+
+def _lifted(model: Any, subject: str, policy: dict[str, Any], figure: float,
+            skip: str | None = None) -> tuple[str, float] | None:
+    """(environment, its figure) where a threshold of `figure` on a team
+    `subject` would let more through than today, `skip` aside, or None. A
+    team's threshold outranks an environment's (OrgModel.threshold_for), so
+    a team proposal reaches every environment the team works in."""
+    if model is None or not subject.startswith("team:"):
+        return None
+    for env in model.threshold_envs():
+        if env == skip:
+            continue
+        now = _in_force(model, subject, policy, env)
+        if figure > now:
+            return env, now
+    return None
+
+
+def _kept_fields(model: Any, subject: str) -> dict[str, float]:
+    """The other figures of the confirmed threshold on `subject` (its
+    velocity cap): a proposal carries them, since confirming it expires
+    that fact, and a figure it dropped would go back to the policy's."""
+    if model is None:
+        return {}
+    from ...org.model import pick
+    f = pick(g for g in model.candidates("threshold", subject) if g.confirmed)
+    if f is None or f.value.get("velocity_cap_usd") is None:
+        return {}
+    return {"velocity_cap_usd": float(f.value["velocity_cap_usd"])}
 
 
 def _date(ts: str) -> str:
@@ -289,11 +327,20 @@ def infer_guard_facts(signal: list[dict[str, Any]] | None = None, *, model: Any 
             hold(e, "touched several environments and no team: no one scope to name")
             continue
         if len(e["declines"]) >= GUARD_MIN_DECLINES:
-            now_usd = _in_force(model, subject, policy)
+            now_usd = _in_force(model, subject, policy, e["env"])
             figure = clean_down(now_usd / 2)
             if figure < _GUARD_FLOOR_USD or figure >= now_usd:
                 hold(e, f"declined {len(e['declines'])} times, but ${now_usd:,.0f}/mo is "
                         "already as low as a threshold goes")
+                continue
+            # A tightening is offered with a default of yes, so it must not
+            # raise the figure anywhere: a team's threshold would replace a
+            # lower environment's for that team.
+            lifted = _lifted(model, subject, policy, figure)
+            if lifted is not None:
+                hold(e, f"declined {len(e['declines'])} times, but ${figure:,.0f}/mo for "
+                        f"{_where(subject)} would lift environment {lifted[0]}'s "
+                        f"${lifted[1]:,.0f}/mo for that team")
                 continue
             prev = proposals.get(subject)
             if prev is not None and (prev["direction"] == "tighten"
@@ -303,7 +350,8 @@ def infer_guard_facts(signal: list[dict[str, Any]] | None = None, *, model: Any 
             smallest = min(u for _, u in e["declines"])
             proposals[subject] = {
                 "subject": subject, "direction": "tighten",
-                "value": {"max_auto_monthly_usd": figure}, "current_usd": now_usd,
+                "value": {"max_auto_monthly_usd": figure, **_kept_fields(model, subject)},
+                "current_usd": now_usd,
                 "confidence": round(min(0.9, 0.6 + 0.05 * len(e["declines"])), 2),
                 "dollars_monthly": smallest,
                 "note": (f"Ask before any change over ${figure:,.0f}/mo in {_where(subject)}, "
@@ -334,9 +382,18 @@ def infer_guard_facts(signal: list[dict[str, Any]] | None = None, *, model: Any 
             continue
         top = max(u for _, u in approvals)
         figure = clean_up(top)
-        now_usd = _in_force(model, subject, policy)
+        now_usd = _in_force(model, subject, policy, e["env"])
         if figure <= now_usd:
             hold(e, f"${now_usd:,.0f}/mo in force already covers ${top:,.0f}/mo")
+            continue
+        # A yes never reaches further than what was approved: a team's
+        # threshold would also replace a lower one in an environment the
+        # approvals did not come from.
+        lifted = _lifted(model, subject, policy, figure, skip=e["env"])
+        if lifted is not None:
+            hold(e, f"${figure:,.0f}/mo for {_where(subject)} would also lift environment "
+                    f"{lifted[0]}'s ${lifted[1]:,.0f}/mo for that team, where nothing "
+                    "was approved")
             continue
         others = [o for o in signal if o is not e and o["door"] != "one_way"
                   and _covers(subject, o)]
@@ -354,7 +411,8 @@ def infer_guard_facts(signal: list[dict[str, Any]] | None = None, *, model: Any 
         n = len(approvals)
         proposals[subject] = {
             "subject": subject, "direction": "loosen",
-            "value": {"max_auto_monthly_usd": figure}, "current_usd": now_usd,
+            "value": {"max_auto_monthly_usd": figure, **_kept_fields(model, subject)},
+            "current_usd": now_usd,
             "confidence": round(min(0.9, 0.5 + 0.05 * n), 2),
             "dollars_monthly": top,
             "note": (f"Stop asking before {e['action_type']} changes up to ${figure:,.0f}/mo "
