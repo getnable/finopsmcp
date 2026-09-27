@@ -1,0 +1,23 @@
+# Always on. Branch protection and required reviews are the approval
+# control change-management evidence rests on, so an agent never weakens or
+# steps around them: it may propose a change to them, and a person makes it.
+version: 1
+rules:
+  - id: no-admin-merge
+    pattern: '\bgh\s+pr\s+merge\b[^;&|\n]*\s--admin\b'
+    verdict: deny
+    reason: >-
+      Merging with --admin skips the required reviews that approve a change.
+      A person who holds that right uses it themselves, with a change record.
+  - id: no-force-push-to-protected-branch
+    pattern: '\bgit\s+push\b[^;&|\n]*\s(?:-f|--force\S*)\s[^;&|\n]*\b(?:main|master|production)\b|\bgit\s+push\b[^;&|\n]*\b(?:main|master|production)\b[^;&|\n]*\s(?:-f|--force\S*)(?:\s|$)|\bgit\s+push\b[^;&|\n]*\s\+(?:refs/heads/)?(?:main|master|production)\b'
+    verdict: deny
+    reason: >-
+      A force push to a protected branch rewrites the history that shows who
+      approved which change.
+  - id: no-branch-protection-change
+    pattern: '\bgh\s+api\b[^;&|\n]*/(?:branches/[^\s;&|]+/protection|rulesets)\b[^;&|\n]*\s(?:-X|--method)[=\s]*(?:DELETE|PUT|PATCH|POST)\b|\bgh\s+api\b[^;&|\n]*\s(?:-X|--method)[=\s]*(?:DELETE|PUT|PATCH|POST)\b[^;&|\n]*/(?:branches/[^\s;&|]+/protection|rulesets)\b'
+    verdict: deny
+    reason: >-
+      Branch protection and rulesets decide who must approve a change. An
+      agent may propose a change to them; a person makes it.

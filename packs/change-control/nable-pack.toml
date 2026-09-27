@@ -1,0 +1,39 @@
+# Change control (SOC 2). Mostly data: guard rules, policies, report
+# templates and a skill, which nable validates and nothing in them runs. One
+# org-context adapter carries code (nable_change_control/approvals.py): the
+# broker runs it out of process with no network, no secrets and no data
+# scopes; it reads the CODEOWNERS file and the GitHub exports you point it at,
+# and every fact it returns lands as a proposal a person confirms.
+# Check it with:
+#   nable pack validate packs/change-control
+[pack]
+name        = "change-control"
+namespace   = "io.github.getnable"
+version     = "1.0.0"
+description = "Change control for SOC 2: guard rules that tighten during change freezes, freeze-window templates, approval chains proposed from CODEOWNERS and GitHub, and CC8.1 evidence from the guard ledger"
+license     = "Apache-2.0"
+nable_api   = ">=1.0,<2.0"
+maintainers = ["@getnable"]
+support     = "first-party"
+repository  = "https://github.com/getnable/packs"
+status      = "active"
+
+# read_data: the evidence report reads the guard ledger. write_org: the
+# adapter proposes approval facts, never confirms them. No network, no
+# secrets, no act: it opens no ticket and no pull request.
+[capabilities]
+read_data    = ["ledger.guard"]
+write_org    = ["proposals"]
+guard        = "tighten-only"
+max_autonomy = "L1"
+
+[provides]
+policies    = ["policies/*.yaml"]
+guard_rules = ["guard/*.yaml"]
+reports     = ["reports/*"]
+skills      = ["skills/change-control/SKILL.md"]
+adapters    = [{id = "approval-chains", entry = "nable_change_control.approvals:propose"}]
+
+[compat]
+clouds    = ["any"]
+harnesses = ["claude-code", "cursor", "codex", "copilot", "gemini", "cline"]
