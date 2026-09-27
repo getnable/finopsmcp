@@ -34,6 +34,22 @@ All notable changes to finops-mcp (nable).
   an undeclared scope is refused. The `repo.files` data scope hands an
   adapter files it names from the repos it is run for. Adapters get context:
   `cwd`, and `nable pack run --context key=value` for their inputs.
+- **Pack credentials and settings.** `[capabilities].secrets` now means
+  credentials: besides the pack's log, their values are kept out of
+  everything it returns. A proposal or a FOCUS row that carries one in any
+  field is refused (the problem names the credential, never the value), and
+  sink receipts, problems, `nable pack run` output and pack reports have
+  them redacted, so a pack can no longer write its token into `nable.org/`
+  YAML. The new `settings` list declares configuration that is not a
+  credential (an org name, an API URL), passed the same way and set with
+  `nable pack setting set <ns/name> NAME VALUE`; its values may appear in
+  proposals. A setting name that reads as a credential is refused. Both are
+  shown at install and in audit, and an added name in either waits for
+  approval again. A manifest with only `secrets` works as before.
+  `org-bootstrap` declares `GITHUB_TOKEN` and `BACKSTAGE_TOKEN` as secrets
+  and `GITHUB_ORG`, `GITHUB_API_URL` and `BACKSTAGE_URL` as settings (set
+  `GITHUB_ORG` with `nable pack setting set`; a value stored earlier with
+  `nable pack secret set` keeps working).
 
 ## 0.10.0
 

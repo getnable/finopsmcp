@@ -17,13 +17,14 @@ interview below.
    nable pack install <a signed release of io.github.getnable/org-bootstrap>
    ```
 
-2. Give the GitHub adapter its token and organization. Each value is read
-   from a prompt (not echoed) or stdin, never the command line, and stored
-   in the pack's own vault entry:
+2. Give the GitHub adapter its token (a credential: read from a prompt,
+   not echoed, or stdin, never the command line) and its organization (a
+   setting: it may be given on the command line). Both are stored in the
+   pack's own vault entries:
 
    ```
    nable pack secret set io.github.getnable/org-bootstrap GITHUB_TOKEN
-   nable pack secret set io.github.getnable/org-bootstrap GITHUB_ORG
+   nable pack setting set io.github.getnable/org-bootstrap GITHUB_ORG your-org
    ```
 
    The Backstage adapter needs nothing to read the `catalog-info.yaml` files
@@ -105,24 +106,28 @@ skipped. Entities outside Backstage's default namespace keep it
   fine-grained token with read access to the organization's members (or a
   classic token with `read:org`) is enough.
 
-## Secrets
+## Secrets and settings
 
-All optional, each from the pack's own vault entry (`nable pack secret set
-io.github.getnable/org-bootstrap NAME`), never from your environment:
+All optional, each from the pack's own vault entry, never from your
+environment. The two tokens are credentials (`secrets`): set with `nable pack
+secret set io.github.getnable/org-bootstrap NAME`, the value read from a
+prompt or stdin. The rest are settings (`settings`): configuration, not
+credentials, set with `nable pack setting set
+io.github.getnable/org-bootstrap NAME VALUE`.
 
-| Secret | Used for |
-|---|---|
-| `GITHUB_TOKEN` | the GitHub API, in the Authorization header only |
-| `GITHUB_ORG` | the organization to read |
-| `GITHUB_API_URL` | GitHub Enterprise Server (`https://<host>/api/v3`) |
-| `BACKSTAGE_URL` | the Backstage instance's base URL |
-| `BACKSTAGE_TOKEN` | a Backstage service token, when the instance needs one |
+| Name | Declared as | Used for |
+|---|---|---|
+| `GITHUB_TOKEN` | secret | the GitHub API, in the Authorization header only |
+| `BACKSTAGE_TOKEN` | secret | a Backstage service token, when the instance needs one |
+| `GITHUB_ORG` | setting | the organization to read; it appears in the subjects and sources it proposes |
+| `GITHUB_API_URL` | setting | GitHub Enterprise Server (`https://<host>/api/v3`) |
+| `BACKSTAGE_URL` | setting | the Backstage instance's base URL |
 
 A token is sent only in the Authorization header, over https, to a host the
 pack declares. The adapters refuse redirects (a redirect could carry the
 token elsewhere) and use no proxy. No token appears in a proposal, a source
-or the pack's log, and the broker redacts every declared secret's value from
-the log as well.
+or the pack's log: the broker redacts each credential's value from the log,
+and refuses any proposal that carries one, in any field.
 
 ## Network
 

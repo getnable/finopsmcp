@@ -16,18 +16,19 @@ carry code. The core never imports that code. For each call it:
      the pack from there, so a file swapped in the packs root after the check
      is not the file that runs; starts `python -I -B` running
      finops.packs.host in a fresh process group, in a throwaway HOME, with a
-     scrubbed environment: PATH, HOME, LANG, and the values of the secrets the
-     manifest declares, read only from the pack's own vault namespace
-     (`pack:<namespace>/<name>:<NAME>`, set with `nable pack secret set`).
-     Never from nable's environment or its provider keys: no FINOPS_*, no
-     AWS_*, no cloud credentials, no vault key cross;
+     scrubbed environment: PATH, HOME, LANG, and the values of the secrets
+     (credentials) and settings the manifest declares, read only from the
+     pack's own vault namespace (`pack:<namespace>/<name>:<NAME>`, set with
+     `nable pack secret set` and `nable pack setting set`). Never from
+     nable's environment or its provider keys: no FINOPS_*, no AWS_*, no
+     cloud credentials, no vault key cross;
   3. speaks JSON-RPC 2.0 over the child's stdin/stdout, one object per line
      (host.py lists the methods), with a per-call timeout that holds even when
      the child stops reading (writes go through a bounded queue and a writer
      thread; past the deadline the child is killed), at most
      MAX_INFLIGHT of the child's requests unanswered at once, and a cap on
      everything the child writes to stdout; the child's stderr is kept,
-     truncated and with declared secret values redacted, in
+     truncated and with its credential values redacted, in
      <packs root>/logs/<namespace>/<name>.log;
   4. answers the child's data.read requests only for scopes the manifest
      declares in read_data (focus.cost from the cost store, org.owners and
@@ -38,7 +39,11 @@ carry code. The core never imports that code. For each call it:
      (invalid rows are dropped and reported), org facts through
      finops.org.make_fact (always status proposed, source prefixed with the
      pack id), and sink deliveries against the declared `act` kinds and
-     `max_autonomy`, checked before the child is even started.
+     `max_autonomy`, checked before the child is even started. A fact or a
+     row that carries the value of one of the pack's credentials anywhere
+     (subject, value, source, any field) is refused and reported by the
+     credential's name; a sink's receipt and every problem and error have
+     them redacted. Settings are not credentials and pass as they are.
 
 Network, honestly. On Linux, a pack that declares no network runs in its own
 empty network namespace (`unshare --user --net`) when the kernel allows
@@ -224,8 +229,12 @@ def secret_value(pack_id: str, name: str) -> str | None:
     return _vault_get(vault_entry_name(pack_id, name))
 
 
-def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | None]:
-    """(why the pair is refused, a note) for `nable pack secret`."""
+def _check_secret_target(pack_id: str, name: str, *, setting: bool = False
+                         ) -> tuple[str | None, str | None]:
+    """(why the pair is refused, a note) for `nable pack secret` (or, with
+    `setting`, `nable pack setting`). A name the installed pack declares as
+    a credential is never stored as a setting, whose value is taken from the
+    command line."""
     from .manifest import FIRST_PARTY_NAMESPACES, check_name, check_namespace
     ns, sep, pname = pack_id.partition("/")
     if not sep or check_namespace(ns) or check_name(pname):
@@ -235,21 +244,35 @@ def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | Non
     except PackError:
         e = None
     first_party = (e.get("tier") == "first-party") if e else ns in FIRST_PARTY_NAMESPACES
-    why = caps_mod.check_secret(name, first_party=first_party)
+    caps = (e.get("capabilities") or {}) if e else {}
+    secrets, settings = caps.get("secrets") or (), caps.get("settings") or ()
+    if setting:
+        if name in secrets:
+            return (f"{name}: {pack_id} declares it as a credential, whose value never comes "
+                    f"from the command line: `nable pack secret set {pack_id} {name}`"), None
+        why = caps_mod.check_setting(name, first_party=first_party)
+    else:
+        why = caps_mod.check_secret(name, first_party=first_party)
     if why:
         return f"{name}: {why}", None
+    what = "setting" if setting else "secret"
     note = None
     if e is None:
-        note = f"{pack_id} is not installed; the secret waits for it"
-    elif name not in ((e.get("capabilities") or {}).get("secrets") or ()):
+        note = f"{pack_id} is not installed; the {what} waits for it"
+    elif name not in secrets and name not in settings:
         note = (f"the installed {pack_id} does not declare {name}, so it is not passed to it "
                 "until a version that declares it is approved")
+    elif not setting and name in settings:
+        note = (f"{pack_id} declares {name} as a setting, not a credential: `nable pack "
+                f"setting set {pack_id} {name} VALUE` sets it too")
     return None, note
 
 
-def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
-    """Store `value` as the pack's secret `name` in nable's vault."""
-    why, note = _check_secret_target(pack_id, name)
+def set_secret(pack_id: str, name: str, value: str, *, setting: bool = False
+               ) -> dict[str, Any]:
+    """Store `value` as the pack's secret (or, with `setting`, its setting)
+    `name` in nable's vault. Both live under pack:<id>:<NAME>."""
+    why, note = _check_secret_target(pack_id, name, setting=setting)
     if why:
         raise PackError(why)
     try:
@@ -261,8 +284,8 @@ def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
     return {"pack": pack_id, "name": name, "vault_entry": vault_entry_name(pack_id, name), "note": note}
 
 
-def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
-    why, _ = _check_secret_target(pack_id, name)
+def remove_secret(pack_id: str, name: str, *, setting: bool = False) -> dict[str, Any]:
+    why, _ = _check_secret_target(pack_id, name, setting=setting)
     if why:
         raise PackError(why)
     removed = False
@@ -276,9 +299,10 @@ def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
 
 
 def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]]:
-    """(the child's environment, the secret values in it). Only PATH, HOME,
-    LANG and the declared secrets, each from the pack's own vault namespace;
-    nothing inherited beyond those."""
+    """(the child's environment, the credential values in it). Only PATH,
+    HOME, LANG and the declared secrets and settings, each from the pack's
+    own vault namespace; nothing inherited beyond those. Only the secrets
+    are credentials, redacted from and refused in what the pack returns."""
     env = {"PATH": os.environ.get("PATH") or os.defpath, "HOME": home,
            "LANG": os.environ.get("LANG") or "C.UTF-8"}
     if os.name == "nt":  # Python on Windows needs these to start and to open sockets
@@ -293,6 +317,12 @@ def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]
         v = secret_value(prep.pack_id, name)
         if v is not None:
             env[name] = secrets[name] = v
+    for name in prep.capabilities.get("settings") or ():
+        if name in secrets or caps_mod.check_setting(name, first_party=first_party):
+            continue  # validated at install; a credential is never passed as a setting
+        v = secret_value(prep.pack_id, name)
+        if v is not None:
+            env[name] = v
     return env, secrets
 
 
@@ -762,11 +792,50 @@ def log_path(prep: Prepared) -> Path:
     return store.packs_root() / "logs" / prep.namespace / f"{prep.name}.log"
 
 
+# A credential shorter than this is not looked for: it would match (and
+# redact) ordinary text.
+MIN_REDACT = 4
+
+
 def _redact(text: str, secrets: dict[str, str]) -> str:
     for name, value in secrets.items():
-        if len(value) >= 4:
+        if len(value) >= MIN_REDACT:
             text = text.replace(value, f"[redacted {name}]")
     return text
+
+
+def _carries(obj: Any, secrets: dict[str, str]) -> str | None:
+    """The name of a credential whose value appears in any string of `obj`
+    (keys included, at any depth), or None."""
+    live = [(n, v) for n, v in secrets.items() if len(v) >= MIN_REDACT]
+    if not live:
+        return None
+    stack: list[Any] = [obj]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            for n, v in live:
+                if v in cur:
+                    return n
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, list | tuple):
+            stack.extend(cur)
+    return None
+
+
+def _scrub(obj: Any, secrets: dict[str, str]) -> Any:
+    """`obj` with every credential value redacted from its strings."""
+    if not secrets:
+        return obj
+    if isinstance(obj, str):
+        return _redact(obj, secrets)
+    if isinstance(obj, dict):
+        return {_scrub(k, secrets): _scrub(v, secrets) for k, v in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [_scrub(v, secrets) for v in obj]
+    return obj
 
 
 def _write_log(path: Path, header: str, body: str) -> None:
@@ -823,8 +892,10 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
             repos: list[Path] | None = None) -> tuple[Any, dict[str, Any]]:
     """Start the host, initialize it, make one call, stop it. Returns (the raw
     result, a report: network mode, declared and observed hosts, where the
-    entry was loaded from, the log path). `repos` are the repositories this
-    call may read through repo.files. Raises BrokerError."""
+    entry was loaded from, the log path, and under "credentials" the values
+    of the pack's credentials, which run() checks the result against and
+    never returns). `repos` are the repositories this call may read through
+    repo.files. Raises BrokerError, with the credentials redacted."""
     timeout = DEFAULT_TIMEOUT_S if timeout is None else float(timeout)
     max_output = MAX_OUTPUT_BYTES if max_output is None else int(max_output)
     from . import API_VERSION
@@ -838,6 +909,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
     code_root = _private_copy(prep) if prep.files else prep.root
     home = tempfile.mkdtemp(prefix="nable-pack-")
     env, secrets = child_env(prep, home)
+    report["credentials"] = secrets
 
     def on_notify(m: str, p: dict[str, Any]) -> None:
         if m == "audit.network" and len(observed) < 200:
@@ -1039,6 +1111,7 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
                                         "repos": [r.public(i) for i, r in enumerate(refs)]}}
     raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output,
                           repos=roots)
+    creds: dict[str, str] = report.pop("credentials", None) or {}
     problems: list[str] = []
     dropped = 0
     output: Any
@@ -1048,6 +1121,12 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
             raise BrokerError(f"{pack_id} {entry_id}: fetch_costs returned no rows list")
         output = []
         for i, r in enumerate(rows):
+            leaked = _carries(r, creds)
+            if leaked:
+                dropped += 1
+                _note(problems, f"row {i} dropped: it carries the value of the credential "
+                      f"{leaked}")
+                continue
             try:
                 output.append(focus_row(r))
             except (ValueError, TypeError) as e:
@@ -1059,6 +1138,15 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
             raise BrokerError(f"{pack_id} {entry_id}: propose returned no facts list")
         output = []
         for i, f in enumerate(facts):
+            # A credential in any field (subject, value, source, a note) would
+            # land in nable.org YAML, a report or a terminal: the proposal is
+            # refused, and the problem names the credential, never its value.
+            leaked = _carries(f, creds)
+            if leaked:
+                dropped += 1
+                _note(problems, f"fact[{i}] dropped: it carries the value of the credential "
+                      f"{leaked}")
+                continue
             try:
                 output.append(_fact(pack_id, f, problems, i))
             except (ValueError, TypeError) as e:
@@ -1068,7 +1156,8 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
         receipt = raw.get("receipt") if isinstance(raw, dict) else None
         if not isinstance(receipt, dict):
             raise BrokerError(f"{pack_id} {entry_id}: deliver returned no receipt object")
-        output = receipt
+        output = _scrub(receipt, creds)
+    problems = [_redact(p, creds) for p in problems]
     if len(problems) >= MAX_PROBLEMS and dropped > MAX_PROBLEMS:
         problems.append(f"... and {dropped - MAX_PROBLEMS} more dropped")
     return RunResult(pack_id, entry_id, kind, method, output, dropped, problems,

@@ -165,13 +165,20 @@ def pack_code(monkeypatch):
         sys.modules.pop(mod, None)
 
 
+CREDENTIALS = ["BACKSTAGE_TOKEN", "GITHUB_TOKEN"]
+SETTINGS = ["BACKSTAGE_URL", "GITHUB_API_URL", "GITHUB_ORG"]
+
+
 def _ctx(entry: str, *, network=(), secrets=None, data=None):
+    """`secrets` names credentials and settings alike; each goes where the
+    manifest declares it."""
+    given = dict(secrets or {})
     return sdk.Context.for_testing(
         pack_id=PID, kind="adapters", entry_id=entry,
         capabilities={"read_data": ["repo.files"], "network": list(network),
-                      "secrets": ["BACKSTAGE_TOKEN", "BACKSTAGE_URL", "GITHUB_API_URL",
-                                  "GITHUB_ORG", "GITHUB_TOKEN"]},
-        secrets=secrets or {}, data=data or {})
+                      "secrets": CREDENTIALS, "settings": SETTINGS},
+        secrets={k: v for k, v in given.items() if k in CREDENTIALS},
+        settings={k: v for k, v in given.items() if k in SETTINGS}, data=data or {})
 
 
 # ── the manifest ──────────────────────────────────────────────────────────────
@@ -190,8 +197,7 @@ def test_the_pack_validates_as_nable_pack_validate_does(capsys):
     assert warning.startswith(f"install will refuse it: {PID} says it is first-party")
     assert r["capabilities"] == {
         "read_data": ["repo.files"],
-        "secrets": ["BACKSTAGE_TOKEN", "BACKSTAGE_URL", "GITHUB_API_URL", "GITHUB_ORG",
-                    "GITHUB_TOKEN"],
+        "secrets": CREDENTIALS, "settings": SETTINGS,
         "network": ["api.github.com"], "write_org": ["proposals"], "max_autonomy": "L1"}
     assert not any(p.suffix == ".pyc" or p.name == "__pycache__" for p in PACK.rglob("*"))
     # Shipped unsigned: a release is signed with nable's first-party key.

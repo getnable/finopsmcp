@@ -89,15 +89,16 @@ def repo_owner_facts(repo_teams: dict[str, list[tuple[int, str]]], host: str, or
 
 def propose(ctx: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
     token = ctx.secret("GITHUB_TOKEN")
-    org = (ctx.secret("GITHUB_ORG") or "").strip()
+    org = (ctx.setting("GITHUB_ORG") or "").strip()
     if not token or not org:
         ctx.log("github-teams: GITHUB_TOKEN and GITHUB_ORG are not both set (nable pack secret "
-                "set io.github.getnable/org-bootstrap GITHUB_TOKEN), so GitHub was not read")
+                "set io.github.getnable/org-bootstrap GITHUB_TOKEN; nable pack setting set "
+                "io.github.getnable/org-bootstrap GITHUB_ORG <org>), so GitHub was not read")
         return []
     if not _ORG.match(org):
         ctx.log("github-teams: GITHUB_ORG is not a GitHub organization name; GitHub was not read")
         return []
-    base = (ctx.secret("GITHUB_API_URL") or DEFAULT_API).strip().rstrip("/")
+    base = (ctx.setting("GITHUB_API_URL") or DEFAULT_API).strip().rstrip("/")
     why = web.url_problem(ctx, base)
     if why:
         ctx.log(f"github-teams: the GitHub API URL {why}; GitHub was not read")

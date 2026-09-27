@@ -13,11 +13,20 @@ capability is one nobody can review, so it is one nobody can approve.
     read_data     nable data scopes (READ_DATA_SCOPES)
     read_cloud    provider:service:Action, read verbs only, no credential or
                   secret services (aws:ce:GetCostAndUsage, k8s:pods:list)
-    secrets       environment-variable names the core passes in from the
-                  pack's own vault namespace (`nable pack secret set`);
-                  nable's own (FINOPS_*, NABLE_*) are never grantable, and
-                  cloud credential names (AWS_*, GOOGLE_*, AZURE_CLIENT_SECRET,
-                  ...) only to a first-party pack (is_cloud_credential)
+    secrets       credentials (tokens, keys, passwords): environment-variable
+                  names the core passes in from the pack's own vault
+                  namespace (`nable pack secret set`). Their values are
+                  redacted from everything the pack returns and logs, and a
+                  proposal or a row that carries one is refused. nable's own
+                  (FINOPS_*, NABLE_*) are never grantable, and cloud
+                  credential names (AWS_*, GOOGLE_*, AZURE_CLIENT_SECRET, ...)
+                  only to a first-party pack (is_cloud_credential)
+    settings      non-secret configuration (an org name, an API URL), passed
+                  in the same way from the same vault namespace (`nable pack
+                  setting set`) but not treated as credentials: a pack may
+                  put a setting's value in what it proposes. A setting name
+                  that looks like a credential (*_TOKEN, *_KEY, *PASSWORD*,
+                  *SECRET*, ...) is refused, and so is a name declared as both
     network       host[:port] egress allowlist; empty means none
     write_org     "proposals" only: a pack may propose org facts, never confirm
     act           "pr" and "ticket"; "execute" is first-party only
@@ -128,14 +137,18 @@ _METADATA_HOSTS = frozenset({
     "metadata", "instance-data", "instance-data.ec2.internal",
 })
 
-LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "network", "write_org",
-                              "act", "pricing")
+LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "settings", "network",
+                              "write_org", "act", "pricing")
 SCALAR_KEYS: tuple[str, ...] = ("guard", "max_autonomy")
 KEYS: tuple[str, ...] = LIST_KEYS + SCALAR_KEYS
 
 _SERVICE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}$")
 _ACTION = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,127}\*?$")
 _SECRET = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+# A setting's value is not redacted, so a name that reads as a credential is
+# refused as a setting: declare it under secrets. Plain words, on purpose.
+_CREDENTIAL_WORDS = re.compile(r"(?:^|_)(?:TOKEN|KEY|PAT|PASS)(?:$|_)|SECRET|PASSWORD|PASSWD|"
+                               r"CREDENTIAL|PRIVATE|APIKEY")
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -214,6 +227,20 @@ def check_secret(value: str, *, first_party: bool = False) -> str | None:
     return None
 
 
+def check_setting(value: str, *, first_party: bool = False) -> str | None:
+    """Why a settings name is refused, or None. The same names as a secret,
+    minus any that reads as a credential and every cloud credential name."""
+    why = check_secret(value, first_party=first_party)
+    if why:
+        return why
+    if is_cloud_credential(value):
+        return f"{value} is a cloud credential (or points a cloud SDK at one), never a setting"
+    if _CREDENTIAL_WORDS.search(value):
+        return (f"{value} reads as a credential, and a setting's value is not redacted: "
+                "declare it under secrets")
+    return None
+
+
 def validate(raw: Any, *, first_party: bool) -> tuple[dict[str, Any], list[Problem]]:
     """Normalize `[capabilities]` and list what is wrong with it.
 
@@ -262,6 +289,11 @@ def validate(raw: Any, *, first_party: bool) -> tuple[dict[str, Any], list[Probl
                                     f"{a} is above {ceiling}, the ceiling for {who}"))
         else:
             out["max_autonomy"] = a
+    both = set(out.get("secrets", ())) & set(out.get("settings", ()))
+    if both:
+        problems.append(Problem("capabilities.settings",
+                                f"{', '.join(sorted(both))} is declared both as a secret and as "
+                                "a setting; a credential is declared under secrets only"))
     if out.get("act") and _level(out.get("max_autonomy", "L0")) < _level(MIN_AUTONOMY_TO_ACT):
         problems.append(Problem("capabilities.max_autonomy",
                                 f"act lists {', '.join(out['act'])}, which is proposing "
@@ -278,6 +310,8 @@ def _check_value(key: str, v: str, *, first_party: bool) -> str | None:
         return check_read_cloud(v)
     if key == "secrets":
         return check_secret(v, first_party=first_party)
+    if key == "settings":
+        return check_setting(v, first_party=first_party)
     if key == "network":
         return check_network(v)
     if key == "write_org":
@@ -302,8 +336,13 @@ def describe(key: str, value: str) -> str:
     if key == "network":
         return f"{value}: may connect to this host"
     if key == "secrets":
-        return (f"{value}: receives this secret from its own vault entry (`nable pack secret "
-                f"set <pack> {value}`), never from your environment or nable's own keys")
+        return (f"{value}: receives this credential from its own vault entry (`nable pack "
+                f"secret set <pack> {value}`), never from your environment or nable's own keys; "
+                "its value is redacted from everything the pack returns")
+    if key == "settings":
+        return (f"{value}: receives this setting, not a credential, from its own vault entry "
+                f"(`nable pack setting set <pack> {value} VALUE`); it may appear in what the "
+                "pack proposes")
     if key == "read_cloud":
         return f"{value}: may call this read-only cloud API"
     if key == "max_autonomy":
@@ -348,10 +387,13 @@ def exceeds(caps: dict[str, Any], ceiling: dict[str, Any]) -> list[Problem]:
     The ceiling is strict: a key the ceiling does not list allows nothing.
     read_cloud and network entries in the ceiling may be glob patterns
     ("aws:ce:*", "*.corp.internal:443"); a pack value is covered when it
-    matches one. max_autonomy is a level; guard is a value."""
+    matches one. A ceiling with no `settings` reads its `secrets` for them: a
+    name an org allows as a credential it allows as a setting. max_autonomy
+    is a level; guard is a value."""
     problems: list[Problem] = []
     for k in LIST_KEYS:
-        allowed = [str(x) for x in (ceiling.get(k) or [])]
+        src = "secrets" if k == "settings" and "settings" not in ceiling else k
+        allowed = [str(x) for x in (ceiling.get(src) or [])]
         for v in caps.get(k, ()):
             if not any(fnmatch.fnmatchcase(v, pat) for pat in allowed):
                 problems.append(Problem(f"capabilities.{k}",

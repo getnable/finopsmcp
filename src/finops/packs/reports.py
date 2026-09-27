@@ -356,6 +356,24 @@ def render(pack_id: str, name: str | None = None, *, since: datetime | None = No
             raise PackError(f"--each {each}: that is not a list of records in the values "
                             "this report reads")
         text = [tmpl.render({**values, "item": item}) for item in items]
+    # The pack's own credentials never reach a report, whatever put them in
+    # the data it read: they are redacted from the text and the values.
+    from .broker import _scrub
+    creds = _credentials(pack_id)
     return {"pack": pack_id, "report": tmpl.path,
             "scopes": list(dict.fromkeys(SOURCES[n].scope for n in used)),
-            "sources": used, "text": text, "values": values}
+            "sources": used, "text": _scrub(text, creds), "values": _scrub(values, creds)}
+
+
+def _credentials(pack_id: str) -> dict[str, str]:
+    """{name: value} of the credentials (secrets) the installed pack
+    declares and the org has set."""
+    from . import broker, store
+    e = store.read_index()["packs"].get(pack_id) or {}
+    out: dict[str, str] = {}
+    for name in (e.get("capabilities") or {}).get("secrets") or ():
+        v = broker.secret_value(pack_id, str(name))
+        if v:
+            out[str(name)] = v
+    return out
+

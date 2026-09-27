@@ -212,7 +212,7 @@ def api_facts(ctx: Any, base_url: str) -> list[dict[str, Any]]:
 def propose(ctx: Any, context: dict[str, Any]) -> list[dict[str, Any]]:
     """Owner and team proposals from the local catalog files, then the API."""
     facts = local_facts(ctx, context)
-    url = ctx.secret("BACKSTAGE_URL")
+    url = ctx.setting("BACKSTAGE_URL")
     if url:
         facts.extend(api_facts(ctx, url))
     return facts[:MAX_FACTS]

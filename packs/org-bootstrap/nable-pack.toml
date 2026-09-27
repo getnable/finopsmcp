@@ -9,7 +9,7 @@
 #   nable pack validate packs/org-bootstrap
 #   nable pack install <a release of it>
 #   nable pack secret set io.github.getnable/org-bootstrap GITHUB_TOKEN
-#   nable pack secret set io.github.getnable/org-bootstrap GITHUB_ORG
+#   nable pack setting set io.github.getnable/org-bootstrap GITHUB_ORG your-org
 #   nable org init
 [pack]
 name        = "org-bootstrap"
@@ -25,14 +25,18 @@ status      = "active"
 
 # repo.files: catalog-info.yaml files nable reads from the repos org init
 #   reads, handed over as text (the backstage adapter needs no network).
-# Each secret comes from this pack's own vault entry, never the environment.
+# secrets are credentials, settings are configuration; each comes from this
+#   pack's own vault entry, never the environment. A credential's value is
+#   refused in anything the adapters return; a setting's (the org name in a
+#   subject, say) is not.
 #   BACKSTAGE_URL and BACKSTAGE_TOKEN are optional (the catalog API);
 #   GITHUB_API_URL is optional (GitHub Enterprise Server).
 # network: only the GitHub API. A Backstage or Enterprise Server host is the
 #   org's own: add it here and approve the changed pack.
 [capabilities]
 read_data    = ["repo.files"]
-secrets      = ["BACKSTAGE_TOKEN", "BACKSTAGE_URL", "GITHUB_API_URL", "GITHUB_ORG", "GITHUB_TOKEN"]
+secrets      = ["BACKSTAGE_TOKEN", "GITHUB_TOKEN"]
+settings     = ["BACKSTAGE_URL", "GITHUB_API_URL", "GITHUB_ORG"]
 network      = ["api.github.com"]
 write_org    = ["proposals"]
 max_autonomy = "L1"

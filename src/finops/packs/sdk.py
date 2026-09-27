@@ -18,18 +18,24 @@ imports the function and calls it with a Context and the call's parameters.
                 is one of the pack's declared `act` kinds
 
     def fetch(ctx, start, end):
-        path = ctx.secret("COSTS_CSV_PATH")          # declared in [capabilities].secrets
-        owners = ctx.read_data("org.owners")        # declared in read_data
+        token = ctx.secret("COSTS_API_TOKEN")      # declared in [capabilities].secrets
+        url = ctx.setting("COSTS_API_URL")         # declared in [capabilities].settings
+        owners = ctx.read_data("org.owners")       # declared in read_data
         ...
 
-The pack's process has a scrubbed environment (PATH, a throwaway HOME, LANG
-and the secrets it declared), its stdout is not the protocol channel (print
-freely; it goes to the pack's log), and network connections to hosts it did
-not declare are refused. ctx.secret() and ctx.read_data() refuse anything the
-manifest did not declare, and the core refuses it again on its side.
+A secret is a credential: its value is redacted from the pack's log, and a
+fact or a row that carries it is refused. A setting (an org name, a URL) is
+configuration a pack may use in what it proposes.
 
-Context.for_testing() gives a Context with canned data and secrets, so a pack's
-own tests can call its entry point without nable's broker.
+The pack's process has a scrubbed environment (PATH, a throwaway HOME, LANG
+and the secrets and settings it declared), its stdout is not the protocol
+channel (print freely; it goes to the pack's log), and network connections
+to hosts it did not declare are refused. ctx.secret(), ctx.setting() and
+ctx.read_data() refuse anything the manifest did not declare, and the core
+refuses it again on its side.
+
+Context.for_testing() gives a Context with canned data, secrets and settings,
+so a pack's own tests can call its entry points without nable's broker.
 """
 from __future__ import annotations
 
@@ -54,7 +60,8 @@ class Context:
     def __init__(self, *, pack_id: str, kind: str, entry_id: str, api_version: str,
                  capabilities: dict[str, Any] | None = None,
                  request: Callable[[str, dict[str, Any]], Any] | None = None,
-                 secrets: dict[str, str] | None = None):
+                 secrets: dict[str, str] | None = None,
+                 settings: dict[str, str] | None = None):
         self.pack_id = pack_id
         self.kind = kind
         self.entry_id = entry_id
@@ -62,17 +69,31 @@ class Context:
         self.capabilities: dict[str, Any] = dict(capabilities or {})
         self._request = request
         self._secrets = secrets
+        self._settings = settings
 
     def _declared(self, key: str) -> tuple[str, ...]:
         return tuple(self.capabilities.get(key) or ())
 
     def secret(self, name: str) -> str | None:
-        """A secret the manifest declares, passed in by the core; None when
-        the org has not set it. Raises PermissionError for an undeclared name."""
+        """A credential the manifest declares under secrets, passed in by the
+        core; None when the org has not set it. Raises PermissionError for an
+        undeclared name."""
         if name not in self._declared("secrets"):
-            raise PermissionError(f"{name} is not in this pack's declared secrets")
+            hint = " (it is a setting: ctx.setting)" if name in self._declared("settings") else ""
+            raise PermissionError(f"{name} is not in this pack's declared secrets{hint}")
         if self._secrets is not None:
             return self._secrets.get(name)
+        return os.environ.get(name)
+
+    def setting(self, name: str) -> str | None:
+        """A setting (not a credential) the manifest declares under
+        settings; None when the org has not set it. Raises PermissionError
+        for an undeclared name."""
+        if name not in self._declared("settings"):
+            hint = " (it is a secret: ctx.secret)" if name in self._declared("secrets") else ""
+            raise PermissionError(f"{name} is not in this pack's declared settings{hint}")
+        if self._settings is not None:
+            return self._settings.get(name)
         return os.environ.get(name)
 
     def read_data(self, scope: str, query: dict[str, Any] | None = None) -> Any:
@@ -93,7 +114,8 @@ class Context:
                     kind: str = "connectors", entry_id: str = "test",
                     capabilities: dict[str, Any] | None = None,
                     data: dict[str, Any] | None = None,
-                    secrets: dict[str, str] | None = None) -> Context:
+                    secrets: dict[str, str] | None = None,
+                    settings: dict[str, str] | None = None) -> Context:
         """A Context for a pack's own unit tests. `data` maps a scope to what
         read_data returns (or to a function of the query)."""
         canned = dict(data or {})
@@ -107,4 +129,5 @@ class Context:
 
         from . import API_VERSION
         return cls(pack_id=pack_id, kind=kind, entry_id=entry_id, api_version=API_VERSION,
-                   capabilities=capabilities, request=request, secrets=dict(secrets or {}))
+                   capabilities=capabilities, request=request, secrets=dict(secrets or {}),
+                   settings=dict(settings or {}))

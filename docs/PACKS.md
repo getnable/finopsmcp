@@ -194,13 +194,13 @@ call the broker:
    file swapped in the packs root after the check is not the file that runs);
    starts `python -I -B` running `finops.packs.host` in a new process group,
    in a throwaway HOME, with only `PATH`, `HOME`, `LANG` and the declared
-   secrets in its environment. No `FINOPS_*`, `NABLE_*` or cloud credentials
-   cross;
+   secrets and settings in its environment. No `FINOPS_*`, `NABLE_*` or cloud
+   credentials cross;
 3. speaks JSON-RPC 2.0 over stdin and stdout with a per-call timeout that
    holds even when the pack stops reading (writes to it are bound by the same
    deadline, and the process is killed when it passes), at most 64 of the
    pack's requests unanswered at once, and an output cap; stderr goes, truncated and with
-   secret values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
+   credential values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
 4. answers `data.read` only for declared `read_data` scopes (`focus.cost`,
    `org.owners`, `org.environments`, and `repo.files` from the repos an
    adapter call names, today; the other scopes say they are not available
@@ -210,7 +210,10 @@ call the broker:
 5. checks what comes back: FOCUS rows against nable's schema (invalid rows are
    dropped and reported), org facts as proposals whose source starts with the
    pack id, sink deliveries against the declared `act` kinds and
-   `max_autonomy` (checked before the process starts).
+   `max_autonomy` (checked before the process starts). A proposal or a row
+   that carries the value of one of the pack's credentials in any field is
+   refused, and the problem names the credential, never its value (see
+   Secrets and settings).
 
 Code must live in the pack directory, where its signature covers it. An entry
 point that resolves to an installed Python distribution instead runs only for
@@ -220,21 +223,63 @@ a pack the org allowlists.
 hands a pack no cloud credentials. A connector that needs an API key declares
 it in `secrets`.
 
-### Secrets
+### Secrets and settings
 
-A pack's secrets come only from its own entries in nable's vault, stored under
-`pack:<namespace>/<name>:<NAME>`:
+A pack declares what it is configured with in two lists:
+
+```toml
+[capabilities]
+secrets  = ["GITHUB_TOKEN"]                 # credentials: tokens, keys, passwords
+settings = ["GITHUB_ORG", "GITHUB_API_URL"] # configuration: names, URLs
+```
+
+Both reach the pack the same way: as environment variables, from its own
+entries in nable's vault (stored under `pack:<namespace>/<name>:<NAME>`),
+read in the pack with `ctx.secret(NAME)` and `ctx.setting(NAME)`. They
+differ in what nable does with their values:
+
+- A **secret** is a credential. Its value is redacted from the pack's log,
+  from a sink's receipt, from every problem and error the broker reports,
+  from `nable pack run` and from the pack's reports. A proposal (subject,
+  value, source, any other field) or a FOCUS row that carries it is refused:
+  it is dropped, and the problem says `fact[3] dropped: it carries the value
+  of the credential GITHUB_TOKEN`, so a token never lands in `nable.org/`
+  YAML. This catches a pack that puts its token where it should not; a pack
+  that encodes the value first gets past it, which is one more reason code
+  runs only when signed by a trusted key.
+- A **setting** is not a credential. A pack may use its value in what it
+  proposes (org-bootstrap puts the GitHub organization in subjects and
+  sources). A settings name that reads as a credential (one with a `TOKEN`,
+  `KEY`, `PAT` or `PASS` word, as in `GITHUB_TOKEN` or `API_KEY_ID`, or
+  with `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `PRIVATE` or `APIKEY`
+  anywhere in it) and every cloud credential name are refused at
+  validation: declare it under `secrets`. So is a name in both lists.
+
+A manifest with only `secrets` works as before, and every name in it is a
+credential. Both lists are shown at install and in `nable pack audit`, and
+an update that adds a name to either one waits for a person to approve it
+(a name moved from `secrets` to `settings` would otherwise stop being
+redacted without anyone saying so). Under `packs.allowed_capabilities`, a
+ceiling with no `settings` list reads its `secrets` list for settings.
 
 ```
 nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
 echo "$VALUE" | nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
 nable pack secret remove com.example/example-csv-connector EXAMPLE_COSTS_CSV
+
+nable pack setting set io.github.getnable/org-bootstrap GITHUB_ORG acme
+nable pack setting remove io.github.getnable/org-bootstrap GITHUB_ORG
 ```
 
-The value is read from a prompt (not echoed) or from stdin, never from the
-command line. A declared secret is never read from nable's environment or its
-provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack the
-keys nable itself uses. Cloud credential names are refused at validation for
+A secret's value is read from a prompt (not echoed) or from stdin, never
+from the command line. A setting's may be given on the command line (or,
+left out, from stdin or a prompt); `nable pack setting set` refuses a name
+the installed pack declares as a secret, so a credential never goes through
+argv. `nable pack secret set` also stores a declared setting (the same vault
+entry), which is how a value stored before a pack moved a name to
+`settings` keeps working. Neither is ever read from nable's environment or
+its provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack
+the keys nable itself uses. Cloud credential names are refused at validation for
 every pack that is not first-party: `AWS_*`, `GOOGLE_*`, `CLOUDSDK_*`,
 `AZURE_*`, `ARM_*`, `KUBECONFIG`, and anything ending in `_SECRET_ACCESS_KEY`
 or `_SESSION_TOKEN`. Each either is a cloud credential or points a cloud SDK at
@@ -285,8 +330,8 @@ An adapter's `context` holds `today`, `cwd` (the directory nable ran in; the
 pack runs in a throwaway directory of its own) and anything given with
 `nable pack run <pack> <adapter> --context key=value`.
 
-`ctx.secret(name)` and `ctx.read_data(scope, query)` refuse anything the
-manifest does not declare. Print freely: stdout is not the protocol channel.
+`ctx.secret(name)`, `ctx.setting(name)` and `ctx.read_data(scope, query)`
+refuse anything the manifest does not declare. Print freely: stdout is not the protocol channel.
 `sdk.Context.for_testing(...)` lets a pack's own tests call its entry points
 without the broker.
 
@@ -307,9 +352,10 @@ the org signs it or allowlists its digest.
 | `io.github.getnable/change-control` ("Change control (SOC 2)", `packs/change-control`) | Guard rules that ask about deploys and deny teardowns during a change freeze, and always deny admin merges, force pushes to protected branches and branch protection changes; freeze-window templates as proposed org facts; an adapter that proposes approval chains from CODEOWNERS and exported GitHub branch protection and environment settings; CC8.1 change-management evidence and change tickets from the guard ledger, as markdown and JSON. Evidence, not a certification. | `read_data = ["ledger.guard"]`, `write_org = ["proposals"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no network, no secrets |
 | `io.github.getnable/commitments-bounds` ("Commitments with bounds", `packs/commitments-bounds`) | Commitment bounds (coverage target, longest term, payment options, migration blackouts) that cut nable's commitment advice to them; guard rules that ask before every commitment purchase on AWS, Google Cloud and Azure and name the bound it would breach. Never buys anything. | `read_data = ["recommendations"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
 | `io.github.getnable/ai-spend` ("AI spend", `packs/ai-spend`) | A policy that flags AI spend without `feature:` or `customer:` request tags; guard rules that make every GPU or accelerator launch ask (AWS p, g, trn, inf and dl families, GCP a2, a3, a4, g2 and TPU types, Azure N-series); the skill `check-ai-budget` for coding agents; a report of AI spend by vendor, model, feature and customer. | `read_data = ["focus.cost"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
-| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`, `BACKSTAGE_TOKEN`), `max_autonomy = "L1"` |
+| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `BACKSTAGE_TOKEN`) and settings (`GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`), `max_autonomy = "L1"` |
 
-Each pack's README says what it reads, its secrets and its network, and why.
+Each pack's README says what it reads, its secrets, settings and network, and
+why.
 
 ### The `repo.files` data scope
 

@@ -77,6 +77,17 @@ def test_set_cannot_stand_in_for_a_scope_or_carry_a_line_break(packs_env, tmp_pa
         reports.render(pid, "brief", sets={"Title": "x"})
 
 
+def test_a_report_never_shows_the_packs_credentials(packs_env, tmp_path, monkeypatch):
+    from finops.packs import broker
+    token = "rep-" + "0f1e2d3c4b5a6978"  # pragma: allowlist secret
+    monkeypatch.setattr(broker, "_vault_get",
+                        {"pack:io.github.example/rep:REP_TOKEN": token}.get)
+    pid = _install(tmp_path, caps='read_data = ["ledger.guard"]\nsecrets = ["REP_TOKEN"]\n')
+    r = reports.render(pid, "brief", sets={"title": f"see {token}"})
+    assert token not in json.dumps(r, default=str)
+    assert r["text"].startswith("# see [redacted REP_TOKEN]\n")
+
+
 def test_each_needs_a_list_and_a_report_must_exist(packs_env, tmp_path):
     pid = _install(tmp_path)
     with pytest.raises(PackError, match="not a list of records"):

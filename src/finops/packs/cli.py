@@ -32,6 +32,12 @@
                                          its own vault namespace (the value is
                                          read from a prompt or stdin, never argv)
     nable pack secret remove <ns/name> <NAME>
+    nable pack setting set <ns/name> <NAME> [VALUE]
+                                         store a setting the pack declares (not
+                                         a credential: an org name, a URL), in
+                                         the same vault namespace; the value may
+                                         be given on the command line
+    nable pack setting remove <ns/name> <NAME>
 
 Exit codes: 0 done, 1 refused or failed (nothing changed), 2 usage.
 """
@@ -134,7 +140,14 @@ def add_parser(sub) -> None:
     sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
     sec.add_argument("pack_id", metavar="ns/name")
     sec.add_argument("env_var_name", metavar="NAME")
-    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, rp, sec, ps.choices["audit"]):
+    st = ps.add_parser("setting", help="Store or remove a setting (not a credential) a code "
+                                       "pack declares")
+    st.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
+    st.add_argument("pack_id", metavar="ns/name")
+    st.add_argument("env_var_name", metavar="NAME")
+    st.add_argument("setting_value", nargs="?", default=None, metavar="VALUE",
+                    help="the value (default: read from stdin or a prompt)")
+    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, rp, sec, st, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
     for sp in (i, u, r):
@@ -209,11 +222,16 @@ def _describe_plan(plan) -> str:
         for val in (vals if isinstance(vals, tuple) else (vals,)):
             lines.append(f"    {k:<12} {caps_mod.describe(k, val)}")
     if caps.get("secrets"):
-        lines.append(f"    Secrets come only from this pack's own vault entries (`nable pack "
-                     f"secret set {m.id} NAME`), never from your environment or the cloud and "
-                     "provider keys nable itself uses. Cloud credential names (AWS_*, "
-                     "GOOGLE_*, AZURE_*, KUBECONFIG, ...) are refused for a pack that is not "
-                     "first-party.")
+        lines.append(f"    Secrets are credentials. They come only from this pack's own vault "
+                     f"entries (`nable pack secret set {m.id} NAME`), never from your "
+                     "environment or the cloud and provider keys nable itself uses, and a "
+                     "proposal or a row that carries one is refused. Cloud credential names "
+                     "(AWS_*, GOOGLE_*, AZURE_*, KUBECONFIG, ...) are refused for a pack that "
+                     "is not first-party.")
+    if caps.get("settings"):
+        lines.append(f"    Settings are configuration, not credentials (`nable pack setting set "
+                     f"{m.id} NAME VALUE`): the pack may use their values in what it "
+                     "proposes.")
     if caps.get("pricing"):
         lines.append("    Its price books change the estimates nable shows. They never make a "
                      "change look cheaper to the guard or a budget check, which judge at the "
@@ -340,20 +358,32 @@ def _read_secret_value(name: str) -> str:
     return value
 
 
-def _secret(parsed, as_json: bool) -> int:
+def _secret(parsed, as_json: bool, *, setting: bool = False) -> int:
+    """`nable pack secret` (a credential: never from argv) and `nable pack
+    setting` (configuration: from argv, stdin or a prompt). Both store under
+    the pack's own vault namespace; a setting never overwrites a name the
+    pack declares as a credential."""
     from . import broker
     from .errors import PackError
     verb = parsed.pack_verb
+    what = "setting" if setting else "secret"
     if verb == "set":
-        why, _ = broker._check_secret_target(parsed.pack_id, parsed.env_var_name)
+        why, _ = broker._check_secret_target(parsed.pack_id, parsed.env_var_name,
+                                             setting=setting)
         if why:
             raise PackError(why)          # before asking for a value it would refuse
-        value = _read_secret_value(parsed.env_var_name)
-        r = broker.set_secret(parsed.pack_id, parsed.env_var_name, value)
+        given = getattr(parsed, "setting_value", None) if setting else None
+        value = given if given is not None else _read_secret_value(parsed.env_var_name)
+        if not value or len(value) > 64 * 1024:
+            raise PackError(f"A pack {what} is 1 byte to 64 KiB; nothing was stored")
+        r = broker.set_secret(parsed.pack_id, parsed.env_var_name, value, setting=setting)
         del value
-        text = (f"Stored {r['name']} for {r['pack']} in nable's vault (entry {r['vault_entry']}).")
+        text = (f"Stored the {what} {r['name']} for {r['pack']} in nable's vault "
+                f"(entry {r['vault_entry']}).")
     else:
-        r = broker.remove_secret(parsed.pack_id, parsed.env_var_name)
+        if setting and getattr(parsed, "setting_value", None) is not None:
+            raise PackError("nable pack setting remove takes no value")
+        r = broker.remove_secret(parsed.pack_id, parsed.env_var_name, setting=setting)
         text = (f"Removed {r['name']} for {r['pack']}." if r["removed"]
                 else f"{r['pack']} had no {r['name']} stored.")
     if r.get("note"):
@@ -549,8 +579,8 @@ def run(parsed) -> int:
             return _run_code(parsed, as_json)
         if action == "report":
             return _report(parsed, as_json)
-        if action == "secret":
-            return _secret(parsed, as_json)
+        if action in ("secret", "setting"):
+            return _secret(parsed, as_json, setting=action == "setting")
         if action == "new":
             root = inst.new_pack(parsed.name, parsed.pack_dir, namespace=parsed.pack_namespace)
             _out({"ok": True, "path": str(root)}, as_json,
@@ -618,6 +648,6 @@ def run(parsed) -> int:
         _err("Stopped; nothing was changed.")
         return EXIT_FAIL
     _err("usage: nable pack {validate,new,install,update,remove,list,audit,search,sign,"
-         "keygen,run,report,secret} ...")
+         "keygen,run,report,secret,setting} ...")
     return 2
 
