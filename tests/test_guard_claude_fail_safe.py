@@ -174,7 +174,7 @@ def test_either_form_is_ours(machine, command):
     path = _write(machine["project"], command)
     assert g.is_installed(path)
     assert g.broken_hook_command(path) is None
-    assert g.hook_surfaces(path) == {"bash": True, "mcp": True}
+    assert g.hook_surfaces(path) == {"bash": True, "mcp": True, "editor": True}
     assert g.unpinned_hook_command(path) is None
     assert g.pinned_elsewhere_hook_command(path) is None
     assert ga.state("claude", False) == "installed"

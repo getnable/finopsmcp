@@ -31,10 +31,13 @@ Two things only the plugin's hook has to handle:
   through unexamined and unrecorded until `nable guard on`. FINOPS_GUARD=off in
   the agent's environment does the same without the file.
 
-Everything here runs on every Bash and MCP tool call, before the guard is
-imported, so it is standard library only and reads at most three small JSON
-files. Like the rest of the guard it fails open: anything unexpected falls
-through to the normal hook, which judges.
+Everything here runs on every Bash, MCP and file-edit tool call, before the
+guard is imported, so it is standard library only and reads at most three
+small JSON files. A Claude Code file edit (Write, Edit, MultiEdit,
+NotebookEdit) is answered here unless it writes to one of the guard's own
+files (guard_paths): that goes on to the guard, which asks. Like the rest of
+the guard it fails open: anything unexpected falls through to the normal
+hook, which judges.
 
 The flag file lives in nable's data directory, FINOPS_DATA_DIR or ~/.finops,
 and not in a FINOPS_PROFILE directory: the hook runs in the agent's
@@ -217,6 +220,38 @@ def cli_hook_covers(tool_name: Any, project_dir: str | os.PathLike | None = None
     return None
 
 
+# ── Claude Code's file tools ──────────────────────────────────────────────────
+
+# The tools Claude Code edits files with. The hook's matcher names them
+# (guard._HOOK_MATCHER) so that an edit to one of the guard's own files
+# (guard_paths) asks; every other edit is answered here, before the guard is
+# imported, with Claude Code's neutral answer (silence).
+EDITOR_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+_EDITOR_PATH_KEYS = ("file_path", "notebook_path")
+
+
+def _editor_call(payload: dict) -> bool:
+    """A Claude Code file-tool call. Codex's payload is Claude-shaped but
+    carries turn_id; its file tools are not the guard's to judge here."""
+    return (payload.get("tool_name") in EDITOR_TOOLS and "turn_id" not in payload
+            and payload.get("hook_event_name") in (None, "PreToolUse"))
+
+
+def editor_target(tool_name: Any, tool_input: Any, cwd: Any = None):
+    """(guard_paths.Protected, path as given) when a file-tool call writes to
+    one of the guard's own files, else None."""
+    if tool_name not in EDITOR_TOOLS or not isinstance(tool_input, dict):
+        return None
+    from . import guard_paths
+    for key in _EDITOR_PATH_KEYS:
+        path = tool_input.get(key)
+        if isinstance(path, str) and path:
+            hit = guard_paths.match(path, cwd if isinstance(cwd, str) else None)
+            if hit is not None:
+                return hit, path
+    return None
+
+
 # ── The hook ───────────────────────────────────────────────────────────────────
 
 def run_hook(harness: str | None = None, via: str | None = None, stdin: Any = None,
@@ -224,22 +259,26 @@ def run_hook(harness: str | None = None, via: str | None = None, stdin: Any = No
     """`finops guard hook [--via plugin]`. Always exits 0.
 
     The guard itself is imported only when something is left to judge, so the
-    two silent answers cost a JSON parse and a few file reads."""
-    if via != VIA_PLUGIN:
-        from .guard_adapters import run_hook as judge
-        return judge(harness, stdin, stdout, stderr)
-    if is_off():
+    silent answers cost a JSON parse and a few file reads: the guard is off,
+    a settings hook judges this call instead, or it is a Claude Code file
+    edit to an ordinary file."""
+    plugin = via == VIA_PLUGIN
+    if plugin and is_off():
         return 0                        # silence is Claude Code's allow
     raw = ""
     try:
         raw = (stdin or sys.stdin).read()
         payload = json.loads(raw)
         if isinstance(payload, dict):
+            if (harness in (None, "claude") and _editor_call(payload)
+                    and editor_target(payload.get("tool_name"), payload.get("tool_input"),
+                                      payload.get("cwd")) is None):
+                return 0
             # Claude Code's project settings sit in the project root, which
             # the payload's cwd stops being after a `cd`.
             project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd")
-            if cli_hook_covers(payload.get("tool_name"),
-                               project if isinstance(project, str) else None):
+            if plugin and cli_hook_covers(payload.get("tool_name"),
+                                          project if isinstance(project, str) else None):
                 return 0
     except Exception:
         pass                            # the guard reads it again, and fails open
@@ -275,10 +314,12 @@ def parse_hook_args(argv: list[str]) -> tuple[str | None, str | None] | None:
 
 
 def hook_main(argv: list[str]) -> int | None:
-    """The plugin's hook, straight from the command line: skips the CLI's
-    start-up (telemetry, the argument parser for forty commands) on the path
-    that runs on every tool call. None means "not a plugin hook call"."""
+    """The hook, straight from the command line: skips the CLI's start-up
+    (telemetry, the argument parser for forty commands) on the path that
+    runs on every tool call, the plugin's and the one `nable guard install`
+    writes alike. None means "not a hook call this reads" (argparse then
+    answers as it always has)."""
     parsed = parse_hook_args(argv)
-    if parsed is None or parsed[1] != VIA_PLUGIN:
+    if parsed is None:
         return None
     return run_hook(*parsed)

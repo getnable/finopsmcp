@@ -61,9 +61,12 @@ def test_a_fresh_install_covers_bash_and_every_recognised_mcp_tool(machine):
     assert d["covered"] == [
         "Claude Code: Bash commands",
         f"Claude Code: MCP tool calls ({n} recognised tools: AWS, Kubernetes, Terraform)",
+        "Claude Code: Write, Edit, MultiEdit and NotebookEdit on the guard's own files",
     ]
     project = d["surfaces"][0]
-    assert (project["pin"], project["bash"], project["mcp"]) == ("pinned", True, True)
+    assert (project["pin"], project["bash"], project["mcp"], project["editor"]) == (
+        "pinned", True, True, True)
+    assert d["editor_tools"]["claude-code"] == "covered"
     assert d["ok"] is True
 
 
@@ -163,7 +166,7 @@ def test_the_cli_says_seatbelt_and_read_only_credentials(machine):
     assert "seatbelt, not a security boundary" in flat
     assert "read-only cloud credentials" in flat
     assert "Covered on this machine" in out and "Not covered" in out
-    assert "sees Bash + MCP, pinned to this release" in out
+    assert "sees Bash + MCP + file edits, pinned to this release" in out
     assert f"finops-mcp {__version__}" in out
 
 

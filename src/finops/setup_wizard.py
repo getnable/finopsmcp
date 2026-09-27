@@ -2683,6 +2683,7 @@ def _run_guard(parsed) -> None:
     elsewhere: list[tuple[bool, str]] = []
     blocking: list[bool] = []
     narrow: list[bool] = []
+    no_edits: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2707,6 +2708,9 @@ def _run_guard(parsed) -> None:
             elif not guard.hook_surfaces(p)["mcp"]:
                 narrow.append(is_global)
                 state = amber("installed, Bash only")
+            elif not guard.hook_surfaces(p)["editor"]:
+                no_edits.append(is_global)
+                state = amber("installed, Bash and MCP only")
             else:
                 state = green("installed")
         else:
@@ -2761,6 +2765,10 @@ def _run_guard(parsed) -> None:
         print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
         print(dim("  The hook only sees Bash. Widen it in place:"))
         _fix(narrow)
+    if no_edits:
+        print("  " + amber("File edits to the guard's own files are not checked."))
+        print(dim("  The hook does not see Write, Edit, MultiEdit or NotebookEdit. Widen it:"))
+        _fix(no_edits)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
     print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
@@ -2828,12 +2836,14 @@ def _guard_doctor(parsed) -> None:
         if not r["installed"]:
             state = dim("not installed")
         elif r.get("via") == "plugin":
-            state = (green("on (via the Claude Code plugin)") + ", sees Bash + MCP" if r["runs"]
+            state = (green("on (via the Claude Code plugin)") + ", sees Bash + MCP"
+                     + (" + file edits" if r.get("editor") else "") if r["runs"]
                      else amber("on (via the Claude Code plugin), but uvx is not on PATH"))
         elif not r.get("runs"):
             state = amber("installed, but the hooked command no longer exists")
         elif r["harness"] == "claude-code":
-            sees = " + ".join(s for s, on in (("Bash", r.get("bash")), ("MCP", r.get("mcp"))) if on)
+            sees = " + ".join(s for s, on in (("Bash", r.get("bash")), ("MCP", r.get("mcp")),
+                                              ("file edits", r.get("editor"))) if on)
             pin = {"pinned": "pinned to this release", "other": "pinned to another release",
                    "unpinned": amber("unpinned"), "binary": "installed binary"}[r["pin"]]
             state = f"{green('installed')}, sees {sees or 'nothing'}, {pin}"
@@ -2856,6 +2866,8 @@ def _guard_doctor(parsed) -> None:
         print(f"    - {c}")
     _guard_doctor_budgets(d.get("budgets") or {})
     _guard_doctor_org(d.get("org") or {})
+    _guard_doctor_protected(d)
+    _guard_doctor_packs(d.get("packs") or {})
     _guard_doctor_refresh(d.get("background_refresh") or {})
     led = d["ledger"]
     print()
@@ -2876,6 +2888,48 @@ def _guard_doctor(parsed) -> None:
     for fix in d["recommendations"]:
         print(f"    {cyan('->')} {fix}")
     print()
+
+
+def _guard_doctor_protected(d: dict) -> None:
+    """The doctor's protected files section: what an agent's write asks
+    about, and which harnesses' file tools are checked for it."""
+    from .welcome import amber, bold, dim, green
+
+    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI",
+              "copilot": "GitHub Copilot", "gemini": "Gemini CLI", "cline": "Cline"}
+    print()
+    print(f"  {bold('Protected files')} (an agent's write, move or delete of one asks)")
+    for p in d.get("protected_paths") or []:
+        tree = "/..." if p.get("tree") else ""
+        print(f"    {p['path']}{tree}  {dim(p['what'])}")
+    editor = d.get("editor_tools") or {}
+    if editor:
+        print(f"  {bold('File-edit tools')} (an edit to a protected file asks)")
+        for name, state in editor.items():
+            shown = green(state) if state == "covered" else amber(state.split(":", 1)[0])
+            why = "" if state == "covered" else dim(state.split(":", 1)[-1])
+            print(f"    {labels.get(name, name):<15}{shown}{why}")
+
+
+def _guard_doctor_packs(p: dict) -> None:
+    """The doctor's packs section: guard rules and price books in effect."""
+    from .welcome import amber, bold, dim
+
+    rules, books = p.get("guard_rules") or [], p.get("price_books") or []
+    problems = p.get("guard_problems") or []
+    if not (rules or books or problems):
+        return
+    print()
+    print(f"  {bold('Packs in the guard')} (rules only tighten; price books replace list prices)")
+    for r in rules:
+        print(f"    rule {r['id']} ({r['pack']}): {r['verdict']} on {r['target']} "
+              f"{dim(r['pattern'])}")
+    for b in books:
+        until = f" until {b['effective_to']}" if b.get("effective_to") else ""
+        print(f"    price {b['provider']} {b['sku']}: {b['rate']} {b['currency']}/{b['unit']} "
+              f"({b['pack']}, from {b['effective_from']}{until})")
+    for problem in problems:
+        print(f"    {amber('not loaded:')} {problem}")
 
 
 def _guard_doctor_org(o: dict) -> None:
@@ -3364,10 +3418,11 @@ def main(args: list[str] | None = None) -> None:
     if args is None:
         args = _sys.argv[1:]
 
-    # The Claude Code plugin's guard hook (`guard hook --via plugin`) runs on
-    # every Bash and MCP tool call, and is often done before it judges
-    # anything: the guard is off, or a settings hook judges this call instead.
-    # It answers here, ahead of the telemetry and the argument parser below.
+    # The guard hook (`guard hook`, and the plugin's `guard hook --via
+    # plugin`) runs on every Bash, MCP and file-edit tool call, and is often
+    # done before it judges anything: the guard is off, a settings hook judges
+    # this call instead, or it is an edit to an ordinary file. It answers
+    # here, ahead of the telemetry and the argument parser below.
     if args[:2] == ["guard", "hook"]:
         from .guard_plugin import hook_main
         code = hook_main(args[2:])

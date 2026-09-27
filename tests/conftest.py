@@ -72,6 +72,22 @@ def _org_model_sandbox(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _packs_sandbox(monkeypatch, tmp_path_factory):
+    """The guard reads installed packs (guard rules, price books) on every
+    verdict. A developer with packs installed must not change what the suite
+    sees, so the packs root is an empty directory; the packs tests point it
+    elsewhere themselves (tests/packs_support.py)."""
+    from finops import guard_packs
+    from finops.packs import runtime, store
+    monkeypatch.setattr(store, "_root_override", tmp_path_factory.mktemp("packs") / "packs")
+    runtime.invalidate()
+    guard_packs.invalidate()
+    yield
+    runtime.invalidate()
+    guard_packs.invalidate()
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_service_creds(monkeypatch):
     """Unit tests must not inherit the developer's live service credentials.
 
