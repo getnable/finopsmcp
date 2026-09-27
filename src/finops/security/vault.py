@@ -311,6 +311,10 @@ class Vault:
             con.close()
         count = 0
         for key_name, encrypted_value in rows:
+            if key_name.startswith("pack:"):
+                # A pack's own secret (finops.packs.broker.secret_key): the
+                # broker hands it to that pack only, never to nable's env.
+                continue
             try:
                 value = self._fernet.decrypt(encrypted_value).decode()
                 os.environ[key_name] = value

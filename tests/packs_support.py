@@ -101,7 +101,7 @@ Do the thing, then say what it cost.
 
 def manifest_text(*, name: str = "demo", namespace: str = "io.github.example",
                   version: str = "1.0.0", support: str = "community",
-                  capabilities: str = 'read_data = ["focus.cost"]\n',
+                  capabilities: str = 'read_data = ["focus.cost"]\npricing = ["override"]\n',
                   provides: str | None = None, extra: str = "") -> str:
     provides = provides if provides is not None else (
         'policies = ["policies/*.yaml"]\nguard_rules = ["guard/*.yaml"]\n'

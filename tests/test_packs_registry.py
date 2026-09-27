@@ -154,7 +154,8 @@ def test_a_remote_registry_may_only_list_git_sources(packs_env, tmp_path, monkey
     import httpx
     src = make_pack(tmp_path / "src")
     doc = {"packs": [_entry(src, name="local-path"),
-                     _entry(src, name="pinned", source="git+https://github.com/o/r@" + "a" * 40)]}
+                     _entry(src, name="pinned", source="git+https://github.com/o/r@" + "a" * 40),
+                     _entry(src, name="local-git", source="git+file:///tmp/r@" + "a" * 40)]}
     real = httpx.Client
 
     def client(*a, **k):
@@ -163,4 +164,5 @@ def test_a_remote_registry_may_only_list_git_sources(packs_env, tmp_path, monkey
     monkeypatch.setattr(httpx, "Client", client)
     entries, skipped = registry.fetch_index("https://registry.invalid/index.json")
     assert [e.name for e in entries] == ["pinned"]
-    assert "only list pinned git+ sources" in skipped[0]
+    assert len(skipped) == 2
+    assert all("only list pinned git+https:// or git+ssh:// sources" in s for s in skipped)

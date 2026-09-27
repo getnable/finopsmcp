@@ -69,7 +69,8 @@ def test_install_prompt_shows_capabilities_and_skills(packs_env, capsys, tmp_pat
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
     src = make_pack(tmp_path / "src", capabilities='read_data = ["focus.cost"]\n'
-                                                    'network = ["api.example.com:443"]\n')
+                                                    'network = ["api.example.com:443"]\n'
+                                                    'pricing = ["override"]\n')
     code, out, _ = _run(capsys, "install", str(src))
     assert code == 0
     assert "focus.cost: cost rows in FOCUS shape" in out

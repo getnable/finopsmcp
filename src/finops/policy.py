@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -174,7 +175,7 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
 #     trusted_keys:                         # org signing keys (`nable pack keygen`)
 #       - name: acme-platform
 #         key: <base64 Ed25519 public key>
-#     allow_unsigned_code: [io.github.acme/internal-connector]   # by pack id
+#     allow_unsigned_code: [io.github.acme/internal-connector@<content digest>]
 #
 # Unlike the keys above, a packs section that cannot be used does not fall back
 # to "no restrictions": it fails closed. `invalid` is set and every install is
@@ -306,10 +307,18 @@ def _parse_packs_section(doc: Any, path: Path, *, readable: bool) -> dict[str, A
         from .packs.registry import parse_ref  # light, stdlib only
         val = sec["allow_unsigned_code"]
         ids = [] if val == [] else _str_list(val)
-        bad = [x for x in ids or [] if not parse_ref(x) or "@" in x]
+
+        def _entry_ok(x: str) -> bool:
+            # "ns/name@<content digest>" pins the exact files; a bare id is
+            # honoured only with packs.allowed_sources (finops.packs.broker).
+            pid, sep, digest = x.partition("@")
+            return bool(parse_ref(pid)) and "@" not in pid and (
+                not sep or bool(re.fullmatch(r"[0-9a-f]{64}", digest)))
+        bad = [x for x in ids or [] if not _entry_ok(x)]
         if ids is None or bad:
             probs.append(f"{path} sets packs.allow_unsigned_code to {val!r}, which is not a "
-                         f"list of pack ids such as io.github.acme/connector, {refused}")
+                         "list of pack ids pinned to a content digest such as "
+                         f"io.github.acme/connector@<64-hex digest>, {refused}")
         else:
             out["allow_unsigned_code"] = ids
     out["invalid"] = bool(probs)

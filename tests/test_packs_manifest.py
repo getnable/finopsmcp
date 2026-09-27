@@ -30,9 +30,9 @@ def test_a_good_manifest_parses_into_a_typed_manifest():
     m = parse_manifest(manifest_text(capabilities=(
         'read_data = ["org.owners", "focus.cost", "focus.cost"]\n'
         'read_cloud = ["aws:ce:GetCostAndUsage", "k8s:pods:list"]\n'
-        'secrets = ["KUBECONFIG"]\nnetwork = ["kubecost.internal:9090"]\n'
+        'secrets = ["KUBECOST_TOKEN"]\nnetwork = ["kubecost.internal:9090"]\n'
         'write_org = ["proposals"]\nact = ["pr", "ticket"]\n'
-        'guard = "tighten-only"\nmax_autonomy = "L2"\n'),
+        'guard = "tighten-only"\nmax_autonomy = "L2"\npricing = ["override"]\n'),
         extra='[compat]\nclouds = ["aws"]\nharnesses = ["claude-code"]\n'))
     assert m.id == "io.github.example/demo"
     assert m.tier == "community" and not m.first_party
@@ -198,7 +198,8 @@ def test_unknown_or_unsafe_capability_values_are_errors(line, needle):
 
 def test_first_party_may_execute_and_reach_l3_but_never_l4():
     fp = {"namespace": "io.github.getnable", "support": "first-party"}
-    m = parse_manifest(manifest_text(capabilities='act = ["execute"]\nmax_autonomy = "L3"\n', **fp))
+    m = parse_manifest(manifest_text(
+        capabilities='act = ["execute"]\nmax_autonomy = "L3"\npricing = ["override"]\n', **fp))
     assert m.capabilities["act"] == ("execute",)
     assert "ceiling" in _one(manifest_text(capabilities='max_autonomy = "L4"\n', **fp),
                              "capabilities.max_autonomy")

@@ -50,7 +50,7 @@ def test_install_from_a_directory_records_everything(packs_env, tmp_path):
     assert set(e["files"]) == {"nable-pack.toml", "policies/rules.yaml", "guard/rules.yaml",
                                "prices/book.yaml", "skills/demo-skill/SKILL.md"}
     assert all(len(h) == 64 for h in e["files"].values())
-    assert e["capabilities"] == {"read_data": ["focus.cost"]}
+    assert e["capabilities"] == {"read_data": ["focus.cost"], "pricing": ["override"]}
     assert e["approval"] == "--yes" and e["approved_by"] and e["approved_at"]
     assert (packs_env.root / "io.github.example" / "demo" / "1.0.0" / "nable-pack.toml").is_file()
     assert oct(store.index_path().stat().st_mode & 0o777) == "0o600"
@@ -193,7 +193,8 @@ def test_nothing_installs_without_approval(packs_env, tmp_path):
 def test_update_that_adds_a_capability_needs_reapproval(packs_env, tmp_path):
     inst.install(str(make_pack(tmp_path / "v1")), yes=True)
     v2 = make_pack(tmp_path / "v2", version="1.1.0", capabilities=(
-        'read_data = ["focus.cost"]\nnetwork = ["collector.example.com:443"]\n'))
+        'read_data = ["focus.cost"]\nnetwork = ["collector.example.com:443"]\n'
+        'pricing = ["override"]\n'))
     # an unattended update refuses it and says what was added
     with pytest.raises(ApprovalRequired) as ei:
         inst.install(str(v2), auto=True)
@@ -215,7 +216,8 @@ def test_update_that_adds_a_capability_needs_reapproval(packs_env, tmp_path):
 def test_update_with_no_new_capability_can_apply_unattended(packs_env, tmp_path):
     inst.install(str(make_pack(tmp_path / "v1")), yes=True)
     r = inst.install(str(make_pack(tmp_path / "v2", version="1.0.1",
-                                   capabilities="read_data = []\n")), auto=True)
+                                   capabilities='read_data = []\npricing = ["override"]\n')),
+                          auto=True)
     assert r["status"] == "updated"
     assert _index()["packs"]["io.github.example/demo"]["approval"].startswith("auto-update")
 
@@ -386,7 +388,7 @@ def test_list_installed_packs_mcp_tool(packs_env, tmp_path):
     assert out["count"] == 1
     row = out["packs"][0]
     assert row["id"] == "io.github.example/demo" and row["loaded"] is True
-    assert row["capabilities"] == {"read_data": ["focus.cost"]}
+    assert row["capabilities"] == {"read_data": ["focus.cost"], "pricing": ["override"]}
     assert "files" not in row and out["api_version"] == "1.0"
 
 

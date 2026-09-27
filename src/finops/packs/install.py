@@ -73,6 +73,8 @@ from .manifest import (
 from .versions import version_key
 
 GIT_TIMEOUT_S = 120
+# How much of git's stderr a failure shows: its last lines, each cut short.
+GIT_ERROR_LINES = 12
 _COMMIT40 = re.compile(r"^[0-9a-f]{40}$")
 TARBALL_SUFFIXES = (".tar.gz", ".tgz", ".tar")
 
@@ -202,6 +204,17 @@ def extract_tarball(archive: Path, dest: Path) -> None:
             problems.append(Problem(".", f"unpacks to more than {store.MAX_TOTAL_BYTES} bytes"))
         if problems:
             raise PackError(f"{archive} was refused and nothing was extracted", problems)
+        # A member whose parent is a file member (a/b after a file a) would
+        # fail half way through extraction; refuse the archive before writing.
+        file_parts = {parts for parts, m in members if not m.isdir()}
+        for parts, m in members:
+            for i in range(1, len(parts)):
+                if parts[:i] in file_parts:
+                    problems.append(Problem(m.name, f"sits under {'/'.join(parts[:i])}, which "
+                                            "the archive also has as a file"))
+                    break
+        if problems:
+            raise PackError(f"{archive} was refused and nothing was extracted", problems)
         root = dest.resolve()
         for parts, m in members:
             if not parts:
@@ -209,19 +222,24 @@ def extract_tarball(archive: Path, dest: Path) -> None:
             target = dest.joinpath(*parts)
             if not target.resolve().is_relative_to(root):
                 raise PackError(f"{archive} was refused", [Problem(m.name, "leaves the archive")])
-            if m.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            fh = tf.extractfile(m)
-            if fh is None:
-                raise PackError(f"{archive} was refused", [Problem(m.name, "could not be read")])
             try:
+                if m.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                fh = tf.extractfile(m)
+                if fh is None:
+                    raise PackError(f"{archive} was refused",
+                                    [Problem(m.name, "could not be read")])
                 with fh, open(target, "xb") as out:
                     shutil.copyfileobj(fh, out)
             except FileExistsError:
                 raise PackError(f"{archive} was refused",
                                 [Problem(m.name, "appears twice in the archive")]) from None
+            except (OSError, tarfile.TarError) as e:
+                raise PackError(f"{archive} was refused",
+                                [Problem(m.name, "could not be extracted "
+                                         f"({getattr(e, 'strerror', None) or e})")]) from None
 
 
 def _git(args: list[str], cwd: Path | None = None) -> str:
@@ -238,8 +256,10 @@ def _git(args: list[str], cwd: Path | None = None) -> str:
     except subprocess.TimeoutExpired:
         raise PackError(f"git {args[0]} took longer than {GIT_TIMEOUT_S}s and was stopped") from None
     if r.returncode != 0:
-        detail = (r.stderr or r.stdout or "").strip().splitlines()
-        raise PackError(f"git {args[0]} failed: {detail[-1] if detail else r.returncode}")
+        detail = [ln for ln in (r.stderr or r.stdout or "").strip().splitlines() if ln.strip()]
+        tail = "\n".join(ln[:300] for ln in detail[-GIT_ERROR_LINES:])
+        raise PackError(f"git {args[0]} failed (exit {r.returncode})"
+                        + (f":\n{tail}" if tail else ""))
     return r.stdout.strip()
 
 
@@ -384,6 +404,10 @@ def _prepare(src: Source, work: Path, *, expected_digest: str | None = None,
     if why:
         raise IntegrityError(f"{manifest.id} {manifest.version} was refused and nothing was "
                              "installed", [Problem("signature", why)])
+    native = store.native_code_problems(files, first_party=manifest.first_party)
+    if native:
+        raise ValidationError(f"{manifest.id} {manifest.version} was refused and nothing was "
+                              "installed", native)
     return Plan(manifest, src, root, files, digest, content, signature=verdict)
 
 
@@ -553,8 +577,19 @@ def check_installed(pack_id: str, entry: dict[str, Any], pp: dict[str, Any]
     """Whether an installed pack may be used right now: today's org policy
     allows it, its files are exactly the approved ones, and its signature
     holds against today's trusted keys. Returns (root, signature verdict, why
-    not); an empty list means it may. The runtime and the broker both ask."""
-    root = store.install_dir(entry["namespace"], entry["name"], entry["version"])
+    not); an empty list means it may. The runtime and the broker both ask.
+
+    The capabilities and tier checked are the installed manifest's (a file
+    the index's hashes pin), never the index's own copy, which a hand edit
+    could widen past what was approved; the manifest's id must be the index
+    key. A pack that was installed with a trusted signature must still have
+    one: removing a key from packs.trusted_keys stops its packs loading,
+    data packs included. `source` is taken from the index as recorded, so it
+    is only as trustworthy as the index file."""
+    try:
+        root = store.install_dir(entry["namespace"], entry["name"], entry["version"])
+    except (PackError, KeyError, TypeError) as err:
+        return Path(store.packs_root()), signing.UNSIGNED, [str(err)]
     try:
         actual = store.hash_tree(root)
     except PackError as err:
@@ -564,10 +599,31 @@ def check_installed(pack_id: str, entry: dict[str, Any], pp: dict[str, Any]
         changed = cmp["modified"] + cmp["missing"] + cmp["added"]
         return root, signing.UNSIGNED, [(f"its files changed since it was approved "
                                          f"({', '.join(changed[:5])}); run `nable pack audit`")]
+    try:
+        manifest = load_manifest(root)
+    except PackError as err:
+        return root, signing.UNSIGNED, [f"its manifest does not validate: {err.message}"]
+    if manifest.id != pack_id:
+        return root, signing.UNSIGNED, [f"its manifest says it is {manifest.id}, not {pack_id}"]
     verdict = signing.verify_pack(root, store.content_digest(actual), pp)
-    viol = policy_violations(pack_id, entry.get("tier", ""), entry.get("capabilities") or {},
-                             entry.get("source") or {}, pp, verdict)
-    return root, verdict, [p.reason for p in viol]
+    why = [p.reason for p in policy_violations(pack_id, manifest.tier, manifest.capabilities,
+                                               entry.get("source") or {}, pp, verdict)]
+    lost = _lost_signature(entry, verdict)
+    if lost:
+        why.append(lost)
+    return root, verdict, why
+
+
+def _lost_signature(entry: dict[str, Any], verdict: signing.Verdict) -> str | None:
+    """Why a pack approved with a trusted signature may no longer be used
+    (the key was removed from packs.trusted_keys), or None."""
+    recorded = entry.get("signature") if isinstance(entry.get("signature"), dict) else {}
+    if signing.trusted(recorded) and not signing.trusted(verdict):
+        who = recorded.get("key_name") or recorded.get("key_id") or "a trusted key"
+        return (f"it was approved as signed by {who}, and that signature no longer holds "
+                f"({verdict.reason}); restore the key in packs.trusted_keys, or remove the "
+                "pack and install it again to approve it as it is now")
+    return None
 
 
 def _approve(plan: Plan, pp: dict[str, Any], *, yes: bool, auto: bool,
@@ -690,6 +746,9 @@ def audit() -> dict[str, Any]:
         problems: list[str] = []
         status = "ok"
         verdict = signing.UNSIGNED
+        # The index's copy until the installed manifest is read (a pack whose
+        # manifest cannot be read is reported invalid either way).
+        tier, caps = e.get("tier", ""), e.get("capabilities") or {}
         if not root.is_dir():
             status = "missing"
             problems.append(f"{root} is gone")
@@ -711,13 +770,23 @@ def audit() -> dict[str, Any]:
                 verdict = signing.verify_pack(root, store.content_digest(actual), pp)
             if status == "ok":
                 try:
-                    load_manifest(root)
+                    manifest = load_manifest(root)
                 except ValidationError as err:
                     status = "invalid"
                     problems.append(str(err))
+                else:
+                    if manifest.id != pid:
+                        status = "invalid"
+                        problems.append(f"its manifest says it is {manifest.id}, not {pid}")
+                    # What the installed files declare, not the index's copy.
+                    tier, caps = manifest.tier, manifest.capabilities
+                    row["tier"] = tier
+                    row["capabilities"] = manifest.to_dict()["capabilities"]
         row["signature"] = verdict.to_dict()
-        viol = policy_violations(pid, e.get("tier", ""), e.get("capabilities") or {},
-                                 e.get("source") or {}, pp, verdict)
+        viol = policy_violations(pid, tier, caps, e.get("source") or {}, pp, verdict)
+        lost = _lost_signature(e, verdict) if status != "missing" else None
+        if lost:
+            viol.append(Problem("signature", lost))
         if viol:
             problems += [p.reason for p in viol]
             if status == "ok":
@@ -750,6 +819,8 @@ def validate_dir(path: str | Path, *, skip_ignored: bool = True) -> dict[str, An
                 "warnings": []}
     content = load_content(root, manifest.provides)
     problems = [str(p) for p in content.problems]
+    problems += [str(p) for p in store.native_code_problems(files,
+                                                            first_party=manifest.first_party)]
     warnings: list[str] = []
     if manifest.integrity_files is not None:
         actual = {k: v for k, v in files.items() if k not in (MANIFEST_NAME, store.SIG_NAME)}

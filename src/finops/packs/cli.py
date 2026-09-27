@@ -21,6 +21,11 @@
     nable pack run <ns/name> <entry-id> [--start D --end D]
                                          run a connector (or adapter) through the
                                          broker and summarize what it returned
+    nable pack secret set <ns/name> <NAME>
+                                         store a secret the pack declares, in
+                                         its own vault namespace (the value is
+                                         read from a prompt or stdin, never argv)
+    nable pack secret remove <ns/name> <NAME>
 
 Exit codes: 0 done, 1 refused or failed (nothing changed), 2 usage.
 """
@@ -28,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -94,7 +100,11 @@ def add_parser(sub) -> None:
                     help="window end, exclusive (default today)")
     rn.add_argument("--timeout", dest="pack_timeout", type=float, default=None,
                     metavar="SECONDS", help="stop the pack after this long")
-    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, ps.choices["audit"]):
+    sec = ps.add_parser("secret", help="Store or remove a secret a code pack declares")
+    sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
+    sec.add_argument("pack_id", metavar="ns/name")
+    sec.add_argument("secret_name", metavar="NAME")
+    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, sec, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
     for sp in (i, u, r):
@@ -115,8 +125,33 @@ def _err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+# Every C0 and C1 control character but newline and tab, and the Unicode
+# format characters that reorder or hide text (bidi overrides and isolates,
+# zero-width marks). Validation refuses the control characters in manifests
+# and skills; this is the second line, for anything that reaches the prompt.
+_UNSAFE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e"
+                     r"\u2066-\u2069\ufeff]")
+
+
+def _visible(m: re.Match[str]) -> str:
+    c = ord(m.group())
+    return f"\\x{c:02x}" if c < 0x100 else f"\\u{c:04x}"
+
+
+def safe_text(text: str) -> str:
+    """`text` with every control and invisible format character written as a
+    visible escape (\\x1b, \\u202e), so nothing a pack ships can move the
+    cursor, recolor or rewrite what the terminal shows."""
+    return _UNSAFE.sub(_visible, text)
+
+
 def describe_plan(plan) -> str:
-    """What a person approving the pack reads before saying yes."""
+    """What a person approving the pack reads before saying yes. Sanitized
+    (safe_text): nothing in it can drive the terminal."""
+    return safe_text(_describe_plan(plan))
+
+
+def _describe_plan(plan) -> str:
     from . import capabilities as caps_mod
     m = plan.manifest
     if not plan.is_update:
@@ -143,6 +178,16 @@ def describe_plan(plan) -> str:
             continue
         for val in (vals if isinstance(vals, tuple) else (vals,)):
             lines.append(f"    {k:<12} {caps_mod.describe(k, val)}")
+    if caps.get("secrets"):
+        lines.append(f"    Secrets come only from this pack's own vault entries (`nable pack "
+                     f"secret set {m.id} NAME`), never from your environment or the cloud and "
+                     "provider keys nable itself uses. Cloud credential names (AWS_*, "
+                     "GOOGLE_*, AZURE_*, KUBECONFIG, ...) are refused for a pack that is not "
+                     "first-party.")
+    if caps.get("pricing"):
+        lines.append("    Its price books change the estimates nable shows. They never make a "
+                     "change look cheaper to the guard or a budget check, which judge at the "
+                     "higher of the list price and the book rate.")
     if plan.is_update:
         if plan.added:
             lines += ["", "  NEW since the installed version (needs your approval again):"]
@@ -248,6 +293,45 @@ def _keygen(parsed, as_json: bool) -> int:
     return EXIT_OK
 
 
+def _read_secret_value(name: str) -> str:
+    """The value, from a prompt at a terminal (not echoed) or from stdin.
+    Never from argv, where it would land in shell history and `ps`."""
+    from .errors import PackError
+    if sys.stdin.isatty():
+        import getpass
+        value = getpass.getpass(f"  Value for {name} (not echoed): ")
+    else:
+        value = sys.stdin.read(64 * 1024 + 1)
+        if len(value) > 64 * 1024:
+            raise PackError("A pack secret is at most 64 KiB")
+        value = value.rstrip("\r\n")
+    if not value:
+        raise PackError(f"No value was given for {name}; nothing was stored")
+    return value
+
+
+def _secret(parsed, as_json: bool) -> int:
+    from . import broker
+    from .errors import PackError
+    verb = parsed.pack_verb
+    if verb == "set":
+        why, _ = broker._check_secret_target(parsed.pack_id, parsed.secret_name)
+        if why:
+            raise PackError(why)          # before asking for a value it would refuse
+        value = _read_secret_value(parsed.secret_name)
+        r = broker.set_secret(parsed.pack_id, parsed.secret_name, value)
+        del value
+        text = (f"Stored {r['name']} for {r['pack']} in nable's vault (key {r['key']}).")
+    else:
+        r = broker.remove_secret(parsed.pack_id, parsed.secret_name)
+        text = (f"Removed {r['name']} for {r['pack']}." if r["removed"]
+                else f"{r['pack']} had no {r['name']} stored.")
+    if r.get("note"):
+        text += f"\n  note: {r['note']}"
+    _out({"ok": True, **r}, as_json, text)
+    return EXIT_OK
+
+
 def _run_code(parsed, as_json: bool) -> int:
     from datetime import date, timedelta
 
@@ -347,6 +431,8 @@ def run(parsed) -> int:
             return _keygen(parsed, as_json)
         if action == "run":
             return _run_code(parsed, as_json)
+        if action == "secret":
+            return _secret(parsed, as_json)
         if action == "new":
             root = inst.new_pack(parsed.name, parsed.pack_dir, namespace=parsed.pack_namespace)
             _out({"ok": True, "path": str(root)}, as_json,
@@ -414,6 +500,6 @@ def run(parsed) -> int:
         _err("Stopped; nothing was changed.")
         return EXIT_FAIL
     _err("usage: nable pack {validate,new,install,update,remove,list,audit,search,sign,"
-         "keygen,run} ...")
+         "keygen,run,secret} ...")
     return 2
 

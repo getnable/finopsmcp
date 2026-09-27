@@ -130,13 +130,16 @@ def test_trusted_keys_and_allow_unsigned_code_fail_closed_when_malformed(packs_e
 
 def test_allowed_capabilities_is_a_ceiling(packs_env, tmp_path):
     src = make_pack(tmp_path / "src", capabilities=(
-        'read_data = ["focus.cost", "org.owners"]\nnetwork = ["api.example.com:443"]\n'))
+        'read_data = ["focus.cost", "org.owners"]\nnetwork = ["api.example.com:443"]\n'
+        'pricing = ["override"]\n'))
     packs_env.policy("packs:\n  allowed_capabilities:\n    read_data: [focus.cost]\n")
     msg = _refusal(src)
     assert "'org.owners' is outside packs.allowed_capabilities.read_data" in msg
     assert "'api.example.com:443' is outside packs.allowed_capabilities.network" in msg
+    # a price book is a capability like any other: the ceiling must allow it
+    assert "'override' is outside packs.allowed_capabilities.pricing" in msg
     packs_env.policy("packs:\n  allowed_capabilities:\n    read_data: [focus.cost, org.owners]\n"
-                     "    network: ['*.example.com:443']\n")
+                     "    network: ['*.example.com:443']\n    pricing: [override]\n")
     assert inst.install(str(src), yes=True)["status"] == "installed"
 
 

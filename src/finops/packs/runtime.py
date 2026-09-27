@@ -72,8 +72,12 @@ def _load() -> dict[str, Any]:
                 problems.append(f"{pid} is not loaded: "
                                 + "; ".join(str(p) for p in content.problems[:3]))
                 continue
-        except (PackError, OSError, KeyError) as err:
-            problems.append(f"{pid} is not loaded: {err}")
+        except Exception as err:  # noqa: BLE001 - one bad pack never drops the others
+            # PackError, OSError and KeyError are the expected ones; anything
+            # else is a bug or a hostile pack, and still only this pack's problem.
+            why = str(err) if isinstance(err, (PackError, OSError, KeyError)) \
+                else f"{type(err).__name__}: {err}"[:300]
+            problems.append(f"{pid} is not loaded: {why}")
             continue
         for kind, objs in content.items.items():
             items[kind].extend(replace(o, pack=pid) for o in objs)

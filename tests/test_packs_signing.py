@@ -13,7 +13,7 @@ import pytest
 
 from finops import packs
 from finops.packs import install as inst
-from finops.packs import signing, store
+from finops.packs import runtime, signing, store
 from finops.packs.errors import IntegrityError, PolicyRefusal
 from finops.setup_wizard import main
 from tests import packs_support
@@ -215,7 +215,30 @@ def test_removing_trust_in_a_key_stops_the_pack_loading(packs_env, tmp_path):
     assert packs.guard_rules() == []
     assert "not signed by nable's first-party key" in packs.load_problems()[0]
     row = inst.audit()["packs"][0]
-    assert row["status"] == "outside-policy" and row["signature"]["status"] == "untrusted"
+    assert row["status"] == "untrusted" and row["signature"]["status"] == "untrusted"
+
+
+def test_removing_a_key_stops_an_org_signed_data_pack_without_require_signed(packs_env,
+                                                                             tmp_path):
+    # review2 keyrm.py: a pack approved as signed by an org key kept loading
+    # after the key left packs.trusted_keys, unless require_signed was also set.
+    key = new_key(tmp_path)
+    src = make_pack(tmp_path / "src")
+    sign_pack(src, key)
+    _trust(packs_env, key)
+    inst.install(str(src), yes=True)
+    assert runtime.loaded_packs() == ["io.github.example/demo"]
+    packs_env.policy("packs:\n  trusted_keys: []\n")
+    assert runtime.loaded_packs() == [] and packs.guard_rules() == []
+    [problem] = packs.load_problems()
+    assert "approved as signed by test-key" in problem and "no longer holds" in problem
+    row = inst.audit()["packs"][0]
+    assert row["status"] == "untrusted"
+    # an unsigned pack was never approved as signed, so it is unaffected
+    packs_env.policy("packs:\n  trusted_keys: []\n")
+    other = make_pack(tmp_path / "other", name="other")
+    inst.install(str(other), yes=True)
+    assert "io.github.example/other" in runtime.loaded_packs()
 
 
 # ── the CLI: keygen and sign, and the key never shows ────────────────────────

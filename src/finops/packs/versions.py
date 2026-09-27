@@ -16,22 +16,30 @@ _SEMVER = re.compile(
 _NUMERIC = re.compile(r"^(\d{1,6})(?:\.(\d{1,6}))?(?:\.(\d{1,6}))?$")
 _CLAUSE = re.compile(r"^\s*(>=|<=|==|!=|>|<)\s*([0-9][0-9.]*)\s*$")
 
-VersionKey = tuple[int, int, int, int, tuple[str, ...]]
+VersionKey = tuple[int, int, int, int, tuple[tuple[int, int | str], ...]]
 
 
 def is_semver(text: object) -> bool:
     return isinstance(text, str) and bool(_SEMVER.match(text))
 
 
+def _pre_part(ident: str) -> tuple[int, int | str]:
+    """Semver 11.4.1 to 11.4.3: numeric identifiers compare numerically and
+    sort before alphanumeric ones, which compare as ASCII text."""
+    return (0, int(ident)) if ident.isdigit() else (1, ident)
+
+
 def version_key(text: str) -> VersionKey:
-    """Sort key for a semver string. A pre-release sorts before its release.
+    """Sort key for a semver string, in semver precedence: a pre-release sorts
+    before its release, rc.2 before rc.10, 1 before alpha, and a longer set of
+    identifiers after a shorter one it starts with (alpha < alpha.1).
     Raises ValueError for anything that is not strict semver."""
     m = _SEMVER.match(text or "")
     if not m:
         raise ValueError(f"{text!r} is not a version like 1.2.0")
     pre = m.group(4)
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)),
-            0 if pre else 1, tuple(pre.split(".")) if pre else ())
+            0 if pre else 1, tuple(_pre_part(x) for x in pre.split(".")) if pre else ())
 
 
 def _numeric_key(text: str) -> tuple[int, int, int]:

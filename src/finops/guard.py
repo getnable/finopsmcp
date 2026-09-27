@@ -69,8 +69,10 @@ otherwise loosen its own guard without a command the rules above would see.
 
 Installed packs (guard_packs): their guard rules may tighten any verdict
 (silence or an allow to an ask, an ask to a deny), never loosen one, and
-their price books replace the list price for the SKUs they name ("at your
-price book rate"). A pack the guard cannot load is a recorded fail-open.
+their price books inform the figures shown for the SKUs they name ("at your
+price book rate"): the verdict judges at the higher of the list price and the
+book rate, so a price book can never make a launch look cheaper to the
+guard. A pack the guard cannot load is a recorded fail-open.
 
 Strict mode (FINOPS_GUARD_STRICT=1) additionally asks on reversible
 mutations (terraform apply, helm upgrade, kubectl apply/scale,
@@ -869,10 +871,35 @@ def _hours_per_month() -> float:
 
 # An installed price book (a pack's price_books, finops.packs.price_override)
 # holds the org's own rate for a SKU: an EDP discount, a private offer, a
-# markup. Where one covers the SKU the guard prices at it and says so ("at
-# your price book rate"), and the ledger records which pack's rate it was.
-# With none installed, or none for this SKU, pricing is the list price as
-# before. Read through guard_packs, which caches the packs between hooks.
+# markup. A price book informs the figure shown and never loosens a verdict:
+# thresholds, the velocity cap and budgets judge at the higher of the list
+# price and the book rate (_gated). A book rate above list prices at it and
+# says so ("at your price book rate"); one below list is shown beside the
+# list figure the guard judges by. A book that prices a SKU the tables do not
+# know is used as it is (without it there would be no figure at all). The
+# ledger records which pack's rate it was. With none installed, or none for
+# this SKU, pricing is the list price as before. Read through guard_packs,
+# which caches the packs between hooks.
+
+def _gated(provider: str, sku: str | None, list_rate: float | None, per: str = "hour"
+           ) -> tuple[float | None, dict[str, Any] | None, bool]:
+    """(the rate the guard judges by, the price book entry or None, whether
+    that rate is the book's). A book rate of 0 is a rate, not "no price"."""
+    book = _book(provider, sku, per)
+    if book is None:
+        return list_rate, None, False
+    if list_rate is None or book["usd"] >= list_rate:
+        return book["usd"], book, True
+    return list_rate, book, False
+
+
+def _below_list(book: dict[str, Any], units: float, per: str = "hr") -> str:
+    """What a book rate below list would make the figure, said beside it."""
+    return (f"; at your price book rate of {_rate(book['usd'])}/{per} ({book['pack']}) "
+            f"it would be ~${book['usd'] * units:,.0f}/mo, but a price book can only raise "
+            "the figure the guard judges by, so its threshold and budget checks use the "
+            "list price")
+
 
 def _book(provider: str, sku: str | None, per: str = "hour") -> dict[str, Any] | None:
     """The org's USD rate for `sku` from an installed price book, or None."""
@@ -890,9 +917,14 @@ def _book_basis(basis: str, book: dict[str, Any], list_basis: str = _ON_DEMAND_B
     return basis.replace(list_basis, f"on-demand rate in your price book ({book['pack']})")
 
 
-def _book_field(book: dict[str, Any]) -> dict[str, Any]:
-    return {"pack": book["pack"], "sku": book["sku"], "rate": book["rate"],
-            "unit": book["unit"]}
+def _book_field(book: dict[str, Any], judged: bool = True,
+                book_monthly: float | None = None) -> dict[str, Any]:
+    out = {"pack": book["pack"], "sku": book["sku"], "rate": book["rate"],
+           "unit": book["unit"]}
+    if not judged:
+        # Below list: shown, not used for the verdict.
+        out.update(below_list=True, monthly_usd=round(book_monthly or 0.0, 2))
+    return out
 
 
 def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
@@ -902,24 +934,25 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     if not itype:
         return None
     from .aws_prices import EC2_HOURLY
-    book = _book("aws", itype)
-    hourly = book["usd"] if book else EC2_HOURLY.get(itype)
-    if not hourly:
+    hourly, book, judged = _gated("aws", itype, EC2_HOURLY.get(itype))
+    if hourly is None:
         return None
-    if book:
+    if book and judged:
         basis = _book_basis(basis, book)
     count = max(count, 1)
-    monthly = hourly * count * _hours_per_month()
-    at = "at your price book rate of " if book else "at "
+    hours = count * _hours_per_month()
+    monthly = hourly * hours
+    at = "at your price book rate of " if judged else "at "
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": itype,
         "count": count,
         "basis": basis,
-        **({"price_book": _book_field(book)} if book else {}),
+        **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         "line": (f"{lead}{count}x {itype} {at}{_rate(hourly)}/hr ({basis}) "
-                 f"is ~${monthly:,.0f}/mo"),
+                 f"is ~${monthly:,.0f}/mo"
+                 + (_below_list(book, hours) if book and not judged else "")),
     }
 
 
@@ -1002,32 +1035,32 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
         return None
     # A price book's rate for the class stands for whatever engine the org
     # priced it on, so it also prices an engine the list tables do not hold.
-    book = _book("aws", cls)
-    if not book and engine not in _RDS_TABLE_ENGINES:
-        return None
     from .aws_prices import rds_hourly
-    hourly = book["usd"] if book else rds_hourly(cls, engine)
-    if not hourly:
+    listed = rds_hourly(cls, engine) if engine in _RDS_TABLE_ENGINES else None
+    hourly, book, judged = _gated("aws", cls, listed)
+    if hourly is None:
         return None
     # Multi-AZ runs a standby of the same class: twice the instance hours,
     # the same rule the Terraform estimator applies to aws_db_instance.
     multi_az = _has_flag(cmd, "multi-az")
-    monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
+    hours = (2 if multi_az else 1) * _hours_per_month()
+    monthly = hourly * hours
     basis = f"{_ON_DEMAND_BASIS}, instance hours only; storage and I/O not included"
-    if book:
+    if book and judged:
         basis = _book_basis(basis, book)
-    at = "at your price book rate of " if book else "at "
+    at = "at your price book rate of " if judged else "at "
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": cls,
         "count": 2 if multi_az else 1,
         "basis": basis,
-        **({"price_book": _book_field(book)} if book else {}),
+        **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         "line": (f"{cls} {engine or 'RDS'}{' Multi-AZ' if multi_az else ''} {at}"
                  f"{_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
-                 f"is ~${monthly:,.0f}/mo"),
+                 f"is ~${monthly:,.0f}/mo"
+                 + (_below_list(book, hours) if book and not judged else "")),
     }
 
 
@@ -1041,34 +1074,35 @@ def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     if not cls:
         return None
     multi_az = _has_flag(cmd, "multi-az")
-    book = _book("aws", cls)
-    if book:
-        hourly = book["usd"]
+    from .aws_prices import rds_hourly
+    rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
+             "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
+    engine, listed = max(rates.items(), key=lambda kv: kv[1])
+    if len(set(rates.values())) == 1:
+        engine = "MySQL, MariaDB and PostgreSQL alike"
+    hourly, book, judged = _gated("aws", cls, listed or None)
+    if hourly is None:
+        return None
+    if judged:
         basis = _book_basis(f"{_ON_DEMAND_BASIS}, instance hours only, before subtracting "
                             "the current class", book)
     else:
-        from .aws_prices import rds_hourly
-        rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
-                 "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
-        engine, hourly = max(rates.items(), key=lambda kv: kv[1])
-        if not hourly:
-            return None
-        if len(set(rates.values())) == 1:
-            engine = "MySQL, MariaDB and PostgreSQL alike"
         basis = (f"{_ON_DEMAND_BASIS}, the {engine} rate (the engine is not in the command), "
                  "instance hours only, before subtracting the current class")
-    monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
-    at = "at your price book rate of " if book else "at "
+    hours = (2 if multi_az else 1) * _hours_per_month()
+    monthly = hourly * hours
+    at = "at your price book rate of " if judged else "at "
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": cls,
         "count": 2 if multi_az else 1,
         "basis": basis,
-        **({"price_book": _book_field(book)} if book else {}),
+        **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         "line": (f"resized to {cls}{' Multi-AZ' if multi_az else ''} {at}{_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
-                 f"is ~${monthly:,.0f}/mo"),
+                 f"is ~${monthly:,.0f}/mo"
+                 + (_below_list(book, hours) if book and not judged else "")),
     }
 
 
@@ -1132,23 +1166,31 @@ def _price_table_vm(cmd: str, *, flag: str, table: dict[str, float], count: int,
     size = _flag(cmd, flag)
     if not size:
         return None
-    book = _book(provider, size, per="month")
     # Azure sizes are case-insensitive on the CLI (standard_d4s_v3 works).
-    each = book["usd"] if book else (
-        table.get(size) or {k.lower(): v for k, v in table.items()}.get(size.lower()))
-    if not each:
+    listed = table.get(size)
+    if listed is None:
+        listed = {k.lower(): v for k, v in table.items()}.get(size.lower())
+    each, book, judged = _gated(provider, size, listed, per="month")
+    if each is None:
         return None
-    if book:
+    if judged:
         basis = f"monthly rate in your price book ({book['pack']})"
     monthly = each * count
-    at = "at your price book rate of " if book else "at "
+    at = "at your price book rate of " if judged else "at "
+    below = ""
+    if book and not judged:
+        below = (f"; at your price book rate of ${book['usd']:,.2f}/mo each ({book['pack']}) "
+                 f"it would be ~${book['usd'] * count:,.0f}/mo, but a price book can only "
+                 "raise the figure the guard judges by, so its threshold and budget checks "
+                 "use the list price")
     return {
         "monthly_usd": round(monthly, 2),
         "instance_type": size,
         "count": count,
         "basis": basis,
-        **({"price_book": _book_field(book)} if book else {}),
-        "line": f"{count}x {size} {at}${each:,.2f}/mo each ({basis}) is ~${monthly:,.0f}/mo",
+        **({"price_book": _book_field(book, judged, book["usd"] * count)} if book else {}),
+        "line": (f"{count}x {size} {at}${each:,.2f}/mo each ({basis}) is ~${monthly:,.0f}/mo"
+                 + below),
     }
 
 
@@ -1351,11 +1393,17 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
     result = estimate_plan(doc)
     if not result["lines"]:
         return None                    # nothing in the plan is priceable
-    monthly = float(result["monthly_delta_usd"])
+    # A price book may raise the figure judged, never lower it (_gated).
+    shown = float(result["monthly_delta_usd"])
+    monthly = float(result.get("gate_monthly_delta_usd", shown))
     unpriced = len(result["unpriced"])
     books = result.get("price_books") or {}
     booked = (f"; {books['resources']} resource{'s' if books['resources'] != 1 else ''} "
               f"at your price book rate ({', '.join(books['packs'])})" if books else "")
+    if books and round(shown, 2) != round(monthly, 2):
+        booked += (f", which would make it {'+' if shown >= 0 else '-'}${abs(shown):,.0f}/mo; "
+                   "a price book can only raise the figure the guard judges by, so the "
+                   "list price stands where it is higher")
     basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}{booked}"
              + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
                 if unpriced else ""))
@@ -4679,7 +4727,7 @@ def _doctor_packs(covered: list[str], gaps: list[str], fix: Any) -> dict[str, An
         covered.append(f"prices from {len(books)} price book rate"
                        f"{'s' if len(books) != 1 else ''} in installed packs "
                        f"({', '.join(sorted({b['pack'] for b in books}))}), where one covers "
-                       "the SKU")
+                       "the SKU; verdicts judge at the higher of list and book rate")
     for problem in st.get("guard_problems") or []:
         gaps.append(f"an installed pack the guard judges without: {problem}")
         fix("nable pack audit", "says what changed in the pack since it was approved")

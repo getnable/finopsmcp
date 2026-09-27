@@ -32,8 +32,9 @@ def _cost(raw: str):
 def fetch(ctx, start: str, end: str):
     path = ctx.secret("EXAMPLE_COSTS_CSV")
     if not path:
-        raise RuntimeError("EXAMPLE_COSTS_CSV is not set: put the CSV's path in nable's vault "
-                           "or environment")
+        raise RuntimeError("EXAMPLE_COSTS_CSV is not set: store the CSV's path with `nable "
+                           "pack secret set com.example/example-csv-connector "
+                           "EXAMPLE_COSTS_CSV`")
     lo, hi = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
     rows = []
     with open(path, encoding="utf-8", newline="") as f:
