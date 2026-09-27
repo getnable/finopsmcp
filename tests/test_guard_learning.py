@@ -546,6 +546,31 @@ def test_retries_within_ten_minutes_are_one_decision(clock):
     assert _infer()["proposals"] == []
 
 
+def test_a_retry_the_person_declined_is_no_approval(clock):
+    """The first ask ran, the agent ran the same thing again a minute later,
+    and the person said no. One decision asked twice, counted once: as the
+    first answer it was an approval, and five of them proposed a higher
+    threshold whose note said "none declined"."""
+    for day in (10, 8, 6, 4, 2):
+        _ask_at(clock, day, session=f"r{day}")
+        _ask_at(clock, day - 0.001, answer="none", session=f"r{day}")
+    clock(0)
+    got = _infer()
+    assert not [p for p in got["proposals"] if p["direction"] == "loosen"], got["proposals"]
+    [e] = guard_signal()
+    assert (e["asks"], e["approved"], e["declined"]) == (5, 0, 5)
+
+
+def test_a_retry_the_person_approved_after_a_no_is_still_a_decline(clock):
+    """No, then yes: the no stands as evidence against a higher threshold."""
+    for day in (10, 8, 6, 4, 2):
+        _ask_at(clock, day, answer="none", session=f"n{day}")
+        _ask_at(clock, day - 0.001, session=f"n{day}")
+    clock(0)
+    [e] = guard_signal()
+    assert (e["asks"], e["approved"], e["declined"]) == (5, 0, 5)
+
+
 def test_never_for_a_one_way_door(clock):
     for day in (12, 10, 8, 6, 4, 2):
         _ask_at(clock, day, command="terraform destroy -auto-approve", door="one_way",
