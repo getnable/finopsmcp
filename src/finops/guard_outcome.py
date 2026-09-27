@@ -77,6 +77,7 @@ _CURSOR_EVENT = "afterShellExecution"
 _EDITOR_TOOLS = guard_plugin.EDITOR_TOOLS
 _EDITOR_PATH_KEYS = ("file_path", "notebook_path")
 _TOOL_USE_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+_MODE_RE = re.compile(r"[A-Za-z]{1,40}")
 _NO_SESSION = "<no-session>"            # ai_budget.NO_SESSION, without importing it
 
 
@@ -134,10 +135,13 @@ def observed(payload: dict, harness: str | None = None) -> dict[str, Any] | None
             path = next((tool_input[k] for k in _EDITOR_PATH_KEYS
                          if isinstance(tool_input.get(k), str) and tool_input[k]), None)
             command = f"{tool} {path}" if path else None
+        mode = payload.get("permission_mode")
         return {"harness": "claude-code", "event": event, "tool": tool,
                 "_session": payload.get("session_id"),
                 "tool_use_id": tool_use_id(payload.get("tool_use_id")),
-                "_command": command}
+                "_command": command,
+                "permission_mode": mode if isinstance(mode, str)
+                and _MODE_RE.fullmatch(mode) else None}
     if harness in (None, "cursor") and (
             event == _CURSOR_EVENT
             or (event is None and isinstance(payload.get("command"), str)
@@ -221,6 +225,9 @@ def record(obs: dict[str, Any], ask: dict[str, Any], linked_by: str) -> bool:
         "verdict_ts": ask.get("ts"),
         "linked_by": linked_by,
         "action_type": ask.get("action_type"),
+        # Claude Code's permission mode when the call ran: under
+        # bypassPermissions nobody may have been asked (ask_outcomes).
+        **({"permission_mode": obs["permission_mode"]} if obs.get("permission_mode") else {}),
     })
 
 

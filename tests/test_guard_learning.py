@@ -185,6 +185,28 @@ def test_an_ask_is_answered_once_though_two_post_hooks_run():
     assert len(_outcomes()) == 1
 
 
+@pytest.mark.parametrize("mode", ["bypassPermissions"])
+def test_a_call_that_ran_with_permissions_bypassed_is_no_persons_approval(mode):
+    """Claude Code sends permission_mode with every hook payload. A call
+    that ran while permissions were bypassed may never have been shown to a
+    person, so its `ran` is recorded (with the mode) but is not an approval
+    that a higher threshold could be learned from."""
+    assert _asked(_pre())
+    _hook({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+           "tool_input": {"command": LAUNCH}, "tool_use_id": "toolu_1",
+           "permission_mode": mode}, post=True)
+    [out] = _outcomes()
+    assert out["permission_mode"] == mode
+    [ask] = [r for r in _all() if r.get("decision") == "ask"]
+    assert gl.ask_outcomes(_all()) == {ask["_hash"]: "unknown"}
+    # In the default mode a person answered the prompt.
+    assert _asked(_pre(tuid="toolu_2"))
+    _hook({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+           "tool_input": {"command": LAUNCH}, "tool_use_id": "toolu_2",
+           "permission_mode": "default"}, post=True)
+    assert sorted(gl.ask_outcomes(_all()).values()) == ["approved", "unknown"]
+
+
 def test_no_ask_no_record_and_garbage_is_a_silent_exit_0():
     _post(command="ls -la", tuid="toolu_9")
     _hook({"hook_event_name": "PostToolUse", "tool_name": "Edit",

@@ -682,6 +682,10 @@ def read(days: float | None = None, path: Path | None = None, *,
 # toward caution.
 
 DECLINE_AFTER = timedelta(minutes=30)
+# Claude Code permission modes in which a call may run without a person
+# being shown the ask: its `ran` is no person's approval, so the ask it
+# answers reads as unknown.
+UNATTENDED_MODES = ("bypassPermissions",)
 # The tools each harness's post hook sees ("*" is every tool its pre hook
 # sees). Cursor's is afterShellExecution only: its MCP calls stay unknown.
 POST_SURFACES: dict[str, tuple[str, ...]] = {
@@ -709,19 +713,23 @@ def ask_outcomes(recs: list[dict[str, Any]], *, now: datetime | None = None
     """{`_hash` of each ask in `recs`: "approved" | "declined" | "unknown"}.
 
     `recs` is read(..., outcomes=True): verdicts and outcomes, with hashes.
-    Approved: an outcome says it ran. Declined: no `ran`, the harness's post
+    Approved: an outcome says it ran (not under a permission mode that runs
+    calls unasked, UNATTENDED_MODES: that is unknown). Declined: no `ran`,
+    the harness's post
     hook is known to work (it recorded an outcome in `recs`) and covers the
     tool, and the ask's session has had no activity for DECLINE_AFTER.
     Unknown: anything else, including an ask still waiting for its answer."""
     now = now or datetime.now(UTC)
     ran: set[str] = set()
+    unattended: set[str] = set()
     working: set[str] = set()
     last: dict[Any, datetime] = {}
     for r in recs:
         ts = _ts(r)
         if is_outcome(r):
             if r.get("outcome") == RAN and isinstance(r.get("verdict"), str):
-                ran.add(r["verdict"])
+                (unattended if r.get("permission_mode") in UNATTENDED_MODES
+                 else ran).add(r["verdict"])
             working.add(str(r.get("harness")))
         if ts is not None and r.get("session"):
             key = (r.get("harness"), r.get("session"))
@@ -734,6 +742,9 @@ def ask_outcomes(recs: list[dict[str, Any]], *, now: datetime | None = None
             continue
         if h in ran:
             out[h] = "approved"
+            continue
+        if h in unattended:
+            out[h] = "unknown"          # it ran, but maybe nobody was asked
             continue
         ts = _ts(r)
         quiet_since = ts
