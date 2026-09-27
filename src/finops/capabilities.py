@@ -283,6 +283,19 @@ CATALOG: list[dict[str, Any]] = [
         "tools": ["get_org_model", "get_org_coverage", "list_org_questions", "propose_org_fact"],
     },
     {
+        "id": "packs",
+        "title": "Installed packs",
+        "gate": lambda c: True,
+        "count": 1,
+        "blurb": "Packs add policies, guard rules, price books and skills. See what is installed "
+                 "and what each one was approved to do.",
+        "asks": [
+            ("Which nable packs are installed?", "version, tier and what each provides"),
+            ("What is the runway pack allowed to do?", "the capabilities it was approved with"),
+        ],
+        "tools": ["list_installed_packs"],
+    },
+    {
         "id": "share",
         "title": "Share & automate",
         "gate": lambda c: True,

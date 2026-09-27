@@ -98,7 +98,7 @@ def run(args) -> int:
         if args.lines:
             out += _lines(args.lines, lad)
         out.append("")
-    out.append("Pro and Team prices are read from finops.license.PLANS; Cloud, Growth and "
-               "Enterprise are proposals, not on sale.")
+    out.append("Pro and Team monthly prices are read from finops.license.PLANS. Cloud, "
+               "Growth, Enterprise and every annual price are proposals, not on sale.")
     print("\n".join(out))
     return 0

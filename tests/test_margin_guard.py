@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import math
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +24,7 @@ from finops import margin_guard as mg
 from finops.llm_prices import MODEL_PRICES
 
 FLOOR_CASES = ("expected", "high")
+DOC = Path(__file__).resolve().parents[1] / "docs" / "PRICING-MODEL.md"
 
 
 def _paid(plans):
@@ -40,6 +43,91 @@ def test_every_proposed_paid_plan_clears_80_percent(plan_id, billing, case):
         f"{mg.MARGIN_FLOOR:.0%}. Tighten a cap (AI credit, jobs, accounts, line items, "
         f"support budget) before touching the price. Lines: "
         f"{ {k: round(v, 2) for k, v in mg.plan_cogs(plan_id, case, billing).items()} }")
+
+
+# The floor test only fails when COGS rises. These pin the cost lines to hand
+# arithmetic, so a coefficient or formula that silently drops a cost (a line
+# that goes to zero, a cap that stops being read) fails too.
+_GOLDEN_HIGH_MONTHLY = {
+    "cloud": {
+        "payment": 6.879,           # $129 x (2.9% + 0.7% + 1.5% international) + $0.30
+        "support": 4.0,             # 4 min at $1
+        "llm": 4.0,                 # the whole $4 credit
+        "compute": 1.4256,          # (7 x 30 x 300 + 2M items x 600 s + $4 x 150) s x $0.000022
+        "database": 0.7248,         # (2 x 3 months x 0.3 + 5 x 13/12 x 0.05) GB x $0.35
+        "object_storage": 0.038,    # (2 x 3 x 0.1 + 10 agents' 0.1M events x 13) GB x $0.02
+        "observability": 1.5,
+        "email": 0.2,               # 1,000 emails
+        "guard_ingest": 0.02,       # 0.1M events x $0.20
+        "platform_share": 4.6875,   # $300 / 64 units x weight 1
+    },
+    "team": {
+        "payment": 51.3,            # $1,000 x 5.1% + $0.30
+        "support": 40.0,
+        "llm": 50.0,
+        "compute": 16.269,          # (60 x 30 x 300 + 50 x 12 x 30 x 10 + 20 x 600 + 50 x 150) s
+        "database": 14.4229,        # (20 x 6 x 0.3 + 50 x 25/12 x 0.05) GB x $0.35
+        "object_storage": 0.74,     # (20 x 6 x 0.1 + 1M events x 25) GB x $0.02
+        "observability": 1.5,
+        "email": 4.0,
+        "guard_ingest": 0.2,
+        "platform_share": 18.75,    # $300 / 64 x 4
+    },
+}
+_GOLDEN_HIGH_MONTHLY_TOTAL = {"cloud": 23.475, "team": 197.18}
+
+
+@pytest.mark.parametrize("plan_id", sorted(_GOLDEN_HIGH_MONTHLY))
+def test_high_case_cost_lines_match_hand_arithmetic(plan_id):
+    lines = mg.plan_cogs(plan_id, "high", "monthly")
+    want = _GOLDEN_HIGH_MONTHLY[plan_id]
+    assert set(lines) == set(want)
+    for k, v in want.items():
+        assert lines[k] == pytest.approx(v, abs=1e-4), (plan_id, k, lines[k])
+    assert sum(lines.values()) == pytest.approx(_GOLDEN_HIGH_MONTHLY_TOTAL[plan_id], abs=0.005)
+
+
+def _doc_rows(heading: str) -> list[str]:
+    lines = DOC.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith(heading))
+    rows, seen_table = [], False
+    for ln in lines[start + 1:]:
+        if ln.startswith("|"):
+            seen_table = True
+            if not ln.startswith(("| Plan |", "|---")):
+                rows.append(ln.strip())
+        elif seen_table:
+            break
+    return rows
+
+
+def _table_rows(option: str, only: set[str] | None = None) -> list[str]:
+    out = []
+    for r in mg.table(mg.ladder(option)):
+        if only and r["plan"] not in only:
+            continue
+        cogs = " / ".join(f"${r[f'cogs_{c}_usd']:,.2f}" for c in mg.CASES)
+        gm = " / ".join(f"{r[f'margin_{c}']:.1%}" for c in mg.CASES)
+        out.append(f"| {r['name']} | {r['billing']} | ${r['price_month_usd']:,.2f} | {cogs} | {gm} |")
+    return out
+
+
+def test_the_margin_tables_in_the_doc_match_the_model():
+    # docs/PRICING-MODEL.md is what the founder reads. Regenerate its tables
+    # from mg.table() when this fails.
+    assert _doc_rows("Option A (proposed)") == _table_rows("A")
+    assert _doc_rows("Option B,") == _table_rows("B", {"cloud", "growth"})
+
+
+def test_clears_floor_is_judged_on_the_unrounded_margin():
+    # A margin of 79.996% prints as 80.0% and is still under the floor.
+    cloud = mg.PROPOSED_PLANS["cloud"]
+    price = mg.min_monthly_price(cloud, "high", target=mg.MARGIN_FLOOR - 0.00004)
+    thin = mg.with_price(cloud, price, annual_usd=12 * price)
+    row = next(r for r in mg.table({"cloud": thin}) if r["billing"] == "monthly")
+    assert row["margin_high"] == round(mg.MARGIN_FLOOR, 4)
+    assert mg.gross_margin(thin, "high") < mg.MARGIN_FLOOR
+    assert row["clears_floor"] is False
 
 
 def test_every_paid_plan_on_sale_today_is_modeled_at_its_live_price():
@@ -86,10 +174,41 @@ def test_included_ai_credit_is_at_most_7_percent_of_price(option):
             f"{p.id}: ${p.caps.ai_credit_usd_month} credit on ${p.monthly_usd}")
 
 
-def test_daily_ceiling_cannot_spend_the_month_in_one_day():
-    for p in mg.PROPOSED_PLANS.values():
-        m = mg.metering_for(p)
-        assert m["ai_daily_ceiling_usd"] <= m["ai_credit_usd_month"] * mg.AI_DAILY_SHARE + 0.005
+def _spend_day(p, used_month, unit_cost):
+    """Run units of AI work for one day as fast as the meters allow."""
+    today = 0.0
+    while True:
+        day = mg.at_cap(p, "ai_daily_ceiling_usd", today, next_cost=unit_cost,
+                        route="interactive")
+        month = mg.at_cap(p, "ai_credit_usd_month", used_month + today, next_cost=unit_cost,
+                          route="interactive")
+        if day not in (mg.OK, mg.NOTIFY) or month not in (mg.OK, mg.NOTIFY):
+            return today
+        today += unit_cost
+
+
+@pytest.mark.parametrize("unit", ["brief_narrative", "chat_session", "root_cause_session"])
+def test_daily_ceiling_cannot_spend_the_month_in_one_day(unit):
+    # Behaviour, not a restatement of the formula: a tenant that asks for AI
+    # work all day long, as fast as at_cap lets it, never passes the day's
+    # ceiling, and needs at least 1 / AI_DAILY_SHARE days to spend the month.
+    cost = mg.llm_unit_cost(unit, cached=False)
+    for p in _paid(mg.PROPOSED_PLANS):
+        caps = mg.metering_for(p)
+        credit, ceiling = caps["ai_credit_usd_month"], caps["ai_daily_ceiling_usd"]
+        if credit <= 0:
+            continue
+        spent, days = 0.0, 0
+        while days < 40:
+            today = _spend_day(p, spent, cost)
+            assert today <= ceiling + 1e-9, (p.id, unit, today, ceiling)
+            if today == 0:
+                break
+            spent += today
+            days += 1
+        assert spent <= credit + 1e-9, (p.id, unit, spent)
+        if spent >= credit * 0.99:
+            assert days >= round(1 / mg.AI_DAILY_SHARE), (p.id, unit, days)
 
 
 @pytest.mark.parametrize("addon_id", sorted(mg.ADDONS))
@@ -154,11 +273,14 @@ def test_at_cap_never_answers_an_included_meter_with_a_bill():
             caps = mg.metering_for(p)
             for meter in mg.METERS:
                 cap = caps[meter]
-                for used in (0, 0.5 * cap, 0.8 * cap, cap, 1.5 * cap, 10 * cap + 1):
-                    for route in ("scheduled", "interactive"):
-                        action = mg.at_cap(p, meter, used, route=route)
-                        assert action in mg.ACTIONS, (p.id, meter, action)
-                        assert not any(w in action for w in _BILLING_WORDS), (p.id, meter, action)
+                for used in (0, 0.5 * cap, 0.8 * cap, cap, 1.5 * cap, 10 * cap + 1, math.nan):
+                    for route in mg.ROUTES:
+                        for key in (False, True):
+                            action = mg.at_cap(p, meter, used, route=route, next_cost=1,
+                                               has_own_key=key)
+                            assert action in mg.ACTIONS, (p.id, meter, action)
+                            assert not any(w in action for w in _BILLING_WORDS), (
+                                p.id, meter, action)
     for rule in mg.METER_RULES.values():
         assert rule.at_cap in mg.ACTIONS and rule.at_cap_interactive in mg.ACTIONS
         assert rule.at_cap not in (mg.OK, mg.NOTIFY)
@@ -183,17 +305,107 @@ def test_at_cap_thresholds():
     assert mg.at_cap("pro", "jobs_per_day", 0) == mg.RUN_LOCALLY
     with pytest.raises(KeyError):
         mg.at_cap("cloud", "seats", 1)
+    with pytest.raises(ValueError):
+        mg.at_cap("cloud", "jobs_per_day", 0, route="nightly")
+
+
+def test_at_cap_counts_the_next_unit_so_the_last_one_cannot_overshoot():
+    # The review's case: Growth's daily ceiling is $1.60, $1.59 is used, and a
+    # root cause session costs $0.64. Judged on `used` alone it ran and the day
+    # ended at $2.23.
+    growth = mg.PROPOSED_PLANS["growth"]
+    assert mg.metering_for(growth)["ai_daily_ceiling_usd"] == pytest.approx(1.60)
+    for route in ("scheduled", "interactive"):
+        action = mg.at_cap(growth, "ai_daily_ceiling_usd", 1.59, next_cost=0.64, route=route)
+        assert action not in (mg.OK, mg.NOTIFY), route
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", 1.59, next_cost=0.64,
+                     route="interactive") == mg.ASK_FOR_OWN_KEY
+    # A unit that lands exactly on the cap runs; the notify band counts it too.
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", 1.0, next_cost=0.60) == mg.NOTIFY
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", 1.0) == mg.OK
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", 1.0, next_cost=0.30) == mg.NOTIFY
+    # Counted meters: the 20th job of 20 runs, a 21st does not.
+    assert mg.at_cap(growth, "jobs_per_day", 19, next_cost=1) == mg.NOTIFY
+    assert mg.at_cap(growth, "jobs_per_day", 20, next_cost=1) == mg.QUEUE_UNTIL_TOMORROW
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf, -1.0])
+def test_a_broken_meter_reading_is_at_the_cap(bad):
+    growth = mg.PROPOSED_PLANS["growth"]
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", bad) == mg.DEGRADE_TO_CODE_ONLY
+    assert mg.at_cap(growth, "ai_credit_usd_month", bad,
+                     route="interactive") == mg.ASK_FOR_OWN_KEY
+    assert mg.at_cap(growth, "ai_daily_ceiling_usd", 0.0, next_cost=bad) == mg.DEGRADE_TO_CODE_ONLY
+    assert mg.at_cap(growth, "jobs_per_day", bad) == mg.QUEUE_UNTIL_TOMORROW
+
+
+def test_on_demand_scans_cannot_take_the_nightly_runs_slots():
+    # Anomaly alerts ride on the nightly run. Fill the day with on-demand deep
+    # scans first, as fast as at_cap allows: every account's nightly run must
+    # still fit.
+    for p in _paid(mg.PROPOSED_PLANS):
+        caps = mg.metering_for(p)
+        if caps["jobs_per_day"] <= 0:
+            assert mg.at_cap(p, "jobs_per_day", 0, route="on_demand") == mg.RUN_LOCALLY
+            continue
+        on_demand = 0
+        while mg.at_cap(p, "jobs_per_day", on_demand, route="on_demand",
+                        next_cost=1) in (mg.OK, mg.NOTIFY):
+            on_demand += 1
+        assert on_demand == caps["jobs_per_day"] - caps["accounts"] > 0, p.id
+        assert mg.at_cap(p, "jobs_per_day", on_demand, route="on_demand",
+                         next_cost=1) == mg.QUEUE_UNTIL_TOMORROW
+        total = on_demand
+        for _ in range(int(caps["accounts"])):
+            assert mg.at_cap(p, "jobs_per_day", total, route="scheduled",
+                             next_cost=1) in (mg.OK, mg.NOTIFY), p.id
+            total += 1
+        assert total == caps["jobs_per_day"]
+    # "interactive" on the jobs meter is on-demand work too.
+    cloud = mg.PROPOSED_PLANS["cloud"]
+    assert mg.at_cap(cloud, "jobs_per_day", 2, route="interactive") == mg.QUEUE_UNTIL_TOMORROW
+    assert mg.at_cap(cloud, "jobs_per_day", 2, route="scheduled") == mg.OK
+
+
+def test_a_tenant_with_its_own_key_is_never_degraded_at_an_ai_cap():
+    # The promise: the customer's own key is always available for every AI
+    # feature. With a key on file, an AI cap moves the work onto it.
+    for p in _paid(mg.PROPOSED_PLANS):
+        caps = mg.metering_for(p)
+        for meter in ("ai_credit_usd_month", "ai_daily_ceiling_usd"):
+            for route in mg.ROUTES:
+                with_key = mg.at_cap(p, meter, caps[meter], route=route, next_cost=0.5,
+                                     has_own_key=True)
+                assert with_key == mg.RUN_ON_OWN_KEY, (p.id, meter, route)
+                assert with_key != mg.DEGRADE_TO_CODE_ONLY
+    growth = mg.PROPOSED_PLANS["growth"]
+    credit = growth.caps.ai_credit_usd_month
+    # Without a key the degrade and the ask stay.
+    assert mg.at_cap(growth, "ai_credit_usd_month", credit) == mg.DEGRADE_TO_CODE_ONLY
+    assert mg.at_cap(growth, "ai_credit_usd_month", credit,
+                     route="interactive") == mg.ASK_FOR_OWN_KEY
+    # Below the cap the included credit is used first, key or not.
+    assert mg.at_cap(growth, "ai_credit_usd_month", 0, has_own_key=True) == mg.OK
+    # The key changes nothing on a meter that is not AI.
+    assert mg.at_cap(growth, "jobs_per_day", 20, has_own_key=True) == mg.QUEUE_UNTIL_TOMORROW
+    # The copy the customer reads at an AI cap says both halves.
+    for meter in ("ai_credit_usd_month", "ai_daily_ceiling_usd"):
+        says = mg.METER_RULES[meter].says
+        assert "If you have added your own model key, AI work continues on it" in says
+        assert "If not," in says
 
 
 def test_metering_surface_is_stable():
     # The hosted product imports these names; renaming one breaks it quietly.
     assert mg.METERS == ("ai_credit_usd_month", "ai_daily_ceiling_usd", "jobs_per_day",
                          "accounts", "line_items_month", "guarded_agents")
+    assert mg.ROUTES == ("scheduled", "interactive", "on_demand")
     for name in ("at_cap", "metering_for", "METER_RULES", "PROPOSED_PLANS", "plan_cogs",
-                 "gross_margin", "table"):
+                 "gross_margin", "table", "ROUTES", "RUN_ON_OWN_KEY"):
         assert name in mg.__all__ and hasattr(mg, name)
     for rule in mg.METER_RULES.values():
-        # Customer copy: no exclamation points, no em dashes.
+        # Customer copy (the hosted product shows it at the cap): no
+        # exclamation points, no em dashes.
         assert rule.says and chr(33) not in rule.says and chr(0x2014) not in rule.says
 
 
@@ -204,18 +416,18 @@ def test_plan_cogs_rejects_an_unknown_case():
 
 # ── the founder's command ────────────────────────────────────────────────────
 
-def _cli(*args):
+def _cli(home, *args):
     return subprocess.run(
         [sys.executable, "-c",
          "import sys; from finops.setup_wizard import main; main(sys.argv[1:])", *args],
         capture_output=True, text=True, timeout=60, check=False,
-        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PATH": "/usr/bin:/bin",
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": str(home), "PATH": "/usr/bin:/bin",
              "PYTHONPATH": ":".join(p for p in sys.path if p)},
     )
 
 
-def test_pricing_margins_prints_both_options_and_every_case():
-    r = _cli("pricing", "margins")
+def test_pricing_margins_prints_both_options_and_every_case(tmp_path):
+    r = _cli(tmp_path, "pricing", "margins")
     assert r.returncode == 0, r.stderr
     out = r.stdout
     assert "Option A" in out and "Option B" in out and "(proposed)" in out
@@ -224,9 +436,9 @@ def test_pricing_margins_prints_both_options_and_every_case():
     assert "low / expected / high" in out
 
 
-def test_pricing_margins_json():
+def test_pricing_margins_json(tmp_path):
     import json
-    r = _cli("pricing", "margins", "--option", "A", "--json", "--lines", "cloud")
+    r = _cli(tmp_path, "pricing", "margins", "--option", "A", "--json", "--lines", "cloud")
     assert r.returncode == 0, r.stderr
     doc = json.loads(r.stdout)
     assert doc["floor"] == mg.MARGIN_FLOOR
@@ -234,7 +446,7 @@ def test_pricing_margins_json():
     assert set(doc["lines"]["A"]) == set(mg.CASES)
 
 
-def test_pricing_is_not_in_the_default_help():
-    r = _cli("--help")
+def test_pricing_is_not_in_the_default_help(tmp_path):
+    r = _cli(tmp_path, "--help")
     assert "pricing" not in r.stdout
     assert "\nother\n" not in r.stdout
