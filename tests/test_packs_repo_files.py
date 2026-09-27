@@ -73,6 +73,33 @@ def test_repo_files_refuses_paths_globs_and_undeclared_packs(repo):
         "files": [], "truncated": False}
 
 
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="no O_NOFOLLOW here")
+def test_repo_files_never_follows_a_symlink_that_appears_after_the_check(repo, monkeypatch):
+    # The walk checks a name is no symlink, then reads it: a link put there
+    # in between (here: a check that sees none) must still not be followed.
+    monkeypatch.setattr(Path, "is_symlink", lambda self: False)
+    got = broker.read_data(_prep(), {"scope": "repo.files",
+                                     "query": {"names": ["catalog-info.yaml"]}}, [repo])
+    assert "outside" not in [f["text"] for f in got["files"]]
+    assert "svc/c/catalog-info.yaml" not in [f["path"] for f in got["files"]]
+
+
+def test_repo_files_reads_no_more_than_its_limit(repo, monkeypatch):
+    # A file that grows between the size check and the read is cut off, not
+    # read whole.
+    real_stat = Path.stat
+
+    def small(self, **kw):
+        st = list(real_stat(self, **kw))[:10]
+        st[6] = 0                                        # st_size
+        return os.stat_result(st)
+    monkeypatch.setattr(Path, "stat", small)
+    got = broker.read_data(_prep(), {"scope": "repo.files",
+                                     "query": {"names": ["catalog-info.yaml"]}}, [repo])
+    assert "big/catalog-info.yaml" not in [f["path"] for f in got["files"]]
+    assert all(len(f["text"]) <= broker.REPO_FILE_MAX_BYTES for f in got["files"])
+
+
 def test_repo_files_stops_at_its_limits(repo, monkeypatch):
     monkeypatch.setattr(broker, "REPO_FILES_MAX", 1)
     got = broker.read_data(_prep(), {"scope": "repo.files",

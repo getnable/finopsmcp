@@ -69,6 +69,7 @@ import queue
 import re
 import shutil
 import signal
+import stat
 
 # The broker's job is to run pack code in a child process, never in this one.
 import subprocess  # nosec B404
@@ -633,6 +634,38 @@ _REPO_SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", ".terraform"
 _REPO_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
+def _read_repo_file(path: Path) -> bytes | None:
+    """A regular file's bytes, or None: never through a symlink (one put
+    there after the walk saw the name included), never a FIFO or a device
+    (opened without blocking, then checked), never more than
+    REPO_FILE_MAX_BYTES however big it has grown since."""
+    if path.is_symlink():
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > REPO_FILE_MAX_BYTES:
+            return None
+        chunks: list[bytes] = []
+        left = REPO_FILE_MAX_BYTES + 1
+        while left > 0:
+            chunk = os.read(fd, min(left, 64 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        raw = b"".join(chunks)
+        return raw if len(raw) <= REPO_FILE_MAX_BYTES else None
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
 def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]:
     names = query.get("names")
     if not isinstance(names, list) or not 1 <= len(names) <= REPO_FILE_NAMES_MAX or not all(
@@ -656,12 +689,8 @@ def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]
                 if fn not in wanted:
                     continue
                 path = Path(dirpath) / fn
-                try:
-                    if path.is_symlink() or not path.is_file() or \
-                            path.stat().st_size > REPO_FILE_MAX_BYTES:
-                        continue
-                    raw = path.read_bytes()
-                except OSError:
+                raw = _read_repo_file(path)
+                if raw is None:
                     continue
                 if len(files) >= REPO_FILES_MAX or total + len(raw) > REPO_FILES_TOTAL_BYTES:
                     truncated = True
