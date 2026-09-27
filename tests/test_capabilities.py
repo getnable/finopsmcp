@@ -100,3 +100,21 @@ def test_catalog_wellformed():
         assert callable(g["gate"])
         assert g["count"] > 0
         assert g["asks"] and all(len(a) == 2 for a in g["asks"])
+
+
+def test_packs_and_org_tools_are_named_so_the_model_can_reach_them():
+    """list_installed_packs and the org tools are tier 2: they cost no tokens
+    until something names them, and what_can_nable_do is what names them. A
+    tier 2 tool the catalog never mentions is one the model never calls."""
+    wanted = {"list_installed_packs", "get_org_model", "get_org_coverage",
+              "list_org_questions", "propose_org_fact"}
+    always = [g for g in CATALOG if all(g["gate"](c) for c in (set(), {"aws"}, {"azure"}))]
+    named = {t for g in always for t in g["tools"]}
+    assert wanted <= named, sorted(wanted - named)
+    for g in CATALOG:
+        assert g["count"] >= len(g["tools"]), g["id"]
+    for connected in (set(), {"aws"}):
+        out = render_capabilities(connected, detailed=True)
+        for tool in wanted:
+            assert tool in out, (connected, tool)
+    assert "Which nable packs are installed?" in render_capabilities({"aws"})

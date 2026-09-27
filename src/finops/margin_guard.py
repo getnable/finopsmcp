@@ -17,7 +17,8 @@ import them without the rest of nable:
   * the runtime meters: per plan, the included AI credit, its daily ceiling,
     jobs per day, connected accounts, billing line items and guarded agents
     (metering_for), and what the product does at each cap (METER_RULES,
-    at_cap). Nothing past a cap is ever billed on its own: the product degrades
+    at_cap). Nothing past a cap is ever billed on its own: the product runs AI
+    work on the customer's own key when one is on file, and otherwise degrades
     to a cheaper path, queues, or asks the customer to choose;
   * the cases. "low" is a light tenant, "expected" a typical one, and "high" is
     every capped driver at its cap in the same month: the whole AI credit spent
@@ -32,13 +33,21 @@ metered quantities instead of modeled ones, so model and bill are compared with
 one function. docs/PRICING-MODEL.md names the assumptions that move the result
 most and should be checked against the first real hosted invoices.
 
-Nothing here is customer-facing copy and nothing here changes a price. The
-prices customers see today are finops.license.PLANS; the Pro and Team prices
-below are read from it, and Cloud, Growth and Enterprise are proposals that
-need the founder's approval and Stripe products before they appear anywhere.
+Nothing here changes a price, but some of it is customer-facing copy:
+METER_RULES[...].says is what the hosted product tells a customer at a cap, so
+it must stay true of what at_cap does (the tests hold it to that, and to no
+exclamation points or em dashes). Plan.includes is proposal copy for the
+founder, not yet shown to anyone.
+
+The prices customers see today are finops.license.PLANS: monthly Pro and Team.
+The Pro and Team monthly prices below are read from it. Everything else is a
+proposal that needs the founder's approval and a Stripe product before it
+appears anywhere: Cloud, Growth and Enterprise, and every annual price,
+including Pro's and Team's (license.PLANS carries no annual price today).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 
 __all__ = [
@@ -67,7 +76,9 @@ __all__ = [
     "PROPOSED_OPTION",
     "PROPOSED_PLANS",
     "QUEUE_UNTIL_TOMORROW",
+    "ROUTES",
     "RUN_LOCALLY",
+    "RUN_ON_OWN_KEY",
     "Addon",
     "Caps",
     "LlmUnit",
@@ -166,10 +177,16 @@ COSTS: dict = {
     "card_pct": Range(0.036, 0.036, 0.051),
     "card_fixed_usd": 0.30,
     # Annual and Enterprise invoices paid by ACH Direct Debit: Stripe 0.8%
-    # capped at $5 a payment, plus Stripe Invoicing 0.4% of the invoice.
+    # capped at $5 a payment, plus the Stripe fee on the invoice itself.
     "ach_pct": 0.008,
     "ach_cap_usd": 5.0,
-    "invoicing_pct": 0.004,
+    # Assumption: these invoices are subscription invoices (an annual or
+    # monthly Stripe subscription with send_invoice collection), so Stripe
+    # Billing's 0.7% of billing volume applies, the same 0.7% card_pct carries.
+    # Stripe Invoicing's 0.4% is for one-off invoices outside a subscription;
+    # it is not used because nothing here is invoiced that way. Standard
+    # pay-as-you-go rates, no negotiated discount.
+    "invoicing_pct": 0.007,
     # Support: founder or engineer time, $60 an hour loaded. Assumption.
     "support_usd_per_minute": 1.00,
     # License issuing, the Stripe webhook and the email login for a local plan.
@@ -283,6 +300,9 @@ def _live_monthly(plan_id: str) -> float:
     return float(PLANS[plan_id]["monthly_usd"])
 
 
+# Annual prices are proposals on every plan, Pro and Team included: they are
+# not on sale until license.PLANS and Stripe carry them. Only the monthly Pro
+# and Team prices are live.
 _PRO = Plan(
     id="pro", name="Pro", monthly_usd=_live_monthly("pro"), annual_usd=250.0,
     runs="local",
@@ -306,9 +326,10 @@ _TEAM = Plan(
                 llm_units_month={"brief_narrative": (34, 34), "finding_critique": (30, 150),
                                  "anomaly_triage": (10, 40), "chat_session": (20, 240),
                                  "root_cause_session": (2, 10)}),
-    includes="Growth plus the @nable Slack bot with root cause investigations, "
-             "anomaly checks every 2 hours, 100 guarded agents, SCIM, audit "
-             "export and a shared Slack channel for support. Unlimited seats.",
+    includes="Growth plus: 50 cloud accounts, the nightly run on each, anomaly "
+             "checks every 2 hours, 10 on-demand deep scans a day, 100 guarded "
+             "agents, SCIM, audit export, a shared Slack channel for support and "
+             "$50 a month of hosted AI. Unlimited seats.",
 )
 
 _ENTERPRISE = Plan(
@@ -480,7 +501,7 @@ def _llm(p: Plan, case: str) -> float:
     if case == "high":
         return credit                   # the whole credit, spent
     i = 0 if case == "low" else 1
-    demand = sum(n[i] * llm_unit_cost(unit, cached=True)
+    demand = math.fsum(n[i] * llm_unit_cost(unit, cached=True)
                  for unit, n in p.usage.llm_units_month.items())
     return min(demand, credit)          # past the credit: the customer's key or a pack
 
@@ -541,14 +562,16 @@ def gross_margin(plan: Plan | str, case: str, billing: str = "monthly",
     revenue = plan_price(p, billing)
     if revenue <= 0:
         raise ValueError(f"{p.id} is free: it has no gross margin")
-    return 1 - sum(plan_cogs(p, case, billing).values()) / revenue
+    # math.fsum: exact, so a total on a rounding boundary rounds the same way
+    # on every Python (3.12's sum() compensates, 3.11's does not).
+    return 1 - math.fsum(plan_cogs(p, case, billing).values()) / revenue
 
 
 def min_monthly_price(plan: Plan | str, case: str, target: float = MARGIN_FLOOR) -> float:
     """Smallest monthly price at which `plan` reaches `target` in `case`, caps unchanged."""
     p = _plan(plan)
     d = plan_cogs(p, case)
-    fixed = sum(d.values()) - d["payment"]
+    fixed = math.fsum(d.values()) - d["payment"]
     if p.monthly_pay == "invoice":
         # ACH is capped: at these prices it is the $5 cap plus Invoicing.
         return (fixed + COSTS["ach_cap_usd"]) / (1 - target - COSTS["invoicing_pct"])
@@ -617,6 +640,13 @@ def addon_cost(addon_id: str) -> float:
 # the next unit of work. No action bills anything: past a cap the product
 # degrades to a cheaper path, queues, or asks the customer to choose (their own
 # key, an add-on, or waiting), and says so where the customer will see it.
+#
+# at_cap is a pure function of one reading. It cannot stop two workers that
+# read the same `used` from both going ahead, so the hosted side must reserve
+# atomically: check and increment the meter in one transaction (for example
+# UPDATE ... SET used = used + :next_cost WHERE used + :next_cost <= :cap
+# RETURNING used), run the work only if the reservation succeeded, and settle
+# an AI reservation to the priced response.usage afterwards.
 
 OK = "ok"
 NOTIFY = "notify_admins"                                   # proceed, and tell admins the burn rate
@@ -627,10 +657,19 @@ HOLD_NEW_ACCOUNT = "hold_new_account"                      # connected accounts 
 KEEP_AGGREGATES_PAUSE_DETAIL = "keep_aggregates_pause_resource_detail"
 LOCAL_GUARD_ONLY = "local_guard_only"                      # the free local guard, no shared policy sync
 RUN_LOCALLY = "run_locally_on_request"                     # not hosted on this plan
+RUN_ON_OWN_KEY = "run_on_customer_model_key"               # the customer's key is on file: use it
 
 ACTIONS = frozenset({OK, NOTIFY, DEGRADE_TO_CODE_ONLY, ASK_FOR_OWN_KEY,
                      QUEUE_UNTIL_TOMORROW, HOLD_NEW_ACCOUNT,
-                     KEEP_AGGREGATES_PAUSE_DETAIL, LOCAL_GUARD_ONLY, RUN_LOCALLY})
+                     KEEP_AGGREGATES_PAUSE_DETAIL, LOCAL_GUARD_ONLY, RUN_LOCALLY,
+                     RUN_ON_OWN_KEY})
+
+# "scheduled": nable started it (the nightly run, a brief). "interactive": a
+# person asked (chat, root cause). "on_demand": a person asked for a deep scan;
+# it is interactive work, and on jobs_per_day it may only use the on-demand
+# slots, never the nightly run's.
+ROUTES = ("scheduled", "interactive", "on_demand")
+_AI_METERS = frozenset({"ai_credit_usd_month", "ai_daily_ceiling_usd"})
 
 
 @dataclass(frozen=True)
@@ -639,26 +678,29 @@ class MeterRule:
     window: str
     at_cap: str                      # scheduled work
     at_cap_interactive: str          # a person asked (chat, RCA, a deep scan)
-    says: str                        # what the customer is told at the cap
+    says: str                        # what the customer is told at the cap: customer copy
 
 
 METER_RULES: dict[str, MeterRule] = {
     "ai_credit_usd_month": MeterRule(
         "USD of model work at list price, from response.usage priced by finops.llm_prices",
         "calendar month", DEGRADE_TO_CODE_ONLY, ASK_FOR_OWN_KEY,
-        "Your included AI credit is used for this month. Scheduled briefs continue "
-        "without the narrative; chat and root cause run on your own model key at "
-        "no markup, or on a credit pack, if you choose."),
+        "Your included AI credit is used for this month. If you have added your own "
+        "model key, AI work continues on it at no markup. If not, scheduled briefs "
+        "continue without the narrative, and chat and root cause ask before running "
+        "on your own key or a credit pack."),
     "ai_daily_ceiling_usd": MeterRule(
         "USD of model work at list price", "calendar day (UTC)",
         DEGRADE_TO_CODE_ONLY, ASK_FOR_OWN_KEY,
         "Today's share of the AI credit is used, so one day cannot spend the month. "
-        "It resets tomorrow; your own key works now."),
+        "If you have added your own model key, AI work continues on it now. If not, "
+        "briefs run without the narrative until tomorrow, and chat asks for your key "
+        "or waits until tomorrow."),
     "jobs_per_day": MeterRule(
         "runs on one account (nightly scan or on-demand deep scan)", "calendar day (UTC)",
         QUEUE_UNTIL_TOMORROW, QUEUE_UNTIL_TOMORROW,
-        "Today's runs are used. This one is queued for tomorrow; anomaly alerts "
-        "are not affected."),
+        "Today's runs are used. This one is queued for tomorrow. On-demand scans "
+        "never use the slots kept for each account's nightly scan and anomaly check."),
     "accounts": MeterRule(
         "connected cloud accounts, subscriptions and projects", "current",
         HOLD_NEW_ACCOUNT, HOLD_NEW_ACCOUNT,
@@ -695,26 +737,66 @@ def metering_for(plan: Plan | str, plans: dict[str, Plan] | None = None) -> dict
 
 
 def at_cap(plan: Plan | str, meter: str, used: float, *, route: str = "scheduled",
+           next_cost: float = 0.0, has_own_key: bool = False,
            plans: dict[str, Plan] | None = None) -> str:
     """What the hosted product does with the next unit of work on `meter`.
 
-    `used` is the meter's reading in its window before that unit. Below
-    NOTIFY_AT of the cap: OK. From there to the cap: NOTIFY (the work runs and
-    admins are told). At or past the cap: the meter's rule, for `route`
-    "scheduled" or "interactive". A meter the plan does not include (cap 0) is
-    work that runs on the customer's machine or key. Never a charge.
+    `used` is the meter's reading in its window before that unit, and
+    `next_cost` is the unit's size: its estimated list-price USD on an AI
+    meter, 1 for a job, an account or an agent, the export's line items on
+    line_items_month. The unit is judged by where it would leave the meter:
+    at the cap if the meter is already at its cap or `used + next_cost` would
+    pass it, so the last unit cannot overshoot; NOTIFY (the work runs and
+    admins are told) if it would reach NOTIFY_AT of the cap; otherwise OK. A
+    reading or cost that is not a finite number of at least zero is treated as
+    at the cap, so a broken meter fails closed. At the cap the meter's rule
+    applies: rule.at_cap for route "scheduled", rule.at_cap_interactive for
+    "interactive" and "on_demand".
+
+    jobs_per_day reserves the nightly run: on route "on_demand" (or
+    "interactive"), `used` counts only today's on-demand runs and is held to
+    jobs_per_day minus the plan's accounts, so on-demand scans can never push
+    an account's nightly scan and anomaly check off the day. On "scheduled",
+    `used` counts every run today.
+
+    `has_own_key`: the tenant has put its own model key on file. At the cap of
+    an AI meter the work then runs on that key (RUN_ON_OWN_KEY), scheduled or
+    not, and is never degraded. Without a key, scheduled work degrades and a
+    person is asked.
+
+    A meter the plan does not include (cap 0) is work that runs on the
+    customer's machine or key. Never a charge.
+
+    This answers for one reading and cannot serialise parallel callers: the
+    hosted side must check and increment the meter in one transaction and run
+    the work only if that reservation succeeded (see the note above METER_RULES).
     """
     if meter not in METER_RULES:
         raise KeyError(f"unknown meter {meter!r}; meters are {METERS}")
-    if route not in ("scheduled", "interactive"):
-        raise ValueError("route must be 'scheduled' or 'interactive'")
+    if route not in ROUTES:
+        raise ValueError(f"route must be one of {ROUTES}, not {route!r}")
     rule = METER_RULES[meter]
-    cap = metering_for(plan, plans)[meter]
+    p = _plan(plan, plans)
+    cap = metering_for(p)[meter]
+    ai = meter in _AI_METERS
     if cap <= 0:
-        return ASK_FOR_OWN_KEY if meter.startswith("ai_") else RUN_LOCALLY
-    if used >= cap:
-        return rule.at_cap_interactive if route == "interactive" else rule.at_cap
-    if used >= NOTIFY_AT * cap:
+        if ai:
+            return RUN_ON_OWN_KEY if has_own_key else ASK_FOR_OWN_KEY
+        return RUN_LOCALLY
+    if meter == "jobs_per_day" and route != "scheduled":
+        cap = cap - p.caps.accounts                 # the nightly slots are not on offer
+
+    def _bad(x: float) -> bool:
+        try:
+            return not math.isfinite(x) or x < 0
+        except TypeError:
+            return True
+
+    if _bad(used) or _bad(next_cost) or cap <= 0 or used >= cap or used + next_cost > cap:
+        if ai and has_own_key:
+            return RUN_ON_OWN_KEY
+        return rule.at_cap if route == "scheduled" else rule.at_cap_interactive
+    if used + next_cost >= NOTIFY_AT * cap:
         return NOTIFY
     return OK
 
@@ -733,9 +815,11 @@ def table(plans: dict[str, Plan] | None = None) -> list[dict]:
                          "price_month_usd": round(plan_price(p, billing), 2),
                          "ai_credit_usd_month": p.caps.ai_credit_usd_month}
             for case in CASES:
-                row[f"cogs_{case}_usd"] = round(sum(plan_cogs(p, case, billing).values()), 2)
+                cogs = math.fsum(plan_cogs(p, case, billing).values())
+                row[f"cogs_{case}_usd"] = round(cogs, 2)
                 row[f"margin_{case}"] = round(gross_margin(p, case, billing), 4)
-            row["clears_floor"] = all(row[f"margin_{c}"] >= MARGIN_FLOOR
+            # On the unrounded margin: 79.996% rounds to 0.8000 and is still under.
+            row["clears_floor"] = all(gross_margin(p, c, billing) >= MARGIN_FLOOR
                                       for c in ("expected", "high"))
             rows.append(row)
     return rows
