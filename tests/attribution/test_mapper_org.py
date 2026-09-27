@@ -17,6 +17,7 @@ import pytest
 
 from finops import org
 from finops.attribution import mapper
+from finops.org.cli import _who as human
 
 RULES = """
     rules:
@@ -52,7 +53,7 @@ def _map_all():
 
 
 def confirmed(kind, subject, value, source="human"):
-    org.set_fact(org.make_fact(kind, subject, value, source=source), "maria")
+    org.set_fact(org.make_fact(kind, subject, value, source=source), human("maria"))
 
 
 def test_without_an_org_model_the_mapping_is_the_files(rules, monkeypatch, tmp_path):

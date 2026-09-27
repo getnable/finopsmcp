@@ -8,11 +8,21 @@ proposal comes back with the exact command a human runs to confirm it.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 from ..server import mcp
 
 _MAX_FACTS = 200
+
+# The schema an agent sees. "threshold" is listed so that proposing one
+# reaches the refusal that says who sets it, not a bare validation error.
+FactKind = Literal["owner", "team", "environment", "tag_key", "tag_alias", "account",
+                   "threshold"]
+SubjectKind = Literal["aws_account", "gcp_project", "azure_subscription", "k8s_namespace",
+                      "repo_path", "service", "tag_value", "resource", "team", "org",
+                      "environment"]
 
 
 @mcp.tool()
@@ -84,40 +94,47 @@ def list_org_questions(limit: int = 10) -> dict:
 
 @mcp.tool()
 def propose_org_fact(
-    fact: str,
-    subject_kind: str,
-    subject_id: str,
-    value: dict,
-    source: str,
-    confidence: float = 0.5,
-    dollars_monthly: float | None = None,
+    fact: Annotated[FactKind, Field(description="What kind of fact. threshold is refused: "
+                                                "a person sets thresholds.")],
+    subject_kind: Annotated[SubjectKind, Field(description="What the fact is about.")],
+    subject_id: Annotated[str, Field(description='e.g. "123456789012", "infra/payments", '
+                                                 '"payments" (team), "org" (tag_key).')],
+    value: Annotated[dict, Field(description="Shape depends on fact: see the tool description.")],
+    source: Annotated[str, Field(description='Where the evidence is, e.g. '
+                                             '"codeowners:infra/payments/".')],
+    confidence: Annotated[float, Field(ge=0, le=1, description="Your confidence.")] = 0.5,
+    dollars_monthly: Annotated[float | None, Field(
+        description="Spend this fact governs, if known; ranks the question.")] = None,
 ) -> dict:
     """
-    Propose one fact about this org (e.g. an owner for an account or a repo
-    path) from evidence you found. It is saved as proposed only; a person
-    confirms it with the returned command. A fact a person rejected is not
-    proposed again, and a proposal never replaces a confirmed fact.
+    Propose one fact about this org from evidence you found. Saved as
+    proposed only; a person confirms it with the returned command. A rejected
+    fact is not proposed again; a proposal never replaces a confirmed fact.
 
-    Args:
-        fact: owner | team | environment | tag_key | tag_alias | account | threshold.
-        subject_kind: aws_account | gcp_project | azure_subscription | k8s_namespace | repo_path | service | tag_value | resource | team | org | environment.
-        subject_id: The subject's id, e.g. "123456789012" or "infra/payments".
-        value: By fact: owner {team, channel?, people?}; team {name, aliases?, channel?};
-            environment {env: prod|nonprod|dr|sandbox|shared|unknown}; tag_key {canonical, keys};
-            tag_alias {canonical_key, canonical_value}; account {name?, business_unit?, cost_center?};
-            threshold {max_auto_monthly_usd?, velocity_cap_usd?}.
-        source: Where the evidence is, as adapter:locator, e.g. "codeowners:infra/payments/".
-        confidence: Your confidence, 0 to 1.
-        dollars_monthly: Spend this fact governs, if known; ranks the question.
+    value by fact:
+      owner {team, channel?, people?}     subject: account, repo_path, k8s_namespace, ...
+      team {name, aliases?, channel?, people?}      subject_kind team
+      environment {env: prod|nonprod|dr|sandbox|shared|unknown}
+      tag_key {canonical: team|environment|service|cost_center|owner, keys: [str]}  subject org:org
+      tag_alias {canonical_key, canonical_value}    subject_kind tag_value
+      account {name?, business_unit?, cost_center?} subject: an account
+    Thresholds are not proposed: a person sets them (`nable org set threshold`).
 
     Examples:
         - "CODEOWNERS says infra/payments/ is @payments-team; propose that"
     """
     from .. import org
-    src = (source or "").strip()
-    # An agent is not a person and not a legacy file: say where it came from.
-    if not src or src == "human" or src.startswith("legacy:"):
-        src = f"agent:{src or 'unspecified'}"
+    if fact == "threshold":
+        return {"result": "refused", "error": (
+            "Thresholds decide what runs without asking, so a person sets them: "
+            "`nable org set threshold --subject team:TEAM --max-auto-usd N` in their "
+            "terminal. Tell the user the figure you would suggest and why.")}
+    # Whatever an agent says, the source says an agent said it: provenance a
+    # proposal carries into review ("human", "legacy:...", a real adapter's
+    # name) cannot be claimed through this tool.
+    src = (source or "").strip() or "unspecified"
+    if not src.startswith("agent:"):
+        src = f"agent:{src}"
     try:
         f = org.make_fact(fact, {"kind": subject_kind, "id": subject_id}, value,
                           source=src, confidence=confidence, dollars_monthly=dollars_monthly)
@@ -132,7 +149,7 @@ def propose_org_fact(
     }
     if result == "suppressed_rejected":
         out["status"] = "rejected"
-        out["note"] = "A person rejected this exact fact before; it was not proposed again."
+        out["note"] = "A person rejected this fact before; it was not proposed again."
     elif result == "duplicate":
         same = org.load().find(f.key)
         out["status"] = same[0].status if same else "proposed"

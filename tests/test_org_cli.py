@@ -14,6 +14,7 @@ import pytest
 
 from finops import org
 from finops.org import cli, store
+from finops.org.cli import _who as human
 from finops.org.model import local_today
 
 
@@ -225,7 +226,7 @@ def test_an_agent_cannot_pass_itself_off_as_a_human_source(odir):
 
 def test_propose_org_fact_respects_a_rejection_and_reports_bad_input(odir):
     f = proposed()
-    org.reject(f.key, "@maria")
+    org.reject(f.key, human("@maria"))
     r = _tool("propose_org_fact", fact="owner", subject_kind="aws_account",
               subject_id="123456789012", value={"team": "payments"}, source="x:y")
     assert r["result"] == "suppressed_rejected" and r["status"] == "rejected"

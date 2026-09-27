@@ -259,3 +259,12 @@ def scan_iac(root: Path) -> dict[str, dict[str, Any]]:
 def is_under(path: str, prefix: str) -> bool:
     """Whole-component prefix test on repo paths ("." holds everything)."""
     return prefix == "." or path == prefix or path.startswith(prefix + "/")
+
+
+def repo_subject(ctx: Any, repo: Path, rel: str) -> str:
+    """ctx.repo_subject when the context has one; bare for a context that
+    does not say where the proposals go."""
+    fn = getattr(ctx, "repo_subject", None)
+    if fn is None or getattr(ctx, "org_dir", None) is None:
+        return f"repo_path:{rel}"
+    return fn(repo, rel)

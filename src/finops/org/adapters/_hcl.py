@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _IDENT = re.compile(r"[A-Za-z_][\w-]*")
-_HEREDOC = re.compile(r"<<-?([A-Za-z_]\w*)[ \t]*\n")
+# \r?\n: a Terraform file saved on Windows ends its lines with CRLF.
+_HEREDOC = re.compile(r"<<-?([A-Za-z_]\w*)[ \t]*\r?\n")
 
 
 def _skip_string(s: str, i: int) -> int:
@@ -45,7 +46,8 @@ def _skip_heredoc(s: str, i: int) -> int | None:
     m = _HEREDOC.match(s, i)
     if not m:
         return None
-    end = re.compile(r"^[ \t]*" + re.escape(m.group(1)) + r"[ \t]*$", re.MULTILINE).search(s, m.end())
+    end = re.compile(r"^[ \t]*" + re.escape(m.group(1)) + r"[ \t]*\r?$",
+                     re.MULTILINE).search(s, m.end())
     return end.end() if end else len(s)
 
 

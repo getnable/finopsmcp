@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..model import Fact, Subject
+from ..model import Fact
 from . import _hcl
 from ._common import (
     ENV_TOKENS,
@@ -59,6 +59,7 @@ from ._common import (
     fact,
     is_under,
     key_meaning,
+    repo_subject,
     tag_key_fact,
 )
 
@@ -339,7 +340,7 @@ def propose(ctx: Any) -> list[Fact]:
     def path_owner(td: TfDir) -> Fact | None:
         # Repo paths are repo-relative in every repo: the guard asks with the
         # path inside whichever repo it runs in.
-        return ctx.owner_fact(f"repo_path:{td.rel}")
+        return ctx.owner_fact(repo_subject(ctx, td.repo, td.rel))
 
     claims: dict[str, list[dict[str, Any]]] = {}
 
@@ -381,7 +382,7 @@ def propose(ctx: Any) -> list[Fact]:
     for subject, cs in sorted(claims.items()):
         out.append(_owner(ctx, subject, cs))
         out.append(_env(ctx, subject, cs))
-    out.extend(_dir_envs(dirs))
+    out.extend(_dir_envs(ctx, dirs))
     out.extend(_tag_keys(ctx, dirs))
     return dedupe(out)
 
@@ -423,27 +424,30 @@ def _env(ctx: Any, subject: str, cs: list[dict[str, Any]]) -> Fact | None:
                 ctx.usd(subject))
 
 
-def _dir_envs(dirs: list[tuple[str, TfDir]]) -> list[Fact | None]:
-    picked: dict[str, tuple[str, float, str]] = {}
+def _dir_envs(ctx: Any, dirs: list[tuple[str, TfDir]]) -> list[Fact | None]:
+    picked: dict[tuple[Path, str], tuple[str, float, str]] = {}
     for label, td in dirs:
         got = dir_env(td)
         if got is None:
             continue
         env, where, conf, locator = got
-        prev = picked.get(where)
+        k = (td.repo, where)
+        prev = picked.get(k)
         if prev is not None and prev[0] != env:
-            picked[where] = ("", 0.0, "")  # two answers for one path: none
+            picked[k] = ("", 0.0, "")      # two answers for one path: none
         elif prev is None or conf > prev[1]:
-            picked[where] = (env, conf, f"terraform:{label}{locator}")
+            picked[k] = (env, conf, f"terraform:{label}{locator}")
     out: list[Fact | None] = []
-    for where in sorted(picked, key=lambda s: (s.count("/"), s)):
-        env, conf, src = picked[where]
+    for repo, where in sorted(picked, key=lambda k: (k[1].count("/"), k[1], str(k[0]))):
+        env, conf, src = picked[(repo, where)]
         if not env:
             continue
-        parents = [p for p in picked if p != where and is_under(where, p) and picked[p][0]]
-        if parents and picked[max(parents, key=len)][0] == env:
+        parents = [p for r, p in picked if r == repo and p != where and is_under(where, p)
+                   and picked[(r, p)][0]]
+        if parents and picked[(repo, max(parents, key=len))][0] == env:
             continue
-        out.append(fact("environment", Subject("repo_path", where), {"env": env}, src, conf))
+        out.append(fact("environment", repo_subject(ctx, repo, where), {"env": env}, src,
+                        conf))
     return out
 
 

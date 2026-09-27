@@ -28,10 +28,17 @@ signal" rather than "production".
 
 The org model (finops.org) comes first when the caller names an account or a
 namespace: an environment a human confirmed for it is the answer, before any
-of the signals below. An environment fact nobody has confirmed is a guess,
-and product-wide a nonprod label is what makes a thing eligible for
-schedules and spot, so a guess may only move a result toward "prod" or
-"unknown", never toward "nonprod".
+of the signals below, unless the resource's own Environment tag says
+otherwise (an account-level fact is about the account, and a tag is about
+this resource): then the answer is "unknown", or the caller's safe side. An
+environment fact nobody has confirmed is a guess, and product-wide a nonprod
+label is what makes a thing eligible for schedules and spot, so a guess may
+only move a result toward "prod" or "unknown", never toward "nonprod".
+
+`safe` lets a caller for whom nonprod is the careful answer say so:
+rightsizing pull requests hold back on nonprod, so there a guess must not
+turn a resource tagged sandbox into "unknown" (and a pull request), and a
+disagreement lands on nonprod.
 """
 from __future__ import annotations
 
@@ -188,6 +195,7 @@ def classify(
     account_id: str | None = None,
     provider: str = "aws",
     org: Any = None,
+    safe: str | None = None,
 ) -> WorkloadContext:
     """Read every signal on hand and return the strongest one.
 
@@ -205,18 +213,50 @@ def classify(
     "unknown", never toward "nonprod".
     """
     facts = _org_environments(org, account_id, provider, namespace, cluster)
-    sure = [(k, e) for k, c, e in facts if c]
-    if sure:
-        return WorkloadContext(sure[0][0], [sure[0][1]])
     ctx = _heuristics(tags=tags, account_name=account_name, namespace=namespace,
                       resource_name=resource_name, cluster=cluster)
+    sure = [(k, e) for k, c, e in facts if c]
+    if sure:
+        kind, why = sure[0]
+        # A confirmed account (or namespace) fact decides unless this
+        # resource's own environment tag says otherwise.
+        tagged = [(k, e) for k, e in _tag_signals(tags)
+                  if (k in ("nonprod", "ephemeral")) != (kind == "nonprod")]
+        if not tagged:
+            return WorkloadContext(kind, [why])
+        return _disagree([why, *(e for _, e in tagged)],
+                         nonprod=[k for k, _ in tagged if k != "prod"] or ["nonprod"],
+                         safe=safe)
     guess = next(((k, e) for k, c, e in facts if k == "prod"), None)
     if guess is None or ctx.kind == "prod":
         return ctx
     if ctx.kind == "unknown":
         return WorkloadContext("prod", [guess[1]])
+    if safe == "nonprod":
+        # Nonprod is this caller's careful side: a guess does not undo it.
+        return ctx
     # The heuristics say nonprod and a guess says prod: neither wins.
     return WorkloadContext("unknown", [*ctx.evidence, guess[1]])
+
+
+def _tag_signals(tags: dict | None) -> list[tuple[str, str]]:
+    """(kind, evidence) for each environment tag on the resource."""
+    out: list[tuple[str, str]] = []
+    for key, value in (tags or {}).items():
+        k = str(key).strip().lower().replace("-", "_")
+        if k in _ENV_TAG_KEYS:
+            hit = _scan(f"tag {key}", str(value))
+            if hit:
+                out.append(hit)
+    return out
+
+
+def _disagree(evidence: list[str], *, nonprod: list[str], safe: str | None) -> WorkloadContext:
+    """An account-level fact and the resource's tag disagree: "unknown",
+    unless the caller named nonprod as its safe side."""
+    if safe == "nonprod":
+        return WorkloadContext(nonprod[0], evidence)
+    return WorkloadContext("unknown", evidence)
 
 
 def _heuristics(

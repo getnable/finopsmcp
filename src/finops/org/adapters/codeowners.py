@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from ..model import Fact
-from ._common import dedupe, fact, is_under, scan_iac
+from ._common import dedupe, fact, is_under, repo_subject, scan_iac
 
 LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 _TEAM = re.compile(r"^@([A-Za-z0-9][\w.-]*)/([A-Za-z0-9][\w.-]*)$")
@@ -261,7 +261,10 @@ def propose(ctx: Any) -> list[Fact]:
     """Owner facts for the IaC paths of every repo in ctx.repos."""
     rows: list[tuple[str, dict[str, Any], float, str]] = []
     for repo in ctx.repos:
-        rows.extend(repo_proposals(repo, ctx.repo_label(repo)))
+        for subject, value, conf, source in repo_proposals(repo, ctx.repo_label(repo)):
+            # The repo is part of the subject unless the proposals go to that
+            # repo's own nable.org/ (AdapterContext.repo_subject).
+            rows.append((repo_subject(ctx, repo, subject), value, conf, source))
     teams_for: dict[str, set[str]] = {}
     for subject, value, _, _ in rows:
         teams_for.setdefault(subject, set()).add(value["team"])
@@ -269,5 +272,6 @@ def propose(ctx: Any) -> list[Fact]:
     for subject, value, conf, source in rows:
         if len(teams_for[subject]) > 1:
             conf = min(conf, 0.4)         # one path, two repos, two owners
-        out.append(fact("owner", f"repo_path:{subject}", value, source, conf))
+        out.append(fact("owner", subject, value, source, conf))
     return dedupe(out)
+

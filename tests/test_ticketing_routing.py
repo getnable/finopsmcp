@@ -16,6 +16,7 @@ import pytest
 
 from finops import org
 from finops.integrations import ticketing as T
+from finops.org.cli import _who as human
 
 ACCT = "123456789012"
 REC = {"resource_id": "i-0abc", "resource_type": "ec2", "current_type": "m5.2xlarge",
@@ -64,7 +65,7 @@ def _capture(monkeypatch, reply, refuse_assignee=False):
 
 
 def confirmed(kind, subject, value):
-    org.set_fact(org.make_fact(kind, subject, value, source="human"), "maria")
+    org.set_fact(org.make_fact(kind, subject, value, source="human"), human("maria"))
 
 
 def proposed(kind, subject, value):

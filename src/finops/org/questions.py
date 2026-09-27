@@ -9,7 +9,9 @@ decision and come with a default answer ready. Candidates:
             are nonprod", "these 12 account records are right"; default yes
   confirm   a proposed fact on its own ("is aws_account 123 owned by
             payments?"), default yes
-  conflict  a proposal that disagrees with a confirmed fact, default no (keep it)
+  conflict  a proposal that disagrees with a confirmed fact, default no (keep it);
+            or two confirmed facts that disagree (two branches merged), default
+            yes (keep the one that answers now)
   recheck   a confirmed fact past its review_after, default yes (still true)
   unowned   an account with spend and no owner at all, no default team
 
@@ -18,8 +20,15 @@ facts and team tag aliases by their (canonical) team; environment facts and
 environment tag aliases by their environment; everything else by kind. A
 proposal is asked on its own when a group would hold only it, when another
 live proposal about the same subject says something else (contested: a
-person should see both), or when a confirmed fact already answers (a
-conflict).
+person should see both), when a confirmed fact already answers (a
+conflict), when it is a threshold (default no: a threshold is a person's
+call), or when an agent proposed a team or a tag alias (it would route every
+fact of that team, so it is never waved through with others).
+
+A bulk answer is bound to the facts it showed: its command carries a digest
+of their keys (`--owner-bulk payments@1a2b3c4d`), and the CLI refuses it,
+printing the set as it is now, when a proposal joined or left the group
+since.
 
 Ranking. Ownership first (owner, team and unowned questions), then
 environments, then descriptive facts (account records, tag keys): the Phase 1
@@ -35,6 +44,8 @@ resources only when no account is in the group (they sit inside accounts).
 """
 from __future__ import annotations
 
+import hashlib
+import re
 import shlex
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -58,24 +69,27 @@ class Question:
     group: str | None = None       # bulk: "owner:payments", "env:nonprod", "kind:account"
     keys: list[str] = field(default_factory=list)       # bulk: every fact it decides
     subjects: list[str] = field(default_factory=list)   # bulk: what those facts are about
+    items: list[str] = field(default_factory=list)      # bulk: each fact, in full
+    digest: str | None = None                           # bulk: bulk_digest(keys)
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "text": self.text, "default": self.default,
                 "command": self.command, "dollars_monthly": self.dollars_monthly,
                 "confidence": self.confidence, "key": self.key, "subject": self.subject,
                 "no_command": self.no_command, "fact": self.fact, "group": self.group,
-                "keys": list(self.keys), "subjects": list(self.subjects)}
+                "keys": list(self.keys), "subjects": list(self.subjects),
+                "items": list(self.items), "digest": self.digest}
 
 
 def describe(f: Fact) -> str:
     """One line a person can say yes or no to."""
     v, s = f.value, str(f.subject)
     if f.fact == "owner":
-        extra = f", channel {v['channel']}" if v.get("channel") else ""
-        return f"{s} is owned by team {v['team']}{extra}"
+        return f"{s} is owned by team {v['team']}{_contact(v)}"
     if f.fact == "team":
         aliases = ", ".join(v.get("aliases") or [])
-        return f"team {f.subject.id} exists" + (f" (also called {aliases})" if aliases else "")
+        return (f"team {f.subject.id} exists" + (f" (also called {aliases})" if aliases else "")
+                + _contact(v))
     if f.fact == "environment":
         return f"{s} is {v['env']}"
     if f.fact == "tag_key":
@@ -94,6 +108,32 @@ def describe(f: Fact) -> str:
                  if v.get(k) is not None]
         return f"{s} thresholds: {', '.join(parts)}"
     return f"{f.fact} {s}: {v}"
+
+
+def _contact(v: dict[str, Any]) -> str:
+    """", channel #x, people a, b": where an owner or team is reached, which
+    is what a yes routes tickets and asks to."""
+    bits = []
+    if v.get("channel"):
+        bits.append(f"channel {v['channel']}")
+    if v.get("people"):
+        bits.append("people " + ", ".join(v["people"]))
+    return "".join(f", {b}" for b in bits)
+
+
+def bulk_digest(keys: Any) -> str:
+    """Eight hex characters over the sorted keys a bulk question decides:
+    what binds a bulk answer to the facts the question showed."""
+    blob = ",".join(sorted({str(k) for k in keys}))
+    return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+
+
+def split_bulk(arg: str) -> tuple[str, str | None]:
+    """("payments", "1a2b3c4d") for "payments@1a2b3c4d"; no digest, None."""
+    what, sep, digest = (arg or "").strip().rpartition("@")
+    if not sep or not re.fullmatch(r"[0-9a-f]{8}", digest.lower()):
+        return (arg or "").strip(), None
+    return what, digest.lower()
 
 
 def _money(x: float | None) -> str:
@@ -131,11 +171,22 @@ def _fact_tier(f: Fact) -> int:
     return _tier(f.fact)
 
 
+def bulk_ok(f: Fact) -> bool:
+    """Whether a proposal may be decided with others: never a threshold,
+    never a team or tag alias an agent proposed."""
+    if f.fact == "threshold":
+        return False
+    return not (f.fact in ("team", "tag_alias") and f.source.startswith("agent:"))
+
+
 def groups(model: OrgModel) -> tuple[dict[str, list[Fact]], list[Fact]]:
-    """({group: uncontested proposals}, contested proposals). Proposals that
-    a confirmed fact already answers are in neither: they are conflicts."""
+    """({group: uncontested proposals}, proposals asked on their own:
+    contested ones and those bulk_ok() keeps out). Proposals that a confirmed
+    fact already answers are in neither: they are conflicts."""
     conflicted = {p.key for _, p in model.conflicts()}
     props = [f for f in model.proposals() if f.key not in conflicted]
+    alone = [f for f in props if not bulk_ok(f)]
+    props = [f for f in props if bulk_ok(f)]
     says = {f.key: _says(model, f) for f in props}
     by_slot: dict[tuple, set[str]] = {}
     for f in props:
@@ -152,7 +203,7 @@ def groups(model: OrgModel) -> tuple[dict[str, list[Fact]], list[Fact]]:
             if all(a <= b for a, b in pairwise(sets)):
                 by_slot[slot] = {"chain"}
     out: dict[str, list[Fact]] = {}
-    contested: list[Fact] = []
+    contested: list[Fact] = list(alone)
     for f in props:
         if len(by_slot[f.slot]) > 1:
             contested.append(f)
@@ -168,7 +219,9 @@ def bulk_facts(model: OrgModel | None = None, *, owner: str | None = None,
     """The proposals one bulk question decides: those for team `owner`
     (through its aliases), environment `env`, or fact kind `kind`. The CLI's
     --owner-bulk/--env-bulk/--kind-bulk use it, so a bulk answer decides
-    exactly what the question listed (as the model stands when answered)."""
+    what the question listed; the CLI checks bulk_digest() of the keys
+    against the one the question printed, so a set that changed since is
+    refused, not decided."""
     if model is None:
         from .store import load
         model = load()
@@ -187,12 +240,18 @@ def _label(model: OrgModel, f: Fact) -> str:
     if s.kind in ACCOUNT_KINDS:
         acct = model.resolve("account", s)
         name = acct.value.get("name") if acct is not None else None
-        return f"{s} ({name})" if name else str(s)
-    if f.fact == "team":
-        return f"team {s.id}"
-    if s.kind == "tag_value":
-        return f"tag value {s.id}"
-    return str(s)
+        base = f"{s} ({name})" if name else str(s)
+    elif f.fact == "team":
+        aliases = ", ".join(f.value.get("aliases") or [])
+        base = f"team {s.id}" + (f" (also called {aliases})" if aliases else "")
+    elif s.kind == "tag_value":
+        base = f"tag value {s.id}"
+    else:
+        base = str(s)
+    # Where a yes sends tickets and asks: shown for every fact in the group.
+    if f.fact in ("owner", "team"):
+        base += _contact(f.value)
+    return base
 
 
 def _group_usd(group: str, facts: list[Fact], usd, spend_teams: dict[str, dict[str, float]]
@@ -256,12 +315,14 @@ def _bulk_question(model: OrgModel, group: str, facts: list[Fact], usd,
         text = f"Are these {len(facts)} {what} facts right{money}? {preview}. " \
                f"From {_sources(facts)}."
         flag = "--kind-bulk"
-    arg = shlex.quote(what)
+    digest = bulk_digest(keys)
+    arg = shlex.quote(f"{what}@{digest}")
     return Question(kind="bulk", text=text, default="y",
                     command=f"nable org confirm {flag} {arg}",
                     no_command=f"nable org reject {flag} {arg}", dollars_monthly=d,
                     confidence=min(f.confidence for f in facts), group=group,
-                    keys=keys, subjects=subjects)
+                    keys=keys, subjects=subjects, digest=digest,
+                    items=[f"{f.key}  {describe(f)}" for f in facts])
 
 
 # ── questions ─────────────────────────────────────────────────────────────────
@@ -303,6 +364,19 @@ def questions(limit: int = 10, *, model: OrgModel | None = None,
         else:
             singles.extend(facts)
     singles.extend(p for p in model.proposals() if p.key in conflicted)
+    for w, other in model.conflicts():
+        if not other.confirmed:
+            continue
+        d = usd(w) if usd(w) is not None else usd(other)
+        out.append((_fact_tier(w), Question(
+            kind="conflict", default="y", key=w.key, subject=str(w.subject),
+            text=(f"Two confirmed facts disagree: '{describe(w)}' ({w.key}, answers now, "
+                  f"confirmed by {w.confirmed_by or 'a person'}) and '{describe(other)}' "
+                  f"({other.key}, confirmed by {other.confirmed_by or 'a person'}). "
+                  f"Keep the first?{_money(d)}"),
+            command=f"nable org confirm {w.key}", dollars_monthly=d,
+            confidence=w.confidence, fact=w.summary(),
+            no_command=f"nable org confirm {other.key}")))
     for f in singles:
         d = usd(f)
         if f.key in conflicted:
@@ -317,7 +391,10 @@ def questions(limit: int = 10, *, model: OrgModel | None = None,
                 no_command=f"nable org reject {f.key}")))
         else:
             out.append((_fact_tier(f), Question(
-                kind="confirm", default="y", key=f.key, subject=str(f.subject),
+                # A threshold decides what runs unasked: a person says yes to
+                # it on purpose, never by pressing enter.
+                kind="confirm", default="n" if f.fact == "threshold" else "y",
+                key=f.key, subject=str(f.subject),
                 text=(f"Is it right that {describe(f)}?{_money(d)} "
                       f"From {f.source}, confidence {f.confidence:.2f}."),
                 command=f"nable org confirm {f.key}", dollars_monthly=d,

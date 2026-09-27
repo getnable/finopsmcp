@@ -49,6 +49,9 @@ def _minimal_args(schema: dict) -> dict:
     args = {}
     for key in schema.get("required", []):
         prop = schema.get("properties", {}).get(key, {})
+        if prop.get("enum"):
+            args[key] = prop["enum"][0]      # an argument the schema pins to a set
+            continue
         kind = prop.get("type") or (prop.get("anyOf") or [{}])[0].get("type")
         args[key] = _FILLER.get(kind, "x")
     return args

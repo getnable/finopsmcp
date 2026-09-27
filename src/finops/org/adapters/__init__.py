@@ -89,6 +89,9 @@ class AdapterContext:
     repos: list[Path] = field(default_factory=list)
     data: Any = None
     prior: list[Fact] = field(default_factory=list)
+    # Where the proposals will be written: repo paths are bare only in a
+    # nable.org/ at the root of the repo they are about.
+    org_dir: Path | None = None
     _view: OrgModel | None = field(default=None, repr=False)
     _view_n: int = field(default=-1, repr=False)
 
@@ -117,6 +120,18 @@ class AdapterContext:
         """The owner fact that answers for `subject` (repo paths by longest
         prefix), counting this run's proposals."""
         return self.view()._owner_fact(subject_of(subject))
+
+    def repo_subject(self, repo: Path, rel: str) -> str:
+        """"repo_path:<rel>" when the proposals go to `repo`'s own nable.org/,
+        else "repo_path:<repo>//<rel>" (the repo's remote, else its name): a
+        path in the data dir's model must say which repo it is in."""
+        from ..store import ORG_DIR_NAME, repo_identity
+        try:
+            inside = self.org_dir is not None and \
+                Path(self.org_dir).resolve() == (repo / ORG_DIR_NAME).resolve()
+        except OSError:
+            inside = False
+        return f"repo_path:{rel}" if inside else f"repo_path:{repo_identity(repo)}//{rel}"
 
     def repo_label(self, repo: Path) -> str:
         """"" for the first repo (the one nable runs in), "<name>/" for the
