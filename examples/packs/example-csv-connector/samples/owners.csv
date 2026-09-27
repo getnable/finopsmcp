@@ -1,0 +1,4 @@
+kind,id,team
+aws_account,123456789012,payments
+repo_path,infra/analytics,data-platform
+service,snowflake,data-platform

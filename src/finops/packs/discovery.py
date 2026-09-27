@@ -11,8 +11,11 @@ This module lists what is installed in those groups and, where it can, the
 pack manifest that declares each one (an installed pack whose [provides]
 names the same entry, or a nable-pack.toml shipped in the distribution). It
 reads metadata and TOML only: no entry point is imported, so nothing a code
-pack contains runs. Running them is the part 2 broker's job, out of process,
-with only the secrets and data scopes the manifest declares.
+pack contains runs. Running code is broker.py's job, out of process, with
+only the secrets, data scopes and hosts the manifest declares, and only for
+entries an installed pack declares. Code that lives in a distribution rather
+than in the pack is not covered by the pack's signature, so the broker runs it
+only for a pack the org allowlists in packs.allow_unsigned_code.
 
 The first-party `finops.plugins` register(mcp) hook (plugins.py) is separate
 and unchanged.

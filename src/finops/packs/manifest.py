@@ -16,14 +16,18 @@ and install. Every problem is collected, with its field and reason.
     [provides]      data content (policies, guard_rules, playbooks,
                     price_books, reports, skills) as lists of relative globs;
                     code (connectors, adapters, sinks) as lists of
-                    {id, entry, output}. Code is declared and validated here
-                    and never loaded by this part of the SDK.
+                    {id, entry, output}. Code is declared and validated here,
+                    never imported by the core, and run only out of process
+                    by broker.py.
     [compat]        clouds, harnesses
     [integrity]     files = {"relative/path" = "sha256 hex"}, attestation
+                    (a PEP 740 / Sigstore bundle reference: parsed, recorded
+                    and shown, and NOT verified yet; the detached Ed25519
+                    signature in signing.py is what nable checks today)
 
-"first-party" is bound to nable's own namespaces. That is a claim, not a
-proof, until signing lands (part 2); install.py adds the provenance checks
-that stand in for it when an org requires signed packs.
+"first-party" is bound to nable's own namespaces here, and that alone is a
+claim. It is honoured only when the pack carries a signature from nable's
+first-party key (signing.py); install.py refuses the claim otherwise.
 """
 from __future__ import annotations
 
@@ -38,6 +42,7 @@ from .errors import Problem, ValidationError
 from .versions import in_range, is_semver, parse_range
 
 MANIFEST_NAME = "nable-pack.toml"
+SIG_NAME = "nable-pack.sig"  # store.SIG_NAME, repeated so this module stays light
 MAX_MANIFEST_BYTES = 64 * 1024
 
 TIERS: tuple[str, ...] = ("first-party", "verified", "community", "private")
@@ -111,8 +116,8 @@ def check_glob(pattern: object) -> str | None:
 
 @dataclass(frozen=True)
 class CodeEntry:
-    """A connector, adapter or sink the pack's Python package provides.
-    Declared and validated in part 1; loaded only by the part 2 broker."""
+    """A connector, adapter or sink the pack provides. The core never imports
+    it: broker.py runs it in a subprocess (finops.packs.host)."""
 
     kind: str
     id: str
@@ -392,6 +397,10 @@ def _parse_integrity(raw: Any, problems: list[Problem]) -> tuple[dict[str, str] 
                 elif path == MANIFEST_NAME:
                     problems.append(Problem(f"integrity.files.{path}",
                                             "the manifest cannot pin its own hash"))
+                elif path == SIG_NAME:
+                    problems.append(Problem(f"integrity.files.{path}",
+                                            "the signature signs the pack's digest, so the "
+                                            "manifest cannot pin it"))
                 elif not isinstance(digest, str) or not _SHA256.match(digest):
                     problems.append(Problem(f"integrity.files.{path}",
                                             "must be a lowercase sha256 hex digest"))

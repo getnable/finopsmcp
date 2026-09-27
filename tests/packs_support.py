@@ -7,6 +7,7 @@ nothing reaches the network.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -16,6 +17,41 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLE_PACK = REPO / "examples" / "packs" / "startup-credits-runway"
+EXAMPLE_CODE_PACK = REPO / "examples" / "packs" / "example-csv-connector"
+
+
+def new_key(tmp: Path, name: str = "test-key") -> SimpleNamespace:
+    """A throwaway Ed25519 key, generated for this test run and never
+    committed: .private (the key object), .pem (a PEM file under `tmp`),
+    .public (base64), .key_id, and .trusted (a packs.trusted_keys entry)."""
+    from finops.packs import signing
+    out = tmp / "keys" / f"{name}.pem"
+    r = signing.keygen(out)
+    key = signing.load_private_key(out)
+    return SimpleNamespace(private=key, pem=out, public=r["public_key"], key_id=r["key_id"],
+                           name=name,
+                           trusted=f"    - name: {name}\n      key: {r['public_key']}\n")
+
+
+def sign_pack(root: Path, key: SimpleNamespace) -> dict:
+    """Sign a pack directory in place, as `nable pack sign` does."""
+    from finops.packs import install as inst
+    return inst.sign(root, key.pem)
+
+
+def copy_pack(src: Path, dest: Path) -> Path:
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return dest
+
+
+@pytest.fixture
+def first_party_key(tmp_path, monkeypatch):
+    """Pretend nable's first-party public key is a throwaway test key (the
+    real constant is a placeholder that makes first-party fail closed)."""
+    from finops.packs import signing
+    key = new_key(tmp_path, "nable-test-first-party")
+    monkeypatch.setattr(signing, "FIRST_PARTY_PUBLIC_KEY_B64", key.public)
+    return key
 
 POLICY = """\
 version: 1

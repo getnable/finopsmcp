@@ -1,0 +1,836 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The broker: run a code pack's entry point out of process, with only what
+its manifest declares.
+
+Connectors, org-context adapters and action sinks are the only packs that
+carry code. The core never imports that code. For each call it:
+
+  1. checks the installed pack as the runtime does (files match what was
+     approved, today's org policy allows it, its signature holds), and refuses
+     code from a pack that is not signed by the first-party key or an
+     org-trusted key unless the org allowlists it by id
+     (`packs.allow_unsigned_code`);
+  2. starts `python -I -B` running finops.packs.host in a fresh process group,
+     in a throwaway HOME, with a scrubbed environment: PATH, HOME, LANG, and
+     the values of the secrets the manifest declares (read by the core from
+     nable's vault, else from its own environment). Nothing else crosses:
+     no FINOPS_*, no AWS_*, no cloud credentials, no vault key;
+  3. speaks JSON-RPC 2.0 over the child's stdin/stdout, one object per line
+     (host.py lists the methods), with a per-call timeout and a cap on
+     everything the child writes to stdout; the child's stderr is kept,
+     truncated and with declared secret values redacted, in
+     <packs root>/logs/<namespace>/<name>.log;
+  4. answers the child's data.read requests only for scopes the manifest
+     declares in read_data (focus.cost from the cost store, org.owners and
+     org.environments from finops.org; the others return "not available");
+  5. validates what comes back: FOCUS rows against finops.focus's schema
+     (invalid rows are dropped and reported), org facts through
+     finops.org.make_fact (always status proposed, source prefixed with the
+     pack id), and sink deliveries against the declared `act` kinds and
+     `max_autonomy`, checked before the child is even started.
+
+Network, honestly. On Linux, a pack that declares no network runs in its own
+empty network namespace (`unshare --user --net`) when the kernel allows
+unprivileged user namespaces; it then has no route anywhere. Everywhere else,
+and for any pack that declares hosts, egress is audited rather than isolated:
+the host process installs an audit hook that refuses connections and lookups
+for undeclared hosts and reports every connection it sees. An audit hook runs
+inside the process it watches, so a determined pack can get around it; that
+is why unsigned code does not run. The filesystem is not sandboxed on a
+laptop: a pack can read what your user can read. Treat this like the guard:
+a seatbelt, not a security boundary. Container network policy in the hosted
+and self-hosted runners is where egress is actually enforced.
+
+read_cloud is declared and shown at install, and not brokered yet: the core
+hands a pack no cloud credentials. A connector that needs an API key declares
+it in `secrets`.
+"""
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import json
+import logging
+import math
+import os
+import queue
+import shutil
+import signal
+
+# The broker's job is to run pack code in a child process, never in this one.
+import subprocess  # nosec B404
+import sys
+import tempfile
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from . import capabilities as caps_mod
+from . import signing, store
+from .errors import BrokerError, PackError, PolicyRefusal, Problem
+
+log = logging.getLogger("finops.packs")
+
+DEFAULT_TIMEOUT_S = 120.0
+MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_STDERR_BYTES = 64 * 1024
+MAX_LOG_BYTES = 1024 * 1024
+MAX_PAYLOAD_BYTES = 1024 * 1024
+MAX_DATA_ROWS = 5000
+MAX_PROBLEMS = 20
+# "auto": an empty network namespace for packs that declare no hosts, when
+# the platform allows one; "off": always audit mode (tests, or a kernel whose
+# user namespaces misbehave).
+NETNS = "auto"
+
+METHOD_KIND = {"connector.fetch_costs": "connectors", "adapter.propose": "adapters",
+               "sink.deliver": "sinks"}
+# The autonomy a delivery of each act kind implies when the payload does not say.
+ACT_LEVEL = {"pr": "L2", "ticket": "L2", "execute": "L3"}
+
+_BOOTSTRAP = ("import sys; sys.path.insert(0, sys.argv[1]); "
+              "from finops.packs.host import main; raise SystemExit(main(sys.argv[2:]))")
+
+
+# ── which pack, and may its code run ─────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Prepared:
+    pack_id: str
+    namespace: str
+    name: str
+    version: str
+    kind: str
+    entry_id: str
+    entry: str
+    root: Path
+    capabilities: dict[str, Any]
+    signature: signing.Verdict
+    allowlisted: bool
+
+
+def prepare(pack_id: str, entry_id: str, kind: str | None = None, *,
+            pp: dict[str, Any] | None = None) -> Prepared:
+    """Everything the broker checks before it starts a process. Raises
+    PackError (PolicyRefusal when the pack may not run)."""
+    from ..policy import pack_policy
+    from .install import check_installed
+    from .manifest import load_manifest
+    pp = pack_policy() if pp is None else pp
+    idx = store.read_index()
+    e = idx["packs"].get(pack_id)
+    if e is None:
+        raise PackError(f"{pack_id} is not installed (`nable pack list` shows what is)")
+    root, verdict, why = check_installed(pack_id, e, pp)
+    if why:
+        raise PolicyRefusal(f"{pack_id} cannot run", [Problem("pack", w) for w in why])
+    manifest = load_manifest(root)
+    matches = [c for c in manifest.code if c.id == entry_id and (kind is None or c.kind == kind)]
+    if not matches:
+        have = ", ".join(f"{c.kind[:-1]} {c.id}" for c in manifest.code) or "no code"
+        what = kind[:-1] if kind else "code entry"
+        raise PackError(f"{pack_id} has no {what} {entry_id!r} (it has {have})")
+    code = matches[0]
+    allowlisted = pack_id in (pp.get("allow_unsigned_code") or [])
+    if not signing.trusted(verdict) and not allowlisted:
+        raise PolicyRefusal(
+            f"{pack_id} carries code and is not signed by a key this org trusts "
+            f"({verdict.reason}). Unsigned code does not run: sign it with a key in "
+            "packs.trusted_keys, or have an admin allowlist it in the org policy "
+            f"(packs.allow_unsigned_code: [{pack_id}])")
+    return Prepared(pack_id, manifest.namespace, manifest.name, manifest.version, code.kind,
+                    code.id, code.entry, root, dict(manifest.capabilities), verdict, allowlisted)
+
+
+# ── secrets and the child's environment ──────────────────────────────────────
+
+def _vault_get(name: str) -> str | None:
+    """A value from nable's vault, without creating a vault that is not there."""
+    try:
+        from ..security.vault import Vault, _vault_dir
+        if not (_vault_dir() / "vault.db").is_file():
+            return None
+        return Vault.default().get(name)
+    except Exception:  # noqa: BLE001 - a vault hiccup reads as "not set"
+        return None
+
+
+def secret_value(name: str) -> str | None:
+    v = _vault_get(name)
+    return v if v is not None else os.environ.get(name)
+
+
+def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(the child's environment, the secret values in it). Only PATH, HOME,
+    LANG and the declared secrets; nothing inherited beyond those."""
+    env = {"PATH": os.environ.get("PATH") or os.defpath, "HOME": home,
+           "LANG": os.environ.get("LANG") or "C.UTF-8"}
+    if os.name == "nt":  # Python on Windows needs these to start and to open sockets
+        for k in ("SYSTEMROOT", "WINDIR"):
+            if os.environ.get(k):
+                env[k] = os.environ[k]
+    secrets: dict[str, str] = {}
+    for name in prep.capabilities.get("secrets") or ():
+        if caps_mod.check_secret(name):
+            continue  # validated at install; a reserved name never crosses
+        v = secret_value(name)
+        if v is not None:
+            env[name] = secrets[name] = v
+    return env, secrets
+
+
+_NETNS_OK: dict[str, bool] = {}
+
+
+def netns_available() -> bool:
+    """Whether `unshare --user --map-root-user --net` works here (cached)."""
+    if NETNS != "auto" or not sys.platform.startswith("linux"):
+        return False
+    if "ok" in _NETNS_OK:
+        return _NETNS_OK["ok"]
+    exe = shutil.which("unshare")
+    ok = False
+    if exe:
+        try:
+            # A fixed argv and no shell: does the kernel give us a network namespace?
+            r = subprocess.run(  # nosec B603
+                [exe, "--user", "--map-root-user", "--net", "--", sys.executable, "-I", "-c",
+                 "pass"], capture_output=True, timeout=10, env={"PATH": os.defpath},
+                check=False)
+            ok = r.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+    _NETNS_OK["ok"] = ok
+    return ok
+
+
+def _command(netns: bool) -> list[str]:
+    import finops
+    finops_dir = str(Path(finops.__file__).resolve().parent.parent)
+    cmd = [sys.executable, "-I", "-B", "-c", _BOOTSTRAP, finops_dir]
+    if netns:
+        exe = shutil.which("unshare")
+        if exe:
+            return [exe, "--user", "--map-root-user", "--net", "--", *cmd]
+    return cmd
+
+
+# ── the child process and its protocol ───────────────────────────────────────
+
+class _RpcError(Exception):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code, self.message = code, message
+
+
+class _Session:
+    """One child process: JSON-RPC requests out, its answers and requests in."""
+
+    def __init__(self, cmd: list[str], env: dict[str, str], cwd: str, *, label: str,
+                 max_output: int, on_request, on_notify):
+        self.label = label
+        self.max_output = max_output
+        self.on_request, self.on_notify = on_request, on_notify
+        self._q: queue.Queue = queue.Queue()
+        self._stderr = bytearray()
+        self._stderr_dropped = 0
+        self._next = 0
+        try:
+            # A fixed argv (this interpreter, -I -B, the host module, optionally
+            # behind unshare), no shell, and the scrubbed environment above.
+            self.proc = subprocess.Popen(  # nosec B603
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env=env, cwd=cwd, start_new_session=True, close_fds=True)
+        except OSError as e:
+            raise BrokerError(f"{label}: could not start the pack's process "
+                              f"({e.strerror or e})") from None
+        self._threads = [threading.Thread(target=self._read_out, daemon=True),
+                         threading.Thread(target=self._read_err, daemon=True)]
+        for t in self._threads:
+            t.start()
+
+    def _read_out(self) -> None:
+        total = 0
+        out = self.proc.stdout
+        try:
+            while True:
+                line = out.readline(self.max_output - total + 1)
+                if not line:
+                    self._q.put(("eof", None))
+                    return
+                total += len(line)
+                if total > self.max_output:
+                    self._q.put(("overflow", None))
+                    return
+                self._q.put(("line", line))
+        except (OSError, ValueError):
+            self._q.put(("eof", None))
+
+    def _read_err(self) -> None:
+        err = self.proc.stderr
+        try:
+            while True:
+                chunk = err.read1(65536) if hasattr(err, "read1") else err.read(65536)
+                if not chunk:
+                    return
+                room = MAX_STDERR_BYTES - len(self._stderr)
+                if room > 0:
+                    self._stderr += chunk[:room]
+                self._stderr_dropped += max(0, len(chunk) - max(room, 0))
+        except (OSError, ValueError):
+            return
+
+    def stderr_text(self) -> str:
+        text = self._stderr.decode("utf-8", "replace")
+        if self._stderr_dropped:
+            text += f"\n[... {self._stderr_dropped} more bytes of stderr dropped]"
+        return text
+
+    def _send(self, obj: dict[str, Any]) -> None:
+        data = (json.dumps(obj, separators=(",", ":"), default=str) + "\n").encode("utf-8")
+        try:
+            self.proc.stdin.write(data)
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError, ValueError):
+            raise BrokerError(f"{self.label}: the pack's process stopped reading "
+                              f"(exit code {self.proc.poll()})") from None
+
+    def request(self, method: str, params: dict[str, Any], timeout: float) -> Any:
+        self._next += 1
+        mid = self._next
+        self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BrokerError(f"{self.label}: {method} took longer than {timeout:g}s and "
+                                  "was stopped")
+            try:
+                what, line = self._q.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if what == "overflow":
+                raise BrokerError(f"{self.label}: the pack wrote more than {self.max_output} "
+                                  "bytes and was stopped")
+            if what == "eof":
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    self.proc.wait(timeout=2)
+                raise BrokerError(f"{self.label}: the pack's process exited during {method} "
+                                  f"(exit code {self.proc.poll()})")
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                raise BrokerError(f"{self.label}: the pack broke the protocol (a line that is "
+                                  "not JSON)") from None
+            if not isinstance(msg, dict):
+                raise BrokerError(f"{self.label}: the pack broke the protocol (not an object)")
+            if "method" in msg:
+                self._incoming(msg)
+                continue
+            if msg.get("id") != mid:
+                raise BrokerError(f"{self.label}: the pack answered a request nobody made")
+            if "error" in msg:
+                err = msg.get("error")
+                detail = err.get("message", "no detail") if isinstance(err, dict) else err
+                raise BrokerError(f"{self.label}: {method} failed: {str(detail)[:500]}")
+            return msg.get("result")
+
+    def _incoming(self, msg: dict[str, Any]) -> None:
+        method, params = str(msg.get("method")), msg.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        if "id" not in msg:
+            with contextlib.suppress(Exception):
+                self.on_notify(method, params)
+            return
+        try:
+            result = self.on_request(method, params)
+        except _RpcError as e:
+            self._send({"jsonrpc": "2.0", "id": msg["id"],
+                        "error": {"code": e.code, "message": e.message}})
+            return
+        self._send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
+
+    def close(self) -> int | None:
+        with contextlib.suppress(OSError, ValueError):
+            self.proc.stdin.close()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.kill()
+        for t in self._threads:
+            t.join(timeout=2)
+        for s in (self.proc.stdout, self.proc.stderr):
+            with contextlib.suppress(OSError, ValueError):
+                s.close()
+        return self.proc.returncode
+
+    def kill(self) -> None:
+        with contextlib.suppress(OSError, ProcessLookupError):
+            if os.name == "posix":
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            else:
+                self.proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            self.proc.wait(timeout=5)
+
+
+# ── data the pack may read back ──────────────────────────────────────────────
+
+def local_today() -> date:
+    """The local calendar day, as the rest of nable counts days."""
+    return datetime.now().astimezone().date()
+
+
+def _day(v: Any, default: date) -> date:
+    if v in (None, ""):
+        return default
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except ValueError:
+        raise _RpcError(-32602, f"{v!r} is not a date like 2026-09-01") from None
+
+
+def _data_focus_cost(query: dict[str, Any]) -> dict[str, Any]:
+    """nable's daily cost snapshots, in FOCUS column names."""
+    from sqlalchemy import and_, select
+
+    from ..storage.db import cost_snapshots, get_engine
+    end = _day(query.get("end"), local_today())
+    start = _day(query.get("start"), end - timedelta(days=30))
+    conds = [cost_snapshots.c.snapshot_date >= start.isoformat(),
+             cost_snapshots.c.snapshot_date < end.isoformat()]
+    if query.get("provider"):
+        conds.append(cost_snapshots.c.provider == str(query["provider"]))
+    with get_engine().connect() as conn:
+        rows = conn.execute(select(cost_snapshots).where(and_(*conds))
+                            .order_by(cost_snapshots.c.snapshot_date)
+                            .limit(MAX_DATA_ROWS + 1)).fetchall()
+    out = []
+    for r in rows[:MAX_DATA_ROWS]:
+        m = r._mapping
+        day = str(m["snapshot_date"])[:10]
+        out.append({"ChargePeriodStart": day,
+                    "ChargePeriodEnd": (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
+                    "ProviderName": m["provider"], "ServiceName": m["service"],
+                    "SubAccountId": m["account_id"], "RegionId": m["region"] or None,
+                    "BilledCost": float(m["amount_usd"] or 0.0),
+                    "x_Category": m["category"]})
+    return {"rows": out, "truncated": len(rows) > MAX_DATA_ROWS,
+            "window": {"start": start.isoformat(), "end": end.isoformat()}}
+
+
+def _org_facts(kind: str) -> list[dict[str, Any]]:
+    from .. import org
+    model = org.load()
+    return [{"subject": str(f.subject), "value": dict(f.value), "confirmed": f.confirmed,
+             "source": f.source} for f in model.by_kind(kind) if f.live][:MAX_DATA_ROWS]
+
+
+def _data_org_owners(query: dict[str, Any]) -> dict[str, Any]:
+    return {"owners": _org_facts("owner")}
+
+
+def _data_org_environments(query: dict[str, Any]) -> dict[str, Any]:
+    return {"environments": _org_facts("environment")}
+
+
+DATA_SCOPES = {"focus.cost": _data_focus_cost, "org.owners": _data_org_owners,
+               "org.environments": _data_org_environments}
+
+
+def read_data(prep: Prepared, params: dict[str, Any]) -> Any:
+    """Answer a pack's data.read: only a declared scope, only one nable serves."""
+    scope = params.get("scope")
+    query = params.get("query") or {}
+    if not isinstance(scope, str) or not isinstance(query, dict):
+        raise _RpcError(-32602, "data.read takes {scope: str, query: object}")
+    if scope not in (prep.capabilities.get("read_data") or ()):
+        raise _RpcError(-32001, f"{scope} is not in {prep.pack_id}'s declared read_data")
+    fn = DATA_SCOPES.get(scope)
+    if fn is None:
+        raise _RpcError(-32002, f"{scope} is declared, but this nable does not serve it to "
+                        f"packs yet (available: {', '.join(sorted(DATA_SCOPES))})")
+    try:
+        return fn(query)
+    except _RpcError:
+        raise
+    except Exception as e:  # noqa: BLE001 - the pack gets a reason, the core keeps running
+        log.warning("finops.packs: data.read %s for %s failed: %s", scope, prep.pack_id, e)
+        raise _RpcError(-32003, f"{scope} could not be read ({type(e).__name__})") from None
+
+
+# ── running one call ─────────────────────────────────────────────────────────
+
+@dataclass
+class RunResult:
+    pack: str
+    entry: str
+    kind: str
+    method: str
+    output: Any
+    dropped: int = 0
+    problems: list[str] = field(default_factory=list)
+    network: dict[str, Any] = field(default_factory=dict)
+    loaded_from: str = ""
+    log: str = ""
+    seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        out = self.output
+        if self.kind == "adapters":
+            out = [f.summary() for f in self.output]
+        return {"pack": self.pack, "entry": self.entry, "kind": self.kind,
+                "method": self.method, "output": out, "dropped": self.dropped,
+                "problems": self.problems, "network": self.network,
+                "loaded_from": self.loaded_from, "log": self.log,
+                "seconds": round(self.seconds, 3)}
+
+
+def log_path(prep: Prepared) -> Path:
+    return store.packs_root() / "logs" / prep.namespace / f"{prep.name}.log"
+
+
+def _redact(text: str, secrets: dict[str, str]) -> str:
+    for name, value in secrets.items():
+        if len(value) >= 4:
+            text = text.replace(value, f"[redacted {name}]")
+    return text
+
+
+def _write_log(path: Path, header: str, body: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            if path.stat().st_size > MAX_LOG_BYTES:
+                os.replace(path, path.with_name(path.name + ".1"))
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(header + "\n" + (body.rstrip() + "\n" if body.strip() else ""))
+    except OSError as e:
+        log.warning("finops.packs: could not write the pack log %s (%s)", path, e)
+
+
+def execute(prep: Prepared, method: str, params: dict[str, Any], *,
+            timeout: float | None = None, max_output: int | None = None
+            ) -> tuple[Any, dict[str, Any]]:
+    """Start the host, initialize it, make one call, stop it. Returns (the raw
+    result, a report: network mode, declared and observed hosts, where the
+    entry was loaded from, the log path). Raises BrokerError."""
+    timeout = DEFAULT_TIMEOUT_S if timeout is None else float(timeout)
+    max_output = MAX_OUTPUT_BYTES if max_output is None else int(max_output)
+    from . import API_VERSION
+    hosts = list(prep.capabilities.get("network") or ())
+    netns = not hosts and netns_available()
+    observed: list[dict[str, Any]] = []
+    report: dict[str, Any] = {"network": {"mode": "namespace" if netns else "audit",
+                                          "declared": hosts, "observed": observed},
+                              "log": str(log_path(prep))}
+    label = f"{prep.pack_id} {prep.kind[:-1]} {prep.entry_id}"
+    home = tempfile.mkdtemp(prefix="nable-pack-")
+    env, secrets = child_env(prep, home)
+
+    def on_notify(m: str, p: dict[str, Any]) -> None:
+        if m == "audit.network" and len(observed) < 200:
+            observed.append({k: p.get(k) for k in ("event", "host", "port", "allowed")})
+
+    def on_request(m: str, p: dict[str, Any]) -> Any:
+        if m == "data.read":
+            return read_data(prep, p)
+        raise _RpcError(-32601, f"{m} is not something a pack can ask the core for")
+
+    started = time.monotonic()
+    session = None
+    status = "stopped"
+    try:
+        session = _Session(_command(netns), env, home, label=label, max_output=max_output,
+                           on_request=on_request, on_notify=on_notify)
+        caps = {k: (list(v) if isinstance(v, tuple) else v)
+                for k, v in prep.capabilities.items()}
+        try:
+            init = session.request("initialize", {
+                "pack": prep.pack_id, "kind": prep.kind, "entry_id": prep.entry_id,
+                "entry": prep.entry, "pack_root": str(prep.root), "api_version": API_VERSION,
+                "capabilities": caps, "network": hosts,
+                "allow_external_code": prep.allowlisted}, timeout)
+        except BrokerError as e:
+            raise BrokerError(f"{label} could not be loaded: "
+                              f"{e.message.removeprefix(label + ': ')}") from None
+        if not isinstance(init, dict) or init.get("protocol") != 1:
+            raise BrokerError(f"{label}: the host speaks a protocol this nable does not")
+        report["loaded_from"] = str(init.get("loaded_from", ""))
+        result = session.request(method, params, timeout)
+        status = "ok"
+        return result, report
+    except BrokerError as e:
+        status = _redact(e.message, secrets)
+        raise BrokerError(f"{status} (the pack's log: {report['log']})") from None
+    finally:
+        if session is not None:
+            if status != "ok":
+                session.kill()
+            rc = session.close()
+            blocked = [o for o in observed if not o.get("allowed")]
+            header = (f"=== {store.now_iso()} {prep.entry_id} {method} exit={rc} "
+                      f"network={report['network']['mode']} declared={','.join(hosts) or '-'} "
+                      f"blocked={len(blocked)} {'ok' if status == 'ok' else 'FAILED: ' + status}")
+            body = _redact(session.stderr_text(), secrets)
+            body += "".join(f"\nnetwork: {o['event']} {o['host']}:{o['port']} "
+                            f"{'allowed' if o['allowed'] else 'REFUSED'}" for o in observed)
+            _write_log(log_path(prep), _redact(header, secrets), body)
+            for o in blocked:
+                log.warning("finops.packs: %s tried %s:%s, which it did not declare",
+                            prep.pack_id, o.get("host"), o.get("port"))
+        report["seconds"] = time.monotonic() - started
+        shutil.rmtree(home, ignore_errors=True)
+
+
+# ── output validation ────────────────────────────────────────────────────────
+
+_MONEY = ("BilledCost", "EffectiveCost", "ListCost")
+_REQ_STR = ("ResourceId", "ResourceType", "ServiceName", "ServiceCategory", "ProviderName",
+            "PublisherName", "ChargeCategory")
+_OPT_STR = ("ResourceName", "RegionId", "RegionName", "ChargeDescription",
+            "CommitmentDiscountId", "CommitmentDiscountType", "SubAccountId", "SubAccountName")
+_DATES = ("BillingPeriodStart", "BillingPeriodEnd", "ChargePeriodStart", "ChargePeriodEnd")
+_MAX_STR = 1024
+
+
+def _when(v: Any, name: str) -> datetime:
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError(f"{name} must be an ISO date or datetime")
+    try:
+        return datetime.fromisoformat(v.strip())
+    except ValueError:
+        raise ValueError(f"{name} {v[:40]!r} is not an ISO date or datetime") from None
+
+
+def focus_row(raw: Any) -> dict[str, Any]:
+    """A connector row checked against finops.focus's FocusRecord schema and
+    returned in JSON form (datetimes as ISO strings). Columns FocusRecord does
+    not have are left out. Raises ValueError with the first thing wrong."""
+    from ..focus.schema import CHARGE_CATEGORIES, SERVICE_CATEGORIES, FocusRecord
+    if not isinstance(raw, dict):
+        raise TypeError("a row must be an object")
+    vals: dict[str, Any] = {}
+    for k in _MONEY:
+        v = raw.get(k)
+        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+            raise ValueError(f"{k} must be a finite number")
+        vals[k] = float(v)
+    for k in _REQ_STR:
+        v = raw.get(k)
+        if not isinstance(v, str) or len(v) > _MAX_STR or (k != "ResourceId" and not v.strip()):
+            raise ValueError(f"{k} must be a string of at most {_MAX_STR} characters")
+        vals[k] = v
+    for k in _OPT_STR:
+        v = raw.get(k)
+        if v is not None and (not isinstance(v, str) or len(v) > _MAX_STR):
+            raise ValueError(f"{k} must be a string or null")
+        vals[k] = v
+    if vals["ChargeCategory"] not in CHARGE_CATEGORIES:
+        raise ValueError(f"ChargeCategory {vals['ChargeCategory']!r} is not one of "
+                         f"{', '.join(sorted(CHARGE_CATEGORIES))}")
+    if vals["ServiceCategory"] not in SERVICE_CATEGORIES:
+        raise ValueError(f"ServiceCategory {vals['ServiceCategory']!r} is not one of "
+                         f"{', '.join(sorted(SERVICE_CATEGORIES))}")
+    for k in _DATES:
+        vals[k] = _when(raw.get(k), k)
+    for a, b in (("BillingPeriodStart", "BillingPeriodEnd"),
+                 ("ChargePeriodStart", "ChargePeriodEnd")):
+        try:
+            if vals[b] < vals[a]:
+                raise ValueError(f"{b} is before {a}")
+        except TypeError:
+            raise ValueError(f"{a} and {b} mix dates with and without a timezone") from None
+    tags = raw.get("Tags") or {}
+    if not isinstance(tags, dict) or len(tags) > 200 or not all(
+            isinstance(k, str) and isinstance(v, str) and len(k) <= 256 and len(v) <= _MAX_STR
+            for k, v in tags.items()):
+        raise ValueError("Tags must be an object of string keys and string values")
+    vals["Tags"] = dict(tags)
+    rec = FocusRecord(**vals)
+    out = dataclasses.asdict(rec)
+    for k in _DATES:
+        out[k] = out[k].isoformat()
+    return out
+
+
+def _fact(pack_id: str, raw: Any, problems: list[str], i: int):
+    from ..org import make_fact
+    if not isinstance(raw, dict):
+        raise TypeError("a fact must be an object")
+    if raw.get("status") not in (None, "proposed") or raw.get("confirmed_by"):
+        problems.append(f"fact[{i}] asked to be {raw.get('status') or 'confirmed'}; a pack can "
+                        "only propose, so it is a proposal")
+    src = str(raw.get("source") or "").strip()
+    source = (f"pack:{pack_id}" + (f":{src}" if src else ""))[:300]
+    conf = raw.get("confidence", 0.5)
+    return make_fact(raw.get("fact"), raw.get("subject"), raw.get("value"), source=source,
+                     confidence=conf if conf is not None else 0.5,
+                     dollars_monthly=raw.get("dollars_monthly"))
+
+
+def _note(problems: list[str], text: str) -> None:
+    if len(problems) < MAX_PROBLEMS:
+        problems.append(text)
+
+
+def _level(v: str) -> int:
+    return caps_mod.AUTONOMY_LEVELS.index(v)
+
+
+def check_delivery(prep: Prepared, payload: Any) -> dict[str, Any]:
+    """A sink may deliver only its declared act kinds, at or below its
+    max_autonomy. Checked before the pack's process starts."""
+    if not isinstance(payload, dict):
+        raise PolicyRefusal(f"{prep.pack_id}: a sink payload must be an object")
+    acts = tuple(prep.capabilities.get("act") or ())
+    kind = payload.get("kind")
+    if kind not in acts:
+        raise PolicyRefusal(f"{prep.pack_id} declares act {list(acts) or 'nothing'}, so it "
+                            f"cannot deliver a {kind!r}")
+    level = payload.get("autonomy") or ACT_LEVEL.get(str(kind), "L2")
+    ceiling = prep.capabilities.get("max_autonomy", "L0")
+    if level not in caps_mod.AUTONOMY_LEVELS or _level(level) > _level(ceiling):
+        raise PolicyRefusal(f"{prep.pack_id}: a {kind} at {level} is above the pack's "
+                            f"max_autonomy ({ceiling})")
+    size = len(json.dumps(payload, default=str))
+    if size > MAX_PAYLOAD_BYTES:
+        raise PolicyRefusal(f"{prep.pack_id}: the payload is {size} bytes; the most a sink "
+                            f"takes is {MAX_PAYLOAD_BYTES}")
+    return payload
+
+
+def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
+        timeout: float | None = None, max_output: int | None = None,
+        pp: dict[str, Any] | None = None) -> RunResult:
+    """Run one call of an installed pack's code and validate what it returns."""
+    kind = METHOD_KIND.get(method)
+    if kind is None:
+        raise PackError(f"{method} is not a broker method; known: {', '.join(METHOD_KIND)}")
+    prep = prepare(pack_id, entry_id, kind, pp=pp)
+    if kind == "adapters" and "proposals" not in (prep.capabilities.get("write_org") or ()):
+        raise PolicyRefusal(f"{pack_id} does not declare write_org = [\"proposals\"], so its "
+                            "adapter cannot propose org facts")
+    if kind == "sinks":
+        check_delivery(prep, params.get("payload"))
+    raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output)
+    problems: list[str] = []
+    dropped = 0
+    output: Any
+    if kind == "connectors":
+        rows = raw.get("rows") if isinstance(raw, dict) else None
+        if not isinstance(rows, list):
+            raise BrokerError(f"{pack_id} {entry_id}: fetch_costs returned no rows list")
+        output = []
+        for i, r in enumerate(rows):
+            try:
+                output.append(focus_row(r))
+            except (ValueError, TypeError) as e:
+                dropped += 1
+                _note(problems, f"row {i} dropped: {e}")
+    elif kind == "adapters":
+        facts = raw.get("facts") if isinstance(raw, dict) else None
+        if not isinstance(facts, list):
+            raise BrokerError(f"{pack_id} {entry_id}: propose returned no facts list")
+        output = []
+        for i, f in enumerate(facts):
+            try:
+                output.append(_fact(pack_id, f, problems, i))
+            except (ValueError, TypeError) as e:
+                dropped += 1
+                _note(problems, f"fact[{i}] dropped: {e}")
+    else:
+        receipt = raw.get("receipt") if isinstance(raw, dict) else None
+        if not isinstance(receipt, dict):
+            raise BrokerError(f"{pack_id} {entry_id}: deliver returned no receipt object")
+        output = receipt
+    if len(problems) >= MAX_PROBLEMS and dropped > MAX_PROBLEMS:
+        problems.append(f"... and {dropped - MAX_PROBLEMS} more dropped")
+    return RunResult(pack_id, entry_id, kind, method, output, dropped, problems,
+                     report["network"], report.get("loaded_from", ""), report["log"],
+                     report.get("seconds", 0.0))
+
+
+def fetch_costs(pack_id: str, entry_id: str, start: str | date, end: str | date,
+                **kw) -> RunResult:
+    """A connector's FOCUS rows for [start, end); invalid rows dropped."""
+    return run(pack_id, entry_id, "connector.fetch_costs",
+               {"start": str(start), "end": str(end)}, **kw)
+
+
+def propose_facts(pack_id: str, entry_id: str, context: dict[str, Any] | None = None,
+                  **kw) -> RunResult:
+    """An adapter's org facts, validated, every one a proposal."""
+    return run(pack_id, entry_id, "adapter.propose", {"context": dict(context or {})}, **kw)
+
+
+def deliver(pack_id: str, entry_id: str, payload: dict[str, Any], **kw) -> RunResult:
+    """Hand a proposal to a sink; its receipt comes back."""
+    return run(pack_id, entry_id, "sink.deliver", {"payload": payload}, **kw)
+
+
+# ── org-context adapters for `nable org init` ─────────────────────────────────
+
+class PackAdapter:
+    """One pack adapter as a finops.org ADAPTERS callable: adapter(model) ->
+    list of Facts (proposals, source "pack:<id>:..."). The model is not sent
+    to the pack; it reads org data only through its declared scopes."""
+
+    def __init__(self, pack_id: str, entry_id: str):
+        self.pack_id, self.entry_id = pack_id, entry_id
+        self.name = f"pack:{pack_id}/{entry_id}"
+        self.last: RunResult | None = None
+
+    def __call__(self, model: Any = None) -> list[Any]:
+        self.last = propose_facts(self.pack_id, self.entry_id,
+                                  {"today": local_today().isoformat()})
+        return list(self.last.output)
+
+    def __repr__(self) -> str:
+        return f"PackAdapter({self.name})"
+
+
+def org_adapters(*, pp: dict[str, Any] | None = None) -> list[PackAdapter]:
+    """Adapters from every installed pack that may run now (intact, in
+    policy, signed or allowlisted, write_org = ["proposals"]). A pack that may
+    not is skipped with a warning, never an error.
+
+    How `nable org init` (finops.org.store.run_adapters) should use them, once
+    the org adapters builder wires it:
+
+        from finops import packs
+        for adapter in [*ADAPTERS, *packs.org_adapters()]:
+            for fact in adapter(model):
+                propose(fact, dir)          # a proposal, as for any adapter
+
+    Each call starts the pack's process through the broker; a failure raises,
+    which run_adapters already counts as "failed" without stopping init."""
+    from ..policy import pack_policy
+    pp = pack_policy() if pp is None else pp
+    try:
+        idx = store.read_index()
+    except PackError as e:
+        log.warning("finops.packs: %s", e)
+        return []
+    out: list[PackAdapter] = []
+    for pid, e in sorted(idx["packs"].items()):
+        for c in e.get("code") or []:
+            if c.get("kind") != "adapters":
+                continue
+            try:
+                prep = prepare(pid, str(c.get("id")), "adapters", pp=pp)
+            except PackError as err:
+                log.warning("finops.packs: adapter %s/%s is skipped: %s", pid, c.get("id"),
+                            err.message)
+                continue
+            if "proposals" not in (prep.capabilities.get("write_org") or ()):
+                log.warning("finops.packs: adapter %s/%s is skipped: the pack does not "
+                            "declare write_org = [\"proposals\"]", pid, c.get("id"))
+                continue
+            out.append(PackAdapter(pid, prep.entry_id))
+    return out

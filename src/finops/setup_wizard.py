@@ -3429,7 +3429,7 @@ def main(args: list[str] | None = None) -> None:
             ("editor & agents", ["claude", "guard", "agents"]),
             ("account & billing", ["login", "logout", "license", "license-status", "whoami",
                                    "plan", "credits", "uninstall"]),
-            ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
+            ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra", "pack"]),
         ]
 
         def _sub_action(self):

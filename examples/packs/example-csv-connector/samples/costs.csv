@@ -1,0 +1,6 @@
+date,service,account,region,cost,category
+2026-09-01,Snowflake Warehouse,analytics,us-east-1,412.50,Database
+2026-09-01,Datadog APM,platform,,96.00,Observability
+2026-09-02,Snowflake Warehouse,analytics,us-east-1,398.25,Database
+2026-09-02,Datadog APM,platform,,96.00,Observability
+2026-09-03,Snowflake Warehouse,analytics,us-east-1,405.00,Database

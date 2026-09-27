@@ -7,17 +7,22 @@ import pytest
 
 from finops import packs
 from finops.packs import install as inst
-from finops.packs.errors import PolicyRefusal
+from finops.packs.errors import IntegrityError, PolicyRefusal
 from finops.policy import load_policy, pack_policy, policy_problems
 from tests import packs_support
 from tests.packs_support import (
     EXAMPLE_PACK,
+    copy_pack,
     make_git_repo,
     make_pack,
+    new_key,
+    sign_pack,
 )
 
-# The shared fixture: an isolated packs root, policy file and registry setting.
+# The shared fixtures: an isolated packs root, policy file and registry
+# setting; a throwaway key standing in for nable's first-party key.
 packs_env = packs_support.packs_env
+first_party_key = packs_support.first_party_key
 
 
 def _refusal(src, **kw) -> str:
@@ -63,28 +68,64 @@ def test_blocked_sources_match_the_source_or_the_pack_id(packs_env, tmp_path):
     assert "blocked_sources" in _refusal(src)
 
 
-def test_require_signed_refuses_every_pack_that_is_not_first_party(packs_env, tmp_path):
+def test_require_signed_refuses_an_unsigned_pack(packs_env, tmp_path):
     packs_env.policy("packs:\n  require_signed: true\n")
     msg = _refusal(make_pack(tmp_path / "src"))
-    assert "community" in msg and "part 2" in msg
+    assert "not signed by nable's first-party key or a key in packs.trusted_keys" in msg
+    assert "no nable-pack.sig" in msg
 
 
-def test_require_signed_refuses_a_first_party_claim_from_a_local_copy(packs_env, tmp_path):
+def test_an_unsigned_first_party_claim_is_refused_with_or_without_the_policy(packs_env):
+    # The placeholder first-party key means nothing verifies as first-party:
+    # a local copy of nable's own pack is refused, whatever the policy says.
+    with pytest.raises(IntegrityError) as ei:
+        inst.install(str(EXAMPLE_PACK), yes=True)
+    msg = str(ei.value)
+    assert "says it is first-party" in msg and "no first-party public key yet" in msg
     packs_env.policy("packs:\n  require_signed: true\n")
-    msg = _refusal(EXAMPLE_PACK)
-    assert "says it is first-party" in msg and "github.com/getnable" in msg
+    with pytest.raises(IntegrityError):
+        inst.install(str(EXAMPLE_PACK), yes=True)
 
 
-def test_require_signed_refuses_yes_even_for_first_party(packs_env, tmp_path, monkeypatch):
+def test_require_signed_accepts_first_party_and_refuses_yes_for_it(
+        packs_env, tmp_path, first_party_key):
     packs_env.policy("packs:\n  require_signed: true\n")
-    url, commit = make_git_repo(tmp_path, EXAMPLE_PACK)
-    # Pretend the local repo is nable's own, which is the only first-party
-    # provenance part 1 can check.
-    monkeypatch.setattr(inst, "FIRST_PARTY_GIT_PREFIXES", (url,))
+    src = copy_pack(EXAMPLE_PACK, tmp_path / "fp")
+    sign_pack(src, first_party_key)
+    url, commit = make_git_repo(tmp_path, src)
     msg = _refusal(f"git+{url}@{commit}", yes=True)
     assert "--yes is refused" in msg
     r = inst.install(f"git+{url}@{commit}", approve=lambda plan: True)
     assert r["status"] == "installed"
+    assert r["pack"]["signature"]["trust"] == "first-party"
+
+
+def test_require_signed_accepts_a_pack_signed_by_an_org_trusted_key(packs_env, tmp_path):
+    key = new_key(tmp_path, "acme")
+    src = make_pack(tmp_path / "src")
+    sign_pack(src, key)
+    packs_env.policy("packs:\n  require_signed: true\n")
+    msg = _refusal(src, yes=False, approve=lambda plan: True)
+    assert "is signed by ed25519:" in msg and "nor a key in packs.trusted_keys" in msg
+    packs_env.policy("packs:\n  require_signed: true\n  trusted_keys:\n" + key.trusted)
+    r = inst.install(str(src), approve=lambda plan: True)
+    assert r["pack"]["signature"]["key_name"] == "acme"
+    assert r["pack"]["signature"]["trust"] == "org"
+
+
+def test_trusted_keys_and_allow_unsigned_code_fail_closed_when_malformed(packs_env, tmp_path):
+    src = make_pack(tmp_path / "src")
+    for text in ("packs:\n  trusted_keys: nope\n",
+                 "packs:\n  trusted_keys:\n    - name: x\n      key: not-a-key\n",
+                 "packs:\n  trusted_keys:\n    - key: AAAA\n",
+                 "packs:\n  allow_unsigned_code: [not a pack id]\n",
+                 "packs:\n  allow_unsigned_code: io.github.a/b\n"):
+        packs_env.policy(text)
+        assert pack_policy()["invalid"] is True, text
+        assert "refused until it is fixed" in _refusal(src), text
+    packs_env.policy("packs:\n  allow_unsigned_code: [io.github.a/b]\n  trusted_keys: []\n")
+    pp = pack_policy()
+    assert pp["invalid"] is False and pp["allow_unsigned_code"] == ["io.github.a/b"]
 
 
 def test_allowed_capabilities_is_a_ceiling(packs_env, tmp_path):

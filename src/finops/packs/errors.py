@@ -54,3 +54,8 @@ class IntegrityError(PackError):
 
 class RegistryError(PackError):
     """The registry index could not be read or does not list the pack."""
+
+
+class BrokerError(PackError):
+    """A code pack's run failed: it timed out, wrote too much, crashed, broke
+    the protocol, or asked for something it did not declare."""
