@@ -21,6 +21,12 @@ All notable changes to finops-mcp (nable).
 - The README and package descriptions lead with the guard, with real output
   for an 8-GPU launch and a `terraform destroy`. New `docs/guard-demo.tape`
   and a launch video script in `docs/LAUNCH-DEMO.md`.
+- **A hook that cannot start no longer blocks Claude Code.** The settings
+  hook `nable guard install` writes now ends in `; exit 0`, like the other
+  agents' hooks, so uvx failing to reach PyPI (it exits 2, which Claude Code
+  treats as a block) no longer stops every Bash and MCP call. Re-running
+  `nable guard install` upgrades an existing hook in place; `nable guard
+  status` flags one that has not been upgraded.
 - Fixed: ledger redaction kept secrets but also hid ARNs and KMS aliases;
   `nable why` now looks up Spot Fleet and Spot request launches on Spot
   rows; Gemini uninstall no longer removes a `BeforeTool` list nable did not

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.217"
+version = "0.8.218"
 description = "Prices what your coding agents are about to do, before they do it: a guard hook for Claude Code, Cursor, Codex CLI, Copilot, Gemini CLI and Cline, plus a local MCP server and CLI for cloud and AI cost."
 readme = "README.md"
 license = { text = "Apache-2.0" }
