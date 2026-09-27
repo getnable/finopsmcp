@@ -3511,6 +3511,21 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
     (_PythonApiCall("learn-decide-api", r"finops\.(?:recommendations\.learning|cli_learn)"
                                         r"(?![\w-])", r"rollback|restore"),
      "learning_change", "rolling back or restoring a learned lesson for a person"),
+    # The post hook's `ran` is how an ask counts as approved, and repeated
+    # approvals are what a higher threshold is learned from. The harness runs
+    # the post hook; an agent that runs it, with a payload it wrote (the
+    # session and the command are in the readable ledger), turns a person's
+    # "no" into a "yes". `--p`, `--po` and `--pos` are argparse's
+    # abbreviations of --post, the guard parser's only --p option.
+    (_VerbWithFlag("guard-post-hook", _NABLE, rf"(?<!\S)guard{_END}",
+                   rf"(?<!\S)--p(?:o(?:st?)?)?{_END}"),
+     "learning_change", "recording, for a person, how the guard's ask was answered"),
+    (_PythonApiCall("guard-post-hook-api", r"guard_(?:outcome|plugin)(?![\w-])",
+                    r"run_post|record|run_hook|hook_main"),
+     "learning_change", "recording, for a person, how the guard's ask was answered"),
+    (_PythonApiCall("guard-ledger-api", r"guard_ledger(?![\w-])", r"append"),
+     "learning_change", "writing the guard's decision ledger, which records how its asks "
+                        "were answered"),
     # Installing a pack grants it capabilities (and may add code the broker
     # runs); updating one can change its rules; removing a guard-rule pack
     # takes its asks and denies away; a signature or a key made here is what
