@@ -150,8 +150,135 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
     elif doc is not None:
         problems.append(f"{path} is a YAML {type(doc).__name__}, not a mapping of "
                         "settings, so the defaults apply")
-    _FILE_CACHE.update(key=key, keys=keys, problems=problems)
+    packs = _parse_packs_section(doc, path, readable=not problems or isinstance(doc, dict))
+    problems.extend(packs["problems"])
+    _FILE_CACHE.update(key=key, keys=keys, problems=problems, packs=packs)
     return dict(keys), list(problems)
+
+
+# ── packs: the org's rules for extension packs ───────────────────────────────
+# nable.policy.yaml may carry a `packs:` section (finops.packs reads it through
+# pack_policy()). Nothing else in this module reads it, so the keys above behave
+# exactly as before. It is read from the same place, never the working
+# directory: a repo that could ship its own pack policy could allow itself.
+#
+#   packs:
+#     allowed_sources: ["git+https://github.com/getnable/*"]   # globs over sources
+#     blocked_sources: ["io.github.someone/*"]                  # sources or pack ids
+#     require_signed: true
+#     allowed_capabilities:                                     # a ceiling
+#       read_data: [focus.cost, org.owners]
+#       network: []
+#       max_autonomy: L1
+#     registry: https://packs.example.com/index.json
+#
+# Unlike the keys above, a packs section that cannot be used does not fall back
+# to "no restrictions": it fails closed. `invalid` is set and every install is
+# refused until it is fixed, because the admin who wrote a broken allowlist
+# meant to restrict something.
+
+PACK_POLICY_KEYS = ("allowed_sources", "blocked_sources", "require_signed",
+                    "allowed_capabilities", "registry")
+
+
+def _pack_policy_default() -> dict[str, Any]:
+    return {"allowed_sources": None, "blocked_sources": [], "require_signed": False,
+            "allowed_capabilities": None, "registry": None, "invalid": False,
+            "problems": [], "path": None}
+
+
+def _str_list(val: Any) -> list[str] | None:
+    if isinstance(val, list) and all(isinstance(x, str) and x.strip() for x in val):
+        return [x.strip() for x in val]
+    return None
+
+
+def _parse_packs_section(doc: Any, path: Path, *, readable: bool) -> dict[str, Any]:
+    out = _pack_policy_default()
+    out["path"] = str(path)
+    refused = "so pack installs are refused until it is fixed"
+    if not readable or (doc is not None and not isinstance(doc, dict)):
+        # The file exists and nobody can read it, and what it failed to say
+        # may have been a packs section.
+        out["invalid"] = True
+        return out
+    if not isinstance(doc, dict) or doc.get("packs") is None:
+        return out
+    sec = doc["packs"]
+    probs: list[str] = out["problems"]
+    if not isinstance(sec, dict):
+        probs.append(f"{path} sets packs: to a YAML {type(sec).__name__}, not a mapping, {refused}")
+        out["invalid"] = True
+        return out
+    for key in sec:
+        if key not in PACK_POLICY_KEYS:
+            probs.append(f"{path} sets packs.{key}, which is not one of "
+                         f"{', '.join(PACK_POLICY_KEYS)}, {refused}")
+    for key in ("allowed_sources", "blocked_sources"):
+        if key in sec:
+            vals = [] if sec[key] == [] else _str_list(sec[key])
+            if vals is None:
+                probs.append(f"{path} sets packs.{key} to {sec[key]!r}, which is not a list "
+                             f"of source patterns, {refused}")
+            else:
+                out[key] = vals
+    if "require_signed" in sec:
+        if isinstance(sec["require_signed"], bool):
+            out["require_signed"] = sec["require_signed"]
+        else:
+            probs.append(f"{path} sets packs.require_signed to {sec['require_signed']!r}, "
+                         f"which is not true or false, {refused}")
+    if "allowed_capabilities" in sec:
+        from .packs.capabilities import LIST_KEYS, SCALAR_KEYS  # light, stdlib only
+        ceil = sec["allowed_capabilities"]
+        if not isinstance(ceil, dict):
+            probs.append(f"{path} sets packs.allowed_capabilities to {ceil!r}, which is not "
+                         f"a mapping of capability to allowed values, {refused}")
+        else:
+            clean: dict[str, Any] = {}
+            for k, v in ceil.items():
+                if k in LIST_KEYS and (v == [] or _str_list(v) is not None):
+                    clean[k] = _str_list(v) or []
+                elif k in SCALAR_KEYS and isinstance(v, str):
+                    clean[k] = v.strip()
+                else:
+                    probs.append(f"{path} sets packs.allowed_capabilities.{k} to {v!r}, which "
+                                 f"is not a capability with a list (or, for guard and "
+                                 f"max_autonomy, a value), {refused}")
+            out["allowed_capabilities"] = clean
+    if "registry" in sec:
+        reg = sec["registry"]
+        if isinstance(reg, str) and reg.strip():
+            out["registry"] = reg.strip()
+        else:
+            probs.append(f"{path} sets packs.registry to {reg!r}, which is not a URL or a "
+                         f"path, {refused}")
+    out["invalid"] = bool(probs)
+    return out
+
+
+def pack_policy() -> dict[str, Any]:
+    """The packs: section of the policy file, validated. Keys:
+    allowed_sources (list, or None for no allowlist), blocked_sources (list),
+    require_signed (bool), allowed_capabilities (dict, or None for no
+    ceiling), registry (str or None), invalid (bool: refuse every install),
+    problems, path. No policy file means no restrictions. Never raises."""
+    try:
+        policy_file_path().stat()
+    except (OSError, ValueError):
+        return _pack_policy_default()
+    try:
+        _read_policy_file()
+        packs = _FILE_CACHE.get("packs")
+    except Exception:  # noqa: BLE001 - fail closed, never break the caller
+        packs = None
+    if not isinstance(packs, dict):
+        out = _pack_policy_default()
+        out["invalid"] = True
+        return out
+    out = dict(packs)
+    out["problems"] = list(packs["problems"])
+    return out
 
 
 def _policy_file_keys() -> dict[str, Any]:

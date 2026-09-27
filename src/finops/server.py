@@ -2254,6 +2254,7 @@ from .tools.meta import (  # noqa: E402,F401
     list_alert_policies,
     list_api_keys,
     list_connected_providers,
+    list_installed_packs,
     list_pinned_views,
     list_profiles,
     list_savings_recommendations,

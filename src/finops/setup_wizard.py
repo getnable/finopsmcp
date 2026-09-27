@@ -3511,6 +3511,8 @@ def main(args: list[str] | None = None) -> None:
     _add_why_parser(sub)
     from .budget.cli import add_parser as _add_budget_parser
     _add_budget_parser(sub)
+    from .packs.cli import add_parser as _add_pack_parser
+    _add_pack_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3707,7 +3709,7 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why", "budget"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget", "pack"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -3964,6 +3966,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "budget":
         from .budget.cli import run as _budget_run
         raise SystemExit(_budget_run(parsed))
+    elif parsed.cmd == "pack":
+        from .packs.cli import run as _pack_run
+        raise SystemExit(_pack_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))

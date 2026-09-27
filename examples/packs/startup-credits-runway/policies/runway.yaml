@@ -1,0 +1,24 @@
+# Flags spend growth that shortens credits runway. A finding looks like:
+#   {type: credits_runway, credits: {balance_usd, runway_months},
+#    spend: {growth_pct, monthly_usd, projected_12m_usd}}
+version: 1
+rules:
+  - id: credits-runway-spend-growth
+    description: >-
+      Spend is growing while credits cover less than six months, or the next
+      twelve months of spend at this rate would use more than the credits left.
+    applies_to: finding
+    match:
+      all:
+        - {field: type, op: eq, value: credits_runway}
+        - {field: credits.balance_usd, op: gt, value: 0}
+        - {field: spend.growth_pct, op: gt, value: 10}
+      any:
+        - {field: credits.runway_months, op: lt, value: 6}
+        - {field: spend.projected_12m_usd, op: gt, value_from: credits.balance_usd}
+    effect:
+      action: escalate
+      severity: high
+      message: >-
+        Spend grew ${spend.growth_pct}% month over month, and $$${credits.balance_usd}
+        of credits covers ${credits.runway_months} more months at this rate.
