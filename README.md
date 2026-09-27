@@ -118,6 +118,34 @@ nable budget ci-gate --fail-on-breach --json   # a pipeline step that fails on a
 
 `reconcile` needs `cloudtrail:LookupEvents` (free, read-only) and matches by kind and time, since the ledger holds no resource ids. The guard is a seatbelt, not a security boundary: `nable guard doctor` lists what it does not see.
 
+**It guards its own settings.** An agent that writes, moves or deletes the files that decide what the guard does (the org model, `nable.policy.yaml`, installed packs, the ledger, the off switch, the hook entries in each agent's settings) is asked about first, from the shell in every agent and through Claude Code's Write and Edit tools too. So are `nable guard off`, `nable org confirm` and `nable pack install` run by an agent, from any entry point (`nable`, `finops`, `finops-mcp`, `uvx`, `python -m`).
+
+## Molded to your org
+
+`nable org init` reads what your org already says about itself (CODEOWNERS, Terraform, AWS Organizations, tags, account and namespace names) and proposes who owns what, which environments are which, and which tag keys mean team or cost center. It then asks at most ten questions, highest spend first, most of them in bulk ("payments owns these 8 things, $18,500/mo: yes, no or edit"). Answers are stored as plain YAML in a `nable.org/` folder you own: in your repo if you want it reviewed by pull request (`nable org init --here`), otherwise in nable's data directory.
+
+```bash
+nable org init            # propose, then ask the week-one questions
+nable org status          # what is confirmed, proposed, stale or in conflict, and spend coverage
+nable org questions       # the open questions, with the command that answers each
+nable org export --format json
+```
+
+What a person confirms changes what nable does: guard asks name the owner ("Owned by payments (#payments-oncall)"), the guard takes the team for team budgets and per-team thresholds from the repo you work in, tickets carry the owner's team and channel, findings carry an owner, and attribution and prod or non-prod detection use your confirmed facts before any guess. Agents, adapters and the MCP tools can only propose; confirming takes a person at the CLI or a merged pull request. A guess may make nable more careful, never less. A `nable.org/` that arrives inside a cloned repo is read on top of your own model, and until you `nable org trust` it, its owners are shown as likely and its thresholds may only lower yours.
+
+## Packs
+
+Packs extend nable with an org's own rules: policies, guard rules that can only tighten, remediation playbooks, price books, report templates, coding-agent skills, and (sandboxed) connectors, org adapters and ticket or Slack sinks. Each declares what it may read, which secrets it gets and which hosts it may reach in `nable-pack.toml`; you see that at install, and an update that asks for more waits for your approval again.
+
+```bash
+nable pack install ./my-pack          # a folder, a .tar.gz, git+https://...@<commit>, or ns/name from the registry
+nable pack audit                      # what is installed, what each may do, and whether any file changed
+nable pack validate ./my-pack         # for authors
+```
+
+Your org policy file can limit where packs come from, cap what they may ask for, and require signatures (`packs:` in `nable.policy.yaml`). Details, the capability list and the honest limits of sandboxing on a laptop are in [docs/PACKS.md](docs/PACKS.md).
+
+
 ## Setup
 
 Requires Python 3.11+. Need `uv`? `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`).

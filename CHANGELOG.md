@@ -2,6 +2,45 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.9.0
+
+nable starts learning each org, and grows an ecosystem.
+
+- **The org model.** `nable org init` proposes who owns what from
+  CODEOWNERS, Terraform, AWS Organizations, tags and workload names, then asks
+  ten questions or fewer, highest spend first, most in bulk. Facts live as
+  plain YAML in a `nable.org/` folder you own; agents and adapters only
+  propose, a person confirms. Confirmed facts change behaviour: guard asks
+  name the owner, team budgets and per-team thresholds follow the repo you
+  work in, tickets and findings carry the owner, attribution and prod or
+  non-prod detection read your facts first. A cloned repo's `nable.org/` is
+  layered under trust: until `nable org trust`, its thresholds may only
+  lower yours. New MCP tools read the model and propose facts; none confirms.
+- **Packs.** `nable pack install|update|remove|audit|validate|search` for
+  add-ons that are mostly data (policies, guard rules that can only tighten,
+  playbooks, price books, reports, skills), with capabilities declared in
+  `nable-pack.toml`, shown at install and diffed on update. Code packs
+  (connectors, org adapters, sinks) run out of process with a scrubbed
+  environment and only their declared secrets and data, and only when
+  signed or allowlisted by content digest. Price books change the figures
+  nable shows, never what the guard lets through: the guard judges at the
+  higher of list and book rate. See docs/PACKS.md.
+- **The guard guards its own settings.** Writes to the org model, policy,
+  packs, ledger, off switch and hook settings ask first, from the shell and
+  from Claude Code's Write and Edit tools; so do `guard off`, `org confirm`
+  and `pack install` run by an agent from any entry point. The hook now sees
+  Claude Code's file-edit tools, answered in about 45 ms for ordinary files.
+- **Margin guard.** `src/finops/margin_guard.py` models the cost of every
+  plan and a test fails the build if any paid plan drops under 80% gross
+  margin, even with every cost at its cap. Metering rules for the hosted
+  product never bill overage: at a cap, work degrades or waits, and your own
+  model key always works at zero markup. See docs/PRICING-MODEL.md.
+- Fixed in a pre-release review: a padded command could stall the new path
+  checks past the hook timeout; `finops-mcp` and `python -m` skipped the
+  self rules; a proposal could redirect a confirmed owner; a pack regex could
+  hang the hook; a pack could rewrite its install prompt with terminal
+  escapes; a zero-rate price book made a launch silent.
+
 ## 0.8.218
 
 - **The Claude Code plugin turns the guard on.** `/plugin install nable@nable`
