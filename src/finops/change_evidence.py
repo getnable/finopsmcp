@@ -234,25 +234,35 @@ def _exceptions(changes: list[dict[str, Any]], policies: list[Any]) -> list[dict
 
 def build(since: datetime | None = None, *, until: datetime | None = None,
           path: Path | None = None, model: Any = None, policies: list[Any] | None = None,
-          now: datetime | None = None) -> dict[str, Any]:
+          now: datetime | None = None, with_org: bool = True) -> dict[str, Any]:
     """The evidence for [since, until) (default: the whole ledger, to now).
 
     `model` is the org model (default: finops.org.load()), `policies` the
     installed packs' policies (default: finops.packs.active("policies")).
-    Either failing to load is noted and costs its section, never the rest."""
+    Either failing to load is noted and costs its section, never the rest.
+    `with_org=False` leaves the org model out entirely (its approval chains
+    and freezes name people): a pack report reads it only when the pack
+    declares the org.approvals data scope."""
     from . import guard_ledger
     now = (now or datetime.now(UTC)).astimezone(UTC)
     until = until or now
     notes: list[str] = []
     check = guard_ledger.check(path)
     exported = guard_ledger.export_records(None, path)
-    if model is None:
+    org_note = None
+    if not with_org:
+        model = None
+        org_note = ("the pack does not declare org.approvals, so the org model's approval "
+                    "chains and change freezes are not shown")
+        notes.append(org_note)
+    elif model is None:
         try:
             from . import org
             model = org.load()
         except Exception as e:  # noqa: BLE001 - the org model is a citation here
-            notes.append(f"the org model could not be read ({type(e).__name__}), so approval "
-                         "chains and freezes are not shown")
+            org_note = (f"the org model could not be read ({type(e).__name__}), so approval "
+                        "chains and freezes are not shown")
+            notes.append(org_note)
             model = None
     if policies is None:
         try:
@@ -396,6 +406,7 @@ def build(since: datetime | None = None, *, until: datetime | None = None,
             ["Scope", "From", "Until", "Mode", "Status", "Confirmed by", "Reason"],
             [[f["subject"], f["start"], f["end"], f["mode"], f["status"],
               f["confirmed_by"] or "-", f["reason"]] for f in freezes],
+            f"Not shown: {org_note}." if org_note else
             "No change freeze overlapped this period.", wide=6),
         "approval_chains": _table(
             ["Scope", "Action classes", "Approvers", "At least", "Change ticket", "Status",
@@ -403,6 +414,7 @@ def build(since: datetime | None = None, *, until: datetime | None = None,
             [[a["subject"], ", ".join(a["action_classes"]), ", ".join(a["approvers"]),
               a["min"], "yes" if a["change_ticket"] else "no", a["status"], a["source"]]
              for a in chains],
+            f"Not shown: {org_note}." if org_note else
             "The org model names no approval chain."),
         "exceptions": _table(
             ["Severity", "Rule", "Change", "Ledger line", "Finding"],

@@ -19,11 +19,13 @@ support     = "first-party"
 repository  = "https://github.com/getnable/packs"
 status      = "active"
 
-# read_data: the evidence report reads the guard ledger. write_org: the
-# adapter proposes approval facts, never confirms them. No network, no
+# read_data: the evidence report reads the guard ledger, and the org
+# model's approval chains and change freezes (org.approvals: the people they
+# name and who confirmed them) to cite them. write_org: the adapter proposes
+# approval facts, never confirms them. No network, no
 # secrets, no act: it opens no ticket and no pull request.
 [capabilities]
-read_data    = ["ledger.guard"]
+read_data    = ["ledger.guard", "org.approvals"]
 write_org    = ["proposals"]
 guard        = "tighten-only"
 max_autonomy = "L1"

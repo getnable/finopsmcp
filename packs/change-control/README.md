@@ -89,7 +89,7 @@ The pack opens no ticket itself: it declares no `act`, so it cannot.
 
 | Capability | Why |
 |---|---|
-| `read_data = ["ledger.guard"]` | the evidence and ticket reports read the guard's decision ledger |
+| `read_data = ["ledger.guard", "org.approvals"]` | the evidence and ticket reports read the guard's decision ledger, and cite the org model's approval chains and change freezes (the logins and emails they name, and who confirmed them) |
 | `write_org = ["proposals"]` | the adapter proposes approval facts; a person confirms them |
 | `guard = "tighten-only"` | its guard rules only ever tighten a verdict |
 | `max_autonomy = "L1"` | it recommends; it proposes no action |

@@ -14,7 +14,10 @@ so a template never shows a number nobody computed.
     SOURCES       placeholder name -> Source(the read_data scope it needs,
                   the core function that builds its values)
       ledger.guard   change-management evidence from the guard ledger
-                     (finops.change_evidence); reads ledger.guard
+                     (finops.change_evidence); reads ledger.guard. The org
+                     model's approval chains and change freezes (the people
+                     they name, who confirmed them) are in it only when the
+                     pack also declares org.approvals
       ai             AI and LLM spend by vendor, model, feature tag and
                      customer tag, from get_llm_costs and
                      get_ai_cost_attribution; reads focus.cost. It also
@@ -48,6 +51,9 @@ _SET_KEY = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 _CORE_KEYS = frozenset({"generated_at", "since", "until", "pack", "report", "item"})
 MAX_SET_VALUE = 200
 DEFAULT_AI_DAYS = 30
+# What the ledger.guard evidence needs besides ledger.guard to cite the org
+# model's approval chains and freezes.
+ORG_APPROVALS = "org.approvals"
 
 
 @dataclass(frozen=True)
@@ -62,9 +68,10 @@ class Source:
 # ── ledger.guard: change-management evidence ──────────────────────────────────
 
 def _ledger_guard(*, since: datetime | None = None, until: datetime | None = None,
-                  **_: Any) -> dict[str, Any]:
+                  declared: tuple[str, ...] = (), **_: Any) -> dict[str, Any]:
     from .. import change_evidence
-    return change_evidence.build(since, until=until)
+    return change_evidence.build(since, until=until,
+                                 with_org=ORG_APPROVALS in declared)
 
 
 # ── ai: AI spend by vendor, model, feature and customer ───────────────────────
@@ -347,7 +354,7 @@ def render(pack_id: str, name: str | None = None, *, since: datetime | None = No
     }
     for n in used:
         _nest(values, n, SOURCES[n].fill(pack_id=pack_id, since=since, until=until,
-                                         days=days, today=today))
+                                         days=days, today=today, declared=declared))
     if each is None:
         text: Any = tmpl.render(values)
     else:

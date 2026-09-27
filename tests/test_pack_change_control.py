@@ -112,7 +112,7 @@ def test_it_validates_as_shipped_with_minimal_capabilities(packs_env, capsys):
     assert body["code"] == [{"kind": "adapters", "id": "approval-chains",
                              "entry": "nable_change_control.approvals:propose"}]
     caps = body["capabilities"]
-    assert caps == {"read_data": ["ledger.guard"], "write_org": ["proposals"],
+    assert caps == {"read_data": ["ledger.guard", "org.approvals"], "write_org": ["proposals"],
                     "guard": "tighten-only", "max_autonomy": "L1"}
     # nothing that reaches out: no network, no secrets, no tickets or PRs
     assert not {"network", "secrets", "act", "read_cloud", "pricing"} & set(caps)
@@ -385,7 +385,9 @@ def test_a_tampered_ledger_is_reported_not_hidden(installed, tmp_path, capsys):
 def test_the_report_reads_the_ledger_only_because_the_pack_declares_it(installed,
                                                                          packs_env):
     idx = json.loads((packs_env.root / "index.json").read_text())
-    assert idx["packs"][PID]["capabilities"]["read_data"] == ["ledger.guard"]
+    # org.approvals: the evidence cites the org model's approval chains and
+    # freezes, which name people.
+    assert idx["packs"][PID]["capabilities"]["read_data"] == ["ledger.guard", "org.approvals"]
     assert reports.scopes_in((PACK / "reports" / "cc8.1-evidence.md").read_text()) == \
         ["ledger.guard"]
     # The freeze template reads no data at all.

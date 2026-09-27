@@ -64,6 +64,11 @@ All notable changes to finops-mcp (nable).
   output that lists facts) print control and invisible format characters in
   a fact's subject, value, source or reason as visible escapes, as `nable
   pack` already did. `--json` output was already escaped and is unchanged.
+- **The `org.approvals` data scope.** The `ledger.guard` evidence in a pack
+  report carries the org model's approval chains and change freezes (the
+  logins and emails they name, and who confirmed them) only when the pack
+  also declares `org.approvals`; otherwise those tables say they are not
+  shown. `change-control` declares it.
 
 ## 0.10.0
 

@@ -88,6 +88,39 @@ def test_a_report_never_shows_the_packs_credentials(packs_env, tmp_path, monkeyp
     assert r["text"].startswith("# see [redacted REP_TOKEN]\n")
 
 
+def test_org_approval_chains_and_freezes_need_the_org_approvals_scope(packs_env, tmp_path,
+                                                                     monkeypatch):
+    # review: the ledger.guard evidence carried the org model's approval
+    # chains and freezes (logins, emails, who confirmed them) to a pack that
+    # declared no org scope.
+    from finops import org
+    from finops.org.cli import _who as human
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(tmp_path / "org"))
+    org.set_fact(org.make_fact("approval", "team:payments", {
+        "action_classes": ["*"], "approvers": ["github:alice-approver", "email:bob@acme.example"],
+        "min": 1}, source="human"), human("carol@acme.example"))
+    now = datetime.now(UTC)
+    org.set_fact(org.make_fact("freeze", "org:org", {
+        "start": (now - timedelta(hours=1)).isoformat(),
+        "end": (now + timedelta(hours=2)).isoformat(), "reason": "Quarter close"},
+        source="human"), human("maria@acme.example"))
+    text = "${ledger.guard.tables.approval_chains}\n${ledger.guard.tables.freezes}\n"
+    people = ("alice-approver", "bob@acme.example", "carol@acme.example", "maria@acme.example",
+              "Quarter close")
+    pid = _install(tmp_path, text=text)
+    r = reports.render(pid, "brief")
+    blob = json.dumps(r, default=str)
+    assert not [p for p in people if p in blob]
+    assert r["text"].count("does not declare org.approvals") == 2
+    assert r["values"]["ledger"]["guard"]["approval_chains"] == []
+    pid = _install(tmp_path, caps='read_data = ["ledger.guard", "org.approvals"]\n', text=text,
+                   name="rep2")
+    r = reports.render(pid, "brief")
+    blob = json.dumps(r, default=str)
+    assert all(p in blob for p in people)
+    assert "alice-approver" in r["text"] and "maria@acme.example" in r["text"]
+
+
 def test_each_needs_a_list_and_a_report_must_exist(packs_env, tmp_path):
     pid = _install(tmp_path)
     with pytest.raises(PackError, match="not a list of records"):
@@ -177,7 +210,8 @@ def test_out_writes_nothing_that_can_drive_a_terminal(packs_env, tmp_path, capsy
     org.propose(org.make_fact("approval", "team:platform",
                               {"action_classes": ["*"], "approvers": ["team:x\x1b[2Jwiped"],
                                "min": 1}, source="pack:io.github.example/evil:a"))
-    pid = _install(tmp_path, text="${ledger.guard.tables.approval_chains}\n")
+    pid = _install(tmp_path, caps='read_data = ["ledger.guard", "org.approvals"]\n',
+                   text="${ledger.guard.tables.approval_chains}\n")
     target = tmp_path / "chains.md"
     with pytest.raises(SystemExit) as ei:
         main(["pack", "report", pid, "brief", "--out", str(target)])

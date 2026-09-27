@@ -63,6 +63,8 @@ READ_DATA_SCOPES: dict[str, str] = {
     "org.owners": "who owns which accounts, repositories and services",
     "org.environments": "which accounts and clusters are prod, staging or dev",
     "org.teams": "teams and their members",
+    "org.approvals": ("approval chains and change freezes from the org model, with the people "
+                      "they name (logins, emails) and who confirmed them"),
     "budgets": "budgets and month-to-date spend against them",
     "recommendations": "open savings recommendations",
     "ledger.guard": "the guard's decision ledger (redacted commands and verdicts)",
