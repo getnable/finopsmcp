@@ -17,6 +17,13 @@ highest confidence, then the newest. Rejected and expired facts are ignored.
 A confirmed fact past its review_after is "stale": still used, flagged, asked
 again.
 
+A repo_path subject names a path inside one repo. In a `nable.org/` stored at
+the root of that repo the path may be bare ("infra/payments"); anywhere else
+(the nable data dir, FINOPS_ORG_DIR) it carries the repo it is in:
+"github.com/acme/payments//infra" (the remote, else the root directory's
+name). A bare repo_path fact outside a repo belongs to no repo: it is still
+shown, and never counts as confirmed where a confirmation picks a team.
+
 Nothing here imports more than the standard library. The guard hook will read
 this model on every agent tool call, and its budget is about 100 ms.
 """
@@ -29,6 +36,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from functools import cached_property
 from typing import Any
 
 log = logging.getLogger("finops.org")
@@ -59,6 +67,7 @@ KNOWN_FILES = tuple(sorted(set(FILE_FOR_KIND.values())))
 HEADER = "# nable org model v1"
 FIELD_ORDER = ("fact", "subject", "value", "source", "confidence", "status", "proposed_at",
                "confirmed_by", "confirmed_at", "review_after", "dollars_monthly")
+_KNOWN_FIELDS = frozenset(FIELD_ORDER)
 _DATE_FIELDS = ("proposed_at", "confirmed_at", "review_after")
 
 # Environment tag values that mean one of ENVIRONMENTS. A match here is our
@@ -95,12 +104,35 @@ class Subject:
         return {"kind": self.kind, "id": self.id}
 
 
-def _norm_repo_path(raw: str) -> str:
+def _norm_path(raw: str) -> str:
     p = raw.strip().replace("\\", "/")
     while p.startswith("./"):
         p = p[2:]
     p = p.strip("/")
     return p or "."
+
+
+def split_repo_path(ident: str) -> tuple[str | None, str]:
+    """(repo, path) for a repo_path id: "github.com/acme/x//infra" is
+    ("github.com/acme/x", "infra"); a bare "infra" is (None, "infra")."""
+    repo, sep, path = ident.partition("//")
+    if not sep:
+        return None, ident
+    return repo, path
+
+
+def _norm_repo_path(raw: str) -> str:
+    """A repo_path id in its one spelling: the repo part (when there is one)
+    lowercased with no slashes around it, the path relative with no ./ or
+    trailing slash, "." for the root."""
+    text = raw.strip().replace("\\", "/")
+    repo, sep, path = text.partition("//")
+    if sep:
+        repo = repo.strip().strip("/").lower()
+        if repo:
+            return f"{repo}//{_norm_path(path)}"
+        text = path
+    return _norm_path(text)
 
 
 def subject_of(x: Subject | dict | str) -> Subject:
@@ -124,8 +156,11 @@ def subject_of(x: Subject | dict | str) -> Subject:
     if not ident:
         raise FactError("subject.id is empty")
     if kind == "aws_account" and isinstance(raw, int) and len(ident) < 12:
-        # An unquoted id in YAML is an int, and an int has lost its leading zeros.
-        ident = ident.zfill(12)
+        # An unquoted id in YAML is an int, and an int has lost its leading
+        # zeros, or was read as octal (012345670123 is 1402433619): the digits
+        # on the page are gone, so no id is made up from what is left.
+        raise FactError(f"subject.id {ident} is not a 12-digit account id: quote account "
+                        "ids in YAML (id: \"012345678901\")")
     if kind == "repo_path":
         ident = _norm_repo_path(ident)
     return Subject(kind, ident)
@@ -137,6 +172,37 @@ def fact_key(fact: str, subject: Subject, value: dict[str, Any]) -> str:
     blob = json.dumps([fact, subject.kind, subject.id, value], sort_keys=True,
                       separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha1(blob.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
+
+
+def _low(v: Any) -> str:
+    return str(v if v is not None else "").strip().lower()
+
+
+def core_value(fact: str, value: dict[str, Any]) -> tuple:
+    """What a fact says, normalised: the schema's own fields, lowercased,
+    lists sorted, keys the schema does not name left out. Two facts in one
+    slot with the same core say the same thing (a rejection of one holds
+    for the other)."""
+    v = value
+
+    def many(name: str) -> tuple[str, ...]:
+        return tuple(sorted({_low(x) for x in (v.get(name) or []) if _low(x)}))
+
+    if fact == "owner":
+        return (_low(v.get("team")),)
+    if fact == "team":
+        return (many("aliases"), _low(v.get("channel")), many("people"), _low(v.get("parent")))
+    if fact == "environment":
+        return (_low(v.get("env")),)
+    if fact == "tag_key":
+        return (many("keys"),)
+    if fact == "tag_alias":
+        return (_low(v.get("canonical_value")),)
+    if fact == "account":
+        return tuple(_low(v.get(n)) for n in ("name", "business_unit", "cost_center"))
+    if fact == "threshold":
+        return tuple(v.get(n) for n in ("max_auto_monthly_usd", "velocity_cap_usd"))
+    return (json.dumps(v, sort_keys=True, default=str),)
 
 
 def _str_list(v: Any, name: str) -> list[str]:
@@ -256,12 +322,29 @@ class Fact:
     dollars_monthly: float | None = None
     # Where it was read from: a file name in the org dir, or "legacy". Not saved.
     origin: str | None = field(default=None, compare=False, repr=False)
+    # What a person wrote that this version does not model: envelope keys
+    # (`extra`), subject keys (`subject_extra`) and the comment lines just
+    # above the entry (`comments`). Written back as they were.
+    extra: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+    subject_extra: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+    comments: list[str] = field(default_factory=list, compare=False, repr=False)
+    # The directory it was read from, whether that directory is trusted (an
+    # org dir a cloned repo ships is not, until a person says so), the repo a
+    # bare repo_path in it belongs to (only a nable.org/ at a repo's root has
+    # one), and its layer: the model the working directory chose (2), the
+    # nable data dir's under it (1), legacy files (0). None of it is saved.
+    src_dir: str | None = field(default=None, compare=False, repr=False)
+    trusted: bool = field(default=True, compare=False, repr=False)
+    anchor: str | None = field(default=None, compare=False, repr=False)
+    layer: int = field(default=2, compare=False, repr=False)
 
-    @property
+    @cached_property
     def key(self) -> str:
+        # Computed once: every sort and index uses it, and a sha1 over the
+        # value's JSON each time was most of a 5,000-fact query.
         return fact_key(self.fact, self.subject, self.value)
 
-    @property
+    @cached_property
     def slot(self) -> tuple[str, str, str, str]:
         """What one fact answers. Two facts in a slot with different values
         disagree; a tag_key or tag_alias slot also carries what it maps to,
@@ -275,6 +358,12 @@ class Fact:
         return (self.fact, self.subject.kind, sid, disc)
 
     @property
+    def said(self) -> tuple:
+        """(slot, what it says): a rejection suppresses every proposal with
+        the same, whatever its spelling or extra value keys."""
+        return (self.slot, core_value(self.fact, self.value))
+
+    @property
     def live(self) -> bool:
         return self.status in LIVE
 
@@ -282,20 +371,39 @@ class Fact:
     def confirmed(self) -> bool:
         return self.status == "confirmed"
 
+    @property
+    def loose(self) -> bool:
+        """A bare repo_path fact that belongs to no repo (stored outside one)."""
+        return (self.subject.kind == "repo_path" and self.anchor is None
+                and split_repo_path(self.subject.id)[0] is None)
+
+    @property
+    def file(self) -> str | None:
+        """The file it was read from, as a path, when known."""
+        if self.origin and self.origin != "legacy" and self.src_dir:
+            return f"{self.src_dir.rstrip('/')}/{self.origin}"
+        return None
+
     def is_stale(self, today: date | None = None) -> bool:
         if self.status != "confirmed" or not self.review_after:
             return False
         return self.review_after < (today or local_today()).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
-        """The saved form, fields in schema order, empty fields left out."""
-        out: dict[str, Any] = {"fact": self.fact, "subject": self.subject.to_dict(),
+        """The saved form, fields in schema order, empty fields left out,
+        then whatever else the entry held."""
+        subject: dict[str, Any] = self.subject.to_dict()
+        for k, v in self.subject_extra.items():
+            subject.setdefault(k, v)
+        out: dict[str, Any] = {"fact": self.fact, "subject": subject,
                                "value": dict(self.value), "source": self.source,
                                "confidence": self.confidence, "status": self.status}
         for name in FIELD_ORDER[6:]:
             val = getattr(self, name)
             if val is not None:
                 out[name] = val
+        for k, v in self.extra.items():
+            out.setdefault(k, v)
         return out
 
     def summary(self) -> dict[str, Any]:
@@ -307,7 +415,33 @@ class Fact:
             d["stale"] = True
         if self.origin == "legacy":
             d["legacy"] = True
+        if not self.trusted:
+            d["untrusted"] = True
+        if self.loose:
+            d["no_repo"] = True
         return d
+
+    def to_cache(self) -> list[Any]:
+        """The fact as a JSON row for nable's own caches (guard_org, the
+        store's parse cache): already validated, so from_cache skips it."""
+        return [self.fact, self.subject.kind, self.subject.id, self.value, self.source,
+                self.confidence, self.status, self.proposed_at, self.confirmed_by,
+                self.confirmed_at, self.review_after, self.dollars_monthly, self.extra,
+                self.subject_extra]
+
+    @classmethod
+    def from_cache(cls, row: list[Any], *, origin: str | None = None) -> Fact:
+        """A to_cache() row back, without validating it again: a cache holds
+        only what from_dict accepted. A malformed row raises (a cache miss)."""
+        (kind, skind, sid, value, source, conf, status, proposed_at, by, confirmed_at,
+         review_after, dollars, extra, subject_extra) = row
+        if kind not in FACT_KINDS or status not in STATUSES or not isinstance(value, dict):
+            raise ValueError("not a cached fact")
+        return cls(fact=kind, subject=Subject(str(skind), str(sid)), value=value,
+                   source=str(source), confidence=float(conf), status=status,
+                   proposed_at=proposed_at, confirmed_by=by, confirmed_at=confirmed_at,
+                   review_after=review_after, dollars_monthly=dollars, origin=origin,
+                   extra=dict(extra or {}), subject_extra=dict(subject_extra or {}))
 
     @classmethod
     def from_dict(cls, raw: Any, *, origin: str | None = None) -> Fact:
@@ -316,7 +450,10 @@ class Fact:
         kind = raw.get("fact")
         if kind not in FACT_KINDS:
             raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
-        subject = subject_of(raw.get("subject"))
+        raw_subject = raw.get("subject")
+        subject = subject_of(raw_subject)
+        subject_extra = ({k: v for k, v in raw_subject.items() if k not in ("kind", "id")}
+                         if isinstance(raw_subject, dict) else {})
         value = validate_value(kind, subject, raw.get("value"))
         status = raw.get("status") or "proposed"
         if status not in STATUSES:
@@ -335,13 +472,15 @@ class Fact:
         dollars = raw.get("dollars_monthly")
         if dollars is not None:
             dollars = _number(dollars, "dollars_monthly")
+        extra = {k: v for k, v in raw.items() if k not in _KNOWN_FIELDS}
         return cls(fact=kind, subject=subject, value=value, source=source.strip(),
                    confidence=confidence, status=status,
                    proposed_at=_iso_date(raw.get("proposed_at"), "proposed_at"),
                    confirmed_by=by or None,
                    confirmed_at=_iso_date(raw.get("confirmed_at"), "confirmed_at"),
                    review_after=_iso_date(raw.get("review_after"), "review_after"),
-                   dollars_monthly=dollars, origin=origin)
+                   dollars_monthly=dollars, origin=origin, extra=extra,
+                   subject_extra=subject_extra)
 
 
 def parse_facts(entries: Any, where: str, *, origin: str | None = None,
@@ -371,13 +510,18 @@ def _warn(sink: list[str] | None, msg: str) -> None:
         sink.append(msg)
 
 
+def _layer(f: Fact) -> int:
+    return 0 if f.origin == "legacy" else f.layer
+
+
 def _rank(f: Fact) -> tuple:
-    """Sort key for precedence: the maximum wins. A file fact beats a legacy
-    one on a tie, then the key keeps the order deterministic."""
-    file_first = f.origin != "legacy"
+    """Sort key for precedence: the maximum wins. Among confirmed facts the
+    working directory's model beats the data dir's under it, which beats a
+    legacy file, then the newest confirmation; among proposals the layer only
+    breaks a tie. The key keeps the order deterministic."""
     if f.status == "confirmed":
-        return (1, f.confirmed_at or "", file_first, f.key)
-    return (0, f.confidence, f.proposed_at or "", file_first, f.key)
+        return (1, _layer(f), f.confirmed_at or "", f.key)
+    return (0, f.confidence, f.proposed_at or "", _layer(f), f.key)
 
 
 def pick(facts: Iterable[Fact]) -> Fact | None:
@@ -424,20 +568,63 @@ def _is_subject_like(x: Any) -> bool:
     return False
 
 
+
+
+_THRESHOLD_FIELDS = ("max_auto_monthly_usd", "velocity_cap_usd")
+
+
 class OrgModel:
-    """Every fact that applies, file facts over legacy ones, with queries."""
+    """Every fact that applies, file facts over legacy ones, with queries.
+
+    Queries take `strict`: what the guard asks with, where an answer picks a
+    team or a threshold. Under it a fact confirmed in an org dir nobody has
+    trusted (a `nable.org/` a cloned repo ships), or a bare repo_path fact
+    that belongs to no repo, counts as a proposal. A citation may still show
+    it, as "likely".
+
+    A confirmed answer is never redirected or downgraded by a proposal: a
+    confirmed owner's team is read through confirmed team and alias facts
+    only, and the first confirmed owner on the way up from a subject answers
+    before any proposal does."""
 
     def __init__(self, facts: list[Fact], *, dir: Any = None, dir_source: str = "",
-                 warnings: list[str] | None = None) -> None:
+                 warnings: list[str] | None = None, layers: list[Any] | None = None) -> None:
         self.facts = facts
         self.dir = dir
         self.dir_source = dir_source
         self.warnings = warnings if warnings is not None else []
+        # store.Layer for each directory read, the working directory's first.
+        self.layers = layers if layers is not None else []
+        self._n = -1
+        self._reset()
+
+    def _reset(self) -> None:
         self._slots: dict[tuple, list[Fact]] | None = None
+        self._keys: dict[str, list[Fact]] | None = None
+        self._kinds: dict[str, list[Fact]] | None = None
+        self._repo: dict[str, dict[str, list[tuple[str | None, Fact]]]] = {}
+        self._teams: dict[tuple[bool, bool], tuple[dict[str, Fact], dict[str, Fact]]] = {}
+        self._canon: dict[tuple[str, bool, bool], tuple[str, Fact | None]] = {}
+        self._owned: dict[bool, dict[str, Fact]] = {}
+
+    def _fresh(self) -> None:
+        # The indexes are built once per model; a list someone appended to
+        # since is indexed again.
+        if self._n != len(self.facts):
+            self._reset()
+            self._n = len(self.facts)
+
+    @staticmethod
+    def _sure(f: Fact | None, strict: bool) -> bool:
+        """Confirmed, and under `strict` also trusted and tied to a repo."""
+        if f is None or not f.confirmed:
+            return False
+        return not strict or (f.trusted and not f.loose)
 
     # ── lookup ────────────────────────────────────────────────────────────────
 
     def _index(self) -> dict[tuple, list[Fact]]:
+        self._fresh()
         if self._slots is None:
             idx: dict[tuple, list[Fact]] = {}
             for f in self.facts:
@@ -445,16 +632,32 @@ class OrgModel:
             self._slots = idx
         return self._slots
 
+    def _by_key(self) -> dict[str, list[Fact]]:
+        self._fresh()
+        if self._keys is None:
+            idx: dict[str, list[Fact]] = {}
+            for f in self.facts:
+                idx.setdefault(f.key, []).append(f)
+            self._keys = idx
+        return self._keys
+
     def by_kind(self, kind: str) -> list[Fact]:
-        return [f for f in self.facts if f.fact == kind]
+        self._fresh()
+        if self._kinds is None:
+            idx: dict[str, list[Fact]] = {}
+            for f in self.facts:
+                idx.setdefault(f.fact, []).append(f)
+            self._kinds = idx
+        return list(self._kinds.get(kind, ()))
 
     def find(self, key: str) -> list[Fact]:
         """Facts whose key is `key`, or starts with it (4 characters at least)."""
         key = (key or "").strip().lower()
-        exact = [f for f in self.facts if f.key == key]
+        keys = self._by_key()
+        exact = list(keys.get(key, ()))
         if exact or len(key) < 4:
             return exact
-        return [f for f in self.facts if f.key.startswith(key)]
+        return [f for k, fs in keys.items() if k.startswith(key) for f in fs]
 
     def candidates(self, fact: str, subject: Subject | dict | str, *,
                    canonical: str = "") -> list[Fact]:
@@ -483,54 +686,122 @@ class OrgModel:
     def stale(self, today: date | None = None) -> list[Fact]:
         return [f for f in self.facts if f.is_stale(today)]
 
+    def without_repo(self) -> list[Fact]:
+        """Live bare repo_path facts stored outside a repo: they name a path
+        in no repo in particular, so the guard never scopes a team by them."""
+        return [f for f in self.facts if f.live and f.loose]
+
     def conflicts(self) -> list[tuple[Fact, Fact]]:
-        """(confirmed winner, proposal that disagrees with it) pairs: a
-        proposal never overwrites a confirmed fact, so it waits here."""
+        """(confirmed winner, fact that disagrees with it) pairs: a proposal,
+        which never overwrites a confirmed fact, so it waits here; or a second
+        confirmed fact in the same file set (two branches that each confirmed
+        an answer, merged), which a person has to settle."""
         out: list[tuple[Fact, Fact]] = []
         for facts in self._index().values():
+            if len(facts) < 2:
+                continue
             winner = pick(facts)
             if winner is None or not winner.confirmed:
                 continue
             for f in facts:
-                if f.status == "proposed" and f.key != winner.key:
+                if f.key == winner.key:
+                    continue
+                merged = (f.confirmed and "legacy" not in (f.origin, winner.origin)
+                          and f.src_dir == winner.src_dir)
+                if f.status == "proposed" or merged:
                     out.append((winner, f))
         return out
 
     def proposals(self, kind: str | None = None) -> list[Fact]:
-        return [f for f in self.facts if f.status == "proposed" and (kind is None or f.fact == kind)]
+        facts = self.facts if kind is None else self.by_kind(kind)
+        return [f for f in facts if f.status == "proposed"]
 
     # ── teams and aliases ─────────────────────────────────────────────────────
 
-    def _team_fact(self, name: str) -> Fact | None:
-        return self.resolve("team", Subject("team", name))
+    def _team_table(self, confirmed_only: bool, strict: bool
+                    ) -> tuple[dict[str, Fact], dict[str, Fact]]:
+        """({lower team id: fact}, {lower name or alias: fact}) over each
+        team's winning fact, best first. Built once per model and mode."""
+        k = (confirmed_only, strict)
+        if k not in self._teams:
+            winners: list[Fact] = []
+            for slot, facts in self._index().items():
+                if slot[0] != "team":
+                    continue
+                cand = [f for f in facts if f.live and
+                        (not confirmed_only or self._sure(f, strict))]
+                w = pick(cand)
+                if w is not None:
+                    winners.append(w)
+            winners.sort(key=_rank, reverse=True)
+            ids: dict[str, Fact] = {}
+            names: dict[str, Fact] = {}
+            for f in winners:
+                ids.setdefault(f.subject.id.lower(), f)
+            for f in winners:
+                for n in [str(f.value.get("name") or ""), *(f.value.get("aliases") or [])]:
+                    if n:
+                        names.setdefault(n.lower(), f)
+            self._teams[k] = (ids, names)
+        return self._teams[k]
 
-    def _alias(self, raw: str, canonical_keys: tuple[str, ...]) -> Fact | None:
+    def _owned_by(self, strict: bool) -> dict[str, Fact]:
+        """{lower team name: a confirmed owner fact naming it}."""
+        self._fresh()
+        if strict not in self._owned:
+            out: dict[str, Fact] = {}
+            for f in self.by_kind("owner"):
+                if self._sure(f, strict):
+                    out.setdefault(str(f.value["team"]).strip().lower(), f)
+            self._owned[strict] = out
+        return self._owned[strict]
+
+    def _team_fact(self, name: str, *, sure_only: bool = False,
+                   strict: bool = False) -> Fact | None:
+        facts = self.candidates("team", Subject("team", name))
+        if sure_only:
+            facts = [f for f in facts if self._sure(f, strict)]
+        return pick(facts)
+
+    def _alias(self, raw: str, canonical_keys: tuple[str, ...], *, sure_only: bool = False,
+               strict: bool = False) -> Fact | None:
+        if not raw.strip():
+            return None
         best: list[Fact] = []
         for ck in canonical_keys:
             best.extend(self.candidates("tag_alias", Subject("tag_value", raw), canonical=ck))
+        if sure_only:
+            best = [f for f in best if self._sure(f, strict)]
         return pick(best)
 
-    def canonical_team(self, name: str) -> tuple[str, Fact | None]:
+    def canonical_team(self, name: str, *, confirmed_only: bool = False,
+                       strict: bool = False) -> tuple[str, Fact | None]:
         """(canonical team name, the fact that said so). A team fact's own id
-        first, then its aliases, then a tag_alias with canonical_key team."""
+        first, then its name and aliases, then a tag_alias with canonical_key
+        team. confirmed_only reads confirmed facts only: what a confirmed
+        answer is read through, so a proposal can neither send it to another
+        team nor make it look unconfirmed."""
         low = name.strip().lower()
-        teams = ranked(self.by_kind("team"))
-        for f in teams:
-            if f.subject.id.lower() == low:
-                return f.subject.id, f
-        for f in teams:
-            names = [str(f.value.get("name") or "")] + list(f.value.get("aliases") or [])
-            if any(n.lower() == low for n in names if n):
-                return f.subject.id, f
-        alias = self._alias(name, ("team",))
-        if alias is not None:
-            return str(alias.value["canonical_value"]), alias
-        return name.strip(), None
+        ck = (low, confirmed_only, strict)
+        hit = self._canon.get(ck) if self._n == len(self.facts) else None
+        if hit is None:
+            ids, names = self._team_table(confirmed_only, strict)
+            f = ids.get(low) or names.get(low)
+            if f is not None:
+                hit = (f.subject.id, f)
+            else:
+                alias = self._alias(name, ("team",), sure_only=confirmed_only, strict=strict)
+                hit = ((str(alias.value["canonical_value"]), alias) if alias is not None
+                       else (name.strip(), None))
+            self._canon[ck] = hit
+        return hit
 
     def _team_answer(self, team: str, *, confirmed: bool, source: str, key: str | None,
-                     stale: bool = False, matched: str | None = None,
+                     strict: bool = False, stale: bool = False, matched: str | None = None,
                      channel: str | None = None, people: list[str] | None = None) -> Resolved:
-        tf = self._team_fact(team)
+        # A confirmed answer takes its channel and people from a confirmed
+        # team fact only: a proposal must not reroute a confirmed owner.
+        tf = self._team_fact(team, sure_only=confirmed, strict=strict)
         if tf is not None:
             channel = channel or tf.value.get("channel")
             people = people or list(tf.value.get("people") or [])
@@ -540,55 +811,96 @@ class OrgModel:
 
     # ── owner_of ──────────────────────────────────────────────────────────────
 
-    def _owner_fact(self, s: Subject) -> Fact | None:
-        f = self.resolve("owner", s)
-        if f is not None:
-            return f
+    def _repo_index(self, kind: str) -> dict[str, list[tuple[str | None, Fact]]]:
+        """{path: [(repo named in the id or None, fact)]} for kind's repo_path facts."""
+        self._fresh()
+        if kind not in self._repo:
+            idx: dict[str, list[tuple[str | None, Fact]]] = {}
+            for f in self.by_kind(kind):
+                if f.subject.kind == "repo_path":
+                    repo, path = split_repo_path(f.subject.id)
+                    idx.setdefault(path, []).append((repo, f))
+            self._repo[kind] = idx
+        return self._repo[kind]
+
+    def _repo_levels(self, kind: str, s: Subject) -> list[list[Fact]]:
+        """The repo_path facts about `s` and every directory above it, deepest
+        first, matched on whole path components ("infra/pay" is not under
+        "infra/payments"). A query naming a repo ("repo//path") matches facts
+        about that repo, bare facts from a nable.org/ in it, and bare facts
+        that belong to no repo; a bare query matches bare facts."""
+        qrepo, qpath = split_repo_path(s.id)
+        idx = self._repo_index(kind)
+        parts = [] if qpath == "." else qpath.split("/")
+        prefixes = ["/".join(parts[:i]) for i in range(len(parts), 0, -1)] + ["."]
+        out: list[list[Fact]] = []
+        for p in prefixes:
+            facts: list[Fact] = []
+            for frepo, f in idx.get(p, ()):
+                if qrepo is None:
+                    if frepo is not None:
+                        continue
+                else:
+                    home = frepo if frepo is not None else f.anchor
+                    if home is not None and home != qrepo:
+                        continue
+                facts.append(f)
+            if facts:
+                out.append(facts)
+        return out
+
+    def _owner_levels(self, s: Subject) -> list[list[Fact]]:
+        """The owner facts to try for `s`, most specific first: the subject,
+        then a bare namespace for "cluster/namespace", then for a repo path
+        each directory above it."""
         if s.kind == "repo_path":
-            return self._longest_prefix("owner", s.id)
+            return self._repo_levels("owner", s)
+        levels = [self.candidates("owner", s)]
         if s.kind == "k8s_namespace" and "/" in s.id:
             # "cluster/namespace" falls back to a fact about the bare namespace.
-            return self.resolve("owner", Subject("k8s_namespace", s.id.rsplit("/", 1)[1]))
-        return None
+            levels.append(self.candidates("owner", Subject("k8s_namespace",
+                                                            s.id.rsplit("/", 1)[1])))
+        return levels
 
-    def _longest_prefix(self, kind: str, path: str) -> Fact | None:
-        """The fact for the longest repo_path that contains `path`, matched on
-        whole path components ("infra/pay" does not contain "infra/payments")."""
-        path = _norm_repo_path(path)
-        best: tuple[int, Fact] | None = None
-        by_prefix: dict[str, list[Fact]] = {}
-        for f in self.by_kind(kind):
-            if f.subject.kind == "repo_path" and f.live:
-                by_prefix.setdefault(f.subject.id, []).append(f)
-        for prefix, facts in by_prefix.items():
-            if prefix == "." or path == prefix or path.startswith(prefix + "/"):
-                depth = 0 if prefix == "." else prefix.count("/") + 1
-                if best is None or depth > best[0]:
-                    winner = pick(facts)
-                    if winner is not None:
-                        best = (depth, winner)
-        return best[1] if best else None
+    def _owner_fact(self, s: Subject, *, strict: bool = False) -> Fact | None:
+        """The owner fact that answers for `s`: the first confirmed one on the
+        way up, else the most specific proposal."""
+        best: Fact | None = None
+        for facts in self._owner_levels(s):
+            live = [f for f in facts if f.live]
+            if not live:
+                continue
+            sure = [f for f in live if self._sure(f, strict)]
+            if sure:
+                return pick(sure)
+            if best is None:
+                best = pick(live)
+        return best
 
-    def owner_of(self, subject: Subject | dict | str) -> Resolved | None:
+    def owner_of(self, subject: Subject | dict | str, *, strict: bool = False
+                 ) -> Resolved | None:
         """Who owns this subject, or None. See Resolved.confirmed before
         letting the answer enable anything."""
         s = subject_of(subject)
         if s.kind == "tag_value":
-            return self._team_from_value(s.id, ("team",), matched=str(s),
-                                         key_fact=None, default_confirmed=True)
+            return self._team_from_value(s.id, ("team",), matched=str(s), key_fact=None,
+                                         default_confirmed=True, strict=strict)
         if s.kind == "team":
-            team, tf = self.canonical_team(s.id)
+            team, tf = self.canonical_team(s.id, confirmed_only=True, strict=strict)
+            if tf is None:
+                team, tf = self.canonical_team(s.id, strict=strict)
             if tf is None:
                 return None
-            return self._team_answer(team, confirmed=tf.confirmed, source=tf.source,
+            sure = self._sure(tf, strict)
+            return self._team_answer(team, confirmed=sure, strict=strict, source=tf.source,
                                      key=tf.key, stale=tf.is_stale(), matched=str(s))
-        f = self._owner_fact(s)
+        f = self._owner_fact(s, strict=strict)
         if f is None:
             return None
-        team, via = self.canonical_team(str(f.value["team"]))
-        confirmed = f.confirmed and (via is None or via.fact == "team" or via.confirmed)
-        return self._team_answer(team, confirmed=confirmed, source=f.source, key=f.key,
-                                 stale=f.is_stale(), matched=str(f.subject),
+        sure = self._sure(f, strict)
+        team, _ = self.canonical_team(str(f.value["team"]), confirmed_only=sure, strict=strict)
+        return self._team_answer(team, confirmed=sure, strict=strict, source=f.source,
+                                 key=f.key, stale=f.is_stale(), matched=str(f.subject),
                                  channel=f.value.get("channel"),
                                  people=list(f.value.get("people") or []))
 
@@ -613,23 +925,40 @@ class OrgModel:
 
     def _team_from_value(self, raw: str, canonical_keys: tuple[str, ...], *,
                          matched: str | None, key_fact: Fact | None,
-                         default_confirmed: bool) -> Resolved | None:
-        alias = self._alias(raw, canonical_keys + (("team",) if "team" not in canonical_keys
-                                                   else ()))
-        key_ok = key_fact.confirmed if key_fact is not None else default_confirmed
+                         default_confirmed: bool, strict: bool = False) -> Resolved | None:
+        keys = canonical_keys + (("team",) if "team" not in canonical_keys else ())
+        key_ok = self._sure(key_fact, strict) if key_fact is not None else default_confirmed
+        # Confirmed readings first, through confirmed facts only; then guesses.
+        alias = self._alias(raw, keys, sure_only=True, strict=strict)
         if alias is not None:
-            team = str(alias.value["canonical_value"])
-            team, _ = self.canonical_team(team)
-            return self._team_answer(team, confirmed=key_ok and alias.confirmed,
+            team, _ = self.canonical_team(str(alias.value["canonical_value"]),
+                                          confirmed_only=True, strict=strict)
+            return self._team_answer(team, confirmed=key_ok, strict=strict,
                                      source=alias.source, key=alias.key,
                                      stale=alias.is_stale(), matched=matched)
+        team, tf = self.canonical_team(raw, confirmed_only=True, strict=strict)
+        if tf is not None:
+            return self._team_answer(team, confirmed=key_ok, strict=strict, source=tf.source,
+                                     key=tf.key, stale=tf.is_stale(), matched=matched)
+        named = self._owned_by(strict).get(raw.strip().lower())
+        if named is not None:
+            # A team a confirmed owner fact names is a team the org confirmed:
+            # a proposed alias does not turn it into another one.
+            return self._team_answer(str(named.value["team"]), confirmed=key_ok,
+                                     strict=strict, source=named.source, key=named.key,
+                                     matched=matched)
+        alias = self._alias(raw, keys)
+        if alias is not None:
+            team, _ = self.canonical_team(str(alias.value["canonical_value"]))
+            return self._team_answer(team, confirmed=False, source=alias.source,
+                                     key=alias.key, stale=alias.is_stale(), matched=matched)
         team, tf = self.canonical_team(raw)
         if tf is not None:
-            return self._team_answer(team, confirmed=key_ok and tf.confirmed, source=tf.source,
-                                     key=tf.key, stale=tf.is_stale(), matched=matched)
+            return self._team_answer(team, confirmed=False, source=tf.source, key=tf.key,
+                                     stale=tf.is_stale(), matched=matched)
         return None
 
-    def team_for_tags(self, tags: dict[str, Any]) -> Resolved | None:
+    def team_for_tags(self, tags: dict[str, Any], *, strict: bool = False) -> Resolved | None:
         """The team a resource's tags name, read through the org's tag_key and
         tag_alias facts. Team keys first, then owner, then cost_center."""
         if not tags:
@@ -643,36 +972,44 @@ class OrgModel:
                     continue
                 where = f"tag:{k}={raw}"
                 r = self._team_from_value(raw, (canonical,), matched=where, key_fact=kf,
-                                          default_confirmed=False)
+                                          default_confirmed=False, strict=strict)
                 if r is not None:
                     return r
+                key_ok = self._sure(kf, strict)
                 if canonical == "team":
                     # The tag names a team nobody has described yet: still the
                     # team, as sure as the key it came from.
-                    return self._team_answer(raw, confirmed=bool(kf and kf.confirmed),
+                    return self._team_answer(raw, confirmed=key_ok, strict=strict,
                                              source=kf.source if kf else "default:team-tag",
                                              key=kf.key if kf else None, matched=where)
                 if canonical == "owner":
-                    return Resolved(team=None, people=[raw], confirmed=bool(kf and kf.confirmed),
+                    return Resolved(team=None, people=[raw], confirmed=key_ok,
                                     source=kf.source if kf else "", key=kf.key if kf else None,
                                     matched=where)
         return None
 
     # ── environment ───────────────────────────────────────────────────────────
 
-    def environment_of(self, x: Subject | dict | str) -> tuple[str, bool]:
+    def environment_of(self, x: Subject | dict | str, *, strict: bool = False
+                       ) -> tuple[str, bool]:
         """(env, confirmed) for a subject or a tag dict. ("unknown", False)
-        when nothing says. Only a confirmed answer may enable an action."""
+        when nothing says. Only a confirmed answer may enable an action. The
+        most specific fact answers, a proposal included: a guess about a
+        subdirectory may only take a confirmation away."""
         if _is_subject_like(x):
             s = subject_of(x)
-            f = self.resolve("environment", s)
-            if f is None and s.kind == "repo_path":
-                f = self._longest_prefix("environment", s.id)
-            if f is None and s.kind == "k8s_namespace" and "/" in s.id:
-                f = self.resolve("environment", Subject("k8s_namespace", s.id.rsplit("/", 1)[1]))
-            if f is None:
-                return "unknown", False
-            return str(f.value["env"]), f.confirmed
+            if s.kind == "repo_path":
+                levels = self._repo_levels("environment", s)
+            else:
+                levels = [self.candidates("environment", s)]
+                if s.kind == "k8s_namespace" and "/" in s.id:
+                    levels.append(self.candidates(
+                        "environment", Subject("k8s_namespace", s.id.rsplit("/", 1)[1])))
+            for facts in levels:
+                f = pick(facts)
+                if f is not None:
+                    return str(f.value["env"]), self._sure(f, strict)
+            return "unknown", False
         if not isinstance(x, dict):
             return "unknown", False
         lower = {str(k).lower(): str(v).strip() for k, v in x.items()
@@ -681,10 +1018,12 @@ class OrgModel:
             raw = lower.get(k.lower())
             if not raw:
                 continue
-            key_ok = bool(kf and kf.confirmed)
-            alias = self._alias(raw, ("environment",))
+            key_ok = self._sure(kf, strict)
+            alias = (self._alias(raw, ("environment",), sure_only=True, strict=strict)
+                     or self._alias(raw, ("environment",)))
             if alias is not None and alias.value["canonical_value"] in ENVIRONMENTS:
-                return str(alias.value["canonical_value"]), key_ok and alias.confirmed
+                return (str(alias.value["canonical_value"]),
+                        key_ok and self._sure(alias, strict))
             if raw.lower() in ENVIRONMENTS:
                 return raw.lower(), key_ok
             for env, words in _ENV_WORDS.items():
@@ -695,26 +1034,55 @@ class OrgModel:
 
     # ── thresholds ────────────────────────────────────────────────────────────
 
-    def threshold_for(self, team: str | None = None, env: str | None = None) -> dict[str, Any]:
+    def threshold_for(self, team: str | None = None, env: str | None = None, *,
+                      strict: bool = False, ceiling: dict[str, float] | None = None
+                      ) -> dict[str, Any]:
         """Per-scope policy overrides: org, then environment, then team, the
         narrower scope winning. Confirmed facts only: a proposed threshold is a
-        guess, and a guess must not raise what may run unasked."""
+        guess, and a guess must not raise what may run unasked. The team is
+        read through confirmed team and alias facts only.
+
+        Under `strict`, a threshold from an org dir nobody trusted (one a
+        cloned repo ships) may only lower a figure: it applies where it is
+        below what the trusted facts say, or, with none, below `ceiling` (the
+        policy's own figures), and is ignored otherwise.
+
+        {max_auto_monthly_usd?, velocity_cap_usd?, scope: {field: "team:x"},
+        files: {field: path of the file it came from}}, or {}."""
         out: dict[str, Any] = {}
         scope: dict[str, str] = {}
+        files: dict[str, str] = {}
         subjects: list[Subject] = [Subject("org", "org")]
         if env:
             subjects.append(Subject("environment", env))
         if team:
-            subjects.append(Subject("team", self.canonical_team(team)[0]))
+            subjects.append(Subject("team", self.canonical_team(team, confirmed_only=True,
+                                                                strict=strict)[0]))
+        lower: list[tuple[Subject, Fact]] = []
         for s in subjects:
             confirmed = [f for f in self.candidates("threshold", s) if f.confirmed]
-            f = pick(confirmed)
+            f = pick([g for g in confirmed if g.trusted or not strict])
+            lower += [(s, g) for g in confirmed if strict and not g.trusted]
             if f is None:
                 continue
-            for name in ("max_auto_monthly_usd", "velocity_cap_usd"):
+            for name in _THRESHOLD_FIELDS:
                 if f.value.get(name) is not None:
                     out[name] = float(f.value[name])
                     scope[name] = str(s)
+                    files[name] = f.file or ""
+        for s, g in lower:
+            for name in _THRESHOLD_FIELDS:
+                if g.value.get(name) is None:
+                    continue
+                cap = out.get(name, (ceiling or {}).get(name))
+                if cap is None or float(g.value[name]) >= float(cap):
+                    continue
+                out[name] = float(g.value[name])
+                scope[name] = str(s)
+                files[name] = g.file or ""
         if out:
             out["scope"] = scope
+            named = {k: v for k, v in files.items() if v}
+            if named:
+                out["files"] = named
         return out

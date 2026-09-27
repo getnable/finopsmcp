@@ -28,6 +28,7 @@ import yaml
 
 from finops import org
 from finops.org import store
+from finops.org.cli import _who as human
 from finops.org.model import Fact, OrgModel, Subject, fact_key, local_today, pick
 
 TODAY = local_today().isoformat()
@@ -146,13 +147,32 @@ def test_value_shapes_are_checked_per_kind():
     assert f.value["max_auto_monthly_usd"] == 900.0
 
 
-def test_an_unquoted_account_id_keeps_its_leading_zeros(odir):
+def test_an_unquoted_short_account_id_is_refused_not_padded(odir):
+    """An unquoted id with a leading zero is a YAML int: 012345670123 reads as
+    octal 1402433619, 000000000017 as 15. Padding either back to 12 digits
+    names a different, valid-looking account, so the entry is skipped with
+    a warning that says to quote it."""
     (odir).mkdir()
     (odir / "owners.yaml").write_text(
-        "# nable org model v1\n- fact: owner\n  subject: {kind: aws_account, id: 12345678901}\n"
-        "  value: {team: payments}\n  source: human\n  status: confirmed\n")
+        "# nable org model v1\n"
+        "- fact: owner\n  subject: {kind: aws_account, id: 012345670123}\n"
+        "  value: {team: payments}\n  source: human\n  status: confirmed\n"
+        "- fact: owner\n  subject: {kind: aws_account, id: 000000000017}\n"
+        "  value: {team: payments}\n  source: human\n  status: confirmed\n"
+        "- fact: owner\n  subject: {kind: aws_account, id: '012345670123'}\n"
+        "  value: {team: search}\n  source: human\n  status: confirmed\n"
+        "- fact: owner\n  subject: {kind: aws_account, id: 123456789012}\n"
+        "  value: {team: data}\n  source: human\n  status: confirmed\n")
     m = org.load()
-    assert m.owner_of("aws_account:012345678901").team == "payments"
+    assert m.owner_of("aws_account:001402433619") is None
+    assert m.owner_of("aws_account:000000000015") is None
+    assert m.owner_of("aws_account:012345670123").team == "search"
+    assert m.owner_of("aws_account:123456789012").team == "data"
+    assert sum("quote account ids" in w for w in m.warnings) == 2
+    # The skipped entries are kept as written when the file is rewritten.
+    org.propose(owner("aws_account:222222222222", "x"))
+    text = (odir / "owners.yaml").read_text()
+    assert "id: 012345670123}" in text and "1402433619" not in text
 
 
 # ── keys ──────────────────────────────────────────────────────────────────────
@@ -174,7 +194,7 @@ def test_the_key_ignores_value_key_order_and_survives_a_round_trip(odir):
     org.propose(a)
     loaded = org.load().facts
     assert [f.key for f in loaded] == [a.key]
-    org.confirm(a.key, "@maria")
+    org.confirm(a.key, human("@maria"))
     assert org.load().facts[0].key == a.key
 
 
@@ -245,7 +265,7 @@ def test_the_same_proposal_twice_is_a_duplicate(odir):
 def test_a_proposal_never_overwrites_a_confirmed_fact(odir):
     good = owner("aws_account:123456789012", "payments")
     org.propose(good)
-    org.confirm(good.key, "@maria")
+    org.confirm(good.key, human("@maria"))
     rival = owner("aws_account:123456789012", "search", confidence=0.99)
     assert org.propose(rival) == "conflict"
     m = org.load()
@@ -260,7 +280,7 @@ def test_a_proposal_never_overwrites_a_confirmed_fact(odir):
 def test_a_rejected_fact_suppresses_the_same_proposal(odir):
     f = owner("aws_account:123456789012", "payments")
     org.propose(f)
-    org.reject(f.key, "@maria")
+    org.reject(f.key, human("@maria"))
     assert org.propose(f) == "suppressed_rejected"
     again = owner("aws_account:123456789012", "payments", source="another:adapter",
                   confidence=0.99)
@@ -276,9 +296,9 @@ def test_confirming_one_answer_expires_the_old_confirmed_one(odir):
     a = owner("aws_account:123456789012", "payments")
     b = owner("aws_account:123456789012", "search")
     org.propose(a)
-    org.confirm(a.key, "@maria")
+    org.confirm(a.key, human("@maria"))
     org.propose(b)
-    org.confirm(b.key, "@maria")
+    org.confirm(b.key, human("@maria"))
     by_key = {f.key: f.status for f in org.load().facts}
     assert by_key == {a.key: "expired", b.key: "confirmed"}
     assert org.owner_of("aws_account:123456789012").team == "search"
@@ -289,7 +309,7 @@ def test_an_expired_fact_can_be_proposed_again(odir):
     b = owner("aws_account:123456789012", "search")
     for f in (a, b):
         org.propose(f)
-        org.confirm(f.key, "@maria")
+        org.confirm(f.key, human("@maria"))
     assert org.propose(a) == "conflict"
     assert {f.key: f.status for f in org.load().facts}[a.key] == "proposed"
 
@@ -298,18 +318,18 @@ def test_confirm_needs_a_name_and_a_real_key(odir):
     f = owner("aws_account:123456789012", "payments")
     org.propose(f)
     with pytest.raises(org.OrgError):
-        org.confirm(f.key, "  ")
+        org.confirm(f.key, human("  "))
     with pytest.raises(org.OrgError):
-        org.confirm("0000000000", "@maria")
-    assert org.confirm(f.key[:6], "@maria").status == "confirmed"
+        org.confirm("0000000000", human("@maria"))
+    assert org.confirm(f.key[:6], human("@maria")).status == "confirmed"
 
 
 # ── owner_of ──────────────────────────────────────────────────────────────────
 
 def test_repo_path_longest_prefix_wins_on_whole_components(odir):
-    org.set_fact(owner("repo_path:infra", "platform"), "@lead")
-    org.set_fact(owner("repo_path:infra/payments/", "payments"), "@lead")
-    org.set_fact(owner("repo_path:.", "everyone"), "@lead")
+    org.set_fact(owner("repo_path:infra", "platform"), human("@lead"))
+    org.set_fact(owner("repo_path:infra/payments/", "payments"), human("@lead"))
+    org.set_fact(owner("repo_path:.", "everyone"), human("@lead"))
     m = org.load()
     assert m.owner_of("repo_path:infra/payments/api/main.tf").team == "payments"
     assert m.owner_of("repo_path:./infra/payments").team == "payments"
@@ -320,20 +340,26 @@ def test_repo_path_longest_prefix_wins_on_whole_components(odir):
     assert r.matched == "repo_path:infra/payments" and r.confirmed
 
 
-def test_a_deeper_proposal_is_cited_but_not_confirmed(odir):
-    org.set_fact(owner("repo_path:infra", "platform"), "@lead")
+def test_a_deeper_proposal_never_shadows_a_confirmed_parent(odir):
+    """The first confirmed owner on the way up answers; a proposal about a
+    deeper path (what CODEOWNERS proposes) is cited only where nothing on
+    the way up is confirmed."""
+    org.set_fact(owner("repo_path:infra", "platform"), human("@lead"))
     org.propose(owner("repo_path:infra/payments", "payments", confidence=0.7))
     r = org.owner_of("repo_path:infra/payments/main.tf")
-    assert (r.team, r.confirmed) == ("payments", False)
+    assert (r.team, r.confirmed, r.matched) == ("platform", True, "repo_path:infra")
+    org.propose(owner("repo_path:docs/api", "docs", confidence=0.7))
+    r = org.owner_of("repo_path:docs/api/x.md")
+    assert (r.team, r.confirmed) == ("docs", False)
 
 
 def test_owner_carries_the_team_channel_and_resolves_aliases(odir):
     org.set_fact(org.make_fact("team", "team:payments",
                                {"name": "payments", "aliases": ["pay"],
                                 "channel": "#payments-oncall", "people": ["@maria"]},
-                               source="human"), "@lead")
-    org.set_fact(owner("aws_account:123456789012", "pay"), "@lead")
-    org.set_fact(owner("k8s_namespace:checkout", "payments", channel="#checkout"), "@lead")
+                               source="human"), human("@lead"))
+    org.set_fact(owner("aws_account:123456789012", "pay"), human("@lead"))
+    org.set_fact(owner("k8s_namespace:checkout", "payments", channel="#checkout"), human("@lead"))
     m = org.load()
     r = m.owner_of("aws_account:123456789012")
     assert (r.team, r.channel, r.people, r.confirmed) == \
@@ -348,13 +374,13 @@ def test_owner_carries_the_team_channel_and_resolves_aliases(odir):
 def test_team_for_tags_reads_tag_keys_then_aliases(odir):
     org.set_fact(org.make_fact("tag_key", "org:org",
                                {"canonical": "team", "keys": ["Team", "costcenter"]},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     org.set_fact(org.make_fact("tag_alias", "tag_value:pay",
                                {"canonical_key": "team", "canonical_value": "payments"},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     org.set_fact(org.make_fact("team", "team:payments", {"name": "payments",
                                                          "channel": "#payments-oncall"},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     m = org.load()
     r = m.team_for_tags({"TEAM": "Pay", "env": "prod"})
     assert (r.team, r.channel, r.confirmed) == ("payments", "#payments-oncall", True)
@@ -368,7 +394,7 @@ def test_team_for_tags_reads_tag_keys_then_aliases(odir):
 
 def test_a_proposed_alias_gives_an_unconfirmed_answer(odir):
     org.set_fact(org.make_fact("tag_key", "org:org", {"canonical": "team", "keys": ["team"]},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     org.propose(org.make_fact("tag_alias", "tag_value:pay",
                               {"canonical_key": "team", "canonical_value": "payments"},
                               source="inference:tag-values", confidence=0.8))
@@ -383,7 +409,7 @@ def test_a_proposed_alias_gives_an_unconfirmed_answer(odir):
 def test_tag_value_subjects_resolve_through_aliases(odir):
     org.set_fact(org.make_fact("tag_alias", "tag_value:pay",
                                {"canonical_key": "team", "canonical_value": "payments"},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     r = org.owner_of("tag_value:PAY")
     assert (r.team, r.confirmed) == ("payments", True)
 
@@ -391,9 +417,9 @@ def test_tag_value_subjects_resolve_through_aliases(odir):
 def test_environment_guesses_never_come_back_confirmed(odir):
     org.set_fact(org.make_fact("tag_key", "org:org",
                                {"canonical": "environment", "keys": ["stage"]},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     org.set_fact(org.make_fact("environment", "aws_account:222222222222", {"env": "nonprod"},
-                               source="human"), "@finops")
+                               source="human"), human("@finops"))
     org.propose(org.make_fact("environment", "k8s_namespace:ci", {"env": "nonprod"},
                               source="inference:name", confidence=0.9))
     m = org.load()
@@ -408,11 +434,11 @@ def test_environment_guesses_never_come_back_confirmed(odir):
 def test_thresholds_use_confirmed_facts_narrowest_scope_first(odir):
     org.set_fact(org.make_fact("threshold", "org:org",
                                {"max_auto_monthly_usd": 500, "velocity_cap_usd": 2000},
-                               source="human"), "@cfo")
+                               source="human"), human("@cfo"))
     org.set_fact(org.make_fact("threshold", "environment:prod",
-                               {"max_auto_monthly_usd": 100}, source="human"), "@cfo")
+                               {"max_auto_monthly_usd": 100}, source="human"), human("@cfo"))
     org.set_fact(org.make_fact("threshold", "team:payments",
-                               {"max_auto_monthly_usd": 2500}, source="human"), "@cfo")
+                               {"max_auto_monthly_usd": 2500}, source="human"), human("@cfo"))
     org.propose(org.make_fact("threshold", "team:search", {"max_auto_monthly_usd": 99999},
                               source="inference", confidence=0.9))
     m = org.load()
@@ -503,12 +529,12 @@ def test_legacy_facts_answer_queries_and_a_file_fact_wins(legacy_home):
     assert m.owner_of("aws_account:123456789012").confirmed
     assert m.team_for_tags({"team": "fin"}).team == "finance"
     alias = next(f for f in m.facts if f.fact == "tag_alias" and f.subject.id == "fin")
-    org.reject(alias.key, "@finops")
+    org.reject(alias.key, human("@finops"))
     m = org.load()
     assert m.team_for_tags({"team": "fin"}).team == "fin"   # the alias no longer applies
     assert [f.status for f in m.facts if f.key == alias.key] == ["rejected"]
     # A confirmed file fact in the slot replaces the legacy one.
-    org.set_fact(owner("aws_account:123456789012", "search"), "@lead")
+    org.set_fact(owner("aws_account:123456789012", "search"), human("@lead"))
     assert org.owner_of("aws_account:123456789012").team == "search"
 
 
@@ -668,7 +694,7 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 def test_coverage_without_cost_data_says_not_read(odir):
-    org.set_fact(owner("aws_account:111111111111", "a"), "@lead")
+    org.set_fact(owner("aws_account:111111111111", "a"), human("@lead"))
     org.propose(owner("aws_account:222222222222", "b"))
     cov = org.coverage()
     assert cov["basis"] == "subjects"
@@ -711,12 +737,13 @@ def _seed(db, month="2026-08"):
 
 def test_coverage_reads_the_latest_month_by_account_and_team(odir, fresh_db):
     _seed(fresh_db)
-    org.set_fact(owner("aws_account:111111111111", "payments"), "@lead")
+    org.set_fact(owner("aws_account:111111111111", "payments"), human("@lead"))
     org.propose(owner("aws_account:222222222222", "search", confidence=0.7))
     org.set_fact(org.make_fact("team", "team:search", {"name": "search"}, source="human"),
-                 "@lead")
+                 human("@lead"))
     cov = org.coverage()
     assert cov["basis"] == "spend" and cov["month"] == "2026-08"
+    assert (cov["start"], cov["through"]) == ("2026-07-17", "2026-08-15")
     assert cov["spend_total"] == 1200.0
     assert cov["spend_confirmed_owner"] == 660.0          # 600 payments + 60 tagged search
     assert cov["spend_proposed_owner"] == 300.0
@@ -725,7 +752,7 @@ def test_coverage_reads_the_latest_month_by_account_and_team(odir, fresh_db):
     assert cov["by_team"]["search"] == {"confirmed": 60.0, "proposed": 300.0}
     assert [u["subject"] for u in cov["unowned"]] == ["gcp_project:proj-x",
                                                       "aws_account:333333333333"]
-    assert "55.0% of 2026-08 spend" in cov["summary"]
+    assert "55.0% of the 30 days to 2026-08-15 spend" in cov["summary"]
 
 
 def test_questions_include_unowned_spend_and_price_facts(odir, fresh_db):

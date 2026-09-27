@@ -14,6 +14,7 @@ import pytest
 
 from finops import org
 from finops.context.workload import classify
+from finops.org.cli import _who as human
 
 ACCT = "123456789012"
 
@@ -26,7 +27,7 @@ def _clean(monkeypatch, tmp_path):
 
 
 def confirmed(subject, env):
-    org.set_fact(org.make_fact("environment", subject, {"env": env}, source="human"), "maria")
+    org.set_fact(org.make_fact("environment", subject, {"env": env}, source="human"), human("maria"))
 
 
 def proposed(subject, env):
@@ -34,13 +35,40 @@ def proposed(subject, env):
                               confidence=0.95))
 
 
-def test_a_confirmed_environment_beats_the_tags():
+def test_a_confirmed_environment_beats_the_heuristics():
     confirmed(f"aws_account:{ACCT}", "nonprod")
-    ctx = classify(tags={"Environment": "production"}, account_id=ACCT)
+    ctx = classify(tags={"Environment": "staging"}, resource_name="api-prod", account_id=ACCT)
     assert ctx.kind == "nonprod" and ctx.is_nonprod
     assert ctx.evidence == [f"org model: aws account {ACCT} is nonprod (confirmed)"]
+    ctx = classify(account_name="acme-prod", account_id=ACCT)
+    assert ctx.kind == "nonprod"
+
+
+def test_an_account_fact_does_not_overrule_the_resources_own_tag():
+    """A confirmed account-level environment is about the account; the
+    resource's own Environment tag is about the resource. When they
+    disagree, the answer is unknown, or the caller's safe side."""
+    confirmed(f"aws_account:{ACCT}", "nonprod")
+    ctx = classify(tags={"Environment": "production"}, account_id=ACCT)
+    assert ctx.kind == "unknown" and not ctx.is_nonprod
+    assert ctx.evidence == [f"org model: aws account {ACCT} is nonprod (confirmed)",
+                            'tag Environment "production" contains "production"']
+    # Rightsizing holds a pull request back on nonprod: its safe side.
+    assert classify(tags={"Environment": "production"}, account_id=ACCT,
+                    safe="nonprod").kind == "nonprod"
     confirmed(f"aws_account:{ACCT}", "prod")
-    assert classify(tags={"env": "dev"}, account_id=ACCT).kind == "prod"
+    assert classify(tags={"env": "dev"}, account_id=ACCT).kind == "unknown"
+    assert classify(tags={"env": "dev"}, account_id=ACCT, safe="nonprod").kind == "nonprod"
+    assert classify(tags={"env": "production"}, account_id=ACCT).kind == "prod"
+
+
+def test_a_guess_never_unsuppresses_for_a_nonprod_safe_caller():
+    """r11: a proposed prod on the account must not turn a resource tagged
+    sandbox into "unknown" (and a rightsizing pull request)."""
+    proposed(f"aws_account:{ACCT}", "prod")
+    assert classify(tags={"Environment": "sandbox"}, account_id=ACCT).kind == "unknown"
+    ctx = classify(tags={"Environment": "sandbox"}, account_id=ACCT, safe="nonprod")
+    assert ctx.kind == "nonprod" and ctx.is_nonprod
 
 
 def test_the_namespace_is_asked_before_the_account():

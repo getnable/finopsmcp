@@ -22,6 +22,15 @@ What each fact may change, following "guesses may restrict, never enable":
                environment the command touches (confirmed environment facts
                only) replaces max_auto_monthly_usd and the velocity cap, up or
                down: a human set it. A proposed threshold is never read.
+
+"Confirmed" here is strict (OrgModel queries with strict=True): a fact from
+a repo's nable.org/ that no person has trusted (`nable org trust --here`)
+is somebody else's word. It is cited as "likely", never picks the team, and
+its thresholds may only lower a figure, below the trusted model's or, with
+none, the policy's own. A bare repo_path fact outside a repo names no repo
+and never picks the team either. Repo paths are asked about with the repo
+named ("repo_path:github.com/acme/x//infra"), so a path in one repo is never
+an answer about another.
 """
 from __future__ import annotations
 
@@ -44,15 +53,10 @@ _CHDIR_RE = re.compile(r"-chdir=(\S+)")
 def load_model(cwd: str | None):
     """The org model the working directory sees: FINOPS_ORG_DIR, else the
     nable.org/ of the repo holding `cwd` (the agent's directory, which may
-    not be the hook's), else what finops.org.load() finds. Read through a
-    cache (_cached) so a hook call does not parse YAML when nothing changed."""
-    from . import org
-    d = None
-    if not os.environ.get("FINOPS_ORG_DIR", "").strip() and cwd:
-        root = org.git_root(cwd)
-        if root is not None and (root / org.ORG_DIR_NAME).is_dir():
-            d = root / org.ORG_DIR_NAME
-    return _cached(d)
+    not be the hook's) over the data dir's, else the data dir's. Read
+    through a cache (_cached) so a hook call does not parse YAML when
+    nothing changed."""
+    return _cached(cwd)
 
 
 # The parsed model, beside the decision ledger, keyed on what it was read
@@ -62,7 +66,7 @@ def load_model(cwd: str | None):
 # a stale or broken cache is a miss, and a hit is exactly what a fresh read
 # of the same files returns.
 _CACHE_NAME = "org-model-cache.json"
-_CACHE_VERSION = 1
+_CACHE_VERSION = 3
 
 
 def _stamp(p: Path) -> list[int] | None:
@@ -73,14 +77,19 @@ def _stamp(p: Path) -> list[int] | None:
     return [st.st_mtime_ns, st.st_size, st.st_ino]
 
 
-def _cache_key(d: Path) -> str:
+def _cache_key(layers: list[Any]) -> str:
     import json
 
     from .org.legacy import accounts_path, tag_rules_path
     from .org.model import KNOWN_FILES
-    parts: list[Any] = [_CACHE_VERSION, str(d), _stamp(d)]
-    parts += [[n, _stamp(d / n)] for n in KNOWN_FILES]
-    for p in (tag_rules_path(), accounts_path()):
+    from .org.store import trust_path
+    parts: list[Any] = [_CACHE_VERSION]
+    for layer in layers:
+        d = layer.dir
+        # Trust and the repo a bare path belongs to are part of what was read.
+        parts += [str(d), _stamp(d), layer.source, layer.trusted, layer.anchor, layer.layer]
+        parts += [[n, _stamp(d / n)] for n in KNOWN_FILES]
+    for p in (tag_rules_path(), accounts_path(), trust_path()):
         parts += [str(p), _stamp(p)]
     parts += [os.environ.get(v, "") for v in ("FINOPS_REQUIRED_TAGS", "FINOPS_PROTECTED_TAGS")]
     return json.dumps(parts)
@@ -91,32 +100,48 @@ def _cache_path() -> Path:
     return guard_ledger.ledger_path().with_name(_CACHE_NAME)
 
 
-def _cached(d: Path | None):
-    """org.load(d), from the cache when its key still matches."""
+def _meta(f: Any) -> dict[str, Any]:
+    return {"src": f.src_dir, "trusted": f.trusted, "anchor": f.anchor, "layer": f.layer}
+
+
+def _cached(cwd: str | None):
+    """org.load() as seen from `cwd`, from the cache when its key still matches."""
     import json
 
     from . import org
     from .org.model import Fact, OrgModel
-    where, why = org.resolve_dir(d)
-    key = _cache_key(where)
+    layers = org.layers(None, cwd=cwd)
+    key = _cache_key(layers)
     path = _cache_path()
+    import gc
+    # Thousands of small objects and no cycles among them: the collector
+    # would walk them all several times over for nothing (half the time).
+    collecting = gc.isenabled()
+    gc.disable()
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(doc, dict) and doc.get("key") == key:
-            facts = [Fact.from_dict(f, origin=o) for o, f in doc["facts"]]
-            return OrgModel(facts, dir=where, dir_source=why,
-                            warnings=list(doc.get("warnings") or []))
+            facts = []
+            for o, meta, row in doc["facts"]:
+                f = Fact.from_cache(row, origin=o)
+                f.src_dir, f.trusted = meta["src"], bool(meta["trusted"])
+                f.anchor, f.layer = meta["anchor"], int(meta["layer"])
+                facts.append(f)
+            return OrgModel(facts, dir=layers[0].dir, dir_source=layers[0].source,
+                            warnings=list(doc.get("warnings") or []), layers=layers)
     except (OSError, ValueError, TypeError, KeyError):
         pass
-    m = org.load(where)
-    m.dir_source = why
+    finally:
+        if collecting:
+            gc.enable()
+    m = org.load(None, cwd=cwd)
     if not m.facts:
         return m       # nothing was parsed, so there is nothing to save
     tmp = None
     try:
         import tempfile
         body = json.dumps({"key": key, "warnings": m.warnings,
-                           "facts": [[f.origin, f.to_dict()] for f in m.facts]})
+                           "facts": [[f.origin, _meta(f), f.to_cache()] for f in m.facts]})
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{_CACHE_NAME}.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -167,8 +192,9 @@ def _work_dir(command: str, cwd: str | None) -> Path:
 def subjects(command: str, cwd: str | None, model) -> list[str]:
     """What the command touches, most specific first, as "kind:id": the
     Kubernetes namespaces it names, the AWS accounts in its ARNs, behind its
-    --profile or in FINOPS_GUARD_ACCOUNT, then the repo path it runs in."""
-    from .org import repo_path_of
+    --profile or in FINOPS_GUARD_ACCOUNT, then the repo path it runs in
+    (with its repo named)."""
+    from .org import repo_subject
     flat = " ".join(command.split())
     out: dict[str, None] = {}
     for seg in _K8S_RE.findall(flat):
@@ -186,11 +212,11 @@ def subjects(command: str, cwd: str | None, model) -> list[str]:
         where = _work_dir(command, cwd)
     except (OSError, ValueError):
         where = Path(cwd or os.getcwd())
-    rel = repo_path_of(where) if where.exists() else None
+    rel = repo_subject(where) if where.exists() else None
     if rel is None and cwd:
-        rel = repo_path_of(cwd)
+        rel = repo_subject(cwd)
     if rel is not None:
-        out[f"repo_path:{rel}"] = None
+        out[rel] = None
     return list(out)
 
 
@@ -199,7 +225,7 @@ def owner(model, subs: list[str]):
     the first proposed one. None when nothing says."""
     first = None
     for s in subs:
-        r = model.owner_of(s)
+        r = model.owner_of(s, strict=True)
         if r is None or not r.team:
             continue
         if r.confirmed:
@@ -229,41 +255,71 @@ def team_scope(model, cwd: str | None) -> tuple[str | None, str | None]:
     """(team, where it came from) for the working directory: the confirmed
     owner of its repo_path, or (None, None). A proposal never picks a team:
     the team decides which budget and threshold apply."""
-    from .org import repo_path_of
-    rel = repo_path_of(cwd or os.getcwd())
-    if rel is None:
+    from .org import repo_subject
+    subject = repo_subject(cwd or os.getcwd())
+    if subject is None:
         return None, None
-    r = model.owner_of(f"repo_path:{rel}")
+    r = model.owner_of(subject, strict=True)
     if r is None or not r.confirmed or not r.team:
         return None, None
-    return r.team, f"org model, {r.matched or f'repo_path:{rel}'}"
+    return r.team, f"org model, {r.matched or subject}"
 
 
 def confirmed_envs(model, subs: list[str]) -> list[str]:
     """The environments the command's subjects are confirmed to be in."""
     out: dict[str, None] = {}
     for s in subs:
-        env, confirmed = model.environment_of(s)
+        env, confirmed = model.environment_of(s, strict=True)
         if confirmed and env != "unknown":
             out[env] = None
     return list(out)
 
 
+def _ceiling() -> dict[str, float]:
+    """The policy's own figures: what a threshold from an untrusted org dir
+    must come in under to apply at all."""
+    from .policy import load_policy, velocity_cap
+    pol = load_policy()
+    return {"max_auto_monthly_usd": float(pol.get("max_auto_monthly_usd", 500.0)),
+            "velocity_cap_usd": velocity_cap(pol)}
+
+
 def thresholds(model, team: str | None, envs: list[str]) -> dict[str, Any]:
     """Confirmed per-scope thresholds for this team and these environments
-    (org.threshold_for), {} when none applies. With more than one
+    (org.threshold_for, strict), {} when none applies. With more than one
     environment, each figure is the lowest any of them sets: the command
-    touches all of them."""
+    touches all of them. `files` names the file each figure came from."""
+    ceiling = _ceiling() if any(not layer.trusted for layer in model.layers) else None
     if not envs:
-        return model.threshold_for(team, None)
+        return model.threshold_for(team, None, strict=True, ceiling=ceiling)
     out: dict[str, Any] = {}
     scope: dict[str, str] = {}
+    files: dict[str, str] = {}
     for env in envs:
-        t = model.threshold_for(team, env)
+        t = model.threshold_for(team, env, strict=True, ceiling=ceiling)
         for name in ("max_auto_monthly_usd", "velocity_cap_usd"):
             if name in t and (name not in out or t[name] < out[name]):
                 out[name] = t[name]
                 scope[name] = t["scope"][name]
+                if (t.get("files") or {}).get(name):
+                    files[name] = t["files"][name]
+                else:
+                    files.pop(name, None)
     if out:
         out["scope"] = scope
+        if files:
+            out["files"] = files
     return out
+
+
+def whose(t: dict[str, Any], name: str) -> str:
+    """"for team payments (in /repo/nable.org/policy.yaml)": the scope whose
+    confirmed threshold set `name`, and the file it is in; "" for none. What
+    guard._OrgLens.whose says, so a person can find and fix the figure."""
+    scope = (t.get("scope") or {}).get(name)
+    if not scope:
+        return ""
+    kind, _, ident = str(scope).partition(":")
+    words = "for the org" if kind == "org" else f"for {kind} {ident}"
+    where = (t.get("files") or {}).get(name)
+    return f"{words} (in {where})" if where else words

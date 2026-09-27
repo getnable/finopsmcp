@@ -29,6 +29,7 @@ import finops.guard_ledger as gl
 from finops import ai_budget, org
 from finops.aws_prices import EC2_HOURLY
 from finops.budget import summary as bs
+from finops.org.cli import _who as human
 
 M5_2XL = "aws ec2 run-instances --instance-type m5.2xlarge"
 M5_2XL_X4 = "aws ec2 run-instances --instance-type m5.2xlarge --count 4"   # ~$1,121/mo
@@ -59,12 +60,21 @@ def repo(tmp_path):
     return root
 
 
+def _in_repo(subject):
+    """The org dir here is FINOPS_ORG_DIR, outside the repo: a repo path
+    there names its repo (the fixture's has no remote, so its name)."""
+    if subject.startswith("repo_path:") and "//" not in subject:
+        return "repo_path:repo//" + subject.split(":", 1)[1]
+    return subject
+
+
 def confirmed(kind, subject, value):
-    return org.set_fact(org.make_fact(kind, subject, value, source="human"), "maria")
+    return org.set_fact(org.make_fact(kind, _in_repo(subject), value, source="human"),
+                        human("maria"))
 
 
 def proposed(kind, subject, value, confidence=0.8):
-    return org.propose(org.make_fact(kind, subject, value, source="codeowners:x",
+    return org.propose(org.make_fact(kind, _in_repo(subject), value, source="codeowners:x",
                                      confidence=confidence))
 
 
@@ -364,7 +374,7 @@ def test_org_status_reports_the_model_and_the_team_scope(repo, monkeypatch):
     assert s["loaded"] and s["exists"] and s["dir_source"] == "FINOPS_ORG_DIR"
     assert (s["confirmed"], s["proposed"]) == (2, 1)
     assert (s["team"], s["team_source"]) == ("payments",
-                                             "org model, repo_path:infra/payments")
+                                             "org model, repo_path:repo//infra/payments")
     assert s["thresholds"]["max_auto_monthly_usd"] == 100
     monkeypatch.setenv("FINOPS_GUARD_TEAM", "search")
     assert g.org_status(str(repo))["team_source"] == "FINOPS_GUARD_TEAM"
@@ -394,6 +404,10 @@ def test_a_repo_org_dir_is_read_from_the_agents_directory(repo, monkeypatch, tmp
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
     v = g.gate_command("terraform destroy", cwd=str(repo / "infra" / "search"))
+    # A repo's own nable.org/ is somebody else's word until a person trusts it.
+    assert v["reason"].endswith("Likely owned by platform, not confirmed.")
+    org.trust(repo, human("maria"))
+    v = g.gate_command("terraform destroy", cwd=str(repo / "infra" / "search"))
     assert v["reason"].endswith("Owned by platform.")
 
 
@@ -401,7 +415,7 @@ def test_the_hook_reads_a_cached_model_until_a_file_changes(repo, monkeypatch, t
     from finops import guard_org
     confirmed("owner", "repo_path:infra", {"team": "platform"})
     where = str(repo / "infra")
-    assert guard_org.load_model(where).owner_of("repo_path:infra").team == "platform"
+    assert guard_org.load_model(where).owner_of("repo_path:repo//infra").team == "platform"
     assert guard_org._cache_path().is_file()
     real = org.load
 
@@ -409,11 +423,11 @@ def test_the_hook_reads_a_cached_model_until_a_file_changes(repo, monkeypatch, t
         raise AssertionError("parsed the YAML again")
     monkeypatch.setattr(org, "load", no_reads)
     m = guard_org.load_model(where)
-    assert m.owner_of("repo_path:infra").team == "platform"
+    assert m.owner_of("repo_path:repo//infra").team == "platform"
     assert m.dir_source == "FINOPS_ORG_DIR"
     monkeypatch.setattr(org, "load", real)
     confirmed("owner", "repo_path:infra", {"team": "search"})
-    assert guard_org.load_model(where).owner_of("repo_path:infra").team == "search"
+    assert guard_org.load_model(where).owner_of("repo_path:repo//infra").team == "search"
     # A legacy file counts too.
     rules = tmp_path / "tag_rules.yaml"
     rules.write_text("team_aliases:\n  payments: [pay]\n")
@@ -426,7 +440,7 @@ def test_a_broken_cache_is_a_miss(repo):
     confirmed("owner", "repo_path:infra", {"team": "platform"})
     guard_org._cache_path().parent.mkdir(parents=True, exist_ok=True)
     guard_org._cache_path().write_text("{not json")
-    assert guard_org.load_model(str(repo)).owner_of("repo_path:infra").team == "platform"
+    assert guard_org.load_model(str(repo)).owner_of("repo_path:repo//infra").team == "platform"
 
 
 def test_hourly_price_used_here_is_the_list_price():

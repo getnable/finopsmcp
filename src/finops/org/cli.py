@@ -9,16 +9,25 @@
   nable org status [--json]      where it lives, counts, coverage, stale, conflicts
   nable org review [--kind K]    proposals waiting for a human, with their keys
   nable org confirm KEY... [--as WHO]
-  nable org confirm --owner-bulk TEAM | --env-bulk ENV | --kind-bulk KIND [--as WHO]
+  nable org confirm --owner-bulk TEAM@DIGEST | --env-bulk ENV@DIGEST
+                    | --kind-bulk KIND@DIGEST [--as WHO]
+                                 (the exact command `nable org questions` prints)
   nable org reject KEY... [--as WHO]    (and the same bulk flags)
   nable org set owner --subject aws_account:123 --team payments [--channel ...]
+  nable org set threshold --subject team:payments --max-auto-usd 200
+  nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
   nable org export [--format json|yaml] [--out PATH]
 
 Confirming, rejecting and `set` are the human path the whole model rests on.
 They record who decided: --as WHO, or on a terminal git's user.email, then
 $USER. Without a terminal and without --as they refuse, so a script or an
-agent cannot quietly sign a person's name.
+agent cannot quietly sign a person's name. _who() is also the only maker of
+the store's HumanDecision, which confirm/reject/set_fact require.
+
+Where init writes: `nable org init` writes to the nable data dir (or --dir,
+or FINOPS_ORG_DIR), never into a repo's tracked files; `init --here` creates
+the repo's nable.org/ and records that this person trusts it.
 """
 from __future__ import annotations
 
@@ -28,7 +37,8 @@ import os
 import sys
 from typing import Any
 
-_ACTIONS = ("init", "status", "review", "confirm", "reject", "set", "questions", "export")
+_ACTIONS = ("init", "status", "review", "confirm", "reject", "set", "questions", "export",
+            "trust")
 
 
 def add_parser(sub) -> None:
@@ -71,22 +81,30 @@ def add_parser(sub) -> None:
         x.add_argument("org_keys", nargs="*", metavar="KEY")
         x.add_argument("--as", dest="org_as", default=None, metavar="WHO",
                        help="Who decided (default on a terminal: git user.email, then $USER)")
-        x.add_argument("--owner-bulk", dest="org_owner_bulk", default=None, metavar="TEAM",
-                       help=f"{verb} every uncontested proposal that TEAM owns something "
-                            "(owner, team and team alias facts), as `nable org questions` "
-                            "lists them")
-        x.add_argument("--env-bulk", dest="org_env_bulk", default=None, metavar="ENV",
-                       help=f"{verb} every uncontested proposal that something is ENV")
-        x.add_argument("--kind-bulk", dest="org_kind_bulk", default=None, metavar="KIND",
-                       help=f"{verb} every uncontested proposal of one kind "
+        x.add_argument("--owner-bulk", dest="org_owner_bulk", default=None,
+                       metavar="TEAM@DIGEST",
+                       help=f"{verb} the proposals a bulk question listed for TEAM (owner, "
+                            "team and team alias facts); DIGEST is the one `nable org "
+                            "questions` printed, and a set that changed since is refused")
+        x.add_argument("--env-bulk", dest="org_env_bulk", default=None, metavar="ENV@DIGEST",
+                       help=f"{verb} the proposals a bulk question listed as ENV")
+        x.add_argument("--kind-bulk", dest="org_kind_bulk", default=None,
+                       metavar="KIND@DIGEST",
+                       help=f"{verb} the proposals a bulk question listed of one kind "
                             "(account, tag_key, ...)")
 
     x = osub.add_parser("set", parents=[common], help="State a fact directly (confirmed)")
-    x.add_argument("org_set_kind", choices=["owner", "environment", "team"], metavar="KIND",
-                   help="owner | environment | team")
+    x.add_argument("org_set_kind", choices=["owner", "environment", "team", "threshold"],
+                   metavar="KIND", help="owner | environment | team | threshold")
     x.add_argument("--subject", dest="org_subject", default=None, metavar="KIND:ID",
                    help="e.g. aws_account:123456789012, repo_path:infra/payments "
-                        "(owner, environment)")
+                        "(owner, environment); team:payments, environment:prod or org:org "
+                        "(threshold)")
+    x.add_argument("--max-auto-usd", dest="org_max_auto", type=float, default=None,
+                   metavar="USD", help="threshold: the most a change may add per month "
+                                       "and run without asking")
+    x.add_argument("--velocity-cap-usd", dest="org_velocity_cap", type=float, default=None,
+                   metavar="USD", help="threshold: the velocity cap, $/mo per window")
     x.add_argument("--team", dest="org_team", default=None,
                    help="owner: the owning team; team: the team's id")
     x.add_argument("--channel", dest="org_channel", default=None,
@@ -97,6 +115,15 @@ def add_parser(sub) -> None:
     x.add_argument("--alias", dest="org_aliases", action="append", default=None,
                    metavar="NAME", help="team: another name for it (repeatable)")
     x.add_argument("--review-after", dest="org_review_after", default=None, metavar="YYYY-MM-DD")
+    x.add_argument("--as", dest="org_as", default=None, metavar="WHO")
+
+    x = osub.add_parser("trust", parents=[common],
+                        help="Trust this repo's nable.org/ (its owners pick the guard's "
+                             "team, its thresholds may raise limits)")
+    x.add_argument("--here", dest="org_here", action="store_true",
+                   help="The repo holding the working directory (the default)")
+    x.add_argument("--revoke", dest="org_revoke", action="store_true",
+                   help="Stop trusting it")
     x.add_argument("--as", dest="org_as", default=None, metavar="WHO")
 
     x = osub.add_parser("questions", parents=[common], help="The top questions, most "
@@ -131,11 +158,13 @@ def _git_email() -> str | None:
     return email or None
 
 
-def _who(as_: str | None) -> str | None:
-    """Who is deciding, or None when nobody can be named honestly: no --as
-    and no terminal means no human is known to be there."""
+def _who(as_: str | None) -> Any:
+    """Who is deciding, as the store's HumanDecision, or None when nobody
+    can be named honestly: no --as and no terminal means no human is known
+    to be there. The only place a HumanDecision is made."""
+    from .store import _MINT, HumanDecision
     if as_ and as_.strip():
-        return as_.strip()
+        return HumanDecision(as_.strip(), "--as", _token=_MINT)
     if not _is_tty():
         return None
     import getpass
@@ -143,7 +172,8 @@ def _who(as_: str | None) -> str | None:
         user = getpass.getuser()
     except Exception:  # noqa: BLE001 - no name is an answer too
         user = ""
-    return _git_email() or os.environ.get("USER") or user or None
+    name = _git_email() or os.environ.get("USER") or user
+    return HumanDecision(name, "terminal", _token=_MINT) if name else None
 
 
 def _need_human() -> int:
@@ -164,18 +194,29 @@ def _status(parsed, org) -> int:
     stale = m.stale()
     conflicts = m.conflicts()
     exists = m.dir.is_dir()
+    loose = m.without_repo()
+    untrusted = [layer for layer in m.layers if not layer.trusted]
     if getattr(parsed, "org_json", False):
         print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
+                          "layers": [layer.to_dict() for layer in m.layers],
                           "counts": m.status_counts(), "by_kind": m.kind_counts(),
                           "coverage": cov, "stale": [f.summary() for f in stale],
-                          "conflicts": [{"confirmed": w.summary(), "proposed": p.summary()}
-                                        for w, p in conflicts],
+                          "conflicts": [{"confirmed": w.summary(),
+                                         ("confirmed_too" if p.confirmed else "proposed"):
+                                         p.summary()} for w, p in conflicts],
+                          "repo_paths_without_repo": [f.summary() for f in loose],
                           "warnings": m.warnings}, default=str))
         return 0
     where = {"argument": "--dir", "FINOPS_ORG_DIR": "FINOPS_ORG_DIR", "repo": "this repo",
              "data_dir": "nable data dir"}.get(m.dir_source, m.dir_source)
     print(f"Org model: {m.dir} ({where})" + ("" if exists else ", not created yet: "
                                              "run `nable org init`"))
+    for layer in m.layers[1:]:
+        print(f"  read under it: {layer.dir} (nable data dir)")
+    if untrusted:
+        print("  not trusted: this repo's nable.org/ came with the repo. Its owners do not "
+              "pick the guard's team and its thresholds may only lower limits; "
+              "`nable org trust --here` if it is yours.")
     c = m.status_counts()
     print(f"  facts: {c['confirmed']} confirmed, {c['proposed']} proposed, "
           f"{c['rejected']} rejected, {c['expired']} expired")
@@ -191,9 +232,19 @@ def _status(parsed, org) -> int:
         for f in stale[:10]:
             print(f"    {f.key}  {f.subject}  review was due {f.review_after}")
     if conflicts:
-        print(f"  conflicts (a proposal disagrees with a confirmed fact): {len(conflicts)}")
+        print(f"  conflicts (a fact disagrees with a confirmed one): {len(conflicts)}")
         for w, p in conflicts[:10]:
-            print(f"    {p.key} proposes {p.value} for {p.subject}; confirmed {w.key} says {w.value}")
+            if p.confirmed:
+                print(f"    {p.key} is also confirmed, as {p.value} for {p.subject}; {w.key} "
+                      f"says {w.value} and answers. Keep one: nable org confirm KEY")
+            else:
+                print(f"    {p.key} proposes {p.value} for {p.subject}; confirmed {w.key} "
+                      f"says {w.value}")
+    if loose:
+        print(f"  repo paths that name no repo: {len(loose)} ({', '.join(str(f.subject) for f in loose[:3])}"
+              f"{', ...' if len(loose) > 3 else ''}). Fix: rewrite each id as "
+              "repo_path:<repo>//<path> (`nable org set owner --subject repo_path:PATH` "
+              "run inside the repo does), or move them into that repo's nable.org/.")
     for w in m.warnings:
         print(f"  warning: {w}", file=sys.stderr)
     return 0
@@ -225,14 +276,38 @@ def _review(parsed, org) -> int:
     return 0
 
 
-def _bulk_keys(parsed, org) -> tuple[list[str], str] | None:
-    """The keys a --*-bulk flag names, and what it was, or None without one."""
+def _bulk_keys(parsed, org, verb: str) -> tuple[list[str], str] | int | None:
+    """The keys a --*-bulk flag names and what it was; an exit code when the
+    set is not the one the question showed (printed, with the command for
+    the set as it is now); None without a bulk flag."""
+    import shlex
+
+    from .questions import _label, bulk_digest, split_bulk
     for attr, name in (("org_owner_bulk", "owner"), ("org_env_bulk", "env"),
                        ("org_kind_bulk", "kind")):
         val = getattr(parsed, attr, None)
-        if val:
-            facts = org.bulk_facts(org.load(parsed.org_dir), **{name: val})
-            return [f.key for f in facts], f"--{name}-bulk {val}"
+        if not val:
+            continue
+        what, digest = split_bulk(val)
+        m = org.load(parsed.org_dir)
+        facts = org.bulk_facts(m, **{name: what})
+        keys = [f.key for f in facts]
+        now = bulk_digest(keys)
+        if digest == now and keys:
+            return keys, f"--{name}-bulk {what}"
+        if not keys:
+            print(f"  --{name}-bulk {what}: nothing proposed to {verb}", file=sys.stderr)
+            return 1
+        why = ("a bulk answer needs the digest its question printed" if digest is None
+               else "the proposals in this group changed since the question was shown")
+        print(f"  --{name}-bulk {what}: not decided, {why}. The group is now "
+              f"{len(facts)} fact(s):", file=sys.stderr)
+        for f in facts:
+            print(f"    {f.key}  {_label(m, f)}: {f.fact} {f.value}  ({f.source})",
+                  file=sys.stderr)
+        print(f"  To {verb} exactly these: nable org {verb} --{name}-bulk "
+              f"{shlex.quote(what + '@' + now)}", file=sys.stderr)
+        return 1
     return None
 
 
@@ -240,16 +315,16 @@ def _decide(parsed, org, verb: str) -> int:
     who = _who(parsed.org_as)
     if who is None:
         return _need_human()
-    bulk = _bulk_keys(parsed, org)
+    bulk = _bulk_keys(parsed, org, verb)
+    if isinstance(bulk, int):
+        return bulk
     if bulk is None and not parsed.org_keys:
-        print(f"nable org {verb}: give KEY..., or --owner-bulk TEAM, --env-bulk ENV "
-              "or --kind-bulk KIND", file=sys.stderr)
+        print(f"nable org {verb}: give KEY..., or --owner-bulk TEAM@DIGEST, --env-bulk "
+              "ENV@DIGEST or --kind-bulk KIND@DIGEST (as `nable org questions` prints them)",
+              file=sys.stderr)
         return 2
     if bulk is not None:
         keys, what = bulk
-        if not keys:
-            print(f"  {what}: nothing proposed to {verb}", file=sys.stderr)
-            return 1
         many = org.confirm_many if verb == "confirm" else org.reject_many
         done = many(keys, who, parsed.org_dir)
         print(f"  {what}: {len(done)} fact(s) {done[0].status} by {who}")
@@ -275,7 +350,16 @@ def _set(parsed, org) -> int:
     kind = parsed.org_set_kind
     people = [p.strip() for p in (parsed.org_people or "").split(",") if p.strip()]
     value: dict[str, Any]
-    if kind == "team":
+    if kind == "threshold":
+        if not parsed.org_subject:
+            print("set threshold needs --subject team:TEAM, environment:ENV or org:org",
+                  file=sys.stderr)
+            return 2
+        subject = parsed.org_subject
+        value = {k: v for k, v in (("max_auto_monthly_usd", parsed.org_max_auto),
+                                   ("velocity_cap_usd", parsed.org_velocity_cap))
+                 if v is not None}
+    elif kind == "team":
         if not parsed.org_team:
             print("set team needs --team ID", file=sys.stderr)
             return 2
@@ -301,7 +385,8 @@ def _set(parsed, org) -> int:
         if people:
             value["people"] = people
     try:
-        fact = org.Fact.from_dict({"fact": kind, "subject": org.subject_of(subject).to_dict(),
+        subject = _qualified(org, org.subject_of(subject), parsed.org_dir)
+        fact = org.Fact.from_dict({"fact": kind, "subject": subject.to_dict(),
                                    "value": value, "source": "human", "status": "confirmed",
                                    "review_after": parsed.org_review_after})
         f = org.set_fact(fact, who, parsed.org_dir)
@@ -309,6 +394,53 @@ def _set(parsed, org) -> int:
         print(f"Not set: {e}", file=sys.stderr)
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
+    return 0
+
+
+def _qualified(org, s, org_dir):
+    """A bare repo_path about the repo holding the working directory, with
+    that repo named, unless the fact goes into the repo's own nable.org/: a
+    path in the data dir's model must say which repo it is in."""
+    from .model import split_repo_path
+    if s.kind != "repo_path" or split_repo_path(s.id)[0] is not None:
+        return s
+    d, _ = org.resolve_dir(org_dir)
+    root = org.git_root()
+    if root is None:
+        return s
+    try:
+        if d.resolve() == (root / org.ORG_DIR_NAME).resolve():
+            return s
+    except OSError:
+        pass
+    return org.subject_of(f"repo_path:{org.repo_identity(root)}//{s.id}")
+
+
+def _trust(parsed, org) -> int:
+    root = org.git_root()
+    if not getattr(parsed, "org_here", False) and not getattr(parsed, "org_revoke", False):
+        rows = org.trusted_repos()
+        here = "not in a git repo" if root is None else (
+            f"{root}: {'trusted' if org.is_trusted(root) else 'not trusted'}")
+        print(f"This repo: {here}")
+        for r in rows:
+            print(f"  trusted: {r['root']}" + (f" ({r['remote']})" if r.get("remote") else "")
+                  + f", by {r.get('by', '?')} on {r.get('at', '?')}")
+        if root is not None and not org.is_trusted(root):
+            print("  Trust it: nable org trust --here")
+        return 0
+    if root is None:
+        print("nable org trust: run it inside the repo whose nable.org/ you trust.",
+              file=sys.stderr)
+        return 2
+    who = _who(parsed.org_as)
+    if who is None:
+        return _need_human()
+    revoke = bool(getattr(parsed, "org_revoke", False))
+    org.trust(root, who, revoke=revoke)
+    remote = org.remote_url(root)
+    print(f"  {'No longer trusted' if revoke else 'Trusted'}: {root}"
+          + (f" ({remote})" if remote else "") + f", by {who}.")
     return 0
 
 
@@ -321,9 +453,16 @@ def _questions(parsed, org) -> int:
         print("No questions: nothing proposed, stale or unowned.")
         return 0
     for i, q in enumerate(qs, 1):
-        print(f"  {i}. {q.text}")
-        print(f"     yes: {q.command}" + (f"    no: {q.no_command}" if q.no_command else ""))
+        _print_question(i, q)
     return 0
+
+
+def _print_question(i: int, q) -> None:
+    print(f"  {i}. {q.text}")
+    # A bulk answer decides every fact listed here, so every one is shown.
+    for item in q.items:
+        print(f"       {item}")
+    print(f"     yes: {q.command}" + (f"    no: {q.no_command}" if q.no_command else ""))
 
 
 def _export(parsed, org) -> int:
@@ -371,6 +510,8 @@ def _interview(qs, org, d, who: str) -> None:
     edit walks through them one at a time."""
     for i, q in enumerate(qs, 1):
         print(f"\n  {i}. {q.text}")
+        for item in q.items:
+            print(f"       {item}")
         if q.kind == "bulk":
             ans = _ask("     yes / no / edit, one by one [Y/n/e/q] ")
             if ans is None or ans.lower() == "q":
@@ -461,8 +602,23 @@ def _init(parsed, org) -> int:
             print(f"  note: FINOPS_ORG_DIR is set, so nable reads "
                   f"{os.environ['FINOPS_ORG_DIR']}, not {d}, until it is unset.",
                   file=sys.stderr)
+        # Creating it is a person saying this repo's model is theirs.
+        who = _who(parsed.org_as)
+        if who is not None:
+            org.trust(root, who)
+            print(f"  trusted {root}'s nable.org/ (by {who})")
+        else:
+            print("  not trusted yet: `nable org trust --here` in a terminal, or with --as "
+                  "WHO, lets its owners pick the guard's team and its thresholds raise limits",
+                  file=sys.stderr)
     else:
-        d, _ = org.resolve_dir(parsed.org_dir)
+        # Never the repo's tracked files: a repo's nable.org/ is written by
+        # `init --here`, and nable's own facts (tag_rules.yaml, accounts.yaml)
+        # are not the repo's to commit.
+        d, why = org.resolve_dir(parsed.org_dir)
+        if why == "repo":
+            from .store import _data_dir
+            d = _data_dir() / "org"
     from .store import ensure_dir
     made = ensure_dir(d)
     print(f"Org model: {d}" + (f" (created {len(made)} files)" if made else ""))
@@ -484,8 +640,7 @@ def _init(parsed, org) -> int:
     else:
         print(f"  {len(qs)} question(s), most dollars first (answer each with its command):")
         for i, q in enumerate(qs, 1):
-            print(f"  {i}. {q.text}")
-            print(f"     yes: {q.command}" + (f"    no: {q.no_command}" if q.no_command else ""))
+            _print_question(i, q)
     print(f"  coverage: {org.coverage(org.load(d))['summary']}")
     return 0
 
@@ -510,6 +665,8 @@ def run(parsed) -> int:
             return _questions(parsed, org)
         if action == "export":
             return _export(parsed, org)
+        if action == "trust":
+            return _trust(parsed, org)
     except (org.OrgError, org.FactError) as e:
         print(f"nable org {action}: {e}", file=sys.stderr)
         return 1

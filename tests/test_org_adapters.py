@@ -36,6 +36,7 @@ from finops.org.adapters import terraform as tf
 from finops.org.adapters import workload as wl
 from finops.org.adapters._common import bend, env_of_name, team_norm
 from finops.org.adapters.data import CostData
+from finops.org.cli import _who as human
 from finops.org.model import OrgModel
 
 MONTH = "2026-08"
@@ -793,12 +794,12 @@ def test_propose_many_matches_propose(odir):
     a = org.make_fact("owner", "aws_account:111111111111", {"team": "a"}, source="x:y")
     b = org.make_fact("owner", "aws_account:222222222222", {"team": "b"}, source="x:y")
     org.propose(b)
-    org.reject(b.key, "@maria")
+    org.reject(b.key, human("@maria"))
     bad = org.make_fact("owner", "aws_account:333333333333", {"team": "c"}, source="x:y")
     bad.value = {}
     assert org.propose_many([a, a, b, bad]) == ["added", "duplicate", "suppressed_rejected",
                                                 "invalid"]
-    org.confirm(a.key, "@maria")
+    org.confirm(a.key, human("@maria"))
     rival = org.make_fact("owner", "aws_account:111111111111", {"team": "z"}, source="x:y")
     assert org.propose_many([rival]) == ["conflict"]
 
@@ -807,11 +808,11 @@ def test_confirm_many_is_all_or_nothing(odir):
     a = org.make_fact("owner", "aws_account:111111111111", {"team": "a"}, source="x:y")
     org.propose(a)
     with pytest.raises(org.OrgError):
-        org.confirm_many([a.key, "ffffffffff"], "@maria")
+        org.confirm_many([a.key, "ffffffffff"], human("@maria"))
     assert org.load().facts[0].status == "proposed"
-    assert [f.status for f in org.confirm_many([a.key, a.key], "@maria")] == ["confirmed"]
+    assert [f.status for f in org.confirm_many([a.key, a.key], human("@maria"))] == ["confirmed"]
     with pytest.raises(org.OrgError):
-        org.confirm_many([a.key], "")
+        org.confirm_many([a.key], human(""))
 
 
 # ── init on the fixture org ───────────────────────────────────────────────────
@@ -825,7 +826,9 @@ def test_init_runs_the_adapters_and_prints_what_they_proposed(fixture_org, odir,
     assert code == 0
     for name in ("codeowners", "terraform", "aws_org", "tags", "workload"):
         assert f"    {name}: " in out, name
-    assert "aws_account:111111111111 is owned by team payments  $12,000/mo" in out
+    assert "aws_account:111111111111 is owned by team payments, people @bob  $12,000/mo" in out
+    # The model is not in the repo, so each repo path names its repo.
+    assert "repo_path:platform//infra/payments is owned by team payments" in out
     m = org.load()
     assert m.facts and all(f.status == "proposed" for f in m.facts)
     assert {f.source.split(":")[0] for f in m.facts} == \
@@ -868,10 +871,14 @@ def test_init_without_adapters_and_with_an_extra_repo(odir, fresh_db, tmp_path, 
     assert code == 0
     sources = {f.source for f in org.load().facts}
     # The repo nable runs in is read first, unprefixed; the extra one is
-    # named in the source, its paths still repo-relative.
+    # named in the source. The model is outside both repos, so every repo path
+    # names the repo it is in.
     assert "codeowners:CODEOWNERS:1" in sources
     assert any(s.startswith("codeowners:platform/.github/CODEOWNERS:") for s in sources)
-    assert org.load().owner_of("repo_path:infra/payments/envs/prod").team == "payments"
+    m = org.load()
+    assert m.owner_of("repo_path:platform//infra/payments/envs/prod").team == "payments"
+    assert m.owner_of("repo_path:app//deploy").team == "app"
+    assert m.owner_of("repo_path:app//infra/payments/envs/prod") is None
 
 
 def test_week_one_questions_are_few_bulk_and_cover_most_spend(fixture_org, odir, capsys):
@@ -880,7 +887,8 @@ def test_week_one_questions_are_few_bulk_and_cover_most_spend(fixture_org, odir,
     assert 1 <= len(qs) <= 10
     first = qs[0]
     assert first.kind == "bulk" and first.group == "owner:payments"
-    assert first.command == "nable org confirm --owner-bulk payments"
+    assert first.command == f"nable org confirm --owner-bulk payments@{first.digest}"
+    assert first.digest == org.bulk_digest(first.keys)
     assert first.text.startswith("payments owns these ")
     assert "$18,500/mo" in first.text          # 111 + 222 + payments-tagged spend in 444
     covered: set[str] = set()
@@ -931,7 +939,7 @@ def test_confirming_the_bulk_owner_questions_reaches_80_percent(fixture_org, odi
     assert cov["by_team"]["payments"]["confirmed"] == 18500.0
     m = org.load()
     assert m.owner_of("aws_account:111111111111").confirmed
-    assert m.owner_of("repo_path:infra/payments/envs/prod/x.tf").team == "payments"
+    assert m.owner_of("repo_path:platform//infra/payments/envs/prod/x.tf").team == "payments"
     assert m.team_for_tags({"team": "payments-svc"}).team == "payments"
     # Confirmed by the person, never by an adapter.
     assert {f.confirmed_by for f in m.facts if f.confirmed} == {"@maria"}

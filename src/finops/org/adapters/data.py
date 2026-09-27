@@ -47,6 +47,8 @@ def _tags(raw: Any) -> dict[str, str]:
 @dataclass
 class CostData:
     month: str | None = None
+    # (first day, last day) of the spend window coverage.read_spend chose.
+    window: tuple[str, str] | None = None
     accounts: dict[tuple[str, str], float] = field(default_factory=dict)
     teams: dict[str, dict[str, float]] = field(default_factory=dict)
     envs: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -117,6 +119,7 @@ class CostData:
             return out
         sp = read_spend()
         out.month, out.accounts, out.teams = sp.month, dict(sp.accounts), dict(sp.teams)
+        out.window = (sp.start, sp.through) if sp.start and sp.through else None
         out.read.extend(sp.read)
         out.not_read.extend(sp.not_read)
         try:
@@ -138,10 +141,13 @@ class CostData:
         )
         with get_engine().connect() as conn:
             if self.month:
+                day = attributed_costs.c.snapshot_date
+                when = (day.like(f"{self.month}-%") if self.window is None
+                        else (day >= self.window[0]) & (day <= self.window[1]))
                 rows = conn.execute(
                     select(attributed_costs.c.account_id, attributed_costs.c.environment,
                            func.sum(attributed_costs.c.amount_usd))
-                    .where(attributed_costs.c.snapshot_date.like(f"{self.month}-%"))
+                    .where(when)
                     .group_by(attributed_costs.c.account_id,
                               attributed_costs.c.environment)).all()
                 for account, env, usd in rows:

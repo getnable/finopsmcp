@@ -188,3 +188,18 @@ def legacy_facts(*, warnings: list[str] | None = None) -> list[Fact]:
             seen.add(f.key)
             out.append(f)
     return out
+
+
+def live_sources() -> set[str]:
+    """The `legacy:` sources that exist right now. A file fact whose source
+    is one of them is a copy `nable org init` imported; the source itself,
+    as edited since, is what answers (load() drops the copy)."""
+    out: set[str] = set()
+    if tag_rules_path().is_file():
+        out.add("legacy:tag_rules.yaml")
+    if accounts_path().is_file():
+        out.add("legacy:accounts.yaml")
+    for var in ("FINOPS_REQUIRED_TAGS", "FINOPS_PROTECTED_TAGS"):
+        if os.environ.get(var):
+            out.add(f"legacy:{var}")
+    return out

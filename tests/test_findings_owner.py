@@ -15,6 +15,7 @@ import pytest
 from finops import org, org_owner
 from finops import server as _server  # noqa: F401  (wires the tool modules)
 from finops.cleanup.idle import IdleResource
+from finops.org.cli import _who as human
 from finops.tools import aws_waste, meta
 
 ACCT = "123456789012"
@@ -31,7 +32,7 @@ def _clean(monkeypatch, tmp_path):
 
 
 def confirmed(kind, subject, value):
-    org.set_fact(org.make_fact(kind, subject, value, source="human"), "maria")
+    org.set_fact(org.make_fact(kind, subject, value, source="human"), human("maria"))
 
 
 def proposed(kind, subject, value):

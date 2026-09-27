@@ -3,7 +3,8 @@
 
 Facts are proposed by adapters, MCP tools and inference, and confirmed or
 rejected only by a human (the `nable org` CLI, or a merged PR that adds a
-confirmed fact). They live in `nable.org/` (see store.py for where that is).
+confirmed fact): confirm(), reject() and set_fact() take the HumanDecision
+only the CLI makes, not a name. They live in `nable.org/` (see store.py for where that is).
 
     from finops import org
     m = org.load()
@@ -38,37 +39,48 @@ from .model import (
     fact_key,
     subject_of,
 )
-from .questions import Question, bulk_facts, questions
+from .questions import Question, bulk_digest, bulk_facts, questions
 from .store import (
     ADAPTERS,
     ORG_DIR_NAME,
     AdapterRun,
+    HumanDecision,
+    Layer,
     OrgError,
     confirm,
     confirm_many,
     export,
     git_root,
     import_legacy,
+    is_trusted,
+    layers,
     load,
     make_fact,
     propose,
     propose_many,
     reject,
     reject_many,
+    remote_url,
+    repo_identity,
     repo_path_of,
+    repo_subject,
     resolve_dir,
     run_adapters,
     set_fact,
+    trust,
+    trusted_repos,
 )
 
 __all__ = [
     "ADAPTERS", "CANONICAL_TAG_KEYS", "ENVIRONMENTS", "FACT_KINDS", "FILE_FOR_KIND",
-    "ORG_DIR_NAME", "STATUSES", "SUBJECT_KINDS", "AdapterRun", "Fact", "FactError", "OrgError",
-    "OrgModel", "Question", "Resolved", "Subject", "bulk_facts", "confirm", "confirm_many",
-    "coverage", "environment_of", "export", "fact_key", "git_root", "import_legacy",
+    "ORG_DIR_NAME", "STATUSES", "SUBJECT_KINDS", "AdapterRun", "Fact", "FactError",
+    "HumanDecision", "Layer", "OrgError", "OrgModel", "Question", "Resolved", "Subject",
+    "bulk_digest", "bulk_facts", "confirm", "confirm_many", "coverage", "environment_of",
+    "export", "fact_key", "git_root", "import_legacy", "is_trusted", "layers",
     "legacy_facts", "load", "make_fact", "owner_of", "propose", "propose_many", "questions",
-    "reject", "reject_many", "repo_path_of", "resolve_dir", "run_adapters", "set_fact",
-    "subject_of", "team_for_tags", "threshold_for",
+    "reject", "reject_many", "remote_url", "repo_identity", "repo_path_of", "repo_subject",
+    "resolve_dir", "run_adapters", "set_fact", "subject_of", "team_for_tags",
+    "threshold_for", "trust", "trusted_repos",
 ]
 
 

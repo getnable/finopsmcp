@@ -3,7 +3,10 @@
 
 The Phase 1 exit is "80% of spend mapped to a confirmed owner", so this is the
 number the org model is judged by, and it must never be a false 100%. It reads
-the latest month in the local cost history:
+the 30 days that end on the last day every provider in the history has
+reported (so the first of a month is not "one day of AWS, 100% owned" while
+GCP's export lags a day), and names a provider that reported the 30 days
+before and nothing since under `not_read`:
 
   cost_snapshots     spend per account; an account's owner fact covers all of it
   attributed_costs   spend per account and team (from tags); covers the part
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +35,17 @@ _PROVIDER_KIND = {"aws": "aws_account", "gcp": "gcp_project", "azure": "azure_su
 _UNATTRIBUTED = ("", "unattributed", "untagged", "unknown", "none")
 
 
+WINDOW_DAYS = 30
+# A provider whose latest day is further behind the others than this has
+# stopped reporting: it no longer holds the window back, and is named.
+_STALE_DAYS = 10
+
+
 @dataclass
 class Spend:
-    month: str | None = None
-    through: str | None = None
+    month: str | None = None       # the month the window ends in
+    through: str | None = None     # the window's last day
+    start: str | None = None       # and its first
     # (provider, account_id) -> dollars in the month
     accounts: dict[tuple[str, str], float] = field(default_factory=dict)
     # account_id -> team -> dollars in the month (from attributed_costs)
@@ -54,9 +65,30 @@ def _db_path() -> Path | None:
     return data_dir() / "finops.db"
 
 
+def _day(s: Any) -> date:
+    return date.fromisoformat(str(s)[:10])
+
+
+def window(latest: dict[str, str]) -> tuple[str, str, list[str]] | None:
+    """(first day, last day, providers that stopped reporting) for providers'
+    latest days. The window ends on the earliest latest day among providers
+    still reporting (within _STALE_DAYS of the newest), so every one of them
+    is in it for all 30 days."""
+    if not latest:
+        return None
+    days = {p: _day(d) for p, d in latest.items()}
+    newest = max(days.values())
+    live = {p: d for p, d in days.items() if (newest - d).days <= _STALE_DAYS}
+    end = min(live.values())
+    start = end - timedelta(days=WINDOW_DAYS - 1)
+    gone = sorted(p for p, d in days.items() if p not in live)
+    return start.isoformat(), end.isoformat(), gone
+
+
 def read_spend() -> Spend:
-    """The latest month of spend in the local history. Never raises; what it
-    could not read is listed in `not_read`."""
+    """The 30 days of spend in the local history that every reporting
+    provider covers (window()). Never raises; what it could not read is
+    listed in `not_read`, a provider that stopped reporting included."""
     out = Spend()
     try:
         path = _db_path()
@@ -66,38 +98,48 @@ def read_spend() -> Spend:
         from sqlalchemy import func, select
 
         from ..storage.db import attributed_costs, cost_snapshots, get_engine
+        snaps, attr = cost_snapshots, attributed_costs
         with get_engine().connect() as conn:
-            latest = conn.execute(select(func.max(cost_snapshots.c.snapshot_date))).scalar()
-            latest_attr = conn.execute(
-                select(func.max(attributed_costs.c.snapshot_date))).scalar()
-            if not latest and not latest_attr:
+            latest = {str(p): str(d) for p, d in conn.execute(
+                select(snaps.c.provider, func.max(snaps.c.snapshot_date))
+                .group_by(snaps.c.provider)).all() if d}
+            latest_attr = {str(p): str(d) for p, d in conn.execute(
+                select(attr.c.provider, func.max(attr.c.snapshot_date))
+                .group_by(attr.c.provider)).all() if d}
+            got = window(latest or latest_attr)
+            if got is None:
                 out.not_read.append("cost history: no rows in cost_snapshots or attributed_costs")
                 return out
-            out.through = str(latest or latest_attr)
+            out.start, out.through, gone = got
             out.month = out.through[:7]
-            like = f"{out.month}-%"
+            span = f"{out.start} to {out.through}"
+            before = (_day(out.start) - timedelta(days=WINDOW_DAYS)).isoformat()
+            for p in gone:
+                d = (latest or latest_attr)[p]
+                if d >= before:
+                    out.not_read.append(f"{p}: no cost rows since {d}, so none in {span} "
+                                        "(its export stopped or lags); its spend is not counted")
             if latest:
                 rows = conn.execute(
-                    select(cost_snapshots.c.provider, cost_snapshots.c.account_id,
-                           func.sum(cost_snapshots.c.amount_usd))
-                    .where(cost_snapshots.c.snapshot_date.like(like))
-                    .group_by(cost_snapshots.c.provider, cost_snapshots.c.account_id)).all()
+                    select(snaps.c.provider, snaps.c.account_id, func.sum(snaps.c.amount_usd))
+                    .where(snaps.c.snapshot_date >= out.start,
+                           snaps.c.snapshot_date <= out.through)
+                    .group_by(snaps.c.provider, snaps.c.account_id)).all()
                 for provider, account, usd in rows:
                     out.accounts[(str(provider), str(account))] = float(usd or 0.0)
-                out.read.append(f"cost_snapshots {out.month}: {len(rows)} accounts")
+                out.read.append(f"cost_snapshots {span}: {len(rows)} accounts")
             else:
                 out.not_read.append("cost_snapshots: no rows")
             rows = conn.execute(
-                select(attributed_costs.c.account_id, attributed_costs.c.team,
-                       func.sum(attributed_costs.c.amount_usd))
-                .where(attributed_costs.c.snapshot_date.like(like))
-                .group_by(attributed_costs.c.account_id, attributed_costs.c.team)).all()
+                select(attr.c.account_id, attr.c.team, func.sum(attr.c.amount_usd))
+                .where(attr.c.snapshot_date >= out.start, attr.c.snapshot_date <= out.through)
+                .group_by(attr.c.account_id, attr.c.team)).all()
             for account, team, usd in rows:
                 out.teams.setdefault(str(account), {})[str(team or "")] = float(usd or 0.0)
             if rows:
-                out.read.append(f"attributed_costs {out.month}: {len(rows)} account-team rows")
+                out.read.append(f"attributed_costs {span}: {len(rows)} account-team rows")
             else:
-                out.not_read.append(f"attributed_costs: no rows for {out.month} "
+                out.not_read.append(f"attributed_costs: no rows for {span} "
                                     "(team-level attribution not run)")
     except Exception as e:  # noqa: BLE001 - reported, never raised
         out.not_read.append(f"cost history: could not be read ({type(e).__name__}: {e})")
@@ -189,7 +231,8 @@ def coverage(model: OrgModel | None = None, *, spend: Spend | None = None) -> di
 
     unowned.sort(key=lambda u: -u["dollars_monthly"])
     out: dict[str, Any] = {"read": sp.read, "not_read": sp.not_read,
-                           "month": sp.month, "through": sp.through}
+                           "month": sp.month, "through": sp.through,
+                           "start": getattr(sp, "start", None)}
     if total > 0:
         out.update({
             "basis": "spend",
@@ -203,9 +246,13 @@ def coverage(model: OrgModel | None = None, *, spend: Spend | None = None) -> di
                         for t, d in sorted(by_team.items(), key=lambda kv: -sum(kv[1].values()))},
             "unowned": unowned[:20],
         })
-        out["summary"] = (f"{out['pct_confirmed']}% of {sp.month} spend "
+        span = (f"the 30 days to {sp.through}" if getattr(sp, "start", None)
+                else f"{sp.month}")
+        out["summary"] = (f"{out['pct_confirmed']}% of {span} spend "
                           f"(${confirmed:,.0f} of ${total:,.0f}) has a confirmed owner; "
-                          f"{out['pct_proposed']}% a proposed one")
+                          f"{out['pct_proposed']}% a proposed one"
+                          + (f" (not counted: {len(sp.not_read)} source(s), see not_read)"
+                             if any(": no cost rows since" in n for n in sp.not_read) else ""))
     else:
         why = "; ".join(sp.not_read) or "no spend in the latest month"
         out.update({"basis": "subjects", "spend_total": None, "spend_confirmed_owner": None,
