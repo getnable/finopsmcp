@@ -300,6 +300,11 @@ def test_end_to_end_in_real_processes(tmp_path):
     "uvx --from finops-mcp nable guard approve 3f9c2a1b --as maria",
     "python -m finops.setup_wizard guard approve 3f9c2a1b --as maria",
     "cd /tmp && nable guard approve",
+    # The program found by a command substitution: nothing but a closing
+    # parenthesis, backtick or quote between its name and the verb.
+    "$(which nable) guard approve 3f9c2a1b --as maria",
+    '"$(command -v nable)" guard approve 3f9c2a1b',
+    "`which finops` guard approve 3f9c2a1b",
     "python3 -c \"from finops import guard_approvals as a; a.approve('3f9c2a1b', x)\"",
     "python3 -c \"from finops.guard_approvals import approve; approve('3f9c2a1b', x)\"",
 ])

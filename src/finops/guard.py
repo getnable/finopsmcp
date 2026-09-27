@@ -3438,9 +3438,12 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
 # `nable org confirm|reject|set|trust` and `nable guard approve`, which record
 # a person's decision. Every way to start the CLI counts: nable, finops and finops-mcp (a path in
 # front, or a uvx pin like `finops-mcp@1.2` or `finops-mcp[aws]==1.2`), and
-# `python -m finops.setup_wizard`, `-m finops.entry` or `-m finops.server`.
+# `python -m finops.setup_wizard`, `-m finops.entry` or `-m finops.server`,
+# and the program a command substitution finds (`$(which nable) guard off`,
+# `"$(command -v nable)"`, `` `which finops` ``): a closing parenthesis,
+# backtick or quote may sit between the name and the space.
 _NABLE = (r"(?:(?<![\w-])(?:nable|finops|finops-mcp)(?:\[[\w,.-]*\])?(?:(?:@|==)[\w.+!*-]*)?"
-          r"|(?<![\w-])-m\s*finops\.(?:setup_wizard|entry|server))\s")
+          r"|(?<![\w-])-m\s*finops\.(?:setup_wizard|entry|server))[)`\"']*\s")
 
 
 class _PythonApiCall:

@@ -816,7 +816,8 @@ def _gate(command: str) -> dict | None:
 
 
 ENTRY_POINTS = ["nable", "finops", "uvx finops-mcp@1.2.3", "python -m finops.entry",
-                "uvx --from finops-mcp==0.9.0 finops", "~/.local/bin/nable"]
+                "uvx --from finops-mcp==0.9.0 finops", "~/.local/bin/nable",
+                "$(which nable)", '"$(command -v nable)"', "`which finops`"]
 
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
