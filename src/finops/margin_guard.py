@@ -241,7 +241,7 @@ class Caps:
     jobs_per_day: int = 0               # runs on one account: nightly scan or on-demand deep scan
     checks_per_account_day: int = 0     # intraday anomaly checks, deterministic, never dropped
     line_items_month: int = 0           # billing export line items ingested a month
-    ai_credit_usd_month: float = 0.0    # hosted model work on nable's key, at list price
+    ai_allowance_usd_month: float = 0.0    # hosted model work on nable's key, at list price
     guarded_agents: int = 0             # agents syncing shared guard policy and audit trail
     retention_months: int = 0           # daily aggregates
     detail_days: int = 0                # resource-level detail
@@ -249,7 +249,7 @@ class Caps:
 
     @property
     def ai_daily_ceiling_usd(self) -> float:
-        return round(self.ai_credit_usd_month * AI_DAILY_SHARE, 2)
+        return round(self.ai_allowance_usd_month * AI_DAILY_SHARE, 2)
 
 
 @dataclass(frozen=True)
@@ -317,7 +317,7 @@ _TEAM = Plan(
     id="team", name="Team", monthly_usd=_live_monthly("team"), annual_usd=11_000.0,
     runs="pooled", annual_pay="invoice", platform_weight=4,
     caps=Caps(accounts=50, jobs_per_day=60, checks_per_account_day=12,
-              line_items_month=20_000_000, ai_credit_usd_month=50.0,
+              line_items_month=20_000_000, ai_allowance_usd_month=50.0,
               guarded_agents=100, retention_months=25, detail_days=180,
               support_min_month=40),
     usage=Usage(accounts=(10, 25), jobs_per_day=(10, 30),
@@ -337,7 +337,7 @@ _ENTERPRISE = Plan(
     annual_usd=44_000.0, runs="dedicated", monthly_pay="invoice", annual_pay="invoice",
     platform_weight=4,
     caps=Caps(accounts=200, jobs_per_day=240, checks_per_account_day=12,
-              line_items_month=60_000_000, ai_credit_usd_month=75.0,
+              line_items_month=60_000_000, ai_allowance_usd_month=75.0,
               guarded_agents=500, retention_months=37, detail_days=365,
               support_min_month=180),
     usage=Usage(accounts=(30, 80), jobs_per_day=(30, 100),
@@ -379,7 +379,7 @@ def _cloud(monthly: float, annual: float, caps: Caps, jobs_words: str) -> Plan:
         includes=(f"Hosted: {caps.accounts} cloud accounts, {jobs_words}, daily and "
                   "weekly briefs by email, Slack and Teams, a dashboard, 13 months "
                   f"of history, shared guard policy for {caps.guarded_agents} agents, "
-                  f"${caps.ai_credit_usd_month:g} a month of hosted AI (brief narrative, "
+                  f"${caps.ai_allowance_usd_month:g} a month of hosted AI (brief narrative, "
                   "critique, anomaly triage); chat on the customer's own key. "
                   "Unlimited seats."),
     )
@@ -398,7 +398,7 @@ def _growth(monthly: float, annual: float, caps: Caps, jobs_words: str) -> Plan:
         includes=(f"Cloud plus: {caps.accounts} cloud accounts, {jobs_words}, the "
                   "hosted @nable Slack bot and chat remediation, SSO, 25 months of "
                   f"history, {caps.guarded_agents} guarded agents, "
-                  f"${caps.ai_credit_usd_month:g} a month of hosted AI. Unlimited seats."),
+                  f"${caps.ai_allowance_usd_month:g} a month of hosted AI. Unlimited seats."),
     )
 
 
@@ -409,13 +409,13 @@ PRICE_OPTIONS: dict[str, dict[str, Plan]] = {
     "A": {
         "cloud": _cloud(129.0, 1_419.0, Caps(
             accounts=5, jobs_per_day=7, line_items_month=2_000_000,
-            ai_credit_usd_month=4.0, guarded_agents=10, retention_months=13,
+            ai_allowance_usd_month=4.0, guarded_agents=10, retention_months=13,
             detail_days=90, support_min_month=4),
             "a nightly scan, brief and anomaly check on each, and 2 on-demand deep "
             "scans a day"),
         "growth": _growth(399.0, 4_389.0, Caps(
             accounts=15, jobs_per_day=20, checks_per_account_day=4,
-            line_items_month=6_000_000, ai_credit_usd_month=16.0, guarded_agents=25,
+            line_items_month=6_000_000, ai_allowance_usd_month=16.0, guarded_agents=25,
             retention_months=25, detail_days=180, support_min_month=18),
             "the nightly run on each, anomaly checks every 6 hours, and 5 on-demand "
             "deep scans a day"),
@@ -423,12 +423,12 @@ PRICE_OPTIONS: dict[str, dict[str, Plan]] = {
     "B": {
         "cloud": _cloud(149.0, 1_639.0, Caps(
             accounts=5, jobs_per_day=24, line_items_month=2_000_000,
-            ai_credit_usd_month=6.0, guarded_agents=10, retention_months=13,
+            ai_allowance_usd_month=6.0, guarded_agents=10, retention_months=13,
             detail_days=90, support_min_month=8),
             "24 jobs a day"),
         "growth": _growth(499.0, 5_489.0, Caps(
             accounts=20, jobs_per_day=96, line_items_month=10_000_000,
-            ai_credit_usd_month=24.0, guarded_agents=25, retention_months=25,
+            ai_allowance_usd_month=24.0, guarded_agents=25, retention_months=25,
             detail_days=180, support_min_month=25),
             "96 jobs a day including intraday anomaly checks"),
     },
@@ -497,7 +497,7 @@ def _driver(p: Plan, name: str, case: str) -> float:
 
 
 def _llm(p: Plan, case: str) -> float:
-    credit = p.caps.ai_credit_usd_month
+    credit = p.caps.ai_allowance_usd_month
     if case == "high":
         return credit                   # the whole credit, spent
     i = 0 if case == "low" else 1
@@ -596,7 +596,7 @@ ADDONS: dict[str, Addon] = {
                             "resource-level detail for a larger billing export"),
     "extra_retention_12mo": Addon("12 more months of history", 29.0,
                                   "daily aggregates kept a year longer, up to 100 accounts"),
-    "ai_credit_pack": Addon("AI credit pack", 50.0,
+    "ai_allowance_pack": Addon("AI credit pack", 50.0,
                             "$10 of hosted model work at list price; the customer's "
                             "own key is always the zero-markup alternative"),
     "compliance_pack": Addon("Compliance pack", 199.0,
@@ -625,7 +625,7 @@ def addon_cost(addon_id: str) -> float:
         return worker + db + obj
     if addon_id == "extra_retention_12mo":
         return 100 * 1 * k["db_gb_per_account_year"] * k["db_gb_month_usd"]
-    if addon_id == "ai_credit_pack":
+    if addon_id == "ai_allowance_pack":
         return 10.0                                                        # list model cost
     if addon_id == "compliance_pack":
         ev_m = 500 * events                                                # 500 agents, 7 years
@@ -669,7 +669,7 @@ ACTIONS = frozenset({OK, NOTIFY, DEGRADE_TO_CODE_ONLY, ASK_FOR_OWN_KEY,
 # it is interactive work, and on jobs_per_day it may only use the on-demand
 # slots, never the nightly run's.
 ROUTES = ("scheduled", "interactive", "on_demand")
-_AI_METERS = frozenset({"ai_credit_usd_month", "ai_daily_ceiling_usd"})
+_AI_METERS = frozenset({"ai_allowance_usd_month", "ai_daily_ceiling_usd"})
 
 
 @dataclass(frozen=True)
@@ -682,7 +682,7 @@ class MeterRule:
 
 
 METER_RULES: dict[str, MeterRule] = {
-    "ai_credit_usd_month": MeterRule(
+    "ai_allowance_usd_month": MeterRule(
         "USD of model work at list price, from response.usage priced by finops.llm_prices",
         "calendar month", DEGRADE_TO_CODE_ONLY, ASK_FOR_OWN_KEY,
         "Your included AI credit is used for this month. If you have added your own "
@@ -721,7 +721,7 @@ METER_RULES: dict[str, MeterRule] = {
 METERS = tuple(METER_RULES)
 
 _METER_CAP = {
-    "ai_credit_usd_month": lambda c: c.ai_credit_usd_month,
+    "ai_allowance_usd_month": lambda c: c.ai_allowance_usd_month,
     "ai_daily_ceiling_usd": lambda c: c.ai_daily_ceiling_usd,
     "jobs_per_day": lambda c: c.jobs_per_day,
     "accounts": lambda c: c.accounts,
@@ -813,7 +813,7 @@ def table(plans: dict[str, Plan] | None = None) -> list[dict]:
         for billing in BILLINGS:
             row: dict = {"plan": p.id, "name": p.name, "billing": billing,
                          "price_month_usd": round(plan_price(p, billing), 2),
-                         "ai_credit_usd_month": p.caps.ai_credit_usd_month}
+                         "ai_allowance_usd_month": p.caps.ai_allowance_usd_month}
             for case in CASES:
                 cogs = math.fsum(plan_cogs(p, case, billing).values())
                 row[f"cogs_{case}_usd"] = round(cogs, 2)

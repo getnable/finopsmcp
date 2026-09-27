@@ -148,12 +148,12 @@ def test_every_paid_plan_on_sale_today_is_modeled_at_its_live_price():
                     plan_id, billing, case)
 
 
-def test_the_high_case_spends_the_whole_ai_credit():
+def test_the_high_case_spends_the_whole_ai_allowance():
     # The high case is every cost at its cap. A lighter demand estimate must
     # not be able to hide a credit that is too large for the price.
     for p in _paid(mg.PROPOSED_PLANS):
         if p.hosted:
-            assert mg.plan_cogs(p, "high")["llm"] == p.caps.ai_credit_usd_month, p.id
+            assert mg.plan_cogs(p, "high")["llm"] == p.caps.ai_allowance_usd_month, p.id
 
 
 def test_both_price_options_are_computed_and_option_a_is_proposed():
@@ -168,10 +168,10 @@ def test_both_price_options_are_computed_and_option_a_is_proposed():
 # ── AI credit and add-ons ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("option", sorted(mg.PRICE_OPTIONS))
-def test_included_ai_credit_is_at_most_7_percent_of_price(option):
+def test_included_ai_allowance_is_at_most_7_percent_of_price(option):
     for p in _paid(mg.ladder(option)):
-        assert p.caps.ai_credit_usd_month <= mg.AI_CREDIT_MAX_SHARE * p.monthly_usd, (
-            f"{p.id}: ${p.caps.ai_credit_usd_month} credit on ${p.monthly_usd}")
+        assert p.caps.ai_allowance_usd_month <= mg.AI_CREDIT_MAX_SHARE * p.monthly_usd, (
+            f"{p.id}: ${p.caps.ai_allowance_usd_month} credit on ${p.monthly_usd}")
 
 
 def _spend_day(p, used_month, unit_cost):
@@ -180,7 +180,7 @@ def _spend_day(p, used_month, unit_cost):
     while True:
         day = mg.at_cap(p, "ai_daily_ceiling_usd", today, next_cost=unit_cost,
                         route="interactive")
-        month = mg.at_cap(p, "ai_credit_usd_month", used_month + today, next_cost=unit_cost,
+        month = mg.at_cap(p, "ai_allowance_usd_month", used_month + today, next_cost=unit_cost,
                           route="interactive")
         if day not in (mg.OK, mg.NOTIFY) or month not in (mg.OK, mg.NOTIFY):
             return today
@@ -195,7 +195,7 @@ def test_daily_ceiling_cannot_spend_the_month_in_one_day(unit):
     cost = mg.llm_unit_cost(unit, cached=False)
     for p in _paid(mg.PROPOSED_PLANS):
         caps = mg.metering_for(p)
-        credit, ceiling = caps["ai_credit_usd_month"], caps["ai_daily_ceiling_usd"]
+        credit, ceiling = caps["ai_allowance_usd_month"], caps["ai_daily_ceiling_usd"]
         if credit <= 0:
             continue
         spent, days = 0.0, 0
@@ -292,16 +292,16 @@ def test_at_cap_thresholds():
     assert mg.at_cap(cloud, "jobs_per_day", 0) == mg.OK
     assert mg.at_cap(cloud, "jobs_per_day", cap * mg.NOTIFY_AT) == mg.NOTIFY
     assert mg.at_cap(cloud, "jobs_per_day", cap) == mg.QUEUE_UNTIL_TOMORROW
-    credit = cloud.caps.ai_credit_usd_month
-    assert mg.at_cap("cloud", "ai_credit_usd_month", credit) == mg.DEGRADE_TO_CODE_ONLY
-    assert mg.at_cap("cloud", "ai_credit_usd_month", credit,
+    credit = cloud.caps.ai_allowance_usd_month
+    assert mg.at_cap("cloud", "ai_allowance_usd_month", credit) == mg.DEGRADE_TO_CODE_ONLY
+    assert mg.at_cap("cloud", "ai_allowance_usd_month", credit,
                      route="interactive") == mg.ASK_FOR_OWN_KEY
     assert mg.at_cap("cloud", "accounts", cloud.caps.accounts) == mg.HOLD_NEW_ACCOUNT
     assert mg.at_cap("cloud", "line_items_month",
                      cloud.caps.line_items_month) == mg.KEEP_AGGREGATES_PAUSE_DETAIL
     assert mg.at_cap("cloud", "guarded_agents", 10_000) == mg.LOCAL_GUARD_ONLY
     # Pro hosts nothing: its AI runs on the customer's key, its jobs locally.
-    assert mg.at_cap("pro", "ai_credit_usd_month", 0) == mg.ASK_FOR_OWN_KEY
+    assert mg.at_cap("pro", "ai_allowance_usd_month", 0) == mg.ASK_FOR_OWN_KEY
     assert mg.at_cap("pro", "jobs_per_day", 0) == mg.RUN_LOCALLY
     with pytest.raises(KeyError):
         mg.at_cap("cloud", "seats", 1)
@@ -333,7 +333,7 @@ def test_at_cap_counts_the_next_unit_so_the_last_one_cannot_overshoot():
 def test_a_broken_meter_reading_is_at_the_cap(bad):
     growth = mg.PROPOSED_PLANS["growth"]
     assert mg.at_cap(growth, "ai_daily_ceiling_usd", bad) == mg.DEGRADE_TO_CODE_ONLY
-    assert mg.at_cap(growth, "ai_credit_usd_month", bad,
+    assert mg.at_cap(growth, "ai_allowance_usd_month", bad,
                      route="interactive") == mg.ASK_FOR_OWN_KEY
     assert mg.at_cap(growth, "ai_daily_ceiling_usd", 0.0, next_cost=bad) == mg.DEGRADE_TO_CODE_ONLY
     assert mg.at_cap(growth, "jobs_per_day", bad) == mg.QUEUE_UNTIL_TOMORROW
@@ -372,24 +372,24 @@ def test_a_tenant_with_its_own_key_is_never_degraded_at_an_ai_cap():
     # feature. With a key on file, an AI cap moves the work onto it.
     for p in _paid(mg.PROPOSED_PLANS):
         caps = mg.metering_for(p)
-        for meter in ("ai_credit_usd_month", "ai_daily_ceiling_usd"):
+        for meter in ("ai_allowance_usd_month", "ai_daily_ceiling_usd"):
             for route in mg.ROUTES:
                 with_key = mg.at_cap(p, meter, caps[meter], route=route, next_cost=0.5,
                                      has_own_key=True)
                 assert with_key == mg.RUN_ON_OWN_KEY, (p.id, meter, route)
                 assert with_key != mg.DEGRADE_TO_CODE_ONLY
     growth = mg.PROPOSED_PLANS["growth"]
-    credit = growth.caps.ai_credit_usd_month
+    credit = growth.caps.ai_allowance_usd_month
     # Without a key the degrade and the ask stay.
-    assert mg.at_cap(growth, "ai_credit_usd_month", credit) == mg.DEGRADE_TO_CODE_ONLY
-    assert mg.at_cap(growth, "ai_credit_usd_month", credit,
+    assert mg.at_cap(growth, "ai_allowance_usd_month", credit) == mg.DEGRADE_TO_CODE_ONLY
+    assert mg.at_cap(growth, "ai_allowance_usd_month", credit,
                      route="interactive") == mg.ASK_FOR_OWN_KEY
     # Below the cap the included credit is used first, key or not.
-    assert mg.at_cap(growth, "ai_credit_usd_month", 0, has_own_key=True) == mg.OK
+    assert mg.at_cap(growth, "ai_allowance_usd_month", 0, has_own_key=True) == mg.OK
     # The key changes nothing on a meter that is not AI.
     assert mg.at_cap(growth, "jobs_per_day", 20, has_own_key=True) == mg.QUEUE_UNTIL_TOMORROW
     # The copy the customer reads at an AI cap says both halves.
-    for meter in ("ai_credit_usd_month", "ai_daily_ceiling_usd"):
+    for meter in ("ai_allowance_usd_month", "ai_daily_ceiling_usd"):
         says = mg.METER_RULES[meter].says
         assert "If you have added your own model key, AI work continues on it" in says
         assert "If not," in says
@@ -397,7 +397,7 @@ def test_a_tenant_with_its_own_key_is_never_degraded_at_an_ai_cap():
 
 def test_metering_surface_is_stable():
     # The hosted product imports these names; renaming one breaks it quietly.
-    assert mg.METERS == ("ai_credit_usd_month", "ai_daily_ceiling_usd", "jobs_per_day",
+    assert mg.METERS == ("ai_allowance_usd_month", "ai_daily_ceiling_usd", "jobs_per_day",
                          "accounts", "line_items_month", "guarded_agents")
     assert mg.ROUTES == ("scheduled", "interactive", "on_demand")
     for name in ("at_cap", "metering_for", "METER_RULES", "PROPOSED_PLANS", "plan_cogs",

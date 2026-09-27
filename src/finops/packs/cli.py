@@ -103,7 +103,7 @@ def add_parser(sub) -> None:
     sec = ps.add_parser("secret", help="Store or remove a secret a code pack declares")
     sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
     sec.add_argument("pack_id", metavar="ns/name")
-    sec.add_argument("secret_name", metavar="NAME")
+    sec.add_argument("env_var_name", metavar="NAME")
     for sp in (v, n, i, u, r, ls, s, sg, kg, rn, sec, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
@@ -315,15 +315,15 @@ def _secret(parsed, as_json: bool) -> int:
     from .errors import PackError
     verb = parsed.pack_verb
     if verb == "set":
-        why, _ = broker._check_secret_target(parsed.pack_id, parsed.secret_name)
+        why, _ = broker._check_secret_target(parsed.pack_id, parsed.env_var_name)
         if why:
             raise PackError(why)          # before asking for a value it would refuse
-        value = _read_secret_value(parsed.secret_name)
-        r = broker.set_secret(parsed.pack_id, parsed.secret_name, value)
+        value = _read_secret_value(parsed.env_var_name)
+        r = broker.set_secret(parsed.pack_id, parsed.env_var_name, value)
         del value
         text = (f"Stored {r['name']} for {r['pack']} in nable's vault (entry {r['vault_entry']}).")
     else:
-        r = broker.remove_secret(parsed.pack_id, parsed.secret_name)
+        r = broker.remove_secret(parsed.pack_id, parsed.env_var_name)
         text = (f"Removed {r['name']} for {r['pack']}." if r["removed"]
                 else f"{r['pack']} had no {r['name']} stored.")
     if r.get("note"):
