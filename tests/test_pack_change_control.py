@@ -124,7 +124,7 @@ def test_its_text_has_no_em_dashes_or_exclamation_points():
     for p in PACK.rglob("*"):
         if p.is_file() and "__pycache__" not in p.parts:
             text = p.read_text(encoding="utf-8")
-            assert "—" not in text, p
+            assert "\u2014" not in text, p
             if p.suffix != ".py":
                 assert "!" not in text.replace("!=", ""), p
 
@@ -298,7 +298,7 @@ def test_the_report_is_cc81_evidence_in_markdown(installed, tmp_path, capsys):
     assert "freeze" in md and "Quarter close" in md
     assert f"{PID}:approved-during-freeze" in md
     assert f"{PID}:approver-not-named" in md
-    assert "—" not in md
+    assert "\u2014" not in md
 
 
 def test_the_report_exports_json_with_every_record(installed, tmp_path, capsys):

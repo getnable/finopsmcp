@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+- **First-party packs.** `packs/change-control` (Change control, SOC 2):
+  guard rules that ask about deploys and deny teardowns during a change
+  freeze, and always deny admin merges, force pushes to protected branches
+  and branch protection changes; freeze-window templates; approval chains
+  proposed from CODEOWNERS and exported GitHub settings; CC8.1
+  change-management evidence and change tickets from the guard ledger, as
+  markdown and JSON. `packs/commitments-bounds` (Commitments with bounds):
+  a coverage target, a longest term, payment options and migration
+  blackouts that cut commitment advice to them, and guard rules that ask
+  before every commitment purchase and name the bound it would breach.
+- **Pack SDK.** Guard rules may apply `during: freeze` only. A pack rule at
+  the guard's own verdict adds its reason to it. Policy files may declare
+  `commitment_bounds`. `nable pack report` renders a pack's report template
+  over the data scopes it declares. `nable pack run --context key=value`
+  passes an adapter its inputs.
+
 ## 0.10.0
 
 Decisions become policy: nable stops asking the same thing twice.

@@ -9,7 +9,8 @@ It runs out of process, behind a broker in the core, and gets only the data,
 secrets and network hosts its manifest declares.
 
 This page covers signing, what data packs may and may not do to the guard,
-and the broker. `nable pack --help` covers the rest.
+commitment bounds, report templates, the broker, and the first-party packs.
+`nable pack --help` covers the rest.
 
 ## Signing
 
@@ -92,6 +93,18 @@ runs under a 50 ms timer (POSIX, main thread); a pattern that runs out of time
 counts as a match that asks, with a reason that names the rule. Where no
 timer is available (Windows) only the validation-time check applies.
 
+A guard rule may say `during: freeze`: it applies only while a change freeze
+in the org model covers what the call touches, and does nothing otherwise.
+The condition only narrows when a rule fires. A freeze nobody confirmed (a
+proposal, or a repo's `nable.org/` nobody trusted) caps the rule at ask, so a
+guess never stops a command outright; when the guard cannot tell whether a
+freeze is in force, the rule asks. The freeze a rule applied under is kept
+in the ledger with the verdict.
+
+A rule that matches at the verdict the guard already gave (both ask) adds
+its reason to that ask without changing the decision, so a pack can say
+which of its bounds a call would breach.
+
 **Price books** need `pricing = ["override"]` in `[capabilities]`, which is
 shown at install, diffed on update, and limited by
 `allowed_capabilities.pricing`. A price book informs the estimates nable
@@ -102,6 +115,50 @@ higher of the list price and the book rate (for a Terraform plan, the higher
 for what is added and the lower for what is removed). A book rate below list
 is shown beside the list figure the guard judges by. A book rate of 0 is a
 rate, not "no price".
+
+## Commitment bounds
+
+A policy file may hold `commitment_bounds` beside (or instead of) `rules`:
+
+```yaml
+version: 1
+commitment_bounds:
+  - id: default-bounds
+    description: At most 80% coverage, one year, no money up front.
+    coverage_target_pct: 80
+    max_term_months: 12
+    payment_options: [no-upfront]
+    blackouts:
+      - id: eu-graviton-move
+        start: "2027-01-01T00:00:00+00:00"
+        end: "2027-04-01T00:00:00+00:00"
+        reason: Moving eu-west-1 compute to Graviton
+        regions: [eu-west-1]
+```
+
+nable applies them as a post-filter to every commitment purchase it
+recommends (the Compute and Database Savings Plan advice and the "if you
+bought more" projection). A purchase past the coverage target is cut to the
+amount that reaches it; one with a longer term, another payment option, or a
+term that would run into a blackout over its scope is dropped, with the
+bound named. Bounds only restrict: several packs' bounds combine to the
+strictest, a figure nable does not have never loosens one, and when an
+installed pack with policies cannot be loaded, purchase advice is withheld.
+
+## Report templates over nable's data
+
+```
+nable pack report <ns/name> <report> [--since 30d] [--set key=value] [--each PATH] [--json]
+```
+
+renders an installed pack's report template. A placeholder under a data
+scope's name reads that scope (`${ledger.guard.counts.asked}`), and only
+when the pack declares the scope in `read_data`; nable builds the values in
+its own process and the template stays text (`content.render`: dict lookups,
+nothing evaluated). `ledger.guard` is served today: change-management
+evidence from the guard ledger (`finops.change_evidence`). `--set` fills
+plain placeholders and can never stand in for a scope; `--each` renders once
+per record of a list; `--json` exports the values the text was rendered from.
 
 ## Running code
 
@@ -204,7 +261,26 @@ def propose(ctx, context):           # adapter: org facts, always proposals
 def deliver(ctx, payload):           # sink: a receipt dict
 ```
 
+An adapter's `context` holds `today`, `cwd` (the directory nable ran in; the
+pack runs in a throwaway directory of its own) and anything given with
+`nable pack run <pack> <adapter> --context key=value`.
+
 `ctx.secret(name)` and `ctx.read_data(scope, query)` refuse anything the
 manifest does not declare. Print freely: stdout is not the protocol channel.
 `sdk.Context.for_testing(...)` lets a pack's own tests call its entry points
 without the broker.
+
+## First-party packs
+
+nable's own packs live in `packs/` in this repository, in the
+`io.github.getnable` namespace. Each is an ordinary pack: it validates with
+`nable pack validate`, declares only what it uses, and installs only when
+signed by nable's first-party key (the copies here are unsigned until a
+release signs them).
+
+| Pack | What it does | Capabilities |
+|---|---|---|
+| `io.github.getnable/change-control` ("Change control (SOC 2)", `packs/change-control`) | Guard rules that ask about deploys and deny teardowns during a change freeze, and always deny admin merges, force pushes to protected branches and branch protection changes; freeze-window templates as proposed org facts; an adapter that proposes approval chains from CODEOWNERS and exported GitHub branch protection and environment settings; CC8.1 change-management evidence and change tickets from the guard ledger, as markdown and JSON. Evidence, not a certification. | `read_data = ["ledger.guard"]`, `write_org = ["proposals"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no network, no secrets |
+| `io.github.getnable/commitments-bounds` ("Commitments with bounds", `packs/commitments-bounds`) | Commitment bounds (coverage target, longest term, payment options, migration blackouts) that cut nable's commitment advice to them; guard rules that ask before every commitment purchase on AWS, Google Cloud and Azure and name the bound it would breach. Never buys anything. | `read_data = ["recommendations"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
+
+Each pack's README says what it reads, and why.

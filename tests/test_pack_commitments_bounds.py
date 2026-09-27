@@ -125,7 +125,7 @@ def test_its_text_has_no_em_dashes_or_exclamation_points():
     for p in PACK.rglob("*"):
         if p.is_file():
             text = p.read_text(encoding="utf-8")
-            assert "—" not in text and "!" not in text, p
+            assert "\u2014" not in text and "!" not in text, p
 
 
 def test_the_guard_reasons_cite_the_bounds_the_policy_sets():
