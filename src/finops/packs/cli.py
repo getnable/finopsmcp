@@ -18,9 +18,13 @@
                                          and orgs with a private registry key)
     nable pack keygen --out <path>       a new Ed25519 signing key (PEM, 0600)
                                          and its public half for packs.trusted_keys
-    nable pack run <ns/name> <entry-id> [--start D --end D]
+    nable pack run <ns/name> <entry-id> [--start D --end D] [--context K=V]
                                          run a connector (or adapter) through the
                                          broker and summarize what it returned
+    nable pack report <ns/name> <report> [--since 30d] [--set K=V] [--each PATH]
+                                         render a pack's report template over the
+                                         data scopes it declares (markdown, or
+                                         the values too with --json)
     nable pack secret set <ns/name> <NAME>
                                          store a secret the pack declares, in
                                          its own vault namespace (the value is
@@ -100,11 +104,29 @@ def add_parser(sub) -> None:
                     help="window end, exclusive (default today)")
     rn.add_argument("--timeout", dest="pack_timeout", type=float, default=None,
                     metavar="SECONDS", help="stop the pack after this long")
+    rn.add_argument("--context", dest="pack_context", action="append", default=None,
+                    metavar="KEY=VALUE",
+                    help="an adapter's context entry (repeatable), e.g. repo=. or "
+                         "branch_protection=protection.json; `cwd` is always the directory "
+                         "this ran in")
+    rp = ps.add_parser("report", help="Render an installed pack's report template")
+    rp.add_argument("pack_id", metavar="ns/name")
+    rp.add_argument("report", help="the report's file name, stem or path in the pack")
+    rp.add_argument("--since", dest="pack_since", default=None, metavar="WHEN",
+                    help="from this long ago (24h, 30d, 2w) or this date; default: all")
+    rp.add_argument("--until", dest="pack_until", default=None, metavar="WHEN",
+                    help="up to this date or time; default: now")
+    rp.add_argument("--set", dest="pack_set", action="append", default=None,
+                    metavar="KEY=VALUE", help="fill a plain placeholder (repeatable)")
+    rp.add_argument("--each", dest="pack_each", default=None, metavar="PATH",
+                    help="render once per record of this list (e.g. ledger.guard.changes)")
+    rp.add_argument("--out", dest="pack_out", default=None, metavar="FILE",
+                    help="write the report (or, with --json, the JSON) to this file")
     sec = ps.add_parser("secret", help="Store or remove a secret a code pack declares")
     sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
     sec.add_argument("pack_id", metavar="ns/name")
     sec.add_argument("env_var_name", metavar="NAME")
-    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, sec, ps.choices["audit"]):
+    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, rp, sec, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
     for sp in (i, u, r):
@@ -366,8 +388,9 @@ def _run_code(parsed, as_json: bool) -> int:
         summary = {"rows": len(rows), "billed_total": round(total, 6),
                    "by_service": by_service, "start": str(start), "end": str(end)}
     else:
-        r = broker.propose_facts(parsed.pack_id, parsed.entry_id,
-                                 {"today": broker.local_today().isoformat()},
+        context = {**_pairs(getattr(parsed, "pack_context", None), "--context"),
+                   "today": broker.local_today().isoformat(), "cwd": os.getcwd()}
+        r = broker.propose_facts(parsed.pack_id, parsed.entry_id, context,
                                  timeout=parsed.pack_timeout)
         lines = [(f"{r.pack} adapter {r.entry}: {len(r.output)} proposed facts "
                   "(shown, not written; `nable org init` proposes them)")]
@@ -393,6 +416,43 @@ def _run_code(parsed, as_json: bool) -> int:
         body["output"] = body["output"][:50]
         body["output_truncated"] = len(r.output) > 50
     _out(body, as_json, "\n".join(lines))
+    return EXIT_OK
+
+
+def _pairs(raw: list[str] | None, flag: str) -> dict[str, str]:
+    """KEY=VALUE arguments as a dict."""
+    from .errors import PackError
+    out: dict[str, str] = {}
+    for item in raw or []:
+        key, sep, value = item.partition("=")
+        if not sep or not re.fullmatch(r"[a-z_][a-z0-9_]{0,63}", key.strip()):
+            raise PackError(f"{flag} {item!r}: write it as key=value, the key in lowercase "
+                            "letters, digits and _")
+        out[key.strip()] = value
+    return out
+
+
+def _report(parsed, as_json: bool) -> int:
+    from ..guard_ledger import parse_since
+    from .errors import PackError
+    from .reports import render
+    try:
+        since = parse_since(parsed.pack_since)
+        until = parse_since(parsed.pack_until) if parsed.pack_until else None
+    except ValueError:
+        raise PackError("--since and --until take 24h, 30d, 2w, or a date such as "
+                        "2026-09-01") from None
+    r = render(parsed.pack_id, parsed.report, since=since, until=until,
+               sets=_pairs(parsed.pack_set, "--set"), each=parsed.pack_each)
+    text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
+    body = {"ok": True, **r}
+    if parsed.pack_out:
+        out = json.dumps(body, indent=2, default=str) if as_json else text
+        with open(parsed.pack_out, "w", encoding="utf-8") as fh:
+            fh.write(out if out.endswith("\n") else out + "\n")
+        print(f"Wrote {r['report']} of {r['pack']} to {parsed.pack_out}")
+        return EXIT_OK
+    _out(body, as_json, text)
     return EXIT_OK
 
 
@@ -431,6 +491,8 @@ def run(parsed) -> int:
             return _keygen(parsed, as_json)
         if action == "run":
             return _run_code(parsed, as_json)
+        if action == "report":
+            return _report(parsed, as_json)
         if action == "secret":
             return _secret(parsed, as_json)
         if action == "new":
@@ -500,6 +562,6 @@ def run(parsed) -> int:
         _err("Stopped; nothing was changed.")
         return EXIT_FAIL
     _err("usage: nable pack {validate,new,install,update,remove,list,audit,search,sign,"
-         "keygen,run,secret} ...")
+         "keygen,run,report,secret} ...")
     return 2
 

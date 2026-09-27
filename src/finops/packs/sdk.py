@@ -10,7 +10,10 @@ imports the function and calls it with a Context and the call's parameters.
                 (dicts with FocusRecord's columns; ISO dates or datetimes)
     adapters    propose(ctx, context: dict) -> iterable of org facts
                 ({"fact", "subject", "value", "source", "confidence"}); they
-                land as proposals a person confirms, whatever they say
+                land as proposals a person confirms, whatever they say.
+                context holds "today", "cwd" (the directory nable ran in; the
+                pack's own process runs elsewhere) and any `--context
+                key=value` given to `nable pack run`
     sinks       deliver(ctx, payload: dict) -> dict receipt; payload["kind"]
                 is one of the pack's declared `act` kinds
 

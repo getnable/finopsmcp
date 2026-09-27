@@ -1001,8 +1001,11 @@ class PackAdapter:
         self.last: RunResult | None = None
 
     def __call__(self, model: Any = None) -> list[Any]:
+        # `cwd`: where `nable org init` runs, which is the repo it is about.
+        # The pack runs in a throwaway directory of its own and would not
+        # otherwise know.
         self.last = propose_facts(self.pack_id, self.entry_id,
-                                  {"today": local_today().isoformat()})
+                                  {"today": local_today().isoformat(), "cwd": os.getcwd()})
         return list(self.last.output)
 
     def __repr__(self) -> str:
