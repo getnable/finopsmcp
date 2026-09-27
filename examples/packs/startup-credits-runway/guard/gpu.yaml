@@ -1,0 +1,15 @@
+version: 1
+rules:
+  - id: ask-before-gpu-launch
+    target: command
+    # EC2 GPU and accelerator families (p, g, trn, inf, dl), and gcloud
+    # instances created with an accelerator.
+    pattern: '(?i)(\baws\s+ec2\s+run-instances\b.*--instance-type[=\s]+(p[2-6]|g[3-6][a-z]*|trn[12]|inf[12]|dl[12])[a-z0-9-]*\.|\bgcloud\s+compute\s+instances\s+create\b.*--accelerator)'
+    verdict: ask
+    reason: >-
+      GPU instances are the fastest way to burn startup credits: one p4d costs
+      about 24,000 USD a month on demand. Check the months of runway left
+      (nable brief) before launching one.
+    price_hint:
+      monthly_usd: 24000
+      note: One p4d.24xlarge on demand in us-east-1, for scale.

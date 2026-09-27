@@ -1,0 +1,29 @@
+# A first-party data pack: nable reads and validates everything here, and
+# nothing here runs. Check it with:
+#   nable pack validate examples/packs/startup-credits-runway
+[pack]
+name        = "startup-credits-runway"
+namespace   = "io.github.getnable"
+version     = "1.0.0"
+description = "Months of cloud credits left at current burn: a runway policy, a GPU guard rule, a founder brief"
+license     = "Apache-2.0"
+nable_api   = ">=1.0,<2.0"
+maintainers = ["@getnable"]
+support     = "first-party"
+repository  = "https://github.com/getnable/packs"
+status      = "active"
+
+[capabilities]
+read_data    = ["focus.cost", "budgets"]
+guard        = "tighten-only"
+max_autonomy = "L1"
+
+[provides]
+policies    = ["policies/*.yaml"]
+guard_rules = ["guard/*.yaml"]
+skills      = ["skills/credits-runway/SKILL.md"]
+reports     = ["reports/founder-brief.md"]
+
+[compat]
+clouds    = ["aws", "gcp", "azure"]
+harnesses = ["claude-code", "cursor", "codex", "copilot", "gemini", "cline"]

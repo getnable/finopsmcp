@@ -83,6 +83,10 @@ _CORE: frozenset[str] = frozenset({
     "list_accounts",
     "list_connected_providers",
     "list_org_questions",
+    # Local and read-only: which packs are installed and what each may do.
+    # Useful with nothing connected, so core; tier 2, so it costs no tokens
+    # until something names it.
+    "list_installed_packs",
     "list_profiles",
     "list_vault_credentials",
     "nable_setup_status",

@@ -120,6 +120,7 @@ list_aws_accounts
 list_budgets
 list_connected_providers
 list_idle_resources
+list_installed_packs
 list_kubernetes_contexts
 list_org_accounts
 list_org_questions

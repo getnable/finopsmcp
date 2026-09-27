@@ -985,6 +985,21 @@ def whoami() -> dict:
 
 
 @_srv.mcp.tool()
+def list_installed_packs() -> dict:
+    """
+    List the nable packs installed on this machine: each pack's version, tier,
+    what it provides (policies, guard rules, price books, skills) and the
+    capabilities it was approved with, and whether it is loaded. Read-only.
+
+    Examples:
+        - "Which nable packs are installed?"
+        - "What is the runway pack allowed to do?"
+    """
+    from ..packs import summary
+    return summary()
+
+
+@_srv.mcp.tool()
 def get_ai_budget_status(session_id: str | None = None) -> dict:
     """Where your AI coding agent stands against its budget, right now.
 
