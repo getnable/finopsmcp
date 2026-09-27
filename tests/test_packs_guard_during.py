@@ -139,7 +139,6 @@ def test_the_freeze_lookup_runs_only_when_a_freeze_rule_matches():
 
     def freeze():
         calls.append(1)
-        return None
     tighten("allow", [_rule()], command="ls -la", freeze=freeze)
     assert calls == []
     tighten("allow", [_rule(), _rule(verdict="ask")], command=DEPLOY, freeze=freeze)

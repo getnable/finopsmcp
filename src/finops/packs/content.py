@@ -8,7 +8,9 @@ string.Template over dotted keys that reads dict entries and nothing else: no
 attribute access, no calls, no format specs, no Jinja. A report template called `showback.md.j2` is plain text with `${...}`
 placeholders; `{{ ''.__class__ }}` in it stays exactly those characters.
 
-    policies     rules: {id, description, applies_to, match, effect}
+    policies     rules: {id, description, applies_to, match, effect}, and/or
+                 commitment_bounds: {id, description, coverage_target_pct,
+                 max_term_months, payment_options, blackouts}
     guard_rules  rules: {id, target, pattern, verdict (ask|deny), reason, price_hint,
                  during (optional: "freeze", only while a change freeze is in force)}
     playbooks    playbooks: {id, finding_type, iac, description, placeholders,
@@ -34,7 +36,7 @@ import re
 import string
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -370,13 +372,15 @@ def _text(raw: Any, where: str, problems: list[Problem], *, limit: int = 2000,
     return raw.strip()
 
 
-def _items(doc: Any, key: str, rel: str, problems: list[Problem]) -> list[Any]:
+def _items(doc: Any, key: str, rel: str, problems: list[Problem],
+           also: tuple[str, ...] = ()) -> list[Any]:
     if not isinstance(doc, dict):
         problems.append(Problem(rel, f"must be a mapping with a {key!r} list"))
         return []
     for k in doc:
-        if k not in (key, "version"):
-            problems.append(Problem(f"{rel}: {k}", f"is not a top-level key; known: {key}, version"))
+        if k not in (key, *also, "version"):
+            problems.append(Problem(f"{rel}: {k}", "is not a top-level key; known: "
+                                    + ", ".join((key, *also, "version"))))
     if doc.get("version", 1) != 1:
         problems.append(Problem(f"{rel}: version", "the only schema version is 1"))
     items = doc.get(key)
@@ -392,10 +396,21 @@ def _unique(item_id: str, seen: set[str], where: str, problems: list[Problem]) -
     seen.add(item_id)
 
 
-def parse_policies(doc: Any, rel: str, problems: list[Problem]) -> list[PolicyRule]:
+def parse_policies(doc: Any, rel: str, problems: list[Problem]
+                   ) -> list[PolicyRule | CommitmentBounds]:
+    """A policy file holds `rules`, `commitment_bounds`, or both."""
+    if isinstance(doc, dict) and "commitment_bounds" in doc:
+        bounds = parse_commitment_bounds(doc, rel, problems)
+        if "rules" not in doc:
+            return list(bounds)
+        return [*parse_rules(doc, rel, problems), *bounds]
+    return list(parse_rules(doc, rel, problems))
+
+
+def parse_rules(doc: Any, rel: str, problems: list[Problem]) -> list[PolicyRule]:
     out: list[PolicyRule] = []
     seen: set[str] = set()
-    for i, r in enumerate(_items(doc, "rules", rel, problems)):
+    for i, r in enumerate(_items(doc, "rules", rel, problems, also=("commitment_bounds",))):
         where = f"{rel}: rules[{i}]"
         if not isinstance(r, dict):
             problems.append(Problem(where, "must be a mapping"))
@@ -452,6 +467,179 @@ def parse_policies(doc: Any, rel: str, problems: list[Problem]) -> list[PolicyRu
         if len(problems) == n:
             out.append(PolicyRule(rid, desc, applies, tuple(conds["all"]), tuple(conds["any"]),
                                   action, severity, message))
+    return out
+
+
+# ── commitment bounds ─────────────────────────────────────────────────────────
+
+# What a commitment recommendation may be, at most. Bounds only restrict: a
+# recommendation outside them is cut to them (coverage) or dropped (term,
+# payment option, a migration blackout its term would run into), never
+# enlarged, and nothing here can make nable buy anything. Several packs'
+# bounds combine to the strictest (finops.recommendations.commitment_bounds).
+PAYMENT_OPTIONS = ("no-upfront", "partial-upfront", "all-upfront")
+COMMITMENT_TYPES = ("savings_plan", "database_savings_plan", "reserved_instance",
+                    "committed_use_discount", "reservation")
+COMMITMENT_PROVIDERS = ("aws", "gcp", "azure")
+BLACKOUT_SCOPE = ("providers", "types", "services", "regions", "accounts")
+_SCOPE_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._:/()-]{0,127}$")
+
+
+@dataclass(frozen=True)
+class Blackout:
+    """A migration blackout: no new commitment whose term would run into
+    [start, end) for the scope it names. An empty scope list means any."""
+
+    id: str
+    start: str
+    end: str
+    reason: str
+    providers: tuple[str, ...] = ()
+    types: tuple[str, ...] = ()
+    services: tuple[str, ...] = ()
+    regions: tuple[str, ...] = ()
+    accounts: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "start": self.start, "end": self.end, "reason": self.reason,
+                **{k: list(getattr(self, k)) for k in BLACKOUT_SCOPE}}
+
+
+@dataclass(frozen=True)
+class CommitmentBounds:
+    """The most a commitment recommendation may be. Every field restricts;
+    None (or no blackouts) restricts nothing on that axis."""
+
+    id: str
+    description: str
+    coverage_target_pct: float | None = None
+    max_term_months: int | None = None
+    payment_options: tuple[str, ...] | None = None
+    blackouts: tuple[Blackout, ...] = ()
+    pack: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "pack": self.pack, "description": self.description,
+                "coverage_target_pct": self.coverage_target_pct,
+                "max_term_months": self.max_term_months,
+                "payment_options": (list(self.payment_options)
+                                    if self.payment_options is not None else None),
+                "blackouts": [b.to_dict() for b in self.blackouts]}
+
+
+def aware_time(raw: Any) -> datetime | None:
+    """An ISO 8601 date and time with a UTC offset, or None. A time with no
+    offset could be any of 24 hours, so it is not a time here."""
+    if isinstance(raw, datetime):
+        dt = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            dt = datetime.fromisoformat(raw.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        return None
+    try:
+        dt.astimezone(UTC)
+    except OverflowError:
+        return None
+    return dt
+
+
+def _blackout(raw: Any, where: str, problems: list[Problem]) -> Blackout | None:
+    if not isinstance(raw, dict):
+        problems.append(Problem(where, "must be a mapping {id, start, end, reason, ...}"))
+        return None
+    n = len(problems)
+    _strict_keys(raw, ("id", "start", "end", "reason", *BLACKOUT_SCOPE), where, problems)
+    bid = raw.get("id")
+    if not isinstance(bid, str) or not _ID.match(bid):
+        problems.append(Problem(f"{where}.id", "must be a short lowercase id"))
+    times: dict[str, datetime | None] = {}
+    for k in ("start", "end"):
+        times[k] = aware_time(raw.get(k))
+        if times[k] is None:
+            problems.append(Problem(f"{where}.{k}",
+                                    "must be an ISO 8601 date and time with a UTC offset, "
+                                    'quoted ("2026-11-01T00:00:00Z")'))
+    start, end = times["start"], times["end"]
+    if start is not None and end is not None and end <= start:
+        problems.append(Problem(f"{where}.end", "must be after start"))
+    reason = _text(raw.get("reason"), f"{where}.reason", problems, limit=300)
+    scope: dict[str, tuple[str, ...]] = {}
+    for k in BLACKOUT_SCOPE:
+        vals = raw.get(k, [])
+        if not isinstance(vals, list) or not all(isinstance(v, str) and _SCOPE_VALUE.match(v)
+                                                 for v in vals):
+            problems.append(Problem(f"{where}.{k}", "must be a list of short names"))
+            continue
+        allowed = {"providers": COMMITMENT_PROVIDERS, "types": COMMITMENT_TYPES}.get(k)
+        for v in vals:
+            if allowed and v not in allowed:
+                problems.append(Problem(f"{where}.{k}",
+                                        f"{v!r} is not one of {', '.join(allowed)}"))
+        scope[k] = tuple(dict.fromkeys(vals))
+    if len(problems) > n or start is None or end is None:
+        return None
+    return Blackout(bid, start.isoformat(), end.isoformat(), reason, **scope)
+
+
+def parse_commitment_bounds(doc: dict[str, Any], rel: str, problems: list[Problem]
+                            ) -> list[CommitmentBounds]:
+    out: list[CommitmentBounds] = []
+    seen: set[str] = set()
+    for i, b in enumerate(_items(doc, "commitment_bounds", rel, problems, also=("rules",))):
+        where = f"{rel}: commitment_bounds[{i}]"
+        if not isinstance(b, dict):
+            problems.append(Problem(where, "must be a mapping"))
+            continue
+        n = len(problems)
+        _strict_keys(b, ("id", "description", "coverage_target_pct", "max_term_months",
+                         "payment_options", "blackouts"), where, problems)
+        bid = b.get("id")
+        if not isinstance(bid, str) or not _ID.match(bid):
+            problems.append(Problem(f"{where}.id", "must be a short lowercase id"))
+        else:
+            _unique(bid, seen, f"{where}.id", problems)
+        desc = _text(b.get("description"), f"{where}.description", problems)
+        cov = b.get("coverage_target_pct")
+        cov_n = _number(cov) if cov is not None else None
+        if cov is not None and (cov_n is None or not 0 <= cov_n <= 100):
+            problems.append(Problem(f"{where}.coverage_target_pct",
+                                    "must be a percentage from 0 to 100"))
+        term = b.get("max_term_months")
+        if term is not None and (isinstance(term, bool) or not isinstance(term, int)
+                                 or not 1 <= term <= 120):
+            problems.append(Problem(f"{where}.max_term_months",
+                                    "must be a whole number of months from 1 to 120"))
+        raw_pay = b.get("payment_options")
+        pay: tuple[str, ...] | None = None
+        if raw_pay is not None:
+            if not isinstance(raw_pay, list) or not raw_pay \
+                    or not all(p in PAYMENT_OPTIONS for p in raw_pay):
+                problems.append(Problem(f"{where}.payment_options",
+                                        "must be a non-empty list of "
+                                        + ", ".join(PAYMENT_OPTIONS)))
+            else:
+                pay = tuple(dict.fromkeys(raw_pay))
+        raw_bo = b.get("blackouts", [])
+        blackouts: list[Blackout] = []
+        if not isinstance(raw_bo, list):
+            problems.append(Problem(f"{where}.blackouts", "must be a list"))
+            raw_bo = []
+        bseen: set[str] = set()
+        for j, raw in enumerate(raw_bo):
+            bo = _blackout(raw, f"{where}.blackouts[{j}]", problems)
+            if bo is not None:
+                _unique(bo.id, bseen, f"{where}.blackouts[{j}].id", problems)
+                blackouts.append(bo)
+        if cov is None and term is None and raw_pay is None and not raw_bo:
+            problems.append(Problem(where, "sets no bound: give coverage_target_pct, "
+                                    "max_term_months, payment_options or blackouts"))
+        if len(problems) == n:
+            out.append(CommitmentBounds(bid, desc, cov_n, term, pay, tuple(blackouts)))
     return out
 
 

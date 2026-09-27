@@ -85,6 +85,11 @@ class CommitmentAnalysis:
     # Recommendations
     recommendations: list[dict[str, Any]] = field(default_factory=list)
 
+    # Purchase recommendations the installed packs' commitment bounds cut or
+    # dropped, with why (commitment_bounds), and the bounds in force.
+    cut_by_bounds: list[dict[str, Any]] = field(default_factory=list)
+    bounds: dict[str, Any] | None = None
+
     @property
     def total_waste_usd(self) -> float:
         return self.savings_plan_unused_usd + self.ri_unused_usd
@@ -472,6 +477,9 @@ def _build_recommendations(
             "payback_months": 0,  # no-upfront has no payback period
             "term": "1-year",
             "payment": "no-upfront",
+            # What the commitment bounds a pack declares read the rec against
+            # (commitment_bounds.apply_compute): coverage before the purchase.
+            "coverage_pct_now": round(sp_coverage, 1),
             "confidence": "high" if baseline > 5000 else "medium",
         })
 
@@ -677,6 +685,11 @@ def analyze_commitments(
             ri_util_data["utilization_pct"],
             monthly_uncovered_series=uncovered_monthly,
         )
+        # Commitment bounds from installed packs: a post-filter that only
+        # cuts or drops purchase advice, never adds to it.
+        from . import commitment_bounds as cb
+        bounds = cb.safely(cb.in_force)
+        recs, cut = cb.apply_compute(recs, bounds)
 
         return CommitmentAnalysis(
             # None survives to the caller rather than being rounded into a
@@ -695,6 +708,8 @@ def analyze_commitments(
             ri_unused_usd=round(ri_util_data["unused_usd"] / _LOOKBACK_MONTHS, 2),
             uncovered_on_demand_usd=round(uncovered_od, 2),
             recommendations=recs,
+            cut_by_bounds=cut,
+            bounds=bounds.to_dict() if bounds is not None else None,
         )
     except Exception as e:
         log.error("Commitment analysis failed: %s", e)
@@ -717,4 +732,6 @@ def commitment_summary(analysis: CommitmentAnalysis) -> dict[str, Any]:
         "uncovered_on_demand_usd_3mo": analysis.uncovered_on_demand_usd,
         "total_waste_usd_per_month": analysis.total_waste_usd,
         "recommendations": analysis.recommendations,
+        **({"commitment_bounds": analysis.bounds} if analysis.bounds else {}),
+        **({"cut_by_bounds": analysis.cut_by_bounds} if analysis.cut_by_bounds else {}),
     }
