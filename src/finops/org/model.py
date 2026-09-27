@@ -249,6 +249,14 @@ def parse_when(v: Any, name: str = "time") -> datetime:
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise FactError(f"{name} {v!s} has no UTC offset: write it as 2026-11-27T00:00:00-05:00 "
                         "or 2026-11-27T05:00:00Z")
+    # Every reader compares in UTC. A time whose UTC instant falls outside
+    # what a datetime holds (9999-12-31T23:00-05:00) would raise OverflowError
+    # there, in the hook too, where an org model that raises is judged as no
+    # org model at all. So it is refused here, like any other bad time.
+    try:
+        dt.astimezone(UTC)
+    except OverflowError:
+        raise FactError(f"{name} {v!s} is out of range in UTC") from None
     return dt
 
 
