@@ -225,12 +225,14 @@ def test_every_version_carrier_agrees_with_the_package():
     weeks stale. packaging/mcpb/manifest.json was the fifth, found by review, and
     the pattern is now obvious enough to enumerate rather than rediscover.
 
-    A new carrier added without a line here is the sixth. That is what the
-    docstring is for.
+    A new carrier added without a line here is the eighth (the plugin's guard
+    hook, hooks/hooks.json, is the seventh). That is what the docstring is for.
     """
     import json
     import pathlib
     import re
+
+    from finops import guard_adapters
 
     root = pathlib.Path(__file__).resolve().parents[1]
     pkg = re.search(r'^version = "([^"]+)"',
@@ -251,6 +253,10 @@ def test_every_version_carrier_agrees_with_the_package():
         # The sixth, found by audit five releases stale at 0.8.211.
         ".claude-plugin/marketplace.json":
             _json(".claude-plugin/marketplace.json")["plugins"][0]["version"],
+        # The seventh: the plugin's guard hook runs this release through uvx,
+        # and a bump that missed it would judge commands with the old guard.
+        "plugins/nable/hooks/hooks.json": guard_adapters.uvx_release(
+            _json("plugins/nable/hooks/hooks.json")["hooks"]["PreToolUse"][0]["hooks"][0]["command"]),
     }
 
     wrong = {k: v for k, v in carriers.items() if v != pkg}

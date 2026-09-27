@@ -16,6 +16,10 @@ and installs the hook into their config files with the same safety bar:
   Cline           an executable PreToolUse script, in ~/Documents/Cline/Hooks/ or
                   .clinerules/hooks/
 
+Claude Code itself is guard.py's, and the nable Claude Code plugin ships the
+same hook (plugins/nable/hooks/hooks.json, written from plugin_hooks here);
+guard_plugin.py is what that hook runs first.
+
 Where each protocol is written down, so the next person can re-check it when a
 harness changes:
 
@@ -97,7 +101,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from . import guard
+from . import guard, guard_plugin
 
 HARNESSES = ("claude", "cursor", "codex", "copilot", "gemini", "cline")
 LABELS = {"claude": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI",
@@ -587,6 +591,13 @@ def run_hook(harness: str | None = None, stdin: Any = None, stdout: Any = None,
         return _fail_open(harness, stdout, stderr, f"the hook input was unreadable ({e})")
 
     name = harness or detect_harness(payload)
+    if guard_plugin.is_off():
+        # `nable guard off` or FINOPS_GUARD=off: the harness's own neutral
+        # answer, nothing on stderr (the human chose this) and no record.
+        with contextlib.suppress(Exception):
+            if name in _NEUTRAL:
+                stdout.write(json.dumps(_NEUTRAL[name]))
+        return 0
     # Anything the gate prints by accident (a library warning, a stray debug
     # line) goes to stderr: one extra line on stdout and the harness cannot
     # parse the verdict at all.
@@ -689,13 +700,53 @@ def hook_command(harness: str, global_scope: bool = True) -> str:
 
     A project file is shared through the repository, and this machine's uvx
     path means nothing on a teammate's, so project scope keeps the bare form.
+
+    Cursor runs hooks in PowerShell on Windows, which reads a line that starts
+    with a quoted string as a string to print, not a program to run: a quoted
+    path (one with a space in it) needs PowerShell's call operator in front,
+    `& "C:\\Program Files\\uv\\uvx.exe" ...`. sh, bash and Codex's cmd.exe
+    keep the plain quoted form.
     """
     cmd = guard._hook_command()
     if global_scope and harness in ("cursor", "cline") and cmd.startswith("uvx "):
         uvx = shutil.which("uvx")
         if uvx and not guard._is_ephemeral(uvx):
             cmd = (f'"{uvx}"' if " " in uvx else uvx) + cmd[len("uvx"):]
+    if harness == "cursor" and sys.platform == "win32" and cmd.startswith('"'):
+        cmd = f"& {cmd}"
     return cmd
+
+
+# The interpreter plugin.json's mcpServers entry asks uvx for. The hook asks
+# for the same one, so it runs in the environment uvx already built for the
+# plugin's MCP server instead of resolving a second one on the first tool call.
+PLUGIN_PYTHON = "3.12"
+
+
+def plugin_hook_command(version: str = guard.__version__) -> str:
+    """The command the Claude Code plugin's hook runs (plugins/nable/hooks/
+    hooks.json; a test holds the file to this).
+
+    The uvx form Claude Code's installer writes, pinned to the plugin's
+    release, marked `--via plugin` (guard_plugin), and fail-safe: Claude Code
+    blocks a tool call when its hook exits 2, and uvx exits 2 when it cannot
+    reach PyPI, before nable runs. A plugin cannot know where the user's uvx
+    lives, so the bare name it is; `; exit 0` means the same in sh, Git Bash
+    and PowerShell, the shells Claude Code runs hooks in."""
+    return _fail_safe(f"uvx --python {PLUGIN_PYTHON} --from {guard._PYPI_NAME}=={version} "
+                      f"{guard._HOOK_CMD} {guard_plugin.VIA_FLAG} {guard_plugin.VIA_PLUGIN}")
+
+
+def plugin_hooks(version: str = guard.__version__) -> dict[str, Any]:
+    """plugins/nable/hooks/hooks.json, as it should read for `version`: the
+    matcher and timeout `nable guard install` writes for Claude Code."""
+    cmd = plugin_hook_command(version)
+    return {"description": "nable guard: prices and checks infrastructure changes in Bash and "
+                           "MCP tool calls before they run (nable guard off pauses it)",
+            "hooks": {"PreToolUse": [{
+        "matcher": guard._HOOK_MATCHER,
+        "hooks": [{"type": "command", "command": cmd, "timeout": guard._timeout_for(cmd)}],
+    }]}}
 
 
 def _hook_timeout() -> int:
@@ -717,11 +768,18 @@ _UVX_VALUE_OPTS = frozenset({
 _PIN_RE = re.compile(rf"{re.escape(guard._PYPI_NAME)}\s*(?:==|@)\s*([A-Za-z0-9.+!_-]+)")
 
 
+def _without_call_operator(cmd: str) -> str:
+    """A hook command without the PowerShell call operator hook_command puts
+    in front of a quoted program for Cursor on Windows."""
+    return cmd[2:].lstrip() if cmd.startswith("& ") else cmd
+
+
 def uvx_spec(cmd: Any) -> str | None:
     """The finops-mcp requirement a uvx (or `uv tool run`) command runs,
     `finops-mcp==0.8.1` or a bare `finops-mcp`; None when it is not one."""
     if not isinstance(cmd, str):
         return None
+    cmd = _without_call_operator(cmd)
     try:
         lexer = shlex.shlex(cmd, posix=True, punctuation_chars=";&|")
         lexer.whitespace_split = True
@@ -732,7 +790,8 @@ def uvx_spec(cmd: Any) -> str | None:
     tokens = tokens[:cut]
     if not tokens:
         return None
-    exe = os.path.basename(tokens[0]).lower()
+    # A Windows path's last part, whichever platform reads it.
+    exe = re.split(r"[\\/]", tokens[0])[-1].lower()
     if exe in ("uvx", "uvx.exe"):
         args = tokens[1:]
     elif exe in ("uv", "uv.exe") and tokens[1:3] == ["tool", "run"]:
@@ -801,6 +860,7 @@ def _is_ours(cmd: Any) -> bool:
 
 def _runnable(cmd: str) -> bool:
     """Whether the program a hook command starts with still exists."""
+    cmd = _without_call_operator(cmd)
     try:
         exe = cmd[1:cmd.index('"', 1)] if cmd.startswith('"') else cmd.split()[0]
     except (ValueError, IndexError):
@@ -1017,7 +1077,7 @@ def _event_handlers(doc: dict, event: str) -> list[dict]:
     return out
 
 
-def _event_uninstall(doc: dict, path: Path, event: str) -> bool:
+def _event_uninstall(doc: dict, path: Path, event: str, *, keep_empty: bool = False) -> bool:
     groups = _event_groups(doc, path, event, create=False)
     if not groups:
         return False
@@ -1037,7 +1097,7 @@ def _event_uninstall(doc: dict, path: Path, event: str) -> bool:
             group["hooks"] = rest
             kept.append(group)
     if removed:
-        if kept:
+        if kept or keep_empty:
             doc["hooks"][event] = kept
         else:
             del doc["hooks"][event]
@@ -1253,7 +1313,71 @@ def _gemini_install(doc: dict, path: Path, cmd: str) -> str:
 
 
 def _gemini_uninstall(doc: dict, path: Path) -> bool:
-    return _event_uninstall(doc, path, _GEMINI_EVENT)
+    """Our group out of BeforeTool. The list, and the hooks object around it,
+    go too only when nable created them: an empty `"BeforeTool": []` someone
+    wrote is theirs, and stays."""
+    created = _created(path)
+    removed = _event_uninstall(doc, path, _GEMINI_EVENT,
+                               keep_empty=f"hooks.{_GEMINI_EVENT}" not in created)
+    if removed and "hooks" in created and doc.get("hooks") == {}:
+        del doc["hooks"]
+    return removed
+
+
+def _gemini_creates(doc: dict) -> list[str]:
+    """What installing into this settings document adds besides our group."""
+    hooks = doc.get("hooks")
+    if hooks is None:
+        return ["hooks", f"hooks.{_GEMINI_EVENT}"]
+    if isinstance(hooks, dict) and hooks.get(_GEMINI_EVENT) is None:
+        return [f"hooks.{_GEMINI_EVENT}"]
+    return []
+
+
+# What install created in a settings file it shares with its owner, so
+# uninstall takes away only that: {resolved settings path: ["hooks", ...]}.
+# Kept beside the ledger in nable's data directory, not in the settings file,
+# whose schema is Gemini CLI's.
+_CREATED_NAME = "guard-created.json"
+
+
+def _created_path() -> Path:
+    return guard_plugin.data_root() / _CREATED_NAME
+
+
+def _created_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path.absolute())
+
+
+def _created_all() -> dict:
+    try:
+        data = json.loads(_created_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _created(path: Path) -> set[str]:
+    keys = _created_all().get(_created_key(path))
+    return {k for k in keys if isinstance(k, str)} if isinstance(keys, list) else set()
+
+
+def _note_created(path: Path, keys: list[str]) -> None:
+    """Record (or, with no keys, forget) what install created in `path`. A
+    marker that cannot be written costs a tidy uninstall, never the install."""
+    data = _created_all()
+    key = _created_key(path)
+    if keys:
+        data[key] = keys
+    elif key not in data:
+        return
+    else:
+        del data[key]
+    with contextlib.suppress(OSError):
+        _write(_created_path(), data)
 
 
 # ── Cline: an executable PreToolUse script, one per hooks directory ────────────
@@ -1364,11 +1488,13 @@ _ADAPTERS = {
 
 def _stale_forms(harness: str, global_scope: bool) -> tuple[str, ...]:
     """Commands of ours to replace even though they run: in a project file,
-    this machine's absolute uvx path (what earlier releases wrote there)."""
-    if global_scope:
-        return ()
-    local = hook_command(harness, global_scope=True)
-    return (local,) if local != hook_command(harness, global_scope=False) else ()
+    this machine's absolute uvx path (what earlier releases wrote there), and
+    a quoted program without the call operator PowerShell needs to run it
+    (what releases before the operator wrote for Cursor on Windows)."""
+    cmd = hook_command(harness, global_scope)
+    forms = [] if global_scope else [hook_command(harness, global_scope=True)]
+    forms += [c[2:] for c in (cmd, *forms) if c.startswith("& ")]
+    return tuple(f for f in dict.fromkeys(forms) if f != cmd)
 
 
 def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
@@ -1394,12 +1520,15 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
     if harness == "cline":
         return _cline_install(path, cmd, _stale_forms(harness, global_scope)), path
     doc = _load(path, comments_allowed=harness == "gemini")
+    creates = _gemini_creates(doc) if harness == "gemini" else []
     if harness in ("cursor", "codex"):
         outcome = _ADAPTERS[harness][0](doc, path, cmd, _stale_forms(harness, global_scope))
     else:
         outcome = _ADAPTERS[harness][0](doc, path, cmd)
     if outcome != "already":
         _write(path, doc)
+    if harness == "gemini" and outcome == "new":
+        _note_created(path, creates)
     return outcome, path
 
 
@@ -1419,6 +1548,8 @@ def uninstall(harness: str, global_scope: bool = False) -> tuple[bool, Path]:
             path.unlink()               # the file was ours alone; leave no husk
         else:
             _write(path, doc)
+        if harness == "gemini":
+            _note_created(path, [])
     return removed, path
 
 
@@ -1487,6 +1618,80 @@ def sees_mcp(harness: str, global_scope: bool) -> bool:
     return False
 
 
+# ── The Claude Code plugin ─────────────────────────────────────────────────────
+
+PLUGIN_OFF_HELP = ("Claude Code has no switch for one plugin's hooks. To stop the guard and "
+                   "keep the plugin: nable guard off (nable guard on turns it back on). To "
+                   f"remove it: /plugin disable {guard_plugin.PLUGIN_KEY}, or /plugin "
+                   f"uninstall {guard_plugin.PLUGIN_KEY}, in Claude Code.")
+
+
+def plugin_status(global_scope: bool = False) -> dict[str, Any]:
+    """Where the Claude Code plugin's guard stands here. Read-only, never raises.
+
+    enabled  the settings file that turns the plugin on, or None
+    runs     uvx is on PATH (the plugin's hook starts nable through it)
+    off      "flag", "env" or None (guard_plugin.off_reason)
+    """
+    try:
+        enabled = guard_plugin.plugin_enabled(user_only=global_scope)
+    except Exception:
+        enabled = None
+    return {"enabled": enabled, "runs": bool(shutil.which("uvx")),
+            "off": guard_plugin.off_reason()}
+
+
+def _drop(items: list[str], unwanted: Any) -> list[str]:
+    return [i for i in items if not unwanted(i)]
+
+
+def with_plugin(report: dict[str, Any]) -> dict[str, Any]:
+    """guard.doctor()'s report, with the Claude Code plugin and the off switch
+    in it: the plugin's hook is a Claude Code surface that no settings file
+    shows, and a guard that is switched off covers nothing."""
+    ps = plugin_status()
+    enabled = ps["enabled"]
+    report["plugin"] = {"enabled": bool(enabled), "path": str(enabled) if enabled else None,
+                        "runs": ps["runs"], "off": ps["off"]}
+    if enabled:
+        rows = report["surfaces"]
+        at = sum(1 for r in rows if r.get("harness") == "claude-code")
+        rows.insert(at, {"harness": "claude-code", "scope": "plugin", "path": str(enabled),
+                         "installed": True, "runs": ps["runs"], "via": "plugin",
+                         "bash": True, "mcp": True})
+        if ps["runs"]:
+            # The plugin sees Bash and MCP calls whether or not a settings hook
+            # does, so neither gap the settings rows reported is one now.
+            report["covered"] = _drop(report["covered"], lambda c: c.startswith("Claude Code:"))
+            report["covered"][:0] = ["Claude Code: Bash commands (via the Claude Code plugin)",
+                                     "Claude Code: MCP tool calls (via the Claude Code plugin)"]
+            report["not_covered"] = _drop(
+                report["not_covered"],
+                lambda c: c == "Claude Code: no working guard hook"
+                or (c.startswith("Claude Code (") and "the hook only sees Bash" in c))
+            report["recommendations"] = _drop(
+                report["recommendations"],
+                lambda f: f.startswith("nable guard install  (this project; add --global")
+                or (f.startswith("nable guard install") and "--harness" not in f
+                    and f.endswith("(widens the hook to MCP tools)")))
+            report["ok"] = bool(report["ledger"].get("clean"))
+        else:
+            report["not_covered"].insert(0, "Claude Code (plugin): uv is not installed, so the "
+                                            "plugin's guard hook cannot start")
+            report["recommendations"].insert(0, "install uv (https://docs.astral.sh/uv/), "
+                                                "then restart Claude Code")
+    if ps["off"]:
+        how = ("FINOPS_GUARD=off is set" if ps["off"] == "env" else "`nable guard off`")
+        report["not_covered"].insert(0, f"everything: the guard is off ({how}); every hook "
+                                        "lets each call through unchecked and unrecorded")
+        report["covered"] = []
+        report["recommendations"].insert(0, "unset FINOPS_GUARD (turns the guard back on)"
+                                         if ps["off"] == "env" else
+                                         "nable guard on  (turns the guard back on)")
+        report["ok"] = False
+    return report
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 _AFTER_INSTALL = {
@@ -1515,8 +1720,19 @@ _WHAT_IT_DOES = ("before the agent runs an infra-mutating command "
                  "reason, or stays silent.")
 
 
-def cli(action: str, *, harness: str | None, everything: bool, global_scope: bool) -> int:
-    """`nable guard install|uninstall --harness X` and `--all`. Returns the exit code."""
+def plugin_skip_line(enabled: Path) -> str:
+    return (f"already on via the Claude Code plugin ({guard_plugin.PLUGIN_KEY} in {enabled}); "
+            "no settings hook written. --force writes one anyway, and the plugin's hook "
+            "then stands aside for it.")
+
+
+def cli(action: str, *, harness: str | None, everything: bool, global_scope: bool,
+        force: bool = False) -> int:
+    """`nable guard install|uninstall --harness X` and `--all`. Returns the exit code.
+
+    Claude Code with the nable plugin enabled already has the guard: install
+    leaves its settings alone unless `force`, and uninstall says how to turn
+    the plugin's guard off, since removing a settings hook does not."""
     from .welcome import _fire_telemetry, amber, bold, cyan, dim, green
 
     scope = "global" if global_scope else "project"
@@ -1535,8 +1751,14 @@ def cli(action: str, *, harness: str | None, everything: bool, global_scope: boo
     print()
     for name in targets:
         label = f"{LABELS[name]:<{_LABEL_WIDTH}}" if everything else LABELS[name]
+        plugin = plugin_status(global_scope)["enabled"] if name == "claude" else None
         try:
-            if action == "install":
+            if action == "install" and plugin and not force:
+                _fire_telemetry("guard_installed", {"scope": scope, "outcome": "via_plugin",
+                                                    "harness": name})
+                print(f"  {green('✓')} {label} guard {plugin_skip_line(plugin)}")
+                installed += 1
+            elif action == "install":
                 outcome, path = install(name, global_scope)
                 _fire_telemetry("guard_installed", {
                     "scope": scope, "outcome": outcome, "harness": name,
@@ -1559,6 +1781,9 @@ def cli(action: str, *, harness: str | None, everything: bool, global_scope: boo
                     print(dim(f"  - {label} not installed in {path}"))
                 else:
                     print(f"  {label} guard was not installed in {path}")
+                if plugin:
+                    print(dim(f"      The Claude Code plugin still runs the guard. "
+                              f"{PLUGIN_OFF_HELP}"))
         except SystemExit as e:           # a refusal: the file was left as found
             failed += 1
             print(f"  {amber('!')} {label} {str(e.code).strip()}")

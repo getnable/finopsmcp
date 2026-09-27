@@ -48,6 +48,20 @@ def _guard_ledger_sandbox(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _guard_switch_sandbox(monkeypatch, tmp_path_factory):
+    """The guard's off switch (`nable guard off`, FINOPS_GUARD=off) and the
+    Claude Code plugin's enabled state are read from the machine: nable's data
+    directory and Claude Code's user settings. A developer who paused the
+    guard, or has the nable plugin installed, must not change what the suite
+    sees, so both point at empty throwaway directories. Tests of those lookups
+    reset the overrides themselves."""
+    import finops.guard_plugin as gp
+    monkeypatch.delenv("FINOPS_GUARD", raising=False)
+    monkeypatch.setattr(gp, "_data_root_override", tmp_path_factory.mktemp("finops-data"))
+    monkeypatch.setattr(gp, "_user_dir_override", tmp_path_factory.mktemp("claude-user"))
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_service_creds(monkeypatch):
     """Unit tests must not inherit the developer's live service credentials.
 

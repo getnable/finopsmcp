@@ -1,0 +1,17 @@
+{
+  "description": "nable guard: prices and checks infrastructure changes in Bash and MCP tool calls before they run (nable guard off pauses it)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --python 3.12 --from finops-mcp==0.8.217 finops guard hook --via plugin; exit 0",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
