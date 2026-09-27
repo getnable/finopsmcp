@@ -73,15 +73,16 @@ _EC2_INSTANCES = (
 # out of MAX_CALLS for the whole answer, so a name earns its place only where
 # it starts that bill.
 #
-# RequestSpotFleet is asked for on Spot rows only: it is the call that starts
-# a Spot Fleet's instances. UpdateNodegroupConfig is asked for nowhere, though
+# RequestSpotFleet and RequestSpotInstances are asked for on Spot rows only:
+# they are the calls that start a Spot Fleet's instances and a Spot request's. UpdateNodegroupConfig is asked for nowhere, though
 # it scales an EKS node group: asking on every EC2 row, the commonest, would
 # cost each one a call, and the scaling it causes is already asked for, since
 # EKS applies it as UpdateAutoScalingGroup on the node group's Auto Scaling
 # group (made by EKS's service-linked role, so the change names that role, not
 # the person who resized the node group).
 _FAMILIES: list[tuple[re.Pattern[str], tuple[tuple[str, str], ...]]] = [
-    (re.compile(r"^SpotUsage"), (*_EC2_INSTANCES, ("RequestSpotFleet", _EC2))),
+    (re.compile(r"^SpotUsage"), (
+        *_EC2_INSTANCES, ("RequestSpotFleet", _EC2), ("RequestSpotInstances", _EC2))),
     (re.compile(r"^(BoxUsage|DedicatedUsage|HostUsage)"), _EC2_INSTANCES),
     (re.compile(r"^EBS:Volume"), (
         ("CreateVolume", _EC2), ("ModifyVolume", _EC2), ("RunInstances", _EC2))),
@@ -134,7 +135,7 @@ _REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
 # resource id cannot confirm one, and not sharing one does not rule it out.
 CONTAINER_EVENTS = frozenset({
     "SetDesiredCapacity", "UpdateAutoScalingGroup", "CreateAutoScalingGroup", "CreateFleet",
-    "RequestSpotFleet", "CreateService", "UpdateService", "CreateNodegroup",
+    "RequestSpotFleet", "RequestSpotInstances", "CreateService", "UpdateService", "CreateNodegroup",
     "UpdateNodegroupConfig"})
 
 # Changes that never move a bill: tagging.

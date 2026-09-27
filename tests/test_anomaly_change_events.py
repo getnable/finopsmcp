@@ -154,7 +154,8 @@ def test_a_spot_fleet_is_asked_for_on_spot_rows_only():
     """RequestSpotFleet starts a Spot Fleet's instances. Each name is a
     LookupEvents call per row, so it is asked for where it starts the bill."""
     spot = ce.family_events("USE2-SpotUsage:m5.large")
-    assert [n for n, _ in spot] == [*BOX_EVENTS, "RequestSpotFleet"]
+    assert [n for n, _ in spot] == [*BOX_EVENTS, "RequestSpotFleet", "RequestSpotInstances"]
+    assert ("RequestSpotInstances", "ec2.amazonaws.com") in spot
     assert ("RequestSpotFleet", "ec2.amazonaws.com") in spot
     assert "RequestSpotFleet" not in BOX_EVENTS
     assert "RequestSpotFleet" not in {n for n, _ in ce.family_events("DedicatedUsage:m5.large")}
@@ -174,14 +175,14 @@ def test_a_spot_row_looks_up_the_spot_fleet_call():
     rows = [_row(usage_type="SpotUsage:m5.large", resources=[])]
 
     def stubbing(stub):
-        for name in [*BOX_EVENTS, "RequestSpotFleet"]:
+        for name in [*BOX_EVENTS, "RequestSpotFleet", "RequestSpotInstances"]:
             stub.add_response("lookup_events",
                               {"Events": [fleet] if name == "RequestSpotFleet" else []},
                               _params("EventName", name))
 
     got, _ = _attach(rows, stubbing)
     assert [e["event"] for e in rows[0]["changes"]] == ["RequestSpotFleet"]
-    assert got["row_status"][0]["status"] == ce.READ and got["lookup_calls"] == 7
+    assert got["row_status"][0]["status"] == ce.READ and got["lookup_calls"] == 8
 
 
 def test_window_and_region():
