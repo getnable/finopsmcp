@@ -2412,6 +2412,7 @@ def _run_guard(parsed) -> None:
     Advisory and propose-only: it asks or denies, it never executes.
     """
     import json
+    import textwrap
 
     from . import guard
     from .welcome import _fire_telemetry, amber, bold, cyan, dim, green
@@ -2423,8 +2424,9 @@ def _run_guard(parsed) -> None:
 
     if action == "hook":
         # Machine path: the agent harness invokes this on every shell command.
-        from .guard_adapters import run_hook
-        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
+        from .guard_plugin import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None),
+                                  getattr(parsed, "guard_via", None)))
 
     # Any agent but Claude Code, or every agent found here: guard_adapters owns
     # those files.
@@ -2432,10 +2434,27 @@ def _run_guard(parsed) -> None:
     everything = getattr(parsed, "guard_all", False)
     if action in ("install", "uninstall") and (everything or harness not in (None, "claude")):
         from .guard_adapters import cli
-        code = cli(action, harness=harness, everything=everything, global_scope=global_scope)
+        code = cli(action, harness=harness, everything=everything, global_scope=global_scope,
+                   force=getattr(parsed, "guard_force", False))
         if code:
             raise SystemExit(code)
         return
+
+    if action in ("on", "off"):
+        _guard_switch(action == "off")
+        return
+
+    if action == "install" and not getattr(parsed, "guard_force", False):
+        # The nable Claude Code plugin already runs the guard. A settings hook
+        # as well would only stand aside for it (or it for the settings hook),
+        # so the install that adds nothing is not made.
+        from .guard_adapters import plugin_skip_line, plugin_status
+        plugin = plugin_status(global_scope)["enabled"]
+        if plugin:
+            _fire_telemetry("guard_installed", {"scope": scope, "outcome": "via_plugin"})
+            print(f"\n  {green('✓')} Claude Code guard {plugin_skip_line(plugin)}")
+            print(dim("  nable guard status shows it; nable guard off pauses it.\n"))
+            return
 
     if action == "install":
         # No license check here on purpose. The guard is free forever (see the
@@ -2511,6 +2530,12 @@ def _run_guard(parsed) -> None:
             print(f"  {green('✓')} Guard removed from {scope_label}")
         else:
             print(f"  Guard was not installed in {scope_label}")
+        from .guard_adapters import PLUGIN_OFF_HELP, plugin_status
+        if plugin_status()["enabled"]:
+            print()
+            print("  The nable Claude Code plugin still runs the guard in Claude Code.")
+            for line in textwrap.wrap(PLUGIN_OFF_HELP, 74):
+                print(dim(f"  {line}"))
         print()
         return
 
@@ -2549,7 +2574,11 @@ def _run_guard(parsed) -> None:
                 else:
                     print(f"    {green('allow')}  not an infra-mutating command: the guard stays silent")
             print()
-        if any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
+        from .guard_adapters import plugin_status
+        if plugin_status()["enabled"]:
+            print("  The nable Claude Code plugin runs this guard on every agent command.")
+            print(f"  {dim('nable guard status')} shows it.")
+        elif any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
             print("  The guard is already installed in Claude Code, so it runs on every")
             print(f"  agent command. {dim('nable guard status')} shows where.")
         else:
@@ -2631,7 +2660,15 @@ def _run_guard(parsed) -> None:
         return
 
     # status (default)
+    from .guard_adapters import plugin_status
+    plugin = plugin_status()
     print()
+    if plugin["off"]:
+        how = "FINOPS_GUARD=off is set" if plugin["off"] == "env" else "nable guard off"
+        again = "unset FINOPS_GUARD" if plugin["off"] == "env" else "nable guard on"
+        print(f"  {amber(f'The guard is off ({how}).')} Every hook below lets each call through,")
+        print(f"  unchecked and unrecorded. {cyan(again)} turns it back on.")
+        print()
     stale: list[bool] = []
     unpinned: list[bool] = []
     elsewhere: list[tuple[bool, str]] = []
@@ -2662,6 +2699,18 @@ def _run_guard(parsed) -> None:
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
+    if plugin["enabled"]:
+        # The plugin's hook is in no settings file; enabledPlugins is where
+        # Claude Code records it.
+        if not plugin["runs"]:
+            state = amber("on (via the Claude Code plugin), but uvx is not on PATH, "
+                          "so it cannot start")
+        elif any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
+            state = green("on (via the Claude Code plugin)") + dim(
+                ", standing aside wherever the settings hook above judges")
+        else:
+            state = green("on (via the Claude Code plugin)")
+        print(f"  {'plugin':<8} {state}   {dim(str(plugin['enabled']))}")
     from .guard_adapters import status_lines
     other_agents = status_lines()
     if other_agents:
@@ -2699,12 +2748,41 @@ def _run_guard(parsed) -> None:
     print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
     print(dim("            nable guard reconcile           (the ledger against CloudTrail)"))
     print(dim("            nable guard export --format cef (the verified ledger, for a SIEM)"))
+    print(dim("  Pause:    nable guard off / nable guard on (every hook, the plugin's too)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
     print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
     print(dim("  In Claude Code the hook sees Bash and MCP tool calls; in Cursor and Codex, shell"))
     print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
     print(dim("  check_action_policy before acting."))
+    print()
+
+
+def _guard_switch(off: bool) -> None:
+    """`nable guard off` / `nable guard on`: every guard hook on this machine,
+    the Claude Code plugin's included (Claude Code cannot turn one plugin's
+    hooks off), lets each call through unchecked and unrecorded, or judges
+    again. The hooks stay installed."""
+    from .guard_plugin import OFF_ENV, off_reason, set_off
+    from .welcome import amber, cyan, dim, green
+
+    try:
+        path = set_off(off)
+    except OSError as e:
+        raise SystemExit(f"\n  Could not {'write' if off else 'remove'} the guard's off switch: "
+                         f"{e.strerror or e}.\n")
+    print()
+    if off:
+        print(f"  {green('✓')} Guard off. Every guard hook on this machine, the Claude Code")
+        print("    plugin's included, now lets each call through without checking or")
+        print("    recording it. The hooks stay installed.")
+        print(f"  {cyan('nable guard on')} turns it back on.")
+        print(dim(f"  {path}"))
+    else:
+        print(f"  {green('✓')} Guard on: the hooks check commands again.")
+        if off_reason() == "env":
+            print(f"  {amber(f'{OFF_ENV}=off is set in this environment')}, and it keeps the guard")
+            print("  off wherever it is set. Unset it to turn the guard on there.")
     print()
 
 
@@ -2716,7 +2794,8 @@ def _guard_doctor(parsed) -> None:
     from . import guard
     from .welcome import amber, bold, cyan, dim, green
 
-    d = guard.doctor()
+    from .guard_adapters import with_plugin
+    d = with_plugin(guard.doctor())
     if getattr(parsed, "guard_json", False):
         print(json.dumps(d, indent=2))
         return
@@ -2730,6 +2809,9 @@ def _guard_doctor(parsed) -> None:
         name = f"{labels.get(r['harness'], r['harness']):<{width}} {r['scope']:<8}"
         if not r["installed"]:
             state = dim("not installed")
+        elif r.get("via") == "plugin":
+            state = (green("on (via the Claude Code plugin)") + ", sees Bash + MCP" if r["runs"]
+                     else amber("on (via the Claude Code plugin), but uvx is not on PATH"))
         elif not r.get("runs"):
             state = amber("installed, but the hooked command no longer exists")
         elif r["harness"] == "claude-code":
@@ -3223,6 +3305,16 @@ def main(args: list[str] | None = None) -> None:
     if args is None:
         args = _sys.argv[1:]
 
+    # The Claude Code plugin's guard hook (`guard hook --via plugin`) runs on
+    # every Bash and MCP tool call, and is often done before it judges
+    # anything: the guard is off, or a settings hook judges this call instead.
+    # It answers here, ahead of the telemetry and the argument parser below.
+    if args[:2] == ["guard", "hook"]:
+        from .guard_plugin import hook_main
+        code = hook_main(args[2:])
+        if code is not None:
+            raise SystemExit(code)
+
     # Bare `finops` (what `uvx nable` runs) launches the guided welcome flow.
     # `finops setup` / `finops setup aws` keep the explicit provider menu/flow, so
     # strip the leading "setup" token but remember it was not a bare invocation.
@@ -3514,7 +3606,7 @@ def main(args: list[str] | None = None) -> None:
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
                                                   "try", "report", "verify-log", "doctor",
-                                                  "reconcile", "export"],
+                                                  "reconcile", "export", "on", "off"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -3525,6 +3617,8 @@ def main(args: list[str] | None = None) -> None:
                          default=None,
                          help="With 'install'/'uninstall': the agent to wire (default claude). "
                               "With 'hook': the payload format (detected when omitted)")
+    guard_p.add_argument("--via", dest="guard_via", choices=["plugin"], default=None,
+                         help="With 'hook': the hook was started by the nable Claude Code plugin")
     guard_p.add_argument("--all", dest="guard_all", action="store_true",
                          help="With 'install'/'uninstall': every supported agent found on this machine")
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
@@ -3549,7 +3643,8 @@ def main(args: list[str] | None = None) -> None:
                          help="With 'export': write here (created 0600) instead of stdout")
     guard_p.add_argument("--force", dest="guard_force", action="store_true",
                          help="With 'export': export a ledger that does not verify, each "
-                              "record flagged")
+                              "record flagged. With 'install': write the Claude Code settings "
+                              "hook even though the nable plugin already runs the guard")
     guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
                          help="With 'report': only this agent session (the hook payload's "
                               "session id, as report lists them)")
@@ -3597,8 +3692,9 @@ def main(args: list[str] | None = None) -> None:
     # banner. guard_adapters answers every other agent's payload and hands
     # Claude Code payloads to guard.run_hook unchanged.
     if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
-        from .guard_adapters import run_hook
-        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
+        from .guard_plugin import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None),
+                                  getattr(parsed, "guard_via", None)))
 
     # Answer commands own their whole output: no setup banner ahead of `scan`,
     # its branded first line must be the first thing on screen (and in --json
@@ -4579,6 +4675,9 @@ def _run_uninstall(purge: bool = False, yes: bool = False, dry_run: bool = False
     elif (entries or hooks) and not dry_run:
         print("  Kept: nothing was removed.")
     print("  Guard hooks in other projects: run `nable guard uninstall --all` inside each.\n")
+    if ga.plugin_status()["enabled"]:
+        print("  The nable Claude Code plugin runs the guard too. Remove it in Claude Code:")
+        print(f"  /plugin uninstall {ga.guard_plugin.PLUGIN_KEY}\n")
 
     present = [d for d in _state_dirs() if d.exists()]
     if present:

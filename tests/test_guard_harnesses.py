@@ -646,6 +646,10 @@ def test_install_is_idempotent_and_uninstall_leaves_nothing(harness, monkeypatch
     assert ga.uninstall(harness, True)[0] is False
     if harness in ("copilot", "cline"):
         assert not path.exists(), "the file was ours alone and should be gone"
+    elif harness == "gemini":
+        # nable created the hooks object too (it remembers what it created),
+        # so it goes with our entry.
+        assert json.loads(path.read_text()) == {}
     else:
         assert json.loads(path.read_text()) == {"hooks": {}}
 

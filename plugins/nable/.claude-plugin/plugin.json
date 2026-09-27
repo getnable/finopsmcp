@@ -2,7 +2,7 @@
   "name": "nable",
   "displayName": "nable, local-first FinOps",
   "version": "0.8.217",
-  "description": "Ask your AWS, Azure, GCP, Kubernetes, and SaaS bill, inside Claude. 180+ tools (read-only analysis; remediation drafts PRs for human approval) for cost queries, anomaly detection, rightsizing, and PRs. Runs on your machine; credentials stay on your machine.",
+  "description": "Prices what your coding agent is about to do before it runs: asks before costly launches and destroys, tracks AI spend, and answers cost questions across AWS, Azure, GCP, Kubernetes and AI providers. Local, read-only. The guard is on once the plugin is installed; nable guard off pauses it. Credentials stay on your machine.",
   "author": {
     "name": "Chandan Bukkapatnam",
     "email": "chandan@nable.sh",
