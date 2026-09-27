@@ -33,7 +33,8 @@ Decisions become policy: nable stops asking the same thing twice.
   deny now carries an id: a person runs `nable guard approve <id>` in their
   own terminal and the identical command is let through once within 15
   minutes, recorded with who approved. An agent cannot approve, and a deny
-  set by policy is never approvable.
+  set by policy is never approvable. On a terminal the command shows the
+  call, its directory and why it was stopped, and approves only on a yes.
 
 ## 0.9.0
 

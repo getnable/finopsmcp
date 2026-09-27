@@ -358,7 +358,7 @@ def _respond_codex_mcp(payload: dict) -> dict[str, Any] | None:
     session = payload.get("session_id")
     return codex_response(guard.gate_mcp_call(
         payload["tool_name"], _mcp_arguments(payload.get("tool_input")), harness="codex",
-        session_id=session if isinstance(session, str) else None))
+        session_id=session if isinstance(session, str) else None, cwd=payload.get("cwd")))
 
 
 def _respond_codex(payload: dict) -> dict[str, Any] | None:

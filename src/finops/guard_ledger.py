@@ -255,6 +255,9 @@ def _pulumi_config(segment: str) -> str:
 # and Slack tokens, JWT segments). A run counts when it mixes upper case, lower
 # case and digits, which a hex digest, a path or a resource name rarely does.
 _LONG_TOKEN_RE = _LazyRe(r"[A-Za-z0-9+/_-]{32,}={0,2}")
+# C0 and C1 controls, DEL, and the Unicode bidi marks, embeddings, overrides
+# and isolates: what could make a summary display as something it is not.
+_CONTROL_RE = _LazyRe("[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def _long_token(m: re.Match[str]) -> str:
@@ -278,6 +281,11 @@ def redact(text: Any, limit: int = _SUMMARY_MAX) -> str:
     s = " ".join(raw[:_REDACT_INPUT_MAX].split())
     if cut:
         s = s.rsplit(" ", 1)[0] + " ..." if " " in s else "..."
+    # A summary is printed to a person's terminal (the report, `nable guard
+    # approve`): an escape sequence or a bidi override from the agent's
+    # command must show as text, not redraw what they read.
+    s = _CONTROL_RE.sub(lambda m: f"\\x{ord(m.group()):02x}" if ord(m.group()) < 0x100
+                        else f"\\u{ord(m.group()):04x}", s)
     for pattern, repl in _REDACTIONS:
         s = pattern.sub(repl, s)
     s = _LONG_TOKEN_RE.sub(_long_token, s)
@@ -674,6 +682,10 @@ def read(days: float | None = None, path: Path | None = None, *,
 # toward caution.
 
 DECLINE_AFTER = timedelta(minutes=30)
+# Claude Code permission modes in which a call may run without a person
+# being shown the ask: its `ran` is no person's approval, so the ask it
+# answers reads as unknown.
+UNATTENDED_MODES = ("bypassPermissions",)
 # The tools each harness's post hook sees ("*" is every tool its pre hook
 # sees). Cursor's is afterShellExecution only: its MCP calls stay unknown.
 POST_SURFACES: dict[str, tuple[str, ...]] = {
@@ -701,19 +713,23 @@ def ask_outcomes(recs: list[dict[str, Any]], *, now: datetime | None = None
     """{`_hash` of each ask in `recs`: "approved" | "declined" | "unknown"}.
 
     `recs` is read(..., outcomes=True): verdicts and outcomes, with hashes.
-    Approved: an outcome says it ran. Declined: no `ran`, the harness's post
+    Approved: an outcome says it ran (not under a permission mode that runs
+    calls unasked, UNATTENDED_MODES: that is unknown). Declined: no `ran`,
+    the harness's post
     hook is known to work (it recorded an outcome in `recs`) and covers the
     tool, and the ask's session has had no activity for DECLINE_AFTER.
     Unknown: anything else, including an ask still waiting for its answer."""
     now = now or datetime.now(UTC)
     ran: set[str] = set()
+    unattended: set[str] = set()
     working: set[str] = set()
     last: dict[Any, datetime] = {}
     for r in recs:
         ts = _ts(r)
         if is_outcome(r):
             if r.get("outcome") == RAN and isinstance(r.get("verdict"), str):
-                ran.add(r["verdict"])
+                (unattended if r.get("permission_mode") in UNATTENDED_MODES
+                 else ran).add(r["verdict"])
             working.add(str(r.get("harness")))
         if ts is not None and r.get("session"):
             key = (r.get("harness"), r.get("session"))
@@ -726,6 +742,9 @@ def ask_outcomes(recs: list[dict[str, Any]], *, now: datetime | None = None
             continue
         if h in ran:
             out[h] = "approved"
+            continue
+        if h in unattended:
+            out[h] = "unknown"          # it ran, but maybe nobody was asked
             continue
         ts = _ts(r)
         quiet_since = ts

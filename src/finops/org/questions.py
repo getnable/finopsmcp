@@ -353,16 +353,41 @@ def inferred(f: Fact) -> bool:
     return f.source.startswith(INFERENCE_PREFIX) and f.status == "proposed"
 
 
-def direction(f: Fact) -> str:
+def direction(f: Fact, model: OrgModel | None = None) -> str:
     """"tighten" or "loosen" (the default: a fact that does not say is
-    treated as the one that needs a deliberate yes)."""
+    treated as the one that needs a deliberate yes).
+
+    What a proposal says about itself is not enough: a repo's nable.org/ can
+    ship any evidence. With the model, a threshold is a tightening only
+    when it lets nothing more through than today anywhere it applies
+    (OrgModel.threshold_floor), and keeps any velocity cap the confirmed
+    threshold it would replace has, at or below that figure."""
     ev = f.extra.get("evidence") if isinstance(f.extra.get("evidence"), dict) else {}
-    return "tighten" if ev.get("direction") == "tighten" else "loosen"
+    if ev.get("direction") != "tighten":
+        return "loosen"
+    if model is None or f.fact != "threshold":
+        return "tighten"
+    try:
+        from ..policy import load_policy
+        from .model import pick
+        default = float(load_policy().get("max_auto_monthly_usd", 500.0))
+        floor, _ = model.threshold_floor(f.subject, default)
+        figure = f.value.get("max_auto_monthly_usd")
+        if not isinstance(figure, (int, float)) or float(figure) > floor:
+            return "loosen"
+        now = pick(g for g in model.candidates("threshold", f.subject) if g.confirmed)
+        cap = now.value.get("velocity_cap_usd") if now is not None else None
+        new = f.value.get("velocity_cap_usd")
+        if cap is not None and (new is None or float(new) > float(cap)):
+            return "loosen"
+    except Exception:  # noqa: BLE001 - unsure is the direction that needs a deliberate yes
+        return "loosen"
+    return "tighten"
 
 
-def _inferred_question(f: Fact, usd: float | None) -> Question:
+def _inferred_question(f: Fact, usd: float | None, model: OrgModel | None = None) -> Question:
     note = str(f.extra.get("note") or f"{describe(f)}.").strip()
-    way = direction(f)
+    way = direction(f, model)
     return Question(kind="confirm", default="y" if way == "tighten" else "n", key=f.key,
                     subject=str(f.subject),
                     text=(f"{note} Learned by {f.source}, confidence {f.confidence:.2f}; "
@@ -429,7 +454,7 @@ def questions(limit: int = 10, *, model: OrgModel | None = None,
         if inferred(f):
             # Its note says what it replaces ("asks now above $500/mo"), and
             # a yes supersedes the confirmed threshold like any confirm.
-            out.append((_fact_tier(f), _inferred_question(f, d)))
+            out.append((_fact_tier(f), _inferred_question(f, d, model)))
         elif f.key in conflicted:
             w = conflicted[f.key]
             d = d if d is not None else usd(w)

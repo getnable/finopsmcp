@@ -427,6 +427,37 @@ def _pos(x: Any) -> float:
     return float(x) if isinstance(x, (int, float)) and x > 0 else 0.0
 
 
+def _group_answers(verdicts: list[dict[str, Any]], answers: dict[str, str]) -> dict[int, str]:
+    """{index of the first ask of each run of repeats: the run's answer}.
+
+    A run is what guard_ledger._repeats folds into one decision (the same
+    command from the same session, each within ten minutes of the last).
+    Its answer is "declined" when the person said no to any ask in it, else
+    "approved" when any ran, else "unknown": a person who said yes once and
+    no to the retry, or no and then yes, has not approved it on every ask,
+    and only asks approved without a no are evidence for a higher figure."""
+    from datetime import datetime, timedelta
+
+    from ... import guard_ledger
+    seen: dict[tuple, tuple[datetime, int]] = {}
+    runs: dict[int, list[str]] = {}
+    for i, r in enumerate(verdicts):
+        head = i
+        ts = guard_ledger._ts(r)
+        if r.get("command") and ts is not None:
+            bucket = "stake" if r.get("decision") in ("ask", "deny") else r.get("decision")
+            key = (r["command"], r.get("session"), bucket)
+            last = seen.get(key)
+            if last is not None and timedelta(0) <= ts - last[0] <= guard_ledger._REPEAT_WINDOW:
+                head = last[1]
+            seen[key] = (ts, head)
+        if r.get("decision") == "ask":
+            runs.setdefault(head, []).append(answers.get(r.get("_hash") or "", "unknown"))
+    return {head: ("declined" if "declined" in got else
+                   "approved" if "approved" in got else "unknown")
+            for head, got in runs.items()}
+
+
 def guard_signal(records: list[dict[str, Any]] | None = None, *,
                  days: float = GUARD_LOOKBACK_DAYS, now: Any = None) -> list[dict[str, Any]]:
     """How the guard's asks were answered, per inference key, most asks first.
@@ -438,7 +469,8 @@ def guard_signal(records: list[dict[str, Any]] | None = None, *,
     pairs, oldest first; `reverts`, approved creations of this key undone by
     a destroy in the same scope within REVERT_WINDOW_HOURS, with one example.
     A repeat of the same command from the same session within ten minutes is
-    one decision asked twice (guard_ledger._repeats) and is counted once."""
+    one decision asked twice (guard_ledger._repeats) and is counted once:
+    declined when any ask in it was (_group_answers)."""
     from datetime import UTC, datetime, timedelta
 
     from ... import guard_ledger
@@ -448,6 +480,7 @@ def guard_signal(records: list[dict[str, Any]] | None = None, *,
     answers = guard_ledger.ask_outcomes(records, now=now)
     verdicts = [r for r in records if not guard_ledger.is_outcome(r)]
     repeats = guard_ledger._repeats(verdicts)
+    answer_of = _group_answers(verdicts, answers)
 
     # Destroys that went ahead (or may have): what counts against a creation.
     destroys: list[tuple[datetime, tuple, str, str]] = []
@@ -472,7 +505,7 @@ def guard_signal(records: list[dict[str, Any]] | None = None, *,
             "action_type": key[0], "door": key[1], "team": key[2], "env": key[3],
             "asks": 0, "approved": 0, "declined": 0, "unknown": 0,
             "approvals": [], "declines": [], "reverts": 0, "revert_example": None})
-        answer = answers.get(r.get("_hash") or "", "unknown")
+        answer = answer_of.get(i, "unknown")
         e["asks"] += 1
         e[answer] += 1
         ts = guard_ledger._ts(r)

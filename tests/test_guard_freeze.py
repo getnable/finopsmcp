@@ -16,6 +16,7 @@ What has to stay true:
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -40,6 +41,15 @@ def _clean(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("FINOPS_ACCOUNTS_FILE", str(tmp_path / "no-accounts.yaml"))
     monkeypatch.setattr(ai_budget, "status", lambda **_: {"verdict": ai_budget.BUDGET_OK})
+    # The data dir's org model and the trusted-repo list live under HOME: a
+    # test that writes a deny freeze there, or trusts a repo, must not leave
+    # it in the developer's real ~/.finops (or in the next test's way).
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("FINOPS_PROFILE", raising=False)
+    monkeypatch.delenv("FINOPS_DATA_DIR", raising=False)
+    db = sys.modules.get("finops.storage.db")
+    if db is not None:                      # it caches the data dir it first saw
+        monkeypatch.setattr(db, "_DATA_DIR", None)
 
 
 @pytest.fixture
@@ -253,3 +263,36 @@ def test_the_guard_names_the_org_dir_as_the_org_store_does():
     assert g._in_org_dir("/repo/nable.org/freezes.yaml")
     assert not g._in_org_dir("/repo/not-nable.org.d/freezes.yaml")
     assert not g._in_org_dir("/home/u/.finops/org/freezes.yaml")
+
+
+def test_a_freeze_ending_past_the_last_utc_instant_cannot_switch_the_org_model_off(
+        repo, monkeypatch):
+    """"9999-12-31T23:00:00-05:00" is a valid ISO time whose UTC instant does
+    not fit a datetime. Read as a freeze it raised OverflowError in the hook,
+    which judged the call as if there were no org model: a cloned repo's
+    freezes.yaml could take away a person's confirmed, stricter threshold."""
+    monkeypatch.delenv("FINOPS_ORG_DIR")
+    from finops.org.model import FactError
+    from finops.org.store import _data_dir
+    confirmed("threshold", "org:org", {"max_auto_monthly_usd": 10}, dir=_data_dir() / "org")
+    where = str(repo / "infra")
+    assert g.gate_command(M5_LARGE, cwd=where)["decision"] == "ask"
+    start, _ = _window()
+    d = repo / "nable.org"
+    d.mkdir()
+    (d / "freezes.yaml").write_text(
+        "# nable org model v1\n"
+        "- fact: freeze\n"
+        "  subject: {kind: org, id: org}\n"
+        f"  value: {{start: '{start}', end: '9999-12-31T23:00:00-05:00', reason: forever, "
+        "mode: ask}\n"
+        "  source: repo\n"
+        "  status: proposed\n")
+    v = g.gate_command(M5_LARGE, cwd=where)
+    assert v is not None and v["decision"] == "ask", v
+    assert "$10 auto threshold" in v["reason"]
+    assert not [r for r in _records() if r.get("decision") == "fail_open"]
+    # And nobody can write one: the time is refused, not stored.
+    with pytest.raises(FactError, match="out of range"):
+        org.make_fact("freeze", "org:org", {"start": start, "end": "9999-12-31T23:00:00-05:00",
+                                            "reason": "forever"}, source="human")

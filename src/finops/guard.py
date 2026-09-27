@@ -3287,7 +3287,7 @@ def _unchecked_verdict(tool_name: str, why: str) -> dict[str, Any]:
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                   harness: str = "claude-code", session_id: str | None = None,
-                  record: bool = True) -> dict[str, Any] | None:
+                  record: bool = True, cwd: str | None = None) -> dict[str, Any] | None:
     """Evaluate an MCP tool call against the policy gate. PUBLIC ENTRY POINT.
 
     `tool_name` is the harness's full name (`mcp__<server>__<tool>` in Claude
@@ -3307,7 +3307,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     returns None and is not recorded: the guard never asks about a tool it
     does not understand. One with more command lines than the guard judges,
     or one nested too deep, is asked about instead of passed. Recording and
-    fail-open as gate_command.
+    fail-open as gate_command. `cwd` is where the agent works: a one-time
+    approval (guard_approvals) is bound to it, as a shell command's is.
     """
     summary = tool_name
     try:
@@ -3375,7 +3376,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         answer, recorded = _against_budget(worst, stop)
         if record:
             answer, recorded = _out_of_band(answer, recorded, kind="mcp",
-                                            text=(tool_name, arguments), cwd=None,
+                                            text=(tool_name, arguments),
+                                            cwd=cwd if isinstance(cwd, str) else None,
                                             harness=harness, session_id=session_id,
                                             tool=tool_name)
             if stop is not None:
@@ -3448,9 +3450,12 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
 # `nable org confirm|reject|set|trust` and `nable guard approve`, which record
 # a person's decision. Every way to start the CLI counts: nable, finops and finops-mcp (a path in
 # front, or a uvx pin like `finops-mcp@1.2` or `finops-mcp[aws]==1.2`), and
-# `python -m finops.setup_wizard`, `-m finops.entry` or `-m finops.server`.
+# `python -m finops.setup_wizard`, `-m finops.entry` or `-m finops.server`,
+# and the program a command substitution finds (`$(which nable) guard off`,
+# `"$(command -v nable)"`, `` `which finops` ``): a closing parenthesis,
+# backtick or quote may sit between the name and the space.
 _NABLE = (r"(?:(?<![\w-])(?:nable|finops|finops-mcp)(?:\[[\w,.-]*\])?(?:(?:@|==)[\w.+!*-]*)?"
-          r"|(?<![\w-])-m\s*finops\.(?:setup_wizard|entry|server))\s")
+          r"|(?<![\w-])-m\s*finops\.(?:setup_wizard|entry|server))[)`\"']*\s")
 
 
 class _PythonApiCall:
@@ -3523,6 +3528,20 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
     (_PythonApiCall("learn-decide-api", r"finops\.(?:recommendations\.learning|cli_learn)"
                                         r"(?![\w-])", r"rollback|restore"),
      "learning_change", "rolling back or restoring a learned lesson for a person"),
+    # The post hook's `ran` is how an ask counts as approved, and repeated
+    # approvals are what a higher threshold is learned from. The harness runs
+    # the post hook; an agent that runs it, with a payload it wrote (the
+    # session and the command are in the readable ledger), turns a person's
+    # "no" into a "yes". `--p`, `--po` and `--pos` are argparse's
+    # abbreviations of --post, the guard parser's only --p option.
+    (_VerbWithFlag("guard-post-hook", _NABLE, rf"(?<!\S)guard{_END}",
+                   rf"(?<!\S)--p(?:o(?:st?)?)?{_END}"),
+     "learning_change", "recording, for a person, how the guard's ask was answered"),
+    (_PythonApiCall("guard-post-hook-api", r"guard_(?:outcome|plugin)(?![\w-])",
+                    r"run_post|record|run_hook|hook_main"),
+     "learning_change", "recording, for a person, how the guard's ask was answered"),
+    (_PythonApiCall("guard-ledger-api", r"guard_ledger(?![\w-])", r"append"),
+     "learning_change", "writing the guard's decision ledger, which records the answers"),
     # Installing a pack grants it capabilities (and may add code the broker
     # runs); updating one can change its rules; removing a guard-rule pack
     # takes its asks and denies away; a signature or a key made here is what

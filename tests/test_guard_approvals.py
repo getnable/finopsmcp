@@ -182,12 +182,69 @@ def test_the_cli_is_a_human_decision(work, monkeypatch, capsys):
     # The Python API wants the decision the CLI makes, not a name.
     with pytest.raises(guard_approvals.ApprovalError, match="person's decision"):
         guard_approvals.approve(aid, "maria")
-    # A terminal names the person.
+    # A terminal names the person (who says yes to what it shows).
     monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
     monkeypatch.setattr(org_cli, "_git_email", lambda: "maria@example.com")
+    monkeypatch.setattr("builtins.input", lambda _p="": "y")
     assert cli_approve(aid) == 0
     assert codex(DESTROY, work) is None
     assert _records()[-1]["approved_out_of_band"]["by"] == "maria@example.com"
+
+
+def test_on_a_terminal_the_person_sees_what_they_approve_before_it_is_approved(
+        work, monkeypatch, capsys):
+    """The id reaches the person through the agent, which can say it is for
+    anything. On a terminal the CLI shows the call, where, and why the guard
+    stopped it, and approves only on a yes; before, it approved at once and
+    showed the call afterwards."""
+    from finops.org import cli as org_cli
+    aid = approval_id(codex_reason(codex(DESTROY, work)))
+    capsys.readouterr()
+    monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
+    monkeypatch.setattr(org_cli, "_git_email", lambda: "maria@example.com")
+    said: list[str] = []
+
+    def answer(text):
+        def ask(prompt=""):
+            said.append(capsys.readouterr().out + prompt)
+            return text
+        return ask
+    for reply in ("", "n", "no thanks"):
+        monkeypatch.setattr("builtins.input", answer(reply))
+        assert cli_approve(aid, "--as", "maria") == 1
+        assert "Not approved" in capsys.readouterr().out
+    shown = said[0]
+    assert DESTROY in shown and str(work) in shown and "codex" in shown
+    assert "deletes" in shown or "destroy" in shown.split(DESTROY, 1)[1], shown
+    assert approval_id(codex_reason(codex(DESTROY, work))) == aid        # still waiting
+
+    monkeypatch.setattr("builtins.input", answer("y"))
+    assert cli_approve(aid) == 0
+    assert codex(DESTROY, work) is None
+
+
+def test_the_call_a_person_approves_cannot_redraw_their_terminal(work, monkeypatch, capsys):
+    """The call shown to the person is the agent's command. Escape sequences
+    in it (erase the line, move the cursor) or a bidi override could make
+    `terraform destroy` read as something harmless on their screen."""
+    from finops.org import cli as org_cli
+    sneaky = f"{DESTROY} \x1b[2K\x1b[1G\u202e# ls -la \x9b2K"
+    aid = approval_id(codex_reason(codex(sneaky, work)))
+    capsys.readouterr()
+    assert cli_approve() == 0
+    listed = capsys.readouterr().out
+    monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p="": "n")
+    assert cli_approve(aid, "--as", "maria") == 1
+    shown = listed + capsys.readouterr().out
+    assert DESTROY in shown
+    for c in ("\x1b", "\u202e", "\x9b"):
+        assert c not in shown, repr(c)
+    assert "\\x1b[2K" in shown
+    row = guard_approvals.waiting()[0]
+    assert not any(c in row["call"] + row["why"] for c in ("\x1b", "\u202e", "\x9b"))
+    # The ledger keeps the same visible spelling.
+    assert "\x1b" not in gl.ledger_path().read_text()
 
 
 def test_the_store_is_private_and_protected(work):
@@ -243,6 +300,11 @@ def test_end_to_end_in_real_processes(tmp_path):
     "uvx --from finops-mcp nable guard approve 3f9c2a1b --as maria",
     "python -m finops.setup_wizard guard approve 3f9c2a1b --as maria",
     "cd /tmp && nable guard approve",
+    # The program found by a command substitution: nothing but a closing
+    # parenthesis, backtick or quote between its name and the verb.
+    "$(which nable) guard approve 3f9c2a1b --as maria",
+    '"$(command -v nable)" guard approve 3f9c2a1b',
+    "`which finops` guard approve 3f9c2a1b",
     "python3 -c \"from finops import guard_approvals as a; a.approve('3f9c2a1b', x)\"",
     "python3 -c \"from finops.guard_approvals import approve; approve('3f9c2a1b', x)\"",
 ])
@@ -340,6 +402,23 @@ def test_a_codex_mcp_call_gets_an_id_too(work):
                   "tool_name": "mcp__aws__call_aws", "tool_input": args,
                   "cwd": str(work)}) is None
     assert _records()[-1]["approved_out_of_band"]["id"] == aid
+
+
+def test_an_mcp_approval_is_bound_to_its_directory_too(work, tmp_path):
+    """An MCP shell server runs its command where the agent works: approving
+    `terraform destroy` through it in one project must not let the same call
+    through in another. The MCP door recorded no directory, so it did."""
+    args = {"command": DESTROY}
+    other = tmp_path / "other"
+    other.mkdir()
+
+    def call(cwd):
+        return _hook({"hook_event_name": "PreToolUse", "turn_id": "t1", "session_id": "s1",
+                      "tool_name": "mcp__shell__run", "tool_input": args, "cwd": str(cwd)})
+    aid = approval_id(codex_reason(call(work)))
+    assert cli_approve(aid, "--as", "maria") == 0
+    assert approval_id(codex_reason(call(other))) != aid
+    assert call(work) is None                              # where it was approved, once
 
 
 # ── never for a deny that is policy ───────────────────────────────────────────
