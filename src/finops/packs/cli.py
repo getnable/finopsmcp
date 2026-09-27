@@ -366,9 +366,12 @@ def _run_code(parsed, as_json: bool) -> int:
         summary = {"rows": len(rows), "billed_total": round(total, 6),
                    "by_service": by_service, "start": str(start), "end": str(end)}
     else:
+        from ..org.store import git_root
+        here = git_root()
         r = broker.propose_facts(parsed.pack_id, parsed.entry_id,
                                  {"today": broker.local_today().isoformat()},
-                                 timeout=parsed.pack_timeout)
+                                 timeout=parsed.pack_timeout,
+                                 repos=broker.repo_refs(roots=[here] if here else []))
         lines = [(f"{r.pack} adapter {r.entry}: {len(r.output)} proposed facts "
                   "(shown, not written; `nable org init` proposes them)")]
         lines += [f"  {f.fact} {f.subject}: {json.dumps(f.value, sort_keys=True)} "

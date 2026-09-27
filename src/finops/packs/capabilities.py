@@ -50,6 +50,8 @@ READ_DATA_SCOPES: dict[str, str] = {
     "budgets": "budgets and month-to-date spend against them",
     "recommendations": "open savings recommendations",
     "ledger.guard": "the guard's decision ledger (redacted commands and verdicts)",
+    "repo.files": ("files it names (such as catalog-info.yaml) in the repositories `nable org "
+                   "init` reads, read on this machine by nable and handed to it as text"),
 }
 
 WRITE_ORG: dict[str, str] = {

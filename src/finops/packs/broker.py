@@ -31,7 +31,9 @@ carry code. The core never imports that code. For each call it:
      <packs root>/logs/<namespace>/<name>.log;
   4. answers the child's data.read requests only for scopes the manifest
      declares in read_data (focus.cost from the cost store, org.owners and
-     org.environments from finops.org; the others return "not available");
+     org.environments from finops.org, repo.files from the repositories an
+     adapter call names, read here and handed over as text; the others
+     return "not available");
   5. validates what comes back: FOCUS rows against finops.focus's schema
      (invalid rows are dropped and reported), org facts through
      finops.org.make_fact (always status proposed, source prefixed with the
@@ -64,6 +66,7 @@ import logging
 import math
 import os
 import queue
+import re
 import shutil
 import signal
 
@@ -613,12 +616,71 @@ def _data_org_environments(query: dict[str, Any]) -> dict[str, Any]:
     return {"environments": _org_facts("environment")}
 
 
+# repo.files: files a pack names, from the repos the call names (an adapter
+# call from `nable org init` names the repos init reads). Plain file names
+# only, never a path or a glob, so a pack cannot ask for ~/.ssh/id_rsa or
+# ../../anything; the walk never follows a symlink and skips vendored and
+# generated trees. Bounded in count, size and time.
+REPO_FILE_NAMES_MAX = 16
+REPO_FILE_MAX_BYTES = 256 * 1024
+REPO_FILES_MAX = 500
+REPO_FILES_TOTAL_BYTES = 8 * 1024 * 1024
+REPO_WALK_MAX_ENTRIES = 200_000
+_REPO_SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", ".terraform", ".venv",
+                             "venv", "__pycache__", "vendor", "dist", "build", ".tox",
+                             ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache", ".next",
+                             ".idea", "target"})
+_REPO_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _data_repo_files(query: dict[str, Any], repos: list[Path]) -> dict[str, Any]:
+    names = query.get("names")
+    if not isinstance(names, list) or not 1 <= len(names) <= REPO_FILE_NAMES_MAX or not all(
+            isinstance(n, str) and _REPO_FILE_NAME.match(n) and ".." not in n for n in names):
+        raise _RpcError(-32602, f"repo.files takes {{names: [...]}}: 1 to {REPO_FILE_NAMES_MAX} "
+                        "plain file names such as catalog-info.yaml, never a path or a glob")
+    wanted = set(names)
+    files: list[dict[str, Any]] = []
+    total = seen = 0
+    truncated = False
+    for i, root in enumerate(repos):
+        if truncated:
+            break
+        for dirpath, dirnames, filenames in os.walk(root):   # never follows a symlink
+            dirnames[:] = sorted(d for d in dirnames if d not in _REPO_SKIP_DIRS)
+            seen += len(dirnames) + len(filenames)
+            if seen > REPO_WALK_MAX_ENTRIES:
+                truncated = True
+                break
+            for fn in sorted(filenames):
+                if fn not in wanted:
+                    continue
+                path = Path(dirpath) / fn
+                try:
+                    if path.is_symlink() or not path.is_file() or \
+                            path.stat().st_size > REPO_FILE_MAX_BYTES:
+                        continue
+                    raw = path.read_bytes()
+                except OSError:
+                    continue
+                if len(files) >= REPO_FILES_MAX or total + len(raw) > REPO_FILES_TOTAL_BYTES:
+                    truncated = True
+                    break
+                total += len(raw)
+                files.append({"repo": i, "path": path.relative_to(root).as_posix(),
+                              "text": raw.decode("utf-8", "replace")})
+            if truncated:
+                break
+    return {"files": files, "truncated": truncated}
+
+
 DATA_SCOPES = {"focus.cost": _data_focus_cost, "org.owners": _data_org_owners,
-               "org.environments": _data_org_environments}
+               "org.environments": _data_org_environments, "repo.files": _data_repo_files}
 
 
-def read_data(prep: Prepared, params: dict[str, Any]) -> Any:
-    """Answer a pack's data.read: only a declared scope, only one nable serves."""
+def read_data(prep: Prepared, params: dict[str, Any], repos: list[Path] | None = None) -> Any:
+    """Answer a pack's data.read: only a declared scope, only one nable serves.
+    `repos` are the repositories this call names, for repo.files."""
     scope = params.get("scope")
     query = params.get("query") or {}
     if not isinstance(scope, str) or not isinstance(query, dict):
@@ -630,6 +692,8 @@ def read_data(prep: Prepared, params: dict[str, Any]) -> Any:
         raise _RpcError(-32002, f"{scope} is declared, but this nable does not serve it to "
                         f"packs yet (available: {', '.join(sorted(DATA_SCOPES))})")
     try:
+        if scope == "repo.files":
+            return _data_repo_files(query, list(repos or ()))
         return fn(query)
     except _RpcError:
         raise
@@ -726,11 +790,12 @@ def _private_copy(prep: Prepared) -> Path:
 
 
 def execute(prep: Prepared, method: str, params: dict[str, Any], *,
-            timeout: float | None = None, max_output: int | None = None
-            ) -> tuple[Any, dict[str, Any]]:
+            timeout: float | None = None, max_output: int | None = None,
+            repos: list[Path] | None = None) -> tuple[Any, dict[str, Any]]:
     """Start the host, initialize it, make one call, stop it. Returns (the raw
     result, a report: network mode, declared and observed hosts, where the
-    entry was loaded from, the log path). Raises BrokerError."""
+    entry was loaded from, the log path). `repos` are the repositories this
+    call may read through repo.files. Raises BrokerError."""
     timeout = DEFAULT_TIMEOUT_S if timeout is None else float(timeout)
     max_output = MAX_OUTPUT_BYTES if max_output is None else int(max_output)
     from . import API_VERSION
@@ -751,7 +816,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
 
     def on_request(m: str, p: dict[str, Any]) -> Any:
         if m == "data.read":
-            return read_data(prep, p)
+            return read_data(prep, p, repos)
         raise _RpcError(-32601, f"{m} is not something a pack can ask the core for")
 
     started = time.monotonic()
@@ -921,8 +986,13 @@ def check_delivery(prep: Prepared, payload: Any) -> dict[str, Any]:
 
 def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
         timeout: float | None = None, max_output: int | None = None,
-        pp: dict[str, Any] | None = None) -> RunResult:
-    """Run one call of an installed pack's code and validate what it returns."""
+        pp: dict[str, Any] | None = None, repos: list[RepoRef] | None = None) -> RunResult:
+    """Run one call of an installed pack's code and validate what it returns.
+
+    `repos` (adapters): the repositories the call is about. A pack that
+    declares read_data = ["repo.files"] gets each one's name, label and
+    repo_path subject prefix in its context (never its path on this machine)
+    and may read files from them by name; any other pack gets neither."""
     kind = METHOD_KIND.get(method)
     if kind is None:
         raise PackError(f"{method} is not a broker method; known: {', '.join(METHOD_KIND)}")
@@ -932,7 +1002,14 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
                             "adapter cannot propose org facts")
     if kind == "sinks":
         check_delivery(prep, params.get("payload"))
-    raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output)
+    roots: list[Path] = []
+    if kind == "adapters" and "repo.files" in (prep.capabilities.get("read_data") or ()):
+        refs = list(repos or ())
+        roots = [r.path for r in refs]
+        params = {**params, "context": {**dict(params.get("context") or {}),
+                                        "repos": [r.public(i) for i, r in enumerate(refs)]}}
+    raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output,
+                          repos=roots)
     problems: list[str] = []
     dropped = 0
     output: Any
@@ -979,7 +1056,8 @@ def fetch_costs(pack_id: str, entry_id: str, start: str | date, end: str | date,
 
 def propose_facts(pack_id: str, entry_id: str, context: dict[str, Any] | None = None,
                   **kw) -> RunResult:
-    """An adapter's org facts, validated, every one a proposal."""
+    """An adapter's org facts, validated, every one a proposal. `repos=`
+    (RepoRefs) names the repositories it may read through repo.files."""
     return run(pack_id, entry_id, "adapter.propose", {"context": dict(context or {})}, **kw)
 
 
@@ -989,6 +1067,41 @@ def deliver(pack_id: str, entry_id: str, payload: dict[str, Any], **kw) -> RunRe
 
 
 # ── org-context adapters for `nable org init` ─────────────────────────────────
+
+@dataclass(frozen=True)
+class RepoRef:
+    """A repository an adapter call is about. `subject_prefix` is what a
+    repo_path subject in it starts with where the proposals are written
+    ("repo_path:" in that repo's own nable.org/, "repo_path:<repo>//"
+    elsewhere); `label` prefixes source locators ("" for the repo nable runs
+    in). The path stays in the core: the pack sees the rest."""
+    path: Path
+    name: str
+    subject_prefix: str
+    label: str = ""
+
+    def public(self, i: int) -> dict[str, Any]:
+        return {"id": i, "name": self.name, "subject_prefix": self.subject_prefix,
+                "label": self.label}
+
+
+def repo_refs(ctx: Any = None, roots: list[Path] | None = None) -> list[RepoRef]:
+    """RepoRefs for an org AdapterContext's repos (subjects as its
+    repo_subject writes them), or for bare roots (subjects that name the
+    repo, as in the data dir's model)."""
+    from ..org.store import repo_identity
+    out: list[RepoRef] = []
+    if ctx is not None and hasattr(ctx, "repos"):
+        for repo in list(ctx.repos or ()):
+            prefix = ctx.repo_subject(repo, "") if hasattr(ctx, "repo_subject") else \
+                f"repo_path:{repo_identity(repo)}//"
+            label = ctx.repo_label(repo) if hasattr(ctx, "repo_label") else ""
+            out.append(RepoRef(Path(repo), repo_identity(repo), prefix, label))
+        return out
+    for repo in roots or ():
+        out.append(RepoRef(Path(repo), repo_identity(repo), f"repo_path:{repo_identity(repo)}//"))
+    return out
+
 
 class PackAdapter:
     """One pack adapter as a finops.org ADAPTERS callable: adapter(model) ->
@@ -1001,8 +1114,11 @@ class PackAdapter:
         self.last: RunResult | None = None
 
     def __call__(self, model: Any = None) -> list[Any]:
+        # run_adapters passes its AdapterContext: the repos it reads go along
+        # (as RepoRefs), for a pack that declares repo.files.
         self.last = propose_facts(self.pack_id, self.entry_id,
-                                  {"today": local_today().isoformat()})
+                                  {"today": local_today().isoformat()},
+                                  repos=repo_refs(model))
         return list(self.last.output)
 
     def __repr__(self) -> str:
