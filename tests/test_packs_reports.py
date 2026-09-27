@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -162,6 +162,63 @@ def test_set_cannot_stand_in_for_what_nable_fills(packs_env, tmp_path):
     for key in ("since", "until", "generated_at", "pack", "report", "item"):
         with pytest.raises(PackError, match="nable fills"):
             reports.render(pid, "brief", sets={key: "2020-01-01"})
+
+
+def test_no_record_at_or_after_a_break_is_shown_as_intact():
+    # A change ticket says "chain intact at this line" for its record. An
+    # edited record still chains to the one before it (only the next one
+    # shows the edit), and one after the break chains to a line nobody can
+    # vouch for: neither is intact.
+    for cmd in ("terraform apply", "terraform destroy", "helm upgrade web ./chart"):
+        gl.append({"decision": "ask", "action_type": "infra_apply", "command": cmd,
+                   "harness": "claude-code"})
+    p = gl.ledger_path()
+    lines = p.read_text().splitlines()
+    lines[0] = lines[0].replace("terraform apply", "ls")
+    p.write_text("\n".join(lines) + "\n")
+    ev = change_evidence.build(model=None, policies=[])
+    assert not ev["ledger"]["chain_ok"] and ev["ledger"]["broken_at"] == 2
+    assert [c["chain_ok"] for c in ev["changes"]] == [False, False, False]
+
+
+def test_a_clean_ledger_shows_each_record_intact():
+    for cmd in ("terraform apply", "terraform destroy"):
+        gl.append({"decision": "ask", "action_type": "infra_apply", "command": cmd,
+                   "harness": "claude-code"})
+    ev = change_evidence.build(model=None, policies=[])
+    assert ev["ledger"]["chain_ok"] and all(c["chain_ok"] for c in ev["changes"])
+
+
+def test_an_out_of_band_approval_answers_only_the_ask_it_could_have_answered():
+    # Approval ids are short and live 15 minutes, so one comes round again.
+    # An approval answers an ask with its id from the ask until the id
+    # expires, wherever the period ends; not an older ask that happened to
+    # carry the same id.
+    t0 = datetime(2026, 9, 1, 12, tzinfo=UTC)
+
+    def at(minutes):
+        return (t0 + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    cmd = "terraform destroy -target=aws_instance.old"
+    gl.append({"ts": at(0), "decision": "ask", "action_type": "infra_destroy",
+               "command": cmd, "harness": "codex", "approval_id": "0badcafe"})
+    gl.append({"ts": at(3 * 24 * 60), "decision": "ask", "action_type": "infra_destroy",
+               "command": cmd, "harness": "codex", "approval_id": "0badcafe"})
+    gl.append({"ts": at(3 * 24 * 60 + 5), "decision": "allow", "action_type": "infra_destroy",
+               "command": cmd, "harness": "codex",
+               "approved_out_of_band": {"id": "0badcafe", "by": "dana", "at": at(3 * 24 * 60 + 4)}})
+    now = t0 + timedelta(days=4)
+    ev = change_evidence.build(model=None, policies=[], now=now)
+    first, second, _let_through = ev["changes"]
+    assert first["outcome"] == "not_run" and first["approved_by"] is None
+    assert second["outcome"] == "approved_later_out_of_band"
+    assert second["approved_by"] == "dana" and second["answered_by_line"] == 3
+    # A period that ends between the ask and the approval still shows it.
+    ev = change_evidence.build(model=None, policies=[], now=now,
+                               until=t0 + timedelta(days=3, minutes=1))
+    first, second = ev["changes"]
+    assert first["outcome"] == "not_run"
+    assert second["outcome"] == "approved_later_out_of_band"
+    assert second["approved_by"] == "dana" and second["answered_by_line"] == 3
 
 
 def test_evidence_from_an_empty_ledger_says_so():

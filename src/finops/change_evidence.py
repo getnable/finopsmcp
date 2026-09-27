@@ -39,15 +39,22 @@ change record to list exceptions for a person to review.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from .guard_approvals import EXPIRY_MINUTES
 
 NOTE = ("This is change-management evidence drawn from nable's guard ledger. It is not a "
         "SOC 2 report, an attestation or a certification. It covers only what nable's guard "
         "saw where it is installed, and an auditor decides what it demonstrates.")
 
 _CHANGE_DECISIONS = ("ask", "deny", "fail_open")
+# How long after an ask a one-time approval can answer it: a pending approval
+# lives guard_approvals.EXPIRY_MINUTES from the first ask that made it (a
+# minute more for timestamps cut to the second). Its id is short, so the same
+# id on a record outside that window is another approval.
+_GRANT_WINDOW = timedelta(minutes=EXPIRY_MINUTES + 1)
 
 
 def _ts(rec: dict[str, Any]) -> datetime | None:
@@ -81,13 +88,27 @@ def _approvers(model: Any, rec: dict[str, Any]) -> list[str]:
     return out
 
 
+def _grant_for(rec: dict[str, Any], granted: dict[str, list[tuple[datetime, dict[str, Any]]]]
+               ) -> dict[str, Any] | None:
+    """The one-time approval that answered this ask: one with its id, on a
+    call recorded from the ask until the id expired; None when there is none."""
+    aid, ts = rec.get("approval_id"), _ts(rec)
+    if not aid or ts is None:
+        return None
+    for at, entry in granted.get(str(aid), []):
+        if ts <= at <= ts + _GRANT_WINDOW:
+            return entry
+    return None
+
+
 def _record(rec: dict[str, Any], answer: str | None, ran_at: dict[str, str],
-            model: Any, granted: dict[str, dict[str, Any]]) -> dict[str, Any]:
+            model: Any, granted: dict[str, list[tuple[datetime, dict[str, Any]]]]
+            ) -> dict[str, Any]:
     chain = rec.get("chain") or {}
     decision = rec.get("decision")
     oob = rec.get("approved_out_of_band") if isinstance(rec.get("approved_out_of_band"),
                                                           dict) else None
-    later = granted.get(str(rec.get("approval_id"))) if rec.get("approval_id") else None
+    later = _grant_for(rec, granted)
     if decision == "fail_open":
         outcome = "not_examined"
     elif decision == "deny":
@@ -257,13 +278,30 @@ def build(since: datetime | None = None, *, until: datetime | None = None,
         if ts is None or (since is not None and ts < since) or ts >= until:
             continue
         in_period.append(r)
-    # One-time approvals, by id: the record of the call each let through.
-    granted: dict[str, dict[str, Any]] = {}
-    for r in in_period:
+    # One-time approvals, by id, with the record of the call each let through
+    # and when: from the whole ledger, since an ask late in the period can be
+    # answered after it ends.
+    granted: dict[str, list[tuple[datetime, dict[str, Any]]]] = {}
+    for r in everything:
         g = r.get("approved_out_of_band")
-        if isinstance(g, dict) and g.get("id"):
-            granted.setdefault(str(g["id"]), {"grant": g,
-                                              "line": (r.get("chain") or {}).get("line")})
+        at = _ts(r)
+        if isinstance(g, dict) and g.get("id") and at is not None \
+                and not guard_ledger.is_outcome(r):
+            granted.setdefault(str(g["id"]), []).append(
+                (at, {"grant": g, "line": (r.get("chain") or {}).get("line")}))
+
+    def intact(line: Any) -> bool:
+        """Whether the chain vouches for the record on `line`: it verifies
+        from the first record through it, and no check since the anchor
+        found history rewritten. An edited record still chains to the one
+        before it (only the next shows the edit), so a break at line n
+        leaves lines before n - 1 intact and nothing after."""
+        if not isinstance(line, int) or check.get("warnings"):
+            return False
+        if check.get("ok"):
+            return line <= int(check.get("records") or 0)
+        broken = check.get("broken_at")
+        return isinstance(broken, int) and line < broken - 1
     counts: dict[str, int] = {k: 0 for k in (
         "verdicts", "allowed_by_policy", "changes", "asked", "approved", "declined", "unknown",
         "denied", "allowed_out_of_band", "approved_later_out_of_band", "not_run",
@@ -280,6 +318,7 @@ def build(since: datetime | None = None, *, until: datetime | None = None,
                 counts["allowed_by_policy"] += 1
             continue
         c = _record(r, answers.get(r["_hash"] or ""), ran_at, model, granted)
+        c["chain_ok"] = intact(c["ledger_line"])
         # One-line forms for a template, which reads scalars only.
         c["policy_summary"] = _policy_words(c)
         c["approval_chain_text"] = "; ".join(c["approval_chain"]) or "none named"
