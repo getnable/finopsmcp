@@ -265,6 +265,10 @@ async def create_rightsizing_tickets(
                 "current_type": r.instance_type,
                 "recommended_type": r.recommended_type,
                 "monthly_savings_usd": savings,
+                # Not shown in the ticket: what routes it to the owner (the
+                # org model's owner of the account or the tagged team).
+                "account_id": getattr(r, "account_id", "") or "",
+                "tags": getattr(r, "tags", None) or {},
             }
             # A synchronous httpx POST to Jira, Linear or GitHub; off the loop.
             url = await _srv.asyncio.to_thread(create_rightsizing_ticket, rec)

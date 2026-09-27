@@ -141,6 +141,16 @@ def _check_repo(repo: str) -> str:
 #
 # Provider selection (optional — auto-detected from env vars if not set):
 #   FINOPS_TICKET_PROVIDER  jira | linear | github
+#
+# Routing to the owner (the org model, finops.org; nothing to set):
+#   A ticket about something the org model says who owns names the owner and
+#   their channel in its body, gets a team:<team> label (Jira, GitHub) when
+#   the owner is confirmed, and is assigned to a person only when a confirmed
+#   owner or team fact lists them for this tracker: "github:login",
+#   "jira:<account id>" or "linear:<user id>" in its people. That assignee
+#   replaces the *_ASSIGNEE* default above. Routing never picks another
+#   tracker, project or repo, and a tracker that refuses the assignee gets
+#   the ticket without it.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -378,10 +388,83 @@ immediately — there's no break-even period.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Routing to the owner
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FOOTER = "\n---\n*Created automatically by"
+
+
+def _route(finding: dict[str, Any] | None, team: str = "") -> Any:
+    """The owner of what a ticket is about (org_owner.Owner), or None. Never
+    raises: a ticket without an owner is the ticket it always was."""
+    try:
+        from ..org_owner import owner_for
+        return owner_for(finding or {}, team=team)
+    except Exception as e:  # noqa: BLE001 - routing is a nicety
+        log.debug("ticket routing skipped: %s", e)
+        return None
+
+
+def _routed_body(body: str, route: Any) -> str:
+    """The body with an owner line before the footer."""
+    if route is None:
+        return body
+    team = _sanitize_field(route.team, 80)
+    chan = f" ({_sanitize_field(route.channel, 120)})" if route.channel else ""
+    line = (f"**Owner:** {team}{chan}" if route.confirmed
+            else f"**Likely owner:** {team}{chan}, not confirmed in the org model")
+    at = body.rfind(_FOOTER)
+    if at < 0:
+        return f"{body.rstrip()}\n\n{line}\n"
+    return f"{body[:at].rstrip()}\n\n{line}\n{body[at:]}"
+
+
+def _routed_labels(labels: list[str], route: Any) -> list[str]:
+    """`labels` plus team:<team> for a confirmed owner (once)."""
+    if route is None or not route.confirmed:
+        return list(labels)
+    team = re.sub(r"\s+", "-", _sanitize_field(route.team, 80).strip())
+    tag = f"team:{team}"
+    if not team or any(lbl.lower() == tag.lower() for lbl in labels):
+        return list(labels)
+    return [*labels, tag]
+
+
+def _assignee(route: Any, provider: str) -> str | None:
+    """The person a confirmed fact names for this tracker ("github:login"),
+    or None. Never a guess: an unconfirmed owner, or people without the
+    tracker's prefix, assign nobody."""
+    if route is None or not route.confirmed:
+        return None
+    for p in route.people or []:
+        kind, sep, ident = str(p).partition(":")
+        ident = _sanitize_field(ident.strip(), 128)
+        if sep and kind.strip().lower() == provider and ident and " " not in ident:
+            return ident
+    return None
+
+
+def _post_routed(url: str, payload: dict[str, Any], without: dict[str, Any] | None,
+                 **kwargs: Any) -> httpx.Response:
+    """POST `payload`. When the tracker refuses it (400 or 422) and `without`
+    is the same payload minus the org model's assignee, send that once:
+    routing may change a ticket's fields, never cost the ticket."""
+    try:
+        return http_with_retry("POST", url, json=payload, **kwargs)
+    except httpx.HTTPStatusError as e:
+        if without is None or e.response.status_code not in (400, 422):
+            raise
+        log.warning("Ticket tracker refused the owner's assignee (%s); creating the "
+                    "ticket without it", e.response.status_code)
+        return http_with_retry("POST", url, json=without, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Provider implementations
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _post_jira(title: str, body: str, priority: str, labels: list[str]) -> str | None:
+def _post_jira(title: str, body: str, priority: str, labels: list[str],
+               assignee: str | None = None) -> str | None:
     base_url = _env("JIRA_BASE_URL").rstrip("/")
     token = _env("JIRA_API_TOKEN")
     email_addr = _env("JIRA_USER_EMAIL")
@@ -413,12 +496,16 @@ def _post_jira(title: str, body: str, priority: str, labels: list[str]) -> str |
     assignee_id = _env("JIRA_ASSIGNEE_ID")
     if assignee_id:
         payload["fields"]["assignee"] = {"id": assignee_id}
+    without = None
+    if assignee:
+        without = json.loads(json.dumps(payload))
+        payload["fields"]["assignee"] = {"id": assignee}
 
     try:
-        r = http_with_retry(
-            "POST",
+        r = _post_routed(
             f"{base_url}/rest/api/3/issue",
-            json=payload,
+            payload,
+            without,
             auth=(email_addr, token),
             timeout=15,
         )
@@ -439,7 +526,8 @@ mutation CreateIssue($input: IssueCreateInput!) {
 """
 
 
-def _post_linear(title: str, body: str, priority: str, labels: list[str]) -> str | None:
+def _post_linear(title: str, body: str, priority: str, labels: list[str],
+                 assignee: str | None = None) -> str | None:
     api_key = _env("LINEAR_API_KEY")
     team_id = _env("LINEAR_TEAM_ID")
 
@@ -459,12 +547,16 @@ def _post_linear(title: str, body: str, priority: str, labels: list[str]) -> str
     assignee_id = _env("LINEAR_ASSIGNEE_ID")
     if assignee_id:
         variables["input"]["assigneeId"] = assignee_id  # type: ignore[index]
+    without = None
+    if assignee:
+        without = {"query": _LINEAR_CREATE_ISSUE, "variables": json.loads(json.dumps(variables))}
+        variables["input"]["assigneeId"] = assignee  # type: ignore[index]
 
     try:
-        r = http_with_retry(
-            "POST",
+        r = _post_routed(
             "https://api.linear.app/graphql",
-            json={"query": _LINEAR_CREATE_ISSUE, "variables": variables},
+            {"query": _LINEAR_CREATE_ISSUE, "variables": variables},
+            without,
             headers={"Authorization": api_key, "Content-Type": "application/json"},
             timeout=15,
         )
@@ -475,7 +567,8 @@ def _post_linear(title: str, body: str, priority: str, labels: list[str]) -> str
         return None
 
 
-def _post_github(title: str, body: str, priority: str, labels: list[str]) -> str | None:
+def _post_github(title: str, body: str, priority: str, labels: list[str],
+                 assignee: str | None = None) -> str | None:
     token = _env("GITHUB_TOKEN")
     repo = _env("GITHUB_FINOPS_REPO")
 
@@ -495,12 +588,16 @@ def _post_github(title: str, body: str, priority: str, labels: list[str]) -> str
     assignees_raw = _env("GITHUB_FINOPS_ASSIGNEES")
     if assignees_raw:
         payload["assignees"] = [a.strip() for a in assignees_raw.split(",")]
+    without = None
+    if assignee:
+        without = json.loads(json.dumps(payload))
+        payload["assignees"] = [assignee]
 
     try:
-        r = http_with_retry(
-            "POST",
+        r = _post_routed(
             f"https://api.github.com/repos/{_check_repo(repo)}/issues",
-            json=payload,
+            payload,
+            without,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
@@ -518,8 +615,13 @@ def _post_github(title: str, body: str, priority: str, labels: list[str]) -> str
 # Core dispatcher
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _dispatch(title: str, body: str, priority: str, labels: list[str]) -> str | None:
-    """Route ticket to the configured provider. Returns URL or None."""
+def _dispatch(title: str, body: str, priority: str, labels: list[str],
+              route: Any = None) -> str | None:
+    """Route ticket to the configured provider. Returns URL or None.
+
+    `route` (org_owner.Owner, from _route) names the owner: it adds the owner
+    line to the body, a team label, and an assignee where a confirmed fact
+    names one for the provider. It changes fields, never the destination."""
     preferred = _env("FINOPS_TICKET_PROVIDER", "").lower()
 
     providers = {
@@ -535,8 +637,13 @@ def _dispatch(title: str, body: str, priority: str, labels: list[str]) -> str | 
     else:
         ordered = list(providers.items())
 
+    if route is not None:
+        body = _routed_body(body, route)
+        labels = _routed_labels(labels, route)
     for name, fn in ordered:
-        url = fn(title, body, priority, labels)
+        who = _assignee(route, name)
+        url = fn(title, body, priority, labels, assignee=who) if who else \
+            fn(title, body, priority, labels)
         if url:
             log.info("Created %s ticket: %s", name, url)
             return url
@@ -554,7 +661,7 @@ def create_ticket(anomaly: dict[str, Any]) -> str | None:
     Backward-compatible with the original signature.
     """
     title, body, priority, labels = _anomaly_ticket(anomaly)
-    url = _dispatch(title, body, priority, labels)
+    url = _dispatch(title, body, priority, labels, route=_route(anomaly))
     if url:
         _persist_ticket(anomaly, url)
     return url
@@ -563,7 +670,7 @@ def create_ticket(anomaly: dict[str, Any]) -> str | None:
 def create_rightsizing_ticket(rec: dict[str, Any]) -> str | None:
     """Create a ticket for a rightsizing recommendation."""
     title, body, priority, labels = _rightsizing_ticket(rec)
-    return _dispatch(title, body, priority, labels)
+    return _dispatch(title, body, priority, labels, route=_route(rec))
 
 
 def create_kubernetes_waste_ticket(finding: dict[str, Any]) -> str | None:
@@ -579,7 +686,7 @@ def create_kubernetes_waste_ticket(finding: dict[str, Any]) -> str | None:
         detail        free-text summary
     """
     title, body, priority, labels = _kubernetes_waste_ticket(finding)
-    return _dispatch(title, body, priority, labels)
+    return _dispatch(title, body, priority, labels, route=_route(finding))
 
 
 def create_scorecard_ticket(dim: dict[str, Any], team: str = "") -> str | None:
@@ -593,7 +700,7 @@ def create_scorecard_ticket(dim: dict[str, Any], team: str = "") -> str | None:
         issues        list of human-readable issue strings
     """
     title, body, priority, labels = _scorecard_ticket(dim, team)
-    return _dispatch(title, body, priority, labels)
+    return _dispatch(title, body, priority, labels, route=_route(dim, team=team))
 
 
 def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
@@ -607,7 +714,7 @@ def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
         recommendation            human-readable recommendation text
     """
     title, body, priority, labels = _commitment_gap_ticket(gap)
-    return _dispatch(title, body, priority, labels)
+    return _dispatch(title, body, priority, labels, route=_route(gap))
 
 
 def create_custom_ticket(
@@ -615,9 +722,12 @@ def create_custom_ticket(
     body: str,
     priority: str = "medium",
     labels: list[str] | None = None,
+    subject: dict[str, Any] | None = None,
 ) -> str | None:
-    """Create a ticket with arbitrary title and body. Used for ad-hoc findings."""
-    return _dispatch(title, body, priority, labels or ["finops"])
+    """Create a ticket with arbitrary title and body. Used for ad-hoc findings.
+    `subject` (account_id, namespace, tags, team) routes it to the owner."""
+    return _dispatch(title, body, priority, labels or ["finops"],
+                     route=_route(subject) if subject else None)
 
 
 def create_tickets_for_unnotified(limit: int = 20) -> list[str]:

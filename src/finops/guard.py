@@ -33,6 +33,16 @@ either way. Spend comes from the summary the budget checks write
 last month) is not used, and a verdict on a priced change says the budget went
 unchecked.
 
+The org model (finops.org, read by guard_org.py only for a priced change or
+an ask or deny): an ask or a deny on a priced change or a one-way door names
+the owner of what the command touches ("Owned by payments
+(#payments-oncall).", "Likely owned by ..." for a proposal); with
+FINOPS_GUARD_TEAM unset, the confirmed owner of the working directory's repo
+path is the team whose budgets apply; and a confirmed threshold for that team
+or for an environment the command touches replaces the auto threshold and
+the velocity cap. Any error there is a recorded fail-open (check "org") and
+the call is judged as if there were no org model.
+
 History (the recent end of the decision ledger, guard_ledger.recent) can
 turn an allow or a warn into an ask, never anything else:
   velocity cap   the priced monthly run-rate the guard let through in a
@@ -1662,11 +1672,14 @@ _PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
 _BUDGETS_LISTED = 5
 
 
-def _change_scope(command: str) -> dict[str, str | tuple[str, ...]]:
+def _change_scope(command: str, *, team: str | None = None
+                  ) -> dict[str, str | tuple[str, ...]]:
     """What the guard knows about where a change bills: provider and service
     from each shell command in it (a tuple when they differ), team and
     account from FINOPS_GUARD_TEAM and FINOPS_GUARD_ACCOUNT (a command does
-    not say which team it is for).
+    not say which team it is for). `team`, when given, is the team the org
+    model scopes the working directory to (_OrgLens.team), and stands in for
+    an unset FINOPS_GUARD_TEAM.
 
     A budget scoped to one of several services a command bills to is checked
     against the whole command's figure: more than lands in it, which is the
@@ -1693,6 +1706,8 @@ def _change_scope(command: str) -> dict[str, str | tuple[str, ...]]:
         val = os.getenv(env, "").strip()
         if val:
             scope[key] = val
+    if team and "team" not in scope:
+        scope["team"] = team
     return scope
 
 
@@ -1726,7 +1741,7 @@ def _refresh_budget_summary(doc: dict[str, Any] | None, state: str) -> bool:
 
 
 def budget_lens(command: str, est: dict[str, Any] | None, *,
-                now: Any = None) -> dict[str, Any] | None:
+                now: Any = None, team: str | None = None) -> dict[str, Any] | None:
     """The change against the budget figures on this machine, or None when the
     change is not priced or does not add cost.
 
@@ -1740,7 +1755,8 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
       absent     there are no figures on this machine
     It is also what the ledger records. Never raises: a summary it cannot read
     is "absent". A stale or absent one carries "refreshing" when a background
-    refresh is under way (_refresh_budget_summary).
+    refresh is under way (_refresh_budget_summary). `team` is the org model's
+    team scope when FINOPS_GUARD_TEAM is unset (_change_scope).
     """
     if not est:
         return None
@@ -1766,7 +1782,7 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
         return out
     when["spend_through"] = fresh["spend_through"]
     today = datetime.now().astimezone().date()
-    scope = _change_scope(command)
+    scope = _change_scope(command, team=team)
     checked: list[str] = []
     over: list[dict[str, Any]] = []
     for b in _summary.current_budgets(doc or {}, today=today):
@@ -1839,6 +1855,16 @@ def _budget_policy() -> dict[str, Any]:
     return {**pol, "on_budget_breach": "deny" if hard else "ask"}
 
 
+def _scoped_policy(org: Any, over: bool) -> dict[str, Any] | None:
+    """The policy a priced change is gated with: the budget policy when it
+    is over a budget, with the org model's thresholds for its team and
+    environment when a human confirmed any (_OrgLens.policy). None means the
+    gate's own default, exactly as before the org model."""
+    base = _budget_policy() if over else None
+    scoped = org.policy(base or load_policy())
+    return scoped if scoped is not None else base
+
+
 def _on_breach() -> tuple[str, str]:
     """(what a change over budget gets, which setting says so)."""
     env = os.getenv("FINOPS_GUARD_STOP_ON_BUDGET", "").strip().lower()
@@ -1854,23 +1880,27 @@ def _on_breach() -> tuple[str, str]:
     return str(load_policy().get("on_budget_breach") or "ask"), source
 
 
-def budget_status() -> dict[str, Any]:
+def budget_status(org_team: str | None = None) -> dict[str, Any]:
     """Which cloud budgets the guard checks priced changes against, and how
     fresh its spend figure is: the doctor's view of budget_lens.
 
     enforced      budgets in the current period a change can land in: total,
                   provider and service ones (placed by the command), team and
                   account ones when FINOPS_GUARD_TEAM / FINOPS_GUARD_ACCOUNT
-                  name them
+                  name them, or the org model scopes this directory to the
+                  team (org_status)
     not_enforced  team and account budgets nothing places a change in
     state         "fresh", "stale", "no_data" or "absent" (budget.summary.freshness)
     on_breach     "ask" or "deny", and on_breach_source, the setting behind it
+
+    `org_team` is the team the org model scopes this directory to, which a
+    priced change here is checked as when FINOPS_GUARD_TEAM is unset.
     """
     from .budget import summary as _summary
     doc = _summary.read_summary()
     fresh = _summary.freshness(doc)
     on_breach, source = _on_breach()
-    env = {"team": os.getenv("FINOPS_GUARD_TEAM", "").strip(),
+    env = {"team": os.getenv("FINOPS_GUARD_TEAM", "").strip() or (org_team or ""),
            "account": os.getenv("FINOPS_GUARD_ACCOUNT", "").strip()}
     enforced: list[dict[str, Any]] = []
     not_enforced: list[dict[str, Any]] = []
@@ -1892,6 +1922,41 @@ def budget_status() -> dict[str, Any]:
             "max_age_hours": fresh["max_age_hours"], "enforced": enforced,
             "not_enforced": not_enforced, "on_breach": on_breach,
             "on_breach_source": source, "summary_path": str(_summary.summary_path())}
+
+
+def org_status(cwd: str | None = None) -> dict[str, Any]:
+    """The doctor's view of the org model (finops.org): whether one is
+    loaded, where from, how many facts are confirmed and proposed, and the
+    team the guard scopes priced changes in `cwd` to. Never raises.
+
+    loaded       True when the org directory holds an org file or any fact applies
+                 (legacy ones from tag_rules.yaml or accounts.yaml included)
+    team         FINOPS_GUARD_TEAM, else the confirmed owner of this repo
+                 path; team_source says which
+    thresholds   the confirmed per-scope thresholds for that team, if any
+    """
+    out: dict[str, Any] = {"loaded": False}
+    try:
+        from . import guard_org
+        from .org.model import KNOWN_FILES
+        m = guard_org.load_model(cwd or os.getcwd())
+        counts = m.status_counts()
+        files = m.dir.is_dir() and any((m.dir / n).is_file() for n in KNOWN_FILES)
+        out.update(loaded=bool(files or m.facts), dir=str(m.dir),
+                   dir_source=m.dir_source, exists=m.dir.is_dir(),
+                   confirmed=counts["confirmed"], proposed=counts["proposed"],
+                   legacy=sum(1 for f in m.facts if f.origin == "legacy"),
+                   warnings=len(m.warnings))
+        env_team = os.getenv("FINOPS_GUARD_TEAM", "").strip()
+        team, source = ((env_team, "FINOPS_GUARD_TEAM") if env_team
+                        else guard_org.team_scope(m, cwd))
+        out.update(team=team, team_source=source)
+        t = m.threshold_for(team, None) if team else m.threshold_for(None, None)
+        if t:
+            out["thresholds"] = t
+    except Exception as exc:  # noqa: BLE001 - the doctor reports it, never dies of it
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
 
 
 def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str, undo: str = "") -> str:
@@ -1956,16 +2021,147 @@ def _budget_skip_note(lens: dict[str, Any] | None) -> str | None:
 _WARN_AT = 0.80
 
 
+class _OrgLens:
+    """One verdict's view of the org model (guard_org): the team scope, the
+    per-scope thresholds and the owner of what the command touches, each
+    computed at most once and only when asked, so an ordinary command never
+    imports finops.org.
+
+    Never raises. The first error switches the lens off and is kept in
+    `error`; _verdict_for then judges the call again with the lens off (the
+    guard as it was before the org model) and records the fail-open."""
+
+    def __init__(self, command: str, cwd: str | None, *, on: bool = True) -> None:
+        self.command, self.cwd, self.on = command, cwd, on
+        self.error: BaseException | None = None
+        self._memo: dict[str, Any] = {}
+
+    def _get(self, name: str, fn: Any, default: Any) -> Any:
+        if not self.on:
+            return default
+        if name not in self._memo:
+            try:
+                self._memo[name] = fn()
+            except Exception as exc:  # noqa: BLE001 - kept, judged again, recorded
+                self.error, self.on = exc, False
+                return default
+        return self._memo[name]
+
+    def _model(self) -> Any:
+        from . import guard_org
+        return self._get("model", lambda: guard_org.load_model(self.cwd), None)
+
+    def _subjects(self) -> list[str]:
+        from . import guard_org
+        m = self._model()
+        return self._get("subjects", lambda: guard_org.subjects(self.command, self.cwd, m)
+                         if m is not None else [], [])
+
+    def team(self) -> tuple[str | None, str | None]:
+        """(team, where it came from): FINOPS_GUARD_TEAM when set, else the
+        confirmed owner of the working directory's repo path."""
+        env = os.getenv("FINOPS_GUARD_TEAM", "").strip()
+        if env:
+            return env, "FINOPS_GUARD_TEAM"
+
+        def find() -> tuple[str | None, str | None]:
+            from . import guard_org
+            m = self._model()
+            return guard_org.team_scope(m, self.cwd) if m is not None else (None, None)
+        return self._get("team", find, (None, None))
+
+    def thresholds(self) -> dict[str, Any]:
+        """Confirmed per-scope thresholds for the team and the environments
+        the command touches, or {}."""
+        def find() -> dict[str, Any]:
+            from . import guard_org
+            m = self._model()
+            if m is None or not any(f.confirmed for f in m.by_kind("threshold")):
+                return {}
+            return guard_org.thresholds(m, self.team()[0],
+                                        guard_org.confirmed_envs(m, self._subjects()))
+        return self._get("thresholds", find, {})
+
+    def policy(self, base: dict[str, Any]) -> dict[str, Any] | None:
+        """`base` with the org model's thresholds in it, or None when the org
+        model sets none (the caller keeps its own policy)."""
+        t = self.thresholds()
+        if not t:
+            return None
+        pol = dict(base)
+        if "max_auto_monthly_usd" in t:
+            pol["max_auto_monthly_usd"] = t["max_auto_monthly_usd"]
+        if "velocity_cap_usd" in t:
+            pol["velocity_cap_monthly_usd"] = t["velocity_cap_usd"]
+        return pol
+
+    def whose(self, name: str) -> str:
+        """"for team payments": the scope whose confirmed threshold set
+        `name` ("max_auto_monthly_usd" or "velocity_cap_usd"), or ""."""
+        scope = (self.thresholds().get("scope") or {}).get(name)
+        if not scope:
+            return ""
+        kind, _, ident = str(scope).partition(":")
+        return "for the org" if kind == "org" else f"for {kind} {ident}"
+
+    def owner(self) -> Any:
+        def find() -> Any:
+            from . import guard_org
+            m = self._model()
+            return guard_org.owner(m, self._subjects()) if m is not None else None
+        return self._get("owner", find, None)
+
+
 def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
                  via: str = "", cwd: str | None = None) -> dict[str, Any]:
-    """The policy verdict, then what the ledger's recent history adds to it.
+    """The policy verdict, then what the ledger's recent history adds to it,
+    then the owner of what it touches when it asks or denies.
 
     A history check that fails leaves the policy verdict standing and puts the
     exception under "_history_error" for the caller to record as a fail-open:
-    a guard that cannot read its own ledger must not take a position."""
-    v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd)
+    a guard that cannot read its own ledger must not take a position. An org
+    model that fails the same way puts it under "_org_error", and the call is
+    judged again as if there were no org model."""
+    org = _OrgLens(command, cwd)
+    v = _judged(command, hit, context=context, via=via, cwd=cwd, org=org)
+    if org.error is not None:
+        err = org.error
+        v = _judged(command, hit, context=context, via=via, cwd=cwd,
+                    org=_OrgLens(command, cwd, on=False))
+        return {**v, "_org_error": err}
+    v = _with_owner(v, org)
+    if org.error is not None:
+        v = {**v, "_org_error": org.error}
+    return v
+
+
+def _with_owner(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
+    """An ask or a deny on a priced change or a one-way door names who owns
+    what it touches, when the org model says: "Owned by payments
+    (#payments-oncall).", or "Likely owned by ..." for a proposal. A citation
+    changes no decision, so an unconfirmed owner may be shown, marked."""
+    if v.get("decision") not in ("ask", "deny") or not v.get("reason"):
+        return v
+    if v.get("door") != "one_way" and not v.get("estimate"):
+        return v
+    r = org.owner()
+    if r is None:
+        return v
     try:
-        v = _check_history(v, command, via=via, cwd=cwd)
+        from . import guard_org
+        return {**v, "reason": f"{v['reason']} {guard_org.owner_words(r)}",
+                "owner": guard_org.owner_field(r)}
+    except Exception as exc:  # noqa: BLE001 - a citation never costs the verdict
+        org.error = exc
+        return v
+
+
+def _judged(command: str, hit: tuple[str, str], *, context: str | None, via: str,
+            cwd: str | None, org: _OrgLens) -> dict[str, Any]:
+    """_verdict_for without the owner: policy, history, the budget note."""
+    v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd, org=org)
+    try:
+        v = _check_history(v, command, via=via, cwd=cwd, org=org)
     except Exception as exc:
         v = {**v, "_history_error": exc}
     # A priced change whose budget went unchecked says so, whenever the
@@ -1978,7 +2174,8 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
 
 
 def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
-                    via: str = "", cwd: str | None = None) -> dict[str, Any]:
+                    via: str = "", cwd: str | None = None,
+                    org: _OrgLens | None = None) -> dict[str, Any]:
     """The policy verdict for one already-classified action. Always a dict:
     "allow" is a verdict too (the ledger records it, with its figure), and the
     public entry points turn it into None for their callers.
@@ -1987,10 +2184,13 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     whichever door the agent used. `command` is the shell form, which is what
     gets priced; `context` is the text searched for a production context
     (defaults to the command); `via` prefixes the reason with what an MCP call
-    amounts to, since the human never saw a command.
+    amounts to, since the human never saw a command. `org` is the org
+    model's view (team scope, per-scope thresholds); None judges without it.
     """
     door, action_type = hit
     lead = f"{via}. " if via else ""
+    if org is None:
+        org = _OrgLens(command, cwd, on=False)
 
     lens: dict[str, Any] | None = None
 
@@ -2037,13 +2237,20 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         # And through the budget: what is left of it this month, not only the
         # per-action threshold (budget_lens).
         est = estimate_command_monthly_cost(command, cwd=cwd)
-        lens = budget_lens(command, est)
+        lens = budget_lens(command, est, team=org.team()[0] if est is not None else None)
         if est is not None:
             over = lens is not None and lens["state"] == "over"
             gate = evaluate_action_gate(action_type,
                                         monthly_delta_usd=est.get("monthly_usd") or 0.0,
                                         cost_verdict="over_budget" if over else None,
-                                        policy=_budget_policy() if over else None)
+                                        policy=_scoped_policy(org, over))
+            whose = org.whose("max_auto_monthly_usd")
+            if gate.get("rule") == "threshold" and whose:
+                # Say whose threshold it is when it is not the policy's own.
+                gate = {**gate, "reason": re.sub(
+                    r"your (\$[\d,]+) auto threshold",
+                    lambda m: f"the {m.group(1)} auto threshold {whose} (org model)",
+                    str(gate.get("reason") or ""), count=1)}
             if gate.get("gate") != GATE_ALLOW:
                 if gate.get("rule") == "over_budget" and lens is not None:
                     hard, why, undo = _budget_hard_stop()
@@ -2070,18 +2277,21 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
             # Allowed, but close to the line: say so without stopping anyone.
             # "warn" never changes the permission flow; the hook shows the
             # figure and the call proceeds exactly as an allow would.
-            cap = float(load_policy().get("max_auto_monthly_usd", 500.0))
+            pol = org.policy(load_policy()) or load_policy()
+            cap = float(pol.get("max_auto_monthly_usd", 500.0))
             monthly = est.get("monthly_usd") or 0.0
+            whose = org.whose("max_auto_monthly_usd")
             if cap > 0 and monthly >= _WARN_AT * cap:
-                return verdict("warn", f"{_cost_line(est)}, {monthly / cap:.0%} of your "
-                               f"${cap:,.0f}/mo auto threshold. Proceeding without a prompt.",
-                               est=est)
+                line = (f"the ${cap:,.0f}/mo auto threshold {whose} (org model)" if whose
+                        else f"your ${cap:,.0f}/mo auto threshold")
+                return verdict("warn", f"{_cost_line(est)}, {monthly / cap:.0%} of {line}. "
+                               "Proceeding without a prompt.", est=est)
         return allowed(est)
 
     # One-way doors escalate whatever they cost, but the human deciding on a
     # Savings Plan should see the commitment in the same breath as the question.
     est = estimate_command_monthly_cost(command, cwd=cwd)
-    lens = budget_lens(command, est)
+    lens = budget_lens(command, est, team=org.team()[0] if est is not None else None)
     over = lens is not None and lens["state"] == "over"
     cost = f"{_cost_line(est)}. " if est else ""
     if destroys:
@@ -2091,7 +2301,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0,
                                 cost_verdict="over_budget" if over else None,
-                                policy=_budget_policy() if over else None)
+                                policy=(_scoped_policy(org, over) if est is not None
+                                        else _budget_policy() if over else None))
     if over and gate.get("rule") != "allowlist":
         # A commitment that breaks the budget: the budget sentence travels with
         # whatever else the gate said, and a hard stop makes it a deny.
@@ -2211,10 +2422,11 @@ _HISTORY_LISTED = 5
 
 
 def _check_history(v: dict[str, Any], command: str, *, via: str = "",
-                   cwd: str | None = None) -> dict[str, Any]:
+                   cwd: str | None = None, org: _OrgLens | None = None) -> dict[str, Any]:
     """`v` upgraded to an ask when recent history says so, else `v` unchanged
     apart from its loop key. May raise; _verdict_for turns that into a
-    fail-open."""
+    fail-open. The velocity cap is the org model's for this team or
+    environment when a human confirmed one (`org`)."""
     if v.get("action_type") == "infra_apply":
         key = loop_key(command, cwd=cwd)
         if key is not None:
@@ -2223,6 +2435,13 @@ def _check_history(v: dict[str, Any], command: str, *, via: str = "",
         return v
     pol = load_policy()
     new = (v.get("estimate") or {}).get("monthly_usd")
+    whose = ""
+    if org is not None and isinstance(new, (int, float)) and new > 0:
+        scoped = org.policy(pol)
+        if scoped is not None and velocity_cap(scoped) != velocity_cap(pol):
+            whose = (org.whose("velocity_cap_usd")
+                     or org.whose("max_auto_monthly_usd"))
+            pol = scoped
     cap = velocity_cap(pol)
     vel_window = float(pol.get("velocity_window_minutes") or 0.0)
     velocity_on = isinstance(new, (int, float)) and new > 0 and cap > 0 and vel_window > 0
@@ -2242,7 +2461,7 @@ def _check_history(v: dict[str, Any], command: str, *, via: str = "",
     if velocity_on:
         since = _minutes_ago(vel_window)
         why = _velocity_reason(v, [r for r in recent if str(r.get("ts", "")) >= since],
-                               new=float(new), cap=cap, window=vel_window)
+                               new=float(new), cap=cap, window=vel_window, whose=whose)
         if why:
             found.append(("velocity", why))
     if not found:
@@ -2425,9 +2644,10 @@ def _listed(recs: list[dict[str, Any]]) -> str:
 
 
 def _velocity_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, new: float,
-                     cap: float, window: float) -> str | None:
+                     cap: float, window: float, whose: str = "") -> str | None:
     """The velocity cap: priced monthly run-rate let through in the window,
-    plus this action, over the cap."""
+    plus this action, over the cap. `whose` names the org model scope that
+    set the cap ("for team payments"), when one did."""
     counted = [r for r in recent
                if r.get("decision") in _LET_THROUGH
                and isinstance(r.get("monthly_usd"), (int, float)) and r["monthly_usd"] > 0]
@@ -2440,6 +2660,9 @@ def _velocity_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, new: fl
             f"last {window:g} minutes ({n} action{'s' if n != 1 else ''}: {_listed(counted)}), "
             f"that is ~{_usd(total + new)}/mo in {window:g} minutes"
             if counted else f"{_cost_line(est)}, on its own")
+    if whose:
+        return (f"{head}, over the {_usd(cap)}/mo velocity cap per {window:g} minutes "
+                f"{whose} (org model). Confirm to proceed.")
     return (f"{head}, over your {_usd(cap)}/mo velocity cap per {window:g} minutes. "
             "Confirm to proceed, or raise FINOPS_POLICY_VELOCITY_CAP_USD.")
 
@@ -2502,11 +2725,15 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
             # still shows (unrecorded; it is not a decision about this call).
             return {**note, "harness": harness} if note else None
         history_error = v.pop("_history_error", None) if v is not None else None
+        org_error = v.pop("_org_error", None) if v is not None else None
         answer, recorded = _against_budget(v, stop)
         if record:
             if history_error is not None:
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
                                   check="history", session_id=session_id)
+            if org_error is not None:
+                _record_fail_open(org_error, harness=harness, tool=tool, command=command,
+                                  check="org", session_id=session_id)
             if stop is not None:
                 _record({**stop, "harness": harness}, tool=tool, command=command,
                         session_id=session_id)
@@ -2647,6 +2874,11 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                     _record_fail_open(history_error, harness=harness, tool=tool_name,
                                       command=act.command, check="history",
                                       session_id=session_id)
+                org_error = v.pop("_org_error", None)
+                if org_error is not None and record:
+                    _record_fail_open(org_error, harness=harness, tool=tool_name,
+                                      command=act.command, check="org",
+                                      session_id=session_id)
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
         if worst is None and stop is None:
@@ -2680,7 +2912,7 @@ _BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session
 # against (budget_lens): raising or deleting one lifts the budget stop just as
 # surely. Any call asks.
 _CLOUD_BUDGET_TOOLS = ("set_budget", "delete_budget", "sync_budgets_from_yaml")
-_CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change")
+_CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change", "org_change")
 _SHOWN_VALUE_MAX = 80
 
 
@@ -2715,7 +2947,8 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
 # `nable budget ci-gate --budget-file ...` (it syncs the file's budgets
 # first), and taking the guard out (`nable guard uninstall`, `nable guard
 # off`, `nable uninstall`). An agent stopped by a budget could otherwise lift it, or remove
-# the hook, in one command. `budget status` and `refresh` only read.
+# the hook, in one command. `budget status` and `refresh` only read. And
+# `nable org confirm|reject|set`, which record a person's decision.
 _NABLE = r"(?<![\w-])(?:nable|finops)\s"
 _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for r, action, what in (
     (_VerbWithFlag("ai-budget-change", _NABLE, rf"(?<!\S)ai-budget{_END}",
@@ -2731,6 +2964,17 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
      "guard_change", "turning the guard off"),
     (_VerbWithFlag("nable-uninstall", _NABLE, rf"(?<!\S)uninstall{_END}", r""),
      "guard_change", "uninstalling nable, the guard's hook with it"),
+    # Confirming, rejecting or setting an org fact is a person's decision, and
+    # a confirmed fact can change which budget and threshold apply. The CLI
+    # refuses without a terminal unless --as names someone, so an agent could
+    # otherwise sign a person's name. Reading (status, review, questions,
+    # export) stays silent.
+    (_VerbWithFlag("org-decide", _NABLE, rf"(?<!\S)org{_END}",
+                   rf"\s(?:confirm|reject|set){_END}"),
+     "org_change", "deciding an org model fact for a person"),
+    (_VerbWithFlag("org-decide-module", r"(?<![\w.-])finops\.org\.cli(?![\w.])",
+                   rf"(?<!\S)(?:confirm|reject|set){_END}", r""),
+     "org_change", "deciding an org model fact for a person"),
 )}
 
 
@@ -2846,6 +3090,11 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # What the budget lens found for a priced change: the figures
             # behind an over-budget stop, or why the budget went unchecked.
             **({"budget_check": v["budget_check"]} if v.get("budget_check") else {}),
+            # Who owns what the call touched, when the org model said (cited
+            # in the reason too); confirmed False marks a proposal.
+            **({"owner": {k: (guard_ledger.redact(str(x), limit=100)
+                              if isinstance(x, str) else x)
+                          for k, x in v["owner"].items()}} if v.get("owner") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
@@ -3557,7 +3806,16 @@ def doctor() -> dict[str, Any]:
                     "could not be written (permissions, a full disk)")
         fix(f"check what holds {ledger['path']} (lsof), then remove {lost['path']}",
             "records the guard could not write")
-    budgets = budget_status()
+    org = org_status()
+    org_team = org.get("team") if org.get("team_source") != "FINOPS_GUARD_TEAM" else None
+    if org_team:
+        covered.append(f"priced changes here as team {org_team} (the org model's confirmed "
+                       f"owner of this repo path): its budgets and thresholds")
+    if org.get("error"):
+        gaps.append(f"the org model: it could not be read ({org['error']}), so the guard "
+                    "judges as if there were none")
+        fix("nable org status", "shows which org file is at fault")
+    budgets = budget_status(org_team)
     if budgets["state"] == "fresh" and budgets["enforced"]:
         n = len(budgets["enforced"])
         covered.append(f"priced changes against {n} cloud budget{'s' if n != 1 else ''} "
@@ -3598,6 +3856,7 @@ def doctor() -> dict[str, Any]:
         "mcp_tools": families,
         "ledger": ledger,
         "budgets": budgets,
+        "org": org,
         "background_refresh": refresh,
         "policy_problems": problems,
         "recommendations": fixes,

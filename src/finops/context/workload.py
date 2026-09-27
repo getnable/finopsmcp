@@ -25,11 +25,19 @@ lets this ship on by default.
 the caller. A classifier that reports its guesses as facts is how "failed read
 becomes a number" gets into a product, and callers need to be able to say "no
 signal" rather than "production".
+
+The org model (finops.org) comes first when the caller names an account or a
+namespace: an environment a human confirmed for it is the answer, before any
+of the signals below. An environment fact nobody has confirmed is a guess,
+and product-wide a nonprod label is what makes a thing eligible for
+schedules and spot, so a guess may only move a result toward "prod" or
+"unknown", never toward "nonprod".
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 # Values that appear in an Environment/Stage tag. Ordered longest-first inside
 # each class at match time so "preprod" never matches as "prod".
@@ -131,6 +139,45 @@ def _scan(label: str, value: str) -> tuple[str, str] | None:
     return None
 
 
+# The org model's environments, as this module's kinds. DR and shared
+# platforms are production for every purpose here: nothing about them says
+# "people may make a mess". "unknown" says nothing, so it decides nothing.
+_ORG_KIND = {"prod": "prod", "dr": "prod", "shared": "prod", "nonprod": "nonprod",
+             "sandbox": "nonprod"}
+
+
+def _org_environments(model: Any, account_id: str | None, provider: str,
+                      namespace: str | None, cluster: str | None
+                      ) -> list[tuple[str, bool, str]]:
+    """(kind, confirmed, evidence) for each org environment fact about the
+    namespace and the account, namespace first. Never raises."""
+    subjects: list[str] = []
+    if namespace:
+        subjects.append(f"k8s_namespace:{cluster}/{namespace}" if cluster
+                        else f"k8s_namespace:{namespace}")
+    if account_id:
+        kind = {"gcp": "gcp_project", "azure": "azure_subscription"}.get(
+            (provider or "aws").lower(), "aws_account")
+        subjects.append(f"{kind}:{account_id}")
+    if not subjects or model is False:
+        return []
+    try:
+        if model is None:
+            from .. import org
+            model = org.load()
+        out = []
+        for s in subjects:
+            env, confirmed = model.environment_of(s)
+            if env in _ORG_KIND:
+                how = "confirmed" if confirmed else "proposed, not confirmed"
+                kind, _, ident = s.partition(":")
+                words = f"org model: {kind.replace('_', ' ')} {ident} is {env} ({how})"
+                out.append((_ORG_KIND[env], confirmed, words))
+        return out
+    except Exception:  # noqa: BLE001 - the heuristics below still answer
+        return []
+
+
 def classify(
     *,
     tags: dict | None = None,
@@ -138,6 +185,9 @@ def classify(
     namespace: str | None = None,
     resource_name: str | None = None,
     cluster: str | None = None,
+    account_id: str | None = None,
+    provider: str = "aws",
+    org: Any = None,
 ) -> WorkloadContext:
     """Read every signal on hand and return the strongest one.
 
@@ -146,7 +196,38 @@ def classify(
     other is a naming habit. When two signals of the same weight disagree, the
     non-production one wins: holding back a pull request on a production box
     costs a day, opening one against somebody's live fleet costs their trust.
+
+    Before any of that, an environment the org model has confirmed for the
+    namespace or the account (`account_id`, of `provider`) is the answer.
+    `org` is a loaded OrgModel, to read it once for many calls; without one
+    it is loaded here, and only when there is an account or namespace to ask
+    about; False skips it. A proposed environment fact may move the result toward "prod" or
+    "unknown", never toward "nonprod".
     """
+    facts = _org_environments(org, account_id, provider, namespace, cluster)
+    sure = [(k, e) for k, c, e in facts if c]
+    if sure:
+        return WorkloadContext(sure[0][0], [sure[0][1]])
+    ctx = _heuristics(tags=tags, account_name=account_name, namespace=namespace,
+                      resource_name=resource_name, cluster=cluster)
+    guess = next(((k, e) for k, c, e in facts if k == "prod"), None)
+    if guess is None or ctx.kind == "prod":
+        return ctx
+    if ctx.kind == "unknown":
+        return WorkloadContext("prod", [guess[1]])
+    # The heuristics say nonprod and a guess says prod: neither wins.
+    return WorkloadContext("unknown", [*ctx.evidence, guess[1]])
+
+
+def _heuristics(
+    *,
+    tags: dict | None = None,
+    account_name: str | None = None,
+    namespace: str | None = None,
+    resource_name: str | None = None,
+    cluster: str | None = None,
+) -> WorkloadContext:
+    """classify() from the account's own signals, without the org model."""
     ranked: list[tuple[int, str, str]] = []   # (weight, kind, evidence)
 
     for key, value in (tags or {}).items():

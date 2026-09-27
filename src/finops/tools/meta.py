@@ -732,6 +732,10 @@ def list_savings_recommendations(
                                         "Call get_recommendation_learning() for the why.")
         except Exception as exc:
             _srv.log.debug("learning rescore skipped in list_savings_recommendations: %s", exc)
+    # Who owns each one, when the org model says (team, channel, confirmed):
+    # by its tags, then its account. Never fails the listing.
+    from ..org_owner import annotate
+    annotate(out["recommendations"])
     return out
 
 

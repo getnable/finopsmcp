@@ -59,9 +59,9 @@ def _mtime_date(p: Path) -> str | None:
 def _read_yaml(p: Path, warnings: list[str] | None) -> Any:
     if not p.is_file():
         return None
-    import yaml
+    from .store import safe_yaml
     try:
-        return yaml.safe_load(p.read_text(encoding="utf-8"))
+        return safe_yaml(p.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001 - a broken legacy file is a warning
         _warn(warnings, f"{p}: not readable as YAML ({type(e).__name__}); no legacy facts from it")
         return None

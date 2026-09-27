@@ -232,7 +232,11 @@ async def audit_aws_waste(
         all_findings = report.get("findings") or []
         if all_findings:
             kept, omitted = _srv.fit_to_budget(all_findings, max_tokens=6000)
-            report["findings"] = kept
+            # Each kept finding with its owner when the org model names one
+            # (by tags, then account). Annotated after the cut so the budget
+            # decides what is shown, not the owner field.
+            from ..org_owner import annotate
+            report["findings"] = annotate(kept, context={"account_id": report.get("account_id")})
             if omitted > 0:
                 report["findings_truncated"] = (
                     f"Showing top {len(kept)} of {len(all_findings)} findings by monthly "
@@ -987,7 +991,16 @@ async def list_idle_resources(
         except Exception:
             pass
 
-        return idle_resources_summary(resources)
+        summary = idle_resources_summary(resources)
+        # The owner of each listed resource, by its tags and account, when the
+        # org model names one. The summary rows leave both out; look them up.
+        from ..org_owner import annotate
+        where = {r.resource_id: {"account_id": r.account_id,
+                                 "tags": (r.metadata or {}).get("tags")}
+                 for r in resources}
+        annotate(summary.get("resources") or [],
+                 context=lambda row: where.get(row.get("resource_id")))
+        return summary
     except Exception as e:
         return {"error": str(e)}
 
@@ -1181,6 +1194,10 @@ async def scan_waste_patterns(
 
         result = scan_dict(ctx, min_monthly_waste=min_monthly_waste, categories=cat_list)
         result["account_id"] = account_id
+        from ..org_owner import owner_for
+        acct_owner = owner_for({"account_id": account_id})
+        if acct_owner is not None:
+            result["owner"] = acct_owner.compact()
         result["note"] = (
             "Findings based on cost time-series only. "
             "Connect EC2/RDS/Lambda metadata for higher-confidence results."
