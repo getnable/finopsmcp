@@ -447,3 +447,34 @@ def test_hourly_price_used_here_is_the_list_price():
     # The figures above assume these list prices; a price table change should
     # fail here, not in a threshold test.
     assert EC2_HOURLY["m5.2xlarge"] * 730 == pytest.approx(280.32, abs=0.5)
+
+
+# ── where a threshold came from ──────────────────────────────────────────────
+
+def test_the_ledger_records_the_org_thresholds_a_verdict_used(repo):
+    confirmed("owner", "repo_path:infra/payments", {"team": "payments"})
+    confirmed("threshold", "team:payments", {"max_auto_monthly_usd": 100})
+    v = g.gate_command(M5_2XL, cwd=str(repo / "infra" / "payments"))
+    assert v["decision"] == "ask"
+    rec = _records()[-1]
+    assert rec["org_thresholds"]["max_auto_monthly_usd"] == 100
+    assert rec["org_thresholds"]["scope"]["max_auto_monthly_usd"] == "team:payments"
+
+
+def test_a_threshold_from_a_repo_org_dir_names_its_file(repo, monkeypatch):
+    """A repo's own nable.org/, trusted by a person, sets the team's
+    threshold: the ask says which file, so a person can see a repo set it."""
+    from finops.org import store
+    monkeypatch.chdir(repo)
+    (repo / "nable.org").mkdir()
+    monkeypatch.delenv("FINOPS_ORG_DIR", raising=False)
+    store.trust(repo, human("maria"))
+    d = repo / "nable.org"
+    org.set_fact(org.make_fact("owner", "repo_path:infra/payments", {"team": "payments"},
+                               source="human"), human("maria"), dir=d)
+    org.set_fact(org.make_fact("threshold", "team:payments", {"max_auto_monthly_usd": 100},
+                               source="human"), human("maria"), dir=d)
+    lens = g._OrgLens(M5_2XL, str(repo / "infra" / "payments"))
+    words = lens.whose("max_auto_monthly_usd")
+    assert words.startswith("for team payments")
+    assert "nable.org" in words

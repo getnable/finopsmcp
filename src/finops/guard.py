@@ -2099,7 +2099,10 @@ def org_status(cwd: str | None = None) -> dict[str, Any]:
         team, source = ((env_team, "FINOPS_GUARD_TEAM") if env_team
                         else guard_org.team_scope(m, cwd))
         out.update(team=team, team_source=source)
-        t = m.threshold_for(team, None) if team else m.threshold_for(None, None)
+        # What the guard would apply: confirmed only, and a repo that is not
+        # trusted may only lower a figure (guard_org.thresholds), never the
+        # raw file contents.
+        t = guard_org.thresholds(m, team, [])
         if t:
             out["thresholds"] = t
     except Exception as exc:  # noqa: BLE001 - the doctor reports it, never dies of it
@@ -2244,13 +2247,19 @@ class _OrgLens:
         return pol
 
     def whose(self, name: str) -> str:
-        """"for team payments": the scope whose confirmed threshold set
-        `name` ("max_auto_monthly_usd" or "velocity_cap_usd"), or ""."""
-        scope = (self.thresholds().get("scope") or {}).get(name)
-        if not scope:
+        """"for team payments (in /repo/nable.org/policy.yaml)": the scope
+        whose confirmed threshold set `name` ("max_auto_monthly_usd" or
+        "velocity_cap_usd") and the file it is in, or ""."""
+        t = self.thresholds()
+        if not t:
             return ""
-        kind, _, ident = str(scope).partition(":")
-        return "for the org" if kind == "org" else f"for {kind} {ident}"
+        from . import guard_org
+        # Name the file when the figure came from a repo's nable.org/, so a
+        # person can see a repo set it; the user's own org dir goes unnamed.
+        where = (t.get("files") or {}).get(name) or ""
+        if "nable.org" not in Path(where).parts:
+            t = {**t, "files": {}}
+        return guard_org.whose(t, name)
 
     def owner(self) -> Any:
         def find() -> Any:
@@ -2280,6 +2289,10 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     v = _with_owner(v, org)
     if org.error is not None:
         v = {**v, "_org_error": org.error}
+    elif org.on and org._memo.get("thresholds"):
+        # The org model's thresholds were in force for this verdict: the
+        # ledger keeps which figures, from which scope and which file.
+        v = {**v, "org_thresholds": org._memo["thresholds"]}
     return v
 
 
@@ -4344,6 +4357,12 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             **({"owner": {k: (guard_ledger.redact(str(x), limit=100)
                               if isinstance(x, str) else x)
                           for k, x in v["owner"].items()}} if v.get("owner") else {}),
+            # The org model thresholds the verdict was judged with: figures,
+            # the scope that set each, and the file each came from.
+            **({"org_thresholds": {k: (guard_ledger.redact(str(x), limit=300)
+                                       if isinstance(x, str) else x)
+                                   for k, x in v["org_thresholds"].items()}}
+               if v.get("org_thresholds") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
