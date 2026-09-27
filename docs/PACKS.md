@@ -279,9 +279,9 @@ A secret's value is read from a prompt (not echoed) or from stdin, never
 from the command line. A setting's may be given on the command line (or,
 left out, from stdin or a prompt); `nable pack setting set` refuses a name
 the installed pack declares as a secret, so a credential never goes through
-argv. `nable pack secret set` also stores a declared setting (the same vault
-entry), which is how a value stored before a pack moved a name to
-`settings` keeps working. Neither is ever read from nable's environment or
+argv. Both commands write the same vault entry, so a value stored with
+`nable pack secret set` before a pack moved the name to `settings` keeps
+working. Neither is ever read from nable's environment or
 its provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack
 the keys nable itself uses. Cloud credential names are refused at validation for
 every pack that is not first-party: `AWS_*`, `GOOGLE_*`, `CLOUDSDK_*`,
