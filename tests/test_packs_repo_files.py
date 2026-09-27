@@ -90,7 +90,7 @@ def test_repo_files_are_shown_diffed_and_need_approval_again():
 
 
 def test_the_broker_refuses_a_file_the_pack_did_not_declare(repo):
-    (repo / "terraform.tfstate").write_text('{"secret": "state"}')
+    (repo / "terraform.tfstate").write_text('{"resources": []}')
     (repo / ".github").mkdir()
     (repo / ".github" / "CODEOWNERS").write_text("* @acme/platform")
     (repo / "CODEOWNERS").write_text("* @acme/root")
