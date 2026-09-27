@@ -380,7 +380,7 @@ def test_a_shared_entry_keeps_its_matcher_and_ours_moves_out(settings):
     assert pre[0] == {"matcher": "Bash",
                       "hooks": [{"type": "command", "command": "other-tool check"}]}
     assert pre[1]["matcher"] == g._HOOK_MATCHER
-    assert pre[1]["hooks"][0]["command"] == g._UVX_HOOK_CMD
+    assert pre[1]["hooks"][0]["command"] == g._UVX_HOOK_CMD + "; exit 0"
     g.install()
     assert len(json.loads(settings.read_text())["hooks"]["PreToolUse"]) == 2, "not idempotent"
     g.uninstall()
@@ -395,7 +395,8 @@ def test_status_says_when_mcp_calls_are_not_checked(settings, monkeypatch):
 
     from finops import setup_wizard
     settings.write_text(json.dumps({"hooks": {"PreToolUse": [
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": g._UVX_HOOK_CMD,
+        {"matcher": "Bash", "hooks": [{"type": "command",
+                                       "command": g._UVX_HOOK_CMD + "; exit 0",
                                        "timeout": 30}]}]}}))
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -406,7 +407,8 @@ def test_status_says_when_mcp_calls_are_not_checked(settings, monkeypatch):
 
 def test_a_hand_written_matcher_is_left_alone(settings):
     body = json.dumps({"hooks": {"PreToolUse": [
-        {"matcher": "Bash|Write", "hooks": [{"type": "command", "command": g._UVX_HOOK_CMD,
+        {"matcher": "Bash|Write", "hooks": [{"type": "command",
+                                             "command": g._UVX_HOOK_CMD + "; exit 0",
                                              "timeout": 30}]}]}}, indent=2)
     settings.write_text(body)
     g.install()

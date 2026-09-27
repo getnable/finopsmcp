@@ -126,7 +126,7 @@ def test_install_marker_matches_all_command_forms(tmp_path, monkeypatch):
             path = guard.install(global_scope=False)
             written = json.loads(path.read_text())
             hook = written["hooks"]["PreToolUse"][0]["hooks"][0]
-            assert hook["command"] == resolved
+            assert hook["command"] == resolved + "; exit 0"     # fail-safe, every form
             assert hook["timeout"] == timeout
             assert guard.is_installed(path)      # marker finds every form
             assert guard.uninstall(global_scope=False)
