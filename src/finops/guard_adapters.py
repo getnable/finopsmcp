@@ -1655,19 +1655,23 @@ def plugin_sees_editor() -> bool | None:
     tools: its hooks.json under Claude Code's plugins directory, read for the
     matcher. None when it cannot be found (an unusual layout), or when
     Claude Code keeps several releases of it that disagree (which one runs
-    is Claude Code's to say). Read-only, bounded, never raises; for the
-    doctor, not the hook."""
+    is Claude Code's to say). A hooks.json that cannot be read is skipped:
+    another plugin's broken file says nothing about nable's. Read-only,
+    bounded, never raises; for the doctor, not the hook."""
     found: set[bool] = set()
     try:
         root = guard_plugin.claude_user_dir() / "plugins"
-        seen = 0
-        for dirpath, dirnames, filenames in os.walk(root):
-            seen += 1
-            if seen > 2000:
-                break
-            dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
-            if "hooks.json" not in filenames or Path(dirpath).name != "hooks":
-                continue
+    except (OSError, ValueError, RuntimeError):
+        return None
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root):     # os.walk skips what it cannot read
+        seen += 1
+        if seen > 2000:
+            break
+        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
+        if "hooks.json" not in filenames or Path(dirpath).name != "hooks":
+            continue
+        try:
             doc = json.loads((Path(dirpath) / "hooks.json").read_text(encoding="utf-8"))
             for group in ((doc.get("hooks") or {}).get("PreToolUse") or []):
                 cmds = [h.get("command") for h in group.get("hooks") or [] if isinstance(h, dict)]
@@ -1675,8 +1679,8 @@ def plugin_sees_editor() -> bool | None:
                        and "finops" in c for c in cmds):
                     found.add(all(guard_plugin.matcher_covers(group.get("matcher"), t)
                                   for t in guard_plugin.EDITOR_TOOLS))
-    except Exception:
-        return None
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue                    # this file is broken; the others still count
     return found.pop() if len(found) == 1 else None
 
 
