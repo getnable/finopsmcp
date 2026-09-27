@@ -201,6 +201,29 @@ def test_a_pack_reason_joins_the_guards_own_ask(packs_env, tmp_path):
     assert "Destroys are change requests under CC8.1 (rule ask-destroy-always" in v["reason"]
 
 
+def test_a_command_too_long_to_read_is_not_read_whole_for_the_freeze(monkeypatch):
+    # The guard does not read past MAX_JUDGED_CHARS of a command, because the
+    # hook would time out; the freeze lookup (which parses the command for
+    # what it touches) must not either.
+    rule = GuardRule("r1", "command", re.compile(r"\bkubectl\s+apply\b"), "deny", "Wait.",
+                     pack="p", during="freeze")
+    monkeypatch.setattr(gpk, "state", lambda: {"rules": [rule], "guard_problems": []})
+    seen: list[int] = []
+    sure = {"sure": True, "words": "A change freeze is in force.", "key": "k1"}
+
+    def lookup(cwd):
+        def freeze_of(command):
+            seen.append(len(command or ""))
+            return sure
+        return freeze_of
+    monkeypatch.setattr(g, "_freeze_lookup", lookup)
+    huge = "kubectl apply -f d.yaml && echo " + "-n x " * (g.MAX_JUDGED_CHARS // 2)
+    base = {"decision": "ask", "reason": "nable guard: too long.", "action_type": "oversize"}
+    v, error, _ = g._with_packs(base, forms=(huge,))
+    assert error is None and v["decision"] == "deny"
+    assert seen and max(seen) <= g.MAX_JUDGED_CHARS
+
+
 def test_an_mcp_rule_during_a_freeze_sees_the_freeze_over_any_command_it_runs(monkeypatch):
     # An MCP call that amounts to several commands is under a freeze when any
     # of them is: the freeze over the second command counts as much as one

@@ -3124,8 +3124,12 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = ()
         worst = base
         freeze_of = _freeze_lookup(cwd) if any(getattr(r, "during", None) for r in rules) \
             else None
+        # A form is a command too long to read whole: the freeze over it is
+        # read from as much of it as the guard reads, or the lookup (which
+        # parses what it touches) would run past the hook's timeout.
         results = [tighten(base, rules, command=f,
-                           freeze=(lambda f=f: freeze_of(f)) if freeze_of else None)
+                           freeze=(lambda f=f: freeze_of(f[:MAX_JUDGED_CHARS]))
+                           if freeze_of else None)
                    for f in forms]
         for c in commands:
             results += _pack_command_results(base, rules, tighten, c, freeze_of)
