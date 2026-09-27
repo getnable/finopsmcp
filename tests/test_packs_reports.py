@@ -334,6 +334,22 @@ def test_the_ai_window_counts_local_days():
     assert end == today and days == (today - since.astimezone().date()).days
 
 
+def test_a_pack_with_commitment_bounds_beside_its_rules_still_reports(packs_env, tmp_path):
+    # A policy file may hold commitment_bounds as well as rules; the report's
+    # policy check reads the rules and passes over the bounds.
+    src = make_pack(tmp_path / "src", capabilities='read_data = ["focus.cost"]\n',
+                    provides='policies = ["policies/*.yaml"]\nreports = ["reports/*.md"]\n')
+    (src / "policies" / "rules.yaml").write_text(
+        (src / "policies" / "rules.yaml").read_text() +
+        "commitment_bounds:\n  - id: cap\n    description: At most 12 months.\n"
+        "    max_term_months: 12\n")
+    (src / "reports").mkdir()
+    (src / "reports" / "r.md").write_text("${ai.policy_findings}")
+    inst.install(str(src), yes=True)
+    lines = reports._policy_lines("io.github.example/demo", {"monthly_delta_usd": 5000})
+    assert lines == ["- medium (flag, rule big-increase): adds 5000/mo"]
+
+
 def test_set_cannot_stand_in_for_the_ai_source(packs_env, tmp_path, filled):
     pid = _pack(tmp_path, caps='read_data = ["focus.cost"]\n', reports_={"r.md": AI_TEMPLATE})
     with pytest.raises(PackError, match="data scope"):

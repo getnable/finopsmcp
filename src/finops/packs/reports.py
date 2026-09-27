@@ -128,7 +128,7 @@ def _policy_lines(pack_id: str, finding: dict[str, Any]) -> list[str]:
     from .runtime import active
     lines = []
     for rule in active("policies"):
-        if rule.pack != pack_id or rule.applies_to != "finding":
+        if rule.pack != pack_id or getattr(rule, "applies_to", None) != "finding":
             continue
         hit = rule.evaluate(finding)
         if hit:
