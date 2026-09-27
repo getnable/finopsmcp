@@ -28,7 +28,7 @@ status      = "active"
 
 # repo.files: catalog-info.yaml files nable reads from the repos org init
 #   reads, handed over as text (the backstage adapter needs no network).
-# secrets: each from this pack's own vault entries, never the environment.
+# Each secret comes from this pack's own vault entry, never the environment.
 #   BACKSTAGE_URL and BACKSTAGE_TOKEN are optional (the catalog API);
 #   GITHUB_API_URL is optional (GitHub Enterprise Server).
 # network: only the GitHub API. A Backstage or Enterprise Server host is the

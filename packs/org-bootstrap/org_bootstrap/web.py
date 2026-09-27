@@ -76,7 +76,8 @@ def get_json(url: str, token: str | None, *, accept: str = "application/json",
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     path = urllib.parse.urlsplit(url).path
     try:
-        with opener.open(req, timeout=TIMEOUT_S) as resp:  # nosec B310 - https or loopback only, checked by url_problem
+        # https, or http to this machine only: the callers check url_problem first.
+        with opener.open(req, timeout=TIMEOUT_S) as resp:  # nosec B310
             body = resp.read(MAX_BODY_BYTES + 1)
             got = {k.lower(): v for k, v in resp.headers.items()}
     except urllib.error.HTTPError as e:
