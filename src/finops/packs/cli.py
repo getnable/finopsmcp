@@ -26,6 +26,9 @@
                                          its own vault namespace (the value is
                                          read from a prompt or stdin, never argv)
     nable pack secret remove <ns/name> <NAME>
+    nable pack report <ns/name> [<report>] [--days N]
+                                         fill an installed pack's report template
+                                         from data nable already has (reports.py)
 
 Exit codes: 0 done, 1 refused or failed (nothing changed), 2 usage.
 """
@@ -100,11 +103,17 @@ def add_parser(sub) -> None:
                     help="window end, exclusive (default today)")
     rn.add_argument("--timeout", dest="pack_timeout", type=float, default=None,
                     metavar="SECONDS", help="stop the pack after this long")
+    rp = ps.add_parser("report", help="Fill an installed pack's report template from nable's data")
+    rp.add_argument("pack_id", metavar="ns/name")
+    rp.add_argument("report_name", nargs="?", default=None, metavar="REPORT",
+                    help="the report's path or file name (default: the pack's only report)")
+    rp.add_argument("--days", dest="pack_days", type=int, default=30, metavar="N",
+                    help="the window, in days up to today (default 30)")
     sec = ps.add_parser("secret", help="Store or remove a secret a code pack declares")
     sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
     sec.add_argument("pack_id", metavar="ns/name")
     sec.add_argument("env_var_name", metavar="NAME")
-    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, sec, ps.choices["audit"]):
+    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, rp, sec, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
     for sp in (i, u, r):
@@ -436,6 +445,13 @@ def run(parsed) -> int:
             return _run_code(parsed, as_json)
         if action == "secret":
             return _secret(parsed, as_json)
+        if action == "report":
+            from .reports import render as render_report
+            r = render_report(parsed.pack_id, parsed.report_name, days=parsed.pack_days)
+            body = {"ok": True, **{k: v for k, v in r.items() if k != "values"}}
+            _out(body, as_json, safe_text(r["text"]).rstrip()
+                 + "".join(f"\n\n  note: {n}" for n in r["notes"]))
+            return EXIT_OK
         if action == "new":
             root = inst.new_pack(parsed.name, parsed.pack_dir, namespace=parsed.pack_namespace)
             _out({"ok": True, "path": str(root)}, as_json,
@@ -503,6 +519,6 @@ def run(parsed) -> int:
         _err("Stopped; nothing was changed.")
         return EXIT_FAIL
     _err("usage: nable pack {validate,new,install,update,remove,list,audit,search,sign,"
-         "keygen,run,secret} ...")
+         "keygen,run,secret,report} ...")
     return 2
 
