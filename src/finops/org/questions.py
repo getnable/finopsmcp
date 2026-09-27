@@ -21,8 +21,9 @@ environment tag aliases by their environment; everything else by kind. A
 proposal is asked on its own when a group would hold only it, when another
 live proposal about the same subject says something else (contested: a
 person should see both), when a confirmed fact already answers (a
-conflict), when it is a threshold (default no: a threshold is a person's
-call), or when an agent proposed a team or a tag alias (it would route every
+conflict), when it is a threshold or an approval chain (default no: each
+is a person's call), when it is a freeze (default yes: it only restricts),
+or when an agent proposed a team or a tag alias (it would route every
 fact of that team, so it is never waved through with others).
 
 A bulk answer is bound to the facts it showed: its command carries a digest
@@ -107,6 +108,14 @@ def describe(f: Fact) -> str:
         parts = [f"{k}={v[k]}" for k in ("max_auto_monthly_usd", "velocity_cap_usd")
                  if v.get(k) is not None]
         return f"{s} thresholds: {', '.join(parts)}"
+    if f.fact == "freeze":
+        return (f"{s} is frozen from {v['start']} to {v['end']} ({v['reason']}), "
+                f"changes {'denied' if v.get('mode') == 'deny' else 'asked about'}")
+    if f.fact == "approval":
+        least = v.get("min", 1)
+        return (f"{s} changes of class {', '.join(v['action_classes'])} need {least} of "
+                f"{', '.join(v['approvers'])} to approve"
+                + (", with a change ticket" if v.get("change_ticket") else ""))
     return f"{f.fact} {s}: {v}"
 
 
@@ -173,8 +182,9 @@ def _fact_tier(f: Fact) -> int:
 
 def bulk_ok(f: Fact) -> bool:
     """Whether a proposal may be decided with others: never a threshold,
-    never a team or tag alias an agent proposed."""
-    if f.fact == "threshold":
+    a freeze or an approval chain, never a team or tag alias an agent
+    proposed."""
+    if f.fact in ("threshold", "freeze", "approval"):
         return False
     return not (f.fact in ("team", "tag_alias") and f.source.startswith("agent:"))
 
@@ -391,9 +401,10 @@ def questions(limit: int = 10, *, model: OrgModel | None = None,
                 no_command=f"nable org reject {f.key}")))
         else:
             out.append((_fact_tier(f), Question(
-                # A threshold decides what runs unasked: a person says yes to
-                # it on purpose, never by pressing enter.
-                kind="confirm", default="n" if f.fact == "threshold" else "y",
+                # A threshold decides what runs unasked, an approval chain whom
+                # nable asks for reviews: a person says yes to either on
+                # purpose, never by pressing enter. A freeze only restricts.
+                kind="confirm", default="n" if f.fact in ("threshold", "approval") else "y",
                 key=f.key, subject=str(f.subject),
                 text=(f"Is it right that {describe(f)}?{_money(d)} "
                       f"From {f.source}, confidence {f.confidence:.2f}."),
