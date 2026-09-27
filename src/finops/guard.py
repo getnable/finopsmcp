@@ -3526,8 +3526,7 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
                     r"run_post|record|run_hook|hook_main"),
      "learning_change", "recording, for a person, how the guard's ask was answered"),
     (_PythonApiCall("guard-ledger-api", r"guard_ledger(?![\w-])", r"append"),
-     "learning_change", "writing the guard's decision ledger, which records how its asks "
-                        "were answered"),
+     "learning_change", "writing the guard's decision ledger, which records the answers"),
     # Installing a pack grants it capabilities (and may add code the broker
     # runs); updating one can change its rules; removing a guard-rule pack
     # takes its asks and denies away; a signature or a key made here is what

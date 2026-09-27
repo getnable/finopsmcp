@@ -257,7 +257,7 @@ def _pulumi_config(segment: str) -> str:
 _LONG_TOKEN_RE = _LazyRe(r"[A-Za-z0-9+/_-]{32,}={0,2}")
 # C0 and C1 controls, DEL, and the Unicode bidi marks, embeddings, overrides
 # and isolates: what could make a summary display as something it is not.
-_CONTROL_RE = _LazyRe("[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
+_CONTROL_RE = _LazyRe("[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
 def _long_token(m: re.Match[str]) -> str:
