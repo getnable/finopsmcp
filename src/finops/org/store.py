@@ -28,12 +28,13 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Callable, Iterable, Iterator
-from dataclasses import replace
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .adapters import ADAPTERS
 from .model import (
     FILE_FOR_KIND,
     HEADER,
@@ -325,28 +326,65 @@ def propose(fact: Fact, dir: str | os.PathLike | None = None) -> str:
 
     Whatever status the caller set, the fact is written as proposed."""
     new = _proposal(fact)
+    return _propose_all([new], dir)[0]
+
+
+def propose_many(facts: Iterable[Fact], dir: str | os.PathLike | None = None) -> list[str]:
+    """propose() for many facts under one lock and one write per file, in
+    order, with the same answers; a fact that does not fit the schema answers
+    "invalid" instead of raising. What adapters use: a few hundred proposals
+    through propose() would re-read the whole directory for each one."""
+    news: list[Fact | None] = []
+    for f in facts:
+        try:
+            news.append(_proposal(f))
+        except (FactError, TypeError, ValueError):
+            news.append(None)
+    return _propose_all(news, dir)
+
+
+def _propose_all(news: list[Fact | None], dir: str | os.PathLike | None) -> list[str]:
     d, _ = resolve_dir(dir)
+    out: list[str] = []
     with _locked(d):
         model = load(d)
-        same = [f for f in model.facts if f.key == new.key]
-        if any(f.status == "rejected" for f in same):
-            return "suppressed_rejected"
-        if any(f.live for f in same):
-            return "duplicate"
-        conflict = any(f.confirmed and f.slot == new.slot for f in model.facts)
+        statuses: dict[str, set[str]] = {}
+        for f in model.facts:
+            statuses.setdefault(f.key, set()).add(f.status)
+        confirmed_slots = {f.slot for f in model.facts if f.confirmed}
         files = _files(d)
-        expired = [(n, i) for n, fl in files.items() for i, f in enumerate(fl.facts)
-                   if f.key == new.key]
-        if expired:
-            # An expired fact proposed again comes back in place, as a proposal.
-            n, i = expired[0]
-            files[n].facts[i] = replace(new, origin=n)
-            _write_file(files[n])
-        else:
-            target = files[FILE_FOR_KIND[new.fact]]
-            target.facts.append(new)
-            _write_file(target)
-    return "conflict" if conflict else "added"
+        changed: set[str] = set()
+        for new in news:
+            if new is None:
+                out.append("invalid")
+                continue
+            same = statuses.get(new.key, set())
+            if "rejected" in same:
+                out.append("suppressed_rejected")
+                continue
+            if same & {"proposed", "confirmed"}:
+                out.append("duplicate")
+                continue
+            placed = False
+            for n, fl in files.items():
+                for i, f in enumerate(fl.facts):
+                    if f.key == new.key:
+                        # An expired fact proposed again comes back in place.
+                        fl.facts[i] = replace(new, origin=n)
+                        changed.add(n)
+                        placed = True
+                        break
+                if placed:
+                    break
+            if not placed:
+                name = FILE_FOR_KIND[new.fact]
+                files[name].facts.append(replace(new, origin=name))
+                changed.add(name)
+            statuses[new.key] = {"proposed"}
+            out.append("conflict" if new.slot in confirmed_slots else "added")
+        for name in sorted(changed):
+            _write_file(files[name])
+    return out
 
 
 def _one(model: OrgModel, key: str) -> Fact:
@@ -359,32 +397,55 @@ def _one(model: OrgModel, key: str) -> Fact:
 
 
 def _decide(key: str, by: str, status: str, dir: str | os.PathLike | None) -> Fact:
+    return _decide_many([key], by, status, dir)[0]
+
+
+def _decide_many(keys: list[str], by: str, status: str,
+                 dir: str | os.PathLike | None) -> list[Fact]:
+    """One human decision over several facts: one lock, one read, one write
+    per file. Every key is checked before anything is written, so a bad key
+    leaves the files as they were."""
     by = (by or "").strip()
     if not by:
         raise OrgError("a human decision needs a name (confirmed_by)")
     d, _ = resolve_dir(dir)
     with _locked(d):
         model = load(d)
-        target = _one(model, key)
-        if target.origin == "legacy":
-            if status == "confirmed":
-                return target        # a human wrote the legacy file: already confirmed
-            files = _files(d)
-            decided = replace(target, status=status, confirmed_by=by,
-                              confirmed_at=_today(), origin=None)
-            files[FILE_FOR_KIND[decided.fact]].facts.append(decided)
-            _write_file(files[FILE_FOR_KIND[decided.fact]])
-            return decided
+        targets: list[Fact] = []
+        for key in keys:
+            t = _one(model, key)
+            if all(t.key != x.key for x in targets):
+                targets.append(t)
         files = _files(d)
-        decided = replace(target, status=status, confirmed_by=by, confirmed_at=_today())
-        _replace_in_files(files, decided, supersede=status == "confirmed")
-        return decided
+        changed: set[str] = set()
+        out: list[Fact] = []
+        for target in targets:
+            if target.origin == "legacy":
+                if status == "confirmed":
+                    out.append(target)    # a human wrote the legacy file: already confirmed
+                    continue
+                decided = replace(target, status=status, confirmed_by=by,
+                                  confirmed_at=_today(), origin=None)
+                name = FILE_FOR_KIND[decided.fact]
+                files[name].facts.append(replace(decided, origin=name))
+                changed.add(name)
+                out.append(decided)
+                continue
+            decided = replace(target, status=status, confirmed_by=by, confirmed_at=_today())
+            changed |= _replace_in_files(files, decided, supersede=status == "confirmed",
+                                         write=False)
+            out.append(decided)
+        for name in sorted(changed):
+            _write_file(files[name])
+        return out
 
 
-def _replace_in_files(files: dict[str, _File], fact: Fact, *, supersede: bool) -> None:
+def _replace_in_files(files: dict[str, _File], fact: Fact, *, supersede: bool,
+                      write: bool = True) -> set[str]:
     """Put `fact` in place of the entry with its key (or add it), and, when
     it is a confirmed fact, expire the other confirmed facts in its slot: two
-    confirmed answers to one question is a question nobody can answer."""
+    confirmed answers to one question is a question nobody can answer.
+    Returns the files changed (written unless write=False)."""
     changed: set[str] = set()
     placed = False
     for name, fl in files.items():
@@ -401,8 +462,10 @@ def _replace_in_files(files: dict[str, _File], fact: Fact, *, supersede: bool) -
         name = FILE_FOR_KIND[fact.fact]
         files[name].facts.append(replace(fact, origin=name))
         changed.add(name)
-    for name in sorted(changed):
-        _write_file(files[name])
+    if write:
+        for name in sorted(changed):
+            _write_file(files[name])
+    return changed
 
 
 def confirm(key: str, by: str, dir: str | os.PathLike | None = None) -> Fact:
@@ -414,6 +477,19 @@ def confirm(key: str, by: str, dir: str | os.PathLike | None = None) -> Fact:
 def reject(key: str, by: str, dir: str | os.PathLike | None = None) -> Fact:
     """A human says no. The fact is kept, so it is never proposed again."""
     return _decide(key, by, "rejected", dir)
+
+
+def confirm_many(keys: Iterable[str], by: str,
+                 dir: str | os.PathLike | None = None) -> list[Fact]:
+    """A human says yes to several facts at once (a bulk question). The same
+    human path as confirm(); nothing is written if any key is unknown."""
+    return _decide_many(list(keys), by, "confirmed", dir)
+
+
+def reject_many(keys: Iterable[str], by: str,
+                dir: str | os.PathLike | None = None) -> list[Fact]:
+    """A human says no to several facts at once; each is kept as rejected."""
+    return _decide_many(list(keys), by, "rejected", dir)
 
 
 def set_fact(fact: Fact, by: str, dir: str | os.PathLike | None = None) -> Fact:
@@ -490,21 +566,72 @@ def export(out: Any = None, fmt: str = "yaml", *, model: OrgModel | None = None,
     return text
 
 
-# Adapters that read the org's own systems (CODEOWNERS, Terraform state, AWS
-# Organizations) and return proposals. Empty in v0; `nable org init` runs each.
-ADAPTERS: list[Callable[[OrgModel], Iterable[Fact]]] = []
+# ── adapters ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class AdapterRun:
+    """What one adapter proposed in one run, and what the store made of it."""
+    id: str
+    facts: list[Fact] = field(default_factory=list)
+    results: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    @property
+    def counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for r in self.results:
+            out[r] = out.get(r, 0) + 1
+        return out
+
+    def top(self, n: int = 3) -> list[Fact]:
+        """What this run newly wrote (added, or beside a confirmed fact),
+        most dollars first."""
+        new = [f for f, r in zip(self.facts, self.results, strict=False)
+               if r in ("added", "conflict")]
+        return sorted(new, key=lambda f: (-(f.dollars_monthly or 0.0), -f.confidence,
+                                          str(f.subject)))[:n]
 
 
-def run_adapters(dir: str | os.PathLike | None = None) -> dict[str, int]:
-    """Run every adapter and propose what it returns. A failing adapter is
-    counted, never fatal."""
-    counts: dict[str, int] = {}
-    model = load(dir)
+def run_adapters(dir: str | os.PathLike | None = None, *,
+                 repos: Iterable[str | os.PathLike] | None = None,
+                 data: Any = None, only: Iterable[str] | None = None) -> list[AdapterRun]:
+    """Run every registered adapter (org.ADAPTERS), in order, and propose
+    what each returns. Each sees the model and what the earlier ones proposed.
+    Whatever an adapter sets, its facts are written as proposed. A failing
+    adapter is reported, never fatal.
+
+    repos: extra repos to read, after the git repo holding the working
+    directory. data: the cost history (an adapters.data.CostData), default
+    the local database, read once."""
+    from .adapters import AdapterContext, adapter_id
+    roots: list[Path] = []
+    here = git_root()
+    if here is not None:
+        roots.append(here)
+    for r in repos or ():
+        p = Path(r).expanduser()
+        root = git_root(p) or (p.resolve() if p.is_dir() else None)
+        if root is not None and root not in roots:
+            roots.append(root)
+    ctx = AdapterContext(model=load(dir), repos=roots, data=data)
+    wanted = set(only) if only is not None else None
+    runs: list[AdapterRun] = []
     for adapter in ADAPTERS:
+        run = AdapterRun(adapter_id(adapter))
+        if wanted is not None and run.id not in wanted:
+            continue
+        runs.append(run)
         try:
-            for f in adapter(model):
-                r = propose(f, dir)
-                counts[r] = counts.get(r, 0) + 1
-        except Exception:  # noqa: BLE001 - one adapter never stops init
-            counts["failed"] = counts.get("failed", 0) + 1
-    return counts
+            fn = adapter.load() if hasattr(adapter, "load") else adapter
+            facts = [f for f in fn(ctx) if isinstance(f, Fact)]
+        except Exception as e:  # noqa: BLE001 - one adapter never stops init
+            run.error = f"{type(e).__name__}: {e}"
+            continue
+        # Only proposals: whatever the adapter set is dropped here, and again
+        # in the store. A proposer cannot confirm.
+        run.facts = [replace(f, status="proposed", confirmed_by=None, confirmed_at=None)
+                     for f in facts]
+        run.results = propose_many(run.facts, dir)
+        ctx.prior.extend(f for f, r in zip(run.facts, run.results, strict=True)
+                         if r != "invalid")
+    return runs
