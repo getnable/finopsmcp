@@ -660,6 +660,70 @@ def test_git_stash_from_a_subdirectory_is_the_whole_repo(machine):
     assert _ask("git stash push -- src/", cwd=str(machine["repo"])) is None
 
 
+GIT = shutil.which("git")
+
+
+def _git(repo: Path, *args: str) -> None:
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run([GIT, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                    "-c", "commit.gpgsign=false", *args], cwd=repo, env=env, check=True,
+                   capture_output=True, timeout=60)
+
+
+@pytest.fixture
+def git_repo(machine):
+    """A real repo: src/ and, when asked, nable.org/ committed; Claude Code's
+    .claude/settings.local.json there but untracked, as it leaves it."""
+    if GIT is None:
+        pytest.skip("git is not installed")
+    repo = machine["repo"]
+    shutil.rmtree(repo / ".git")
+
+    def make(org: bool) -> Path:
+        _git(repo, "init", "-q")
+        (repo / "src" / "app.py").write_text("x = 1\n")
+        if org:
+            _org(machine)
+        past = time.time() - 120
+        for p in repo.rglob("*"):
+            if ".git" not in p.parts:
+                os.utime(p, (past, past))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "init")
+        (repo / ".claude").mkdir()
+        (repo / ".claude" / "settings.local.json").write_text("{}")
+        return repo
+    return make
+
+
+@pytest.mark.parametrize("command", ["git stash", "git stash push", "git checkout .",
+                                     "git restore .", "git rm -r --cached .", "git stash pop",
+                                     "git restore --staged ."])
+def test_an_untracked_local_settings_file_does_not_make_git_ask(command, git_repo):
+    git_repo(org=False)
+    assert _ask(command) is None, command
+
+
+def test_git_stash_with_untracked_files_counts_what_is_there(git_repo):
+    git_repo(org=False)
+    assert _ask("git stash -u")
+    assert _ask("git stash push --include-untracked")
+
+
+def test_git_puts_back_only_what_it_tracks_and_what_changed(git_repo):
+    repo = git_repo(org=True)
+    for command in ("git stash", "git checkout .", "git restore .", "git restore --staged ."):
+        assert _ask(command) is None, f"nable.org is unchanged: {command}"
+    for command in ("git stash pop", "git stash apply", "git checkout HEAD~0 -- .",
+                    "git restore --source=HEAD .", "git rm -r --cached ."):
+        v = _ask(command)
+        assert v is not None and "nable.org" in v["reason"], command
+    (repo / "nable.org" / "policy.yaml").write_text("facts: [changed]\n")
+    for command in ("git stash", "git checkout .", "git restore .", "git checkout -- nable.org"):
+        v = _ask(command)
+        assert v is not None and "nable.org" in v["reason"], command
+
+
 def test_the_doctor_reads_the_plugin_matcher_past_another_plugins_broken_file(monkeypatch,
                                                                               tmp_path):
     user = tmp_path / "claude"

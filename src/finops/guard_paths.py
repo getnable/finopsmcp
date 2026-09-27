@@ -151,6 +151,101 @@ def git_root(start: str | os.PathLike | None = None) -> Path | None:
     return None
 
 
+# ── What git would put back ───────────────────────────────────────────────────
+# `git checkout .`, `git restore .` and `git stash` change only the files git
+# tracks, and push only the ones changed since the last commit: a protected
+# file that is untracked (Claude Code's settings.local.json) or untouched is
+# not theirs to change. Read from the index and the reflog's time, without
+# running git; anything this does not read says None, and the caller falls
+# back to what is there.
+_INDEX_MAX = 64 * 1024 * 1024
+_CHANGED_WALK_MAX = 512
+
+
+def _git_dir(root: str) -> Path | None:
+    dot = Path(root) / ".git"
+    if dot.is_dir():
+        return dot
+    try:
+        text = dot.read_text(encoding="utf-8", errors="replace")[:4096]
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    gd = Path(text[len("gitdir:"):].strip())
+    return gd if gd.is_absolute() else Path(root) / gd
+
+
+def git_tracked(path: str, root: str, tree: bool = False) -> bool | None:
+    """Does the index of the repo at `root` hold `path` (or, for a `tree`,
+    anything under it)? None when that cannot be told: no index, a split or
+    v4 index, a path outside the repo, a filesystem that ignores case."""
+    if _FOLD:
+        return None
+    rel = os.path.relpath(path, root)
+    if rel == "." or rel.startswith(".."):
+        return None
+    gd = _git_dir(root)
+    try:
+        if gd is None or any(n.startswith("sharedindex.") for n in os.listdir(gd)):
+            return None
+        index = gd / "index"
+        if index.stat().st_size > _INDEX_MAX:
+            return None
+        charge(1 + index.stat().st_size // (1024 * 1024))
+        data = index.read_bytes()
+    except OSError:
+        return None
+    if data[:4] != b"DIRC" or int.from_bytes(data[4:8], "big") not in (2, 3):
+        return None
+    needle = rel.replace(os.sep, "/").encode("utf-8", "surrogateescape")
+    needle += b"/" if tree else b"\x00"
+    i = data.find(needle, 12)
+    while i >= 0:
+        # An entry's name follows its flags (and in v3, maybe two bytes of
+        # extended flags), whose low 12 bits are the name's length.
+        end = data.find(b"\x00", i)
+        for back in (2, 4):
+            n = int.from_bytes(data[i - back:i - back + 2], "big") & 0xFFF
+            if i - back >= 12 and (n == end - i or (n == 0xFFF and end - i >= 0xFFF)):
+                return True
+        i = data.find(needle, i + 1)
+    return False
+
+
+def git_changed(path: str, root: str, tree: bool = False) -> bool | None:
+    """Has `path` (or, for a `tree`, anything in it) changed since the repo
+    at `root` last moved HEAD (its reflog's time)? A path that is not there
+    has (a checkout brings it back). None when there is no reflog."""
+    gd = _git_dir(root)
+    try:
+        since = (gd / "logs" / "HEAD").stat().st_mtime if gd is not None else None
+    except OSError:
+        since = None
+    if since is None:
+        return None
+    try:
+        if os.lstat(path).st_mtime > since:
+            return True
+    except OSError:
+        return True
+    if not tree:
+        return False
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for name in (*dirnames, *filenames):
+            seen += 1
+            if seen > _CHANGED_WALK_MAX:
+                return True
+            try:
+                if os.lstat(os.path.join(dirpath, name)).st_mtime > since:
+                    return True
+            except OSError:
+                return True
+        charge(1 + (len(dirnames) + len(filenames)) // _UNIT_ENTRIES)
+    return False
+
+
 def _claude_user_dir() -> Path:
     from . import guard_plugin
     return guard_plugin.claude_user_dir()

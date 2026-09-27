@@ -601,6 +601,24 @@ def _fast(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
+class _Lazy:
+    """A pattern compiled the first time it is used. The hook imports this
+    module on every Bash and MCP call; the patterns only some calls need (an
+    MCP tool's name, a long one-liner, a substitution) cost nothing until
+    one of those comes."""
+
+    __slots__ = ("_args", "_re")
+
+    def __init__(self, pattern: str, flags: int = 0) -> None:
+        self._args = (pattern, flags)
+        self._re: re.Pattern[str] | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        if self._re is None:
+            self._re = re.compile(*self._args)
+        return getattr(self._re, name)
+
+
 class _Rule:
     """A compiled classifier pattern with search() linear in the command.
 
@@ -3212,9 +3230,9 @@ class _PythonApiCall:
 
     def __init__(self, pattern: str, module: str, names: str) -> None:
         self.pattern = pattern
-        self._module = re.compile(module)
-        self._call = re.compile(rf"(?<![\w])(?:{names})(?![\w])\s*\("
-                                rf"|(?:\.|\bimport\s|,)\s*(?:{names})(?![\w])")
+        self._module = _Lazy(module)
+        self._call = _Lazy(rf"(?<![\w])(?:{names})(?![\w])\s*\("
+                           rf"|(?:\.|\bimport\s|,)\s*(?:{names})(?![\w])")
 
     def search(self, cmd: str) -> re.Match[str] | None:
         mod = self._module.search(cmd)
@@ -3376,8 +3394,8 @@ _CODE_WRITE_RE = re.compile(
 # _OPEN_ARGS_MAX characters on (nested calls included: `open(os.path.
 # expanduser('~/x'), 'w')`). The two halves are found separately and paired
 # by position, so a run of `open(f, ` costs one pass, never one per call.
-_OPEN_CALL_RE = re.compile(r"open\s{0,8}\(")
-_OPEN_MODE_RE = re.compile(r",\s{0,8}(?:mode\s{0,8}=\s{0,8})?[rbt]{0,3}[wax+]")
+_OPEN_CALL_RE = _Lazy(r"open\s{0,8}\(")
+_OPEN_MODE_RE = _Lazy(r",\s{0,8}(?:mode\s{0,8}=\s{0,8})?[rbt]{0,3}[wax+]")
 _OPEN_ARGS_MAX = 512
 _CODE_TOKEN_SPLIT_RE = re.compile(r"[^\w.~${}/\-]+")
 _CODE_TOKENS_MAX = 400
@@ -3385,10 +3403,10 @@ _CODE_TOKENS_MAX = 400
 # `perl -ne CODE`, `ruby -e CODE`. Code longer than _CODE_MAX_CHARS asks,
 # as a command over MAX_JUDGED_CHARS does: the checks on code are
 # heuristics, and a human should read that much of it.
-_ONE_LINER_RE = re.compile(
+_ONE_LINER_RE = _Lazy(
     r"(?<![\w.-])(?:python[\d.]*|node(?:js)?|perl|ruby)(?:\s+-[\w=-]*+)*?"
     r"\s+(?:-[A-Za-z]*[ceE]|--eval|--print)(?=[\s'\"$])\s*")
-_UNQUOTED_WORD_RE = re.compile(r"\S*")
+_UNQUOTED_WORD_RE = _Lazy(r"\S*")
 _CODE_MAX_CHARS = 16 * 1024
 
 
@@ -3627,24 +3645,43 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         return [], base
     sub, rest = args[i], args[i + 1:]
     if sub in ("checkout", "restore"):
+        source = any(w in ("-s", "--source") or w.startswith("--source=") for w in rest)
+        if sub == "restore" and (_has_short(rest, "S") or "--staged" in rest) and not (
+                _has_short(rest, "W") or "--worktree" in rest):
+            return [], base             # the index only
         rest = [w for j, w in enumerate(rest)
                 if not (j and rest[j - 1] in ("-b", "-B", "--orphan", "-s", "--source"))]
-        # A path named, and what is there under one (`git checkout .` puts
-        # back every file under it, the org model's among them).
         paths = _plain_args(rest)
-        return [(p, False) for p in paths] + [(p, "exists") for p in paths], base
+        if sub == "checkout" and "--" in rest and any(
+                not w.startswith("-") for w in rest[:rest.index("--")]):
+            source = True               # `git checkout HEAD~3 -- .`
+            paths = rest[rest.index("--") + 1:]
+        elif sub == "checkout" and len(paths) > 1:
+            source = True               # `git checkout HEAD~3 .`: a commit, then paths
+        # A path named, and what git would put back under one (`git checkout
+        # .` puts back every changed file under it, the org model's among
+        # them; from another commit, every tracked one).
+        mode = "tracked" if source else "changed"
+        return [(p, False) for p in paths] + [(p, mode) for p in paths], base
     if sub == "stash" and (not rest or rest[0] in ("push", "save", "pop", "apply")
                            or rest[0].startswith("-")):
-        # It takes back (or puts back) the changes to every tracked file in
-        # the repo, or under the pathspecs after `--` when there are any.
+        # It takes back the changes to every tracked file in the repo (or
+        # under the pathspecs after `--`), untracked ones too with -u or -a;
+        # pop and apply put back whatever the stash holds.
         from . import guard_paths
         spec = rest[rest.index("--") + 1:] if "--" in rest else []
         root = guard_paths.git_root(base)
-        return [(p, "exists") for p in (spec or [str(root) if root else "."])], base
+        if rest and rest[0] in ("pop", "apply"):
+            mode = "tracked"
+        elif _has_short(rest, "ua") or any(w in ("--include-untracked", "--all") for w in rest):
+            mode = "exists"
+        else:
+            mode = "changed"
+        return [(p, mode) for p in (spec or [str(root) if root else "."])], base
     if sub == "rm" and "--cached" in rest:
         # The index only: the files stay, but the next commit drops what is
-        # there from the repo (nable.org/ with it) for everyone else.
-        return [(p, "exists") for p in _plain_args(rest)], base
+        # tracked from the repo (nable.org/ with it) for everyone else.
+        return [(p, "tracked") for p in _plain_args(rest)], base
     if sub in ("rm", "mv"):
         return [(p, True) for p in _plain_args(rest)], base
     if sub == "clean" and (_has_short(rest, "f") or "--force" in rest) and not (
@@ -3816,9 +3853,34 @@ def _spaced(form: str, entries: list[Any]) -> str:
     return form
 
 
+def _git_would_change(path: str, mode: str, where: str, env: dict[str, str],
+                      entries: list[Any]) -> Any:
+    """The protected entry under `path` that a checkout, restore or stash
+    there would change: one git tracks ("tracked"), and ("changed") has
+    changed since HEAD last moved. Where git's records cannot be read, one
+    that is there."""
+    from . import guard_paths
+    real = guard_paths.resolve(path, where, env=env)
+    if real is None:
+        return None
+    root = guard_paths.git_root(real)
+    for e in entries:
+        if not (guard_paths.is_under(e.path, real)
+                or (e.tree and guard_paths.is_under(real, e.path))):
+            continue
+        tracked = guard_paths.git_tracked(e.path, str(root), e.tree) if root else None
+        if tracked is None:
+            if os.path.lexists(e.path):
+                return e
+        elif tracked and (mode == "tracked" or guard_paths.git_changed(
+                e.path, str(root), e.tree) is not False):
+            return e
+    return None
+
+
 # What starts a command substitution (`$(...)`, a backtick) or a process
 # substitution (`<(...)`, `>(...)`), and the parentheses that close one.
-_SUBST_TOKEN_RE = re.compile(r"\$\(|[<>]\(|[()`]")
+_SUBST_TOKEN_RE = _Lazy(r"\$\(|[<>]\(|[()`]")
 _SUBST_OPENERS = ("$(", "<(", ">(")
 # Between the bodies of substitutions judged together: a word no command has,
 # which puts the directory back where the command's own `cd`s left it.
@@ -3898,6 +3960,8 @@ def _protected_commands(form: str, code: str, base: str, entries: list[Any],
         return checks.once(key, lambda: look(path, ancestors, where))
 
     def look(path: str, ancestors: Any, where: str | None) -> Any:
+        if ancestors in ("changed", "tracked"):
+            return _git_would_change(path, ancestors, where or base, env, entries)
         if isinstance(ancestors, tuple) or ancestors == "exists":
             # Only what is there: a clean of untracked files, a find -delete
             # (whose -name patterns, when it has any, must match a name in
@@ -4040,7 +4104,7 @@ def gate_editor(tool_name: str, tool_input: Any, *, cwd: str | None = None,
 # name says it writes (mcp__filesystem__write_file {"path": ...}). The name is
 # read a word at a time (write_file, writeFile, createDirectory), so compute
 # and output are not put.
-_MCP_NAME_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+_MCP_NAME_WORD_RE = _Lazy(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
 _MCP_WRITE_WORDS = frozenset({
     "write", "overwrite", "edit", "create", "move", "mv", "rename", "delete", "del", "remove",
     "rm", "rmdir", "unlink", "patch", "append", "replace", "put", "upload", "copy", "cp",
@@ -4048,15 +4112,15 @@ _MCP_WRITE_WORDS = frozenset({
 _MCP_DELETE_WORDS = frozenset({"move", "mv", "rename", "delete", "del", "remove", "rm",
                                "rmdir", "unlink", "trash"})
 # A verb run into the noun it acts on: writefile, mkdirs, deletefiles.
-_MCP_NOUN_RE = re.compile(r"(?:s|d|file|files|dir|dirs|directory|directories|text|bytes|"
-                          r"object|objects|blob|path|paths|content|contents|notebook|cell)?")
+_MCP_NOUN_RE = _Lazy(r"(?:s|d|file|files|dir|dirs|directory|directories|text|bytes|"
+                     r"object|objects|blob|path|paths|content|contents|notebook|cell)?")
 _MCP_PATH_KEYS = frozenset({"path", "paths", "file_path", "filepath", "file", "filename",
                             "file_name", "destination", "dest", "target", "target_path",
                             "source", "src", "new_path", "old_path", "notebook_path",
                             "directory", "dir"})
 _MCP_WALK_MAX = 512
 # A key the walk checks, in the JSON of the arguments it did not reach.
-_MCP_CHECKED_KEY_RE = re.compile(
+_MCP_CHECKED_KEY_RE = _Lazy(
     r'"(?:path|paths|file_path|filepath|file|filename|file_name|destination|dest|target|'
     r'target_path|source|src|new_path|old_path|notebook_path|directory|dir|command|commands|'
     r'cmd|script|args|arguments|argv|input|code|cli_command|shell)"\s*:', re.IGNORECASE)
