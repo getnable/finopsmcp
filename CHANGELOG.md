@@ -59,6 +59,11 @@ All notable changes to finops-mcp (nable).
   kubeconfigs are never read, declared or not, and a `repo_files` entry
   that could name one is refused at validation. `org-bootstrap` declares
   `catalog-info.yaml` and `catalog-info.yml`.
+- **`nable org` output cannot drive the terminal.** `nable org status`,
+  `review`, `questions` and `export` (and the confirm, reject and init
+  output that lists facts) print control and invisible format characters in
+  a fact's subject, value, source or reason as visible escapes, as `nable
+  pack` already did. `--json` output was already escaped and is unchanged.
 
 ## 0.10.0
 

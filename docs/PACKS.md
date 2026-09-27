@@ -214,7 +214,10 @@ call the broker:
    `max_autonomy` (checked before the process starts). A proposal or a row
    that carries the value of one of the pack's credentials in any field is
    refused, and the problem names the credential, never its value (see
-   Secrets and settings).
+   Secrets and settings). Text a pack returns can still hold control
+   characters; `nable pack run` and `nable org status`, `review`,
+   `questions` and `export` show them on the terminal as visible escapes
+   (`\x1b`, `‮`), and their `--json` output stays JSON-escaped.
 
 Code must live in the pack directory, where its signature covers it. An entry
 point that resolves to an installed Python distribution instead runs only for
