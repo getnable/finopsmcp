@@ -295,8 +295,19 @@ def _group_usd(group: str, facts: list[Fact], usd, spend_teams: dict[str, dict[s
     return round(total, 2) or None
 
 
+def _source_name(source: str) -> str:
+    """"codeowners" for "codeowners:CODEOWNERS:4"; for a pack adapter's
+    "pack:<ns/name>:<its source>:...", the pack and the source it named
+    ("io.github.getnable/org-bootstrap backstage"), so a person answering
+    knows which pack, and which of its readers, said it."""
+    parts = source.split(":", 3)
+    if parts[0] == "pack" and len(parts) > 1 and parts[1]:
+        return f"{parts[1]} {parts[2]}" if len(parts) > 2 and parts[2] else parts[1]
+    return parts[0]
+
+
 def _sources(facts: list[Fact]) -> str:
-    names = sorted({f.source.split(":", 1)[0] for f in facts})
+    names = sorted({_source_name(f.source) for f in facts})
     return ", ".join(names)
 
 
