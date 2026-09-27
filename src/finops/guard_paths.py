@@ -29,6 +29,7 @@ case, the comparison does too.
 """
 from __future__ import annotations
 
+import contextvars
 import fnmatch
 import os
 import re
@@ -48,6 +49,11 @@ _LEDGER_FILES = (
     ("org-model-cache.json", "the guard's cache of the org model"),
     ("packs-guard-cache.json", "the guard's cache of pack rules and price books"),
 )
+# Directories beside the ledger: facts derived from the org model's files,
+# keyed on their content (written into, they would be read as facts).
+_LEDGER_DIRS = (
+    ("org-parse-cache", "the guard's cache of facts parsed from the org model"),
+)
 POLICY_FILE_NAME = "nable.policy.yaml"
 ORG_DIR_NAME = "nable.org"
 # Any file with one of these names: `nable budget ci-gate --budget-file` and
@@ -65,6 +71,9 @@ class Protected(NamedTuple):
     shown: str      # as a person would write it: ~ for the home directory
     what: str       # what it is, for the reason a human reads
     tree: bool = False      # a directory: everything under it is protected too
+    # A directory that only a change to all of it reaches (`rm -rf ~/.finops`,
+    # however little is in it); a file written inside it is not protected.
+    whole: bool = False
 
     def as_dict(self) -> dict:
         return {"path": self.shown, "what": self.what, "tree": self.tree}
@@ -240,6 +249,7 @@ def protected(cwd: str | None = None) -> list[Protected]:
     entries.append((guard_plugin.off_flag_path(), "the guard's off switch", False))
     for dirpath in dict.fromkeys((ledger.parent, data)):
         entries += [(dirpath / name, what, False) for name, what in _LEDGER_FILES]
+        entries += [(dirpath / name, what, True) for name, what in _LEDGER_DIRS]
     ai = Path(os.environ["FINOPS_DATA_DIR"]).expanduser() if os.environ.get(
         "FINOPS_DATA_DIR") else _home() / ".nable"
     entries.append((ai / "ai-budget.json", "the agent's AI budget", False))
@@ -266,19 +276,78 @@ def protected(cwd: str | None = None) -> list[Protected]:
             continue
         seen.add(key)
         out.append(Protected(key, _shown(p), what, tree))
+    try:
+        key = _real(data)
+    except (OSError, ValueError):
+        return out
+    if key not in seen:
+        out.append(Protected(key, _shown(data), "nable's data directory, which holds the "
+                             "guard's own files", whole=True))
     return out
+
+
+# ── Work done for one check ──────────────────────────────────────────────────
+# The guard's shell check runs this module over every path a command names.
+# Each resolve, directory listing and brace expansion is charged here while
+# a meter is running (meter(): the guard's shell and MCP checks), and past
+# its units TooMuch is raised, so a command padded with thousands of paths
+# gets an answer (an ask) inside the hook's timeout instead of none. The
+# editor fast path runs no meter and is charged nothing.
+_METER: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "nable_guard_paths_meter", default=None)
+# One unit (a quarter of a millisecond or so): a path with this many parts to
+# resolve (realpath stats each), this many directory entries to list, or
+# this much text to build.
+_UNIT_PARTS = 16
+_UNIT_ENTRIES = 64
+_UNIT_CHARS = 1024
+# The longest a path may grow by its variables before it is not read.
+_EXPAND_MAX = 64 * 1024
+
+
+class TooMuch(Exception):
+    """A metered check ran out of units."""
+
+
+def meter(units: int) -> contextvars.Token:
+    """Start charging this context's work against `units`; unmeter() stops."""
+    return _METER.set([units])
+
+
+def unmeter(token: contextvars.Token) -> None:
+    _METER.reset(token)
+
+
+def charge(units: int) -> None:
+    """Spend `units` of the running meter, if there is one."""
+    left = _METER.get()
+    if left is not None:
+        left[0] -= units
+        if left[0] < 0:
+            raise TooMuch
+
+
+class _TooLong(Exception):
+    pass
 
 
 _VAR_RE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 _GLOB_CHARS = frozenset("*?[")
-_BRACE_RE = re.compile(r"\{([^{}]*,[^{}]*)\}")
-_BRACE_MAX = 16
+_BRACE_TOKEN_RE = re.compile(r"[{}]")
+# The alternatives of one brace that are resolved. Past these, only the ones
+# that name something protected by its file or directory name are.
+_BRACE_MAX = 64
+# Directory entries a glob's expansion may list before it is taken to match.
+_GLOB_VISITS = 4096
 
 
 def _expand(path: str, env: Mapping[str, str] | None) -> str | None:
     """`$VAR` and `${VAR}` from `env` (assignments earlier on the command
     line), then the environment; `~` and `~user`. None when a variable is
-    unset, or written in a form this does not read (`${X:-y}`)."""
+    unset, or written in a form this does not read (`${X:-y}`), or when it
+    grows past _EXPAND_MAX (`$V$V$V...`), which a meter is charged for."""
+    grown = [len(path)]
+
     def one(m: re.Match[str]) -> str:
         name = m.group(1) or m.group(2)
         val = (env or {}).get(name)
@@ -286,24 +355,154 @@ def _expand(path: str, env: Mapping[str, str] | None) -> str | None:
             val = os.environ.get(name)
         if val is None:
             return m.group(0)
+        grown[0] += len(val)
+        if grown[0] > _EXPAND_MAX:
+            raise _TooLong
         # `D=~/.finops` assigns the expanded home, as the shell does.
         return os.path.expanduser(val) if val.startswith("~") else val
-    for _ in range(4):                  # D=$HOME/x; E=$D/y; rm $E/z
-        if "$" not in path:
-            break
-        path = _VAR_RE.sub(one, path)
+    try:
+        for _ in range(4):              # D=$HOME/x; E=$D/y; rm $E/z
+            if "$" not in path:
+                break
+            grown[0] = len(path)
+            path = _VAR_RE.sub(one, path)
+    except _TooLong:
+        charge(_EXPAND_MAX // _UNIT_PARTS)
+        return None
     if "$" in path:
         return None
     return os.path.expanduser(path)
 
 
-def _braces(path: str) -> list[str]:
-    """One level of brace expansion: `~/.finops/{a,guard-off}` is two paths."""
-    m = _BRACE_RE.search(path)
-    if m is None:
-        return [path]
-    alts = m.group(1).split(",")[:_BRACE_MAX]
-    return [path[:m.start()] + a + path[m.end():] for a in alts]
+def _braces(path: str, entries: list[Protected]) -> list[str]:
+    """One level of brace expansion: `~/.finops/{a,guard-off}` is two paths.
+    The first `{...}` with a comma and no brace inside, found in one pass
+    over the braces: a regex over `{a,a,a,...` with no `}` rescanned the rest
+    from every comma, quadratic in the length."""
+    start = -1
+    for m in _BRACE_TOKEN_RE.finditer(path):
+        if m.group() == "{":
+            start = m.start()
+            continue
+        if start < 0:
+            continue
+        body = path[start + 1:m.start()]
+        if "," in body:
+            alts = body.split(",")
+            if len(alts) > _BRACE_MAX:
+                names = {n for e in entries for n in (os.path.basename(e.path),
+                                                      os.path.basename(os.path.dirname(e.path)))}
+                names.update(PROTECTED_NAMES, (ORG_DIR_NAME,))
+                marked = re.compile("|".join(re.escape(n) for n in names if n))
+                alts = alts[:_BRACE_MAX] + [a for a in alts[_BRACE_MAX:]
+                                            if marked.search(a)][:_BRACE_MAX * 3]
+            charge((len(alts) * (len(path) - len(body)) + len(body)) // _UNIT_CHARS)
+            return [path[:start] + a + path[m.end():] for a in alts]
+        start = -1
+    return [path]
+
+
+_BRACE_PATHS_MAX = 256
+
+
+def _all_braces(path: str, entries: list[Protected]) -> list[str]:
+    """Every level of brace expansion (`{a,{b,guard-off}}`), up to
+    _BRACE_PATHS_MAX paths."""
+    out: list[str] = []
+    todo = [path]
+    while todo and len(out) + len(todo) < _BRACE_PATHS_MAX:
+        one = todo.pop()
+        alts = _braces(one, entries) if "{" in one else [one]
+        if alts == [one]:
+            out.append(one)
+        else:
+            todo += alts
+    return out + todo
+
+
+class _TooMany(Exception):
+    pass
+
+
+def _glob_paths(base: str, comps: list[str]):
+    """Each path that exists and that the glob `base`/`comps` expands to
+    (`**` as zsh and bash's globstar read it). Raises _TooMany past
+    _GLOB_VISITS directory entries listed."""
+    budget = [_GLOB_VISITS]
+
+    def walk(d: str, k: int):
+        if k == len(comps):
+            yield d
+            return
+        c = comps[k]
+        if not _GLOB_CHARS & set(c):
+            nxt = os.path.join(d, c)
+            if os.path.lexists(nxt):
+                yield from walk(nxt, k + 1)
+            return
+        try:
+            names = os.listdir(d)
+        except OSError:
+            return
+        charge(1 + len(names) // _UNIT_ENTRIES)
+        budget[0] -= len(names) + 1
+        if budget[0] < 0:
+            raise _TooMany
+        if c == "**":
+            yield from walk(d, k + 1)
+            for n in names:
+                sub = os.path.join(d, n)
+                if os.path.isdir(sub) and not os.path.islink(sub):
+                    yield from walk(sub, k)
+            return
+        for n in names:
+            if fnmatch.fnmatchcase(n.casefold() if _FOLD else n, c):
+                yield from walk(os.path.join(d, n), k + 1)
+    return walk(base, 0)
+
+
+def _glob_first(base: str, comps: list[str]) -> str | None:
+    """The first path the glob `base`/`comps` expands to, or None. Past
+    _GLOB_VISITS directory entries, `base` is returned as if one matched."""
+    try:
+        return next(_glob_paths(base, comps), None)
+    except _TooMany:
+        return base
+    except (OSError, RecursionError, ValueError):
+        return None
+
+
+def glob_names(pattern: str, cwd: str | None = None, *,
+               env: Mapping[str, str] | None = None) -> list[str] | None:
+    """The file names a shell glob expands to (`config/*.yaml` to budget.yaml
+    and the rest), [] when it expands to nothing or is not a glob, None when
+    it names more than the guard lists (_GLOB_VISITS)."""
+    p = _expand(pattern, env)
+    if p is None or not _GLOB_CHARS & set(p):
+        return []
+    if not os.path.isabs(p):
+        p = os.path.join(os.path.expanduser(cwd or os.getcwd()), p)
+    parts = p.split(os.sep)
+    i = next(n for n, part in enumerate(parts) if _GLOB_CHARS & set(part))
+    charge(1 + p.count(os.sep) // _UNIT_PARTS)
+    try:
+        fixed = os.path.realpath(os.sep.join(parts[:i]) or os.sep)
+        return list(dict.fromkeys(os.path.basename(f) for f in _glob_paths(
+            fixed, [c.casefold() if _FOLD else c for c in parts[i:] if c and c != "."])))
+    except _TooMany:
+        return None
+    except (OSError, RecursionError, ValueError):
+        return []
+
+
+def _org_component(real: str) -> Protected | None:
+    """A path with a nable.org directory in it, wherever it is: the org model
+    of the repo that directory is in, or of one the agent is about to make."""
+    parts = real.split(os.sep)
+    if ORG_DIR_NAME not in parts:
+        return None
+    d = os.sep.join(parts[:parts.index(ORG_DIR_NAME) + 1])
+    return Protected(d, _shown(Path(d)), "a repo's org model", True)
 
 
 def resolve(path: str, cwd: str | None = None, *,
@@ -319,6 +518,7 @@ def resolve(path: str, cwd: str | None = None, *,
     if not os.path.isabs(p):
         base = cwd or os.getcwd()
         p = os.path.join(os.path.expanduser(base), p)
+    charge(1 + p.count(os.sep) // _UNIT_PARTS)
     try:
         return _real(p)
     except (OSError, ValueError):
@@ -338,8 +538,11 @@ def _match_glob(pattern: str, cwd: str | None, env: Mapping[str, str] | None,
                 entries: list[Protected], ancestors: bool) -> Protected | None:
     """A glob (`nable.org/*.yaml`, `~/.fin*/guard-off`) that could name a
     protected path. The fixed directory in front of the first wildcard is
-    resolved; the rest is matched as fnmatch does, where `*` also crosses a
-    `/`, which can only over-match."""
+    resolved; the rest is matched a path component at a time, as the shell
+    expands it. A glob that names a protected file literally
+    (`~/.fin*/guard-off`) matches it whether or not it is there; one that
+    reaches it only through a wildcard (`rm -rf *`, `rm build/*`) matches
+    only what is there, since the shell expands a wildcard to nothing else."""
     p = _expand(pattern, env)
     if p is None:
         return None
@@ -348,39 +551,73 @@ def _match_glob(pattern: str, cwd: str | None, env: Mapping[str, str] | None,
     parts = p.split(os.sep)
     i = next(n for n, part in enumerate(parts) if _GLOB_CHARS & set(part))
     fixed = os.sep.join(parts[:i]) or os.sep
+    charge(1 + p.count(os.sep) // _UNIT_PARTS)
     try:
         fixed = _real(fixed)
     except (OSError, ValueError):
         return None
-    full = os.path.join(fixed, *parts[i:])
-    if _FOLD:
-        full = full.casefold()
+    rest: list[str] = []
+    for c in parts[i:]:
+        if c == "..":
+            # `*/../.claude` is .claude beside what `*` matched.
+            if rest:
+                rest.pop()
+            else:
+                fixed = os.path.dirname(fixed)
+        elif c and c != ".":
+            rest.append(c.casefold() if _FOLD else c)
+    if not rest:
+        return _match_one(fixed, cwd, env, entries, ancestors)
+    full = os.path.join(fixed, *rest)
+    org = _org_component(full)
+    if org is not None:
+        return org
+    literal = not _GLOB_CHARS & set(rest[-1])
     for e in entries:
         if e.tree and _under(fixed, e.path):
             return e                    # whatever it matches is inside a protected tree
-        if fnmatch.fnmatchcase(e.path, full):
-            return e
-        if ancestors and _under(e.path, fixed):
-            d = e.path
-            while _under(d, fixed) and d != fixed:
-                if fnmatch.fnmatchcase(d, full):
-                    return e
-                d = os.path.dirname(d)
-    name = os.path.basename(full)
-    for n, what in PROTECTED_NAMES.items():
-        if fnmatch.fnmatchcase(n, name):
-            return Protected(full, _shown(Path(full)), what)
+        if e.path == fixed or not _under(e.path, fixed):
+            continue
+        comps = e.path[len(fixed.rstrip(os.sep)) + 1:].split(os.sep)
+        n = min(len(comps), len(rest))
+        if not all(fnmatch.fnmatchcase(c, r) for c, r in zip(comps[:n], rest[:n])):
+            continue
+        if e.whole:
+            if ancestors and len(comps) >= len(rest) and os.path.lexists(e.path):
+                return e
+        elif len(comps) == len(rest):
+            if literal or os.path.lexists(e.path):
+                return e
+        elif len(comps) > len(rest):
+            # The glob matches a directory the entry is in: `rm -rf ~/.fin*`.
+            if ancestors and os.path.lexists(e.path):
+                return e
+        elif e.tree and os.path.lexists(e.path):
+            return e                    # it reaches inside a protected tree: `*/policy.yaml`
+    if literal:
+        what = PROTECTED_NAMES.get(rest[-1])
+        return Protected(full, _shown(Path(full)), what) if what else None
+    # A wildcard name (`config/*.yaml`) is a budget file only when the glob
+    # expands to one: `rm -rf build/*` is not a write to budget.yml.
+    for name, what in PROTECTED_NAMES.items():
+        if fnmatch.fnmatchcase(name, rest[-1]):
+            found = _glob_first(fixed, [*rest[:-1], name])
+            if found is not None:
+                shown = found if found != fixed else full
+                return Protected(shown, _shown(Path(shown)), what)
     return None
 
 
 def match(path: str, cwd: str | None = None, *, entries: list[Protected] | None = None,
           ancestors: bool = False, env: Mapping[str, str] | None = None) -> Protected | None:
     """The protected entry `path` is, or is inside; with `ancestors`, also
-    one it contains (`rm -rf ~/.finops` takes the ledger with it). `env`
-    holds variables assigned earlier on a command line. Braces and globs are
-    read as the shell would expand them. None when it is none of them."""
+    one it contains that is there (`rm -rf ~/.finops` takes the ledger with
+    it; `chmod -R 755 .` in a repo without nable.org/ changes none). Any path
+    through a directory named nable.org is protected too. `env` holds
+    variables assigned earlier on a command line. Braces and globs are read
+    as the shell would expand them. None when it is none of them."""
     entries = entries if entries is not None else protected(cwd)
-    for one in _braces(path) if "{" in path else (path,):
+    for one in _all_braces(path, entries) if "{" in path else (path,):
         if _GLOB_CHARS & set(one):
             hit = _match_glob(one, cwd, env, entries, ancestors)
         else:
@@ -396,10 +633,22 @@ def _match_one(path: str, cwd: str | None, env: Mapping[str, str] | None,
     if real is None:
         return None
     for e in entries:
+        if e.whole:
+            if ancestors and _under(e.path, real) and os.path.lexists(e.path):
+                return e
+            continue
         if real == e.path or (e.tree and _under(real, e.path)):
             return e
-        if ancestors and _under(e.path, real):
+        # A recursive change reaches only what is there: a repo's nable.org/
+        # that does not exist is not in `rm -rf .`, and not the path to name.
+        # (A directory that is not there either, `rm -rf ~/.cursor`, is
+        # named for what it would hold.)
+        if ancestors and _under(e.path, real) and (
+                os.path.lexists(e.path) or not os.path.lexists(real)):
             return e
+    org = _org_component(real)
+    if org is not None:
+        return org
     name = os.path.basename(real)
     what = PROTECTED_NAMES.get(name.casefold() if _FOLD else name)
     if what:
@@ -411,5 +660,6 @@ def _match_one(path: str, cwd: str | None, env: Mapping[str, str] | None,
 # that file: `Path.home() / ".finops" / "guard-off"` in a one-liner has no
 # path in it to resolve, but it has the name.
 DISTINCTIVE_NAMES = frozenset({"guard-off", POLICY_FILE_NAME, ORG_DIR_NAME, "ai-budget.json",
-                               "tag_rules.yaml", "nable-guard.json",
-                               *PROTECTED_NAMES, *(n for n, _ in _LEDGER_FILES)})
+                               "tag_rules.yaml", "nable-guard.json", "trusted-repos.json",
+                               *PROTECTED_NAMES, *(n for n, _ in _LEDGER_FILES),
+                               *(n for n, _ in _LEDGER_DIRS)})

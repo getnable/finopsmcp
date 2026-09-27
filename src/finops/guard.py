@@ -384,11 +384,13 @@ _SHELL_LEX_RE = re.compile(
 # confirm a destroy nobody was running, and a guard that cries wolf on every
 # docs commit gets uninstalled. `bash -c`, `sh -c` and `eval` are not here:
 # their quoted argument is a command.
-_DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git)(?![\w.-])")
+_DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git|gh)(?![\w.-])")
 _DATA_SEGMENT_RE = re.compile(
     r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
     r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
-    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S))")
+    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S)"
+    # A pull request's or an issue's title, body or comment.
+    r"|gh\s+(?:pr|issue)\s+(?:create|edit|comment|review|close)(?!\S))")
 # Blanking is for commands short enough to check this carefully (and to hand
 # to shlex); a longer one is judged as written.
 _MASK_MAX_CHARS = 16 * 1024
@@ -434,8 +436,8 @@ def _plain_ok(cmd: str, a: int, b: int) -> bool:
 
 def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
     """Spans (quotes included) of the quoted arguments of echo, printf, grep,
-    rg, ag and `git commit|tag` that the shell will not run, or [] when that
-    is not certain for the whole command.
+    rg, ag, `git commit|tag` and `gh pr|issue create|...` that the shell will
+    not run, or [] when that is not certain for the whole command.
 
     Conservative on purpose: a comment, an escape, a subshell, a redirection
     into a file, a pipe into anything but a reader, an unterminated quote or
@@ -2797,14 +2799,14 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
             v = _oversize_verdict(command)
             forms: tuple[str, ...] = (command,)
         else:
-            v = _self_change(command) or _protected_write(command, cwd)
+            v = _self_change(command) or _protected_write(command, cwd) or _oversize_code(command)
             hit = classify_command(command)
             if hit is not None:
                 v = _worse_of(v, _verdict_for(command, hit, cwd=cwd))
-            r = _readings(command)
-            forms = tuple(dict.fromkeys((command, r.masked, r.raw, r.expanded)))
+            forms = ()
         # Installed guard-rule packs may tighten any of that, never loosen it.
-        v, pack_error, pack_problem = _with_packs(v, forms=forms)
+        v, pack_error, pack_problem = _with_packs(
+            v, forms=forms, commands=() if forms else (command,))
         if record:
             _record_pack_trouble(pack_error, pack_problem, judged=v is not None or stop is not None,
                                  harness=harness, tool=tool, command=command,
@@ -2864,17 +2866,39 @@ class _PackRuleHit(NamedTuple):
     reason: str
 
 
-def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), tool: str | None = None,
-                args: Any = None
+def _pack_command_results(base: str, rules: Any, tighten: Any, command: str) -> list[Any]:
+    """tighten() over the readings of one command line. The reading with
+    quoted data blanked counts as it is; a rule that only the others (as
+    written, aliases expanded, nothing blanked) match counts unless all it
+    matches is inside one quoted data argument (_only_in_data): a commit
+    message or a search pattern that names a command is not that command."""
+    r = _readings(command)
+    out = [tighten(base, rules, command=r.masked)]
+    for rule in rules:
+        if rule.matches_command(r.masked):
+            continue
+
+        def judge(form: str, rule: Any = rule) -> str | None:
+            return rule.id if rule.matches_command(form) else None
+        for form in dict.fromkeys((r.expanded, r.raw, command)):
+            if judge(form) is not None and not _only_in_data(r, rule.id, judge):
+                out.append(tighten(base, [rule], command=form))
+                break
+    return out
+
+
+def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = (),
+                tool: str | None = None, args: Any = None
                 ) -> tuple[dict[str, Any] | None, BaseException | None, BaseException | None]:
     """(v after the installed packs' guard rules, an error reading them, a
     pack with guard rules or a price book that is not loaded).
 
-    finops.packs.content.tighten() over every form of the command (as
-    written, and the readings the rules above use) and over the MCP call:
-    the strictest answer wins, and it is never looser than `v`. A rule that
-    matches without tightening is named in the ledger only. An error keeps
-    `v` as it was: the caller records it as a fail-open (check "packs")."""
+    finops.packs.content.tighten() over every reading of each of `commands`
+    (_pack_command_results), over each of `forms` as it is (a command too
+    long to read), and over the MCP call: the strictest answer wins, and it
+    is never looser than `v`. A rule that matches without tightening is
+    named in the ledger only. An error keeps `v` as it was: the caller
+    records it as a fail-open (check "packs")."""
     try:
         from . import guard_packs
         st = guard_packs.state()
@@ -2889,6 +2913,8 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), tool: str | None =
         hits: dict[tuple[str, str], _PackRuleHit] = {}
         worst = base
         results = [tighten(base, rules, command=f) for f in forms]
+        for c in commands:
+            results += _pack_command_results(base, rules, tighten, c)
         if tool is not None:
             results.append(tighten(base, rules, tool=tool, args=args))
         for t in results:
@@ -3046,7 +3072,7 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         change = _budget_change(tool_name, arguments) or _protected_mcp(tool_name, arguments)
         # A write to the guard's own files is judged with whatever else the
         # call does, so confirming the one is never a way past the other.
-        judge_actions = change is None or change.get("action_type") == "protected_write"
+        judge_actions = change is None or change.get("action_type") in _JUDGED_WITH
         actions = translate(tool_name, arguments) if judge_actions else []
         if actions:
             summary = actions[0].command
@@ -3064,7 +3090,9 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 if act.unchecked:
                     v = _unchecked_verdict(tool_name, act.unchecked)
                 else:
-                    v = _self_change(act.command)
+                    # A self rule on a command line in the arguments is the
+                    # change already found; the command is judged for the rest.
+                    v = _self_change(act.command) if change is None else None
                     if v is None:
                         hit = act.hit or classify_command(act.command)
                         if hit is None:
@@ -3082,19 +3110,15 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                     _record_fail_open(org_error, harness=harness, tool=tool_name,
                                       command=act.command, check="org",
                                       session_id=session_id)
-                if worst is not None and worst.get("action_type") == "protected_write":
+                if worst is not None and worst.get("action_type") in _JUDGED_WITH:
                     worst = _worse_of(worst, v)
                 elif worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
         # Installed guard-rule packs: `mcp` rules on the call, `command` rules
         # on each command line it amounts to. They only tighten.
-        forms: list[str] = []
-        for act in actions:
-            if len(act.command) <= MAX_JUDGED_CHARS:
-                r = _readings(act.command)
-                forms += [act.command, r.masked, r.raw, r.expanded]
+        commands = [act.command for act in actions if len(act.command) <= MAX_JUDGED_CHARS]
         worst, pack_error, pack_problem = _with_packs(
-            worst, forms=tuple(dict.fromkeys(forms)), tool=tool_name, args=arguments)
+            worst, commands=tuple(dict.fromkeys(commands)), tool=tool_name, args=arguments)
         if record:
             _record_pack_trouble(pack_error, pack_problem,
                                  judged=worst is not None or stop is not None, harness=harness,
@@ -3132,6 +3156,9 @@ _BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session
 _CLOUD_BUDGET_TOOLS = ("set_budget", "delete_budget", "sync_budgets_from_yaml")
 _CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change", "org_change",
                  "pack_change", "protected_write")
+# Verdicts on an MCP call that the infrastructure it amounts to is judged
+# with: a change to the guard or its files, and code too long to read.
+_JUDGED_WITH = (*_CHANGE_TYPES, "oversize_command")
 _SHOWN_VALUE_MAX = 80
 
 
@@ -3167,8 +3194,33 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
 # first), and taking the guard out (`nable guard uninstall`, `nable guard
 # off`, `nable uninstall`). An agent stopped by a budget could otherwise lift it, or remove
 # the hook, in one command. `budget status` and `refresh` only read. And
-# `nable org confirm|reject|set`, which record a person's decision.
-_NABLE = r"(?<![\w-])(?:nable|finops)\s"
+# `nable org confirm|reject|set|trust`, which record a person's decision.
+# Every way to start the CLI counts: nable, finops and finops-mcp (a path in
+# front, or a uvx pin like `finops-mcp@1.2` or `finops-mcp[aws]==1.2`), and
+# `python -m finops.setup_wizard`, `-m finops.entry` or `-m finops.server`.
+_NABLE = (r"(?:(?<![\w-])(?:nable|finops|finops-mcp)(?:\[[\w,.-]*\])?(?:(?:@|==)[\w.+!*-]*)?"
+          r"|(?<![\w-])-m\s*finops\.(?:setup_wizard|entry|server))\s")
+
+
+class _PythonApiCall:
+    """Code that imports one of nable's modules and calls a function that
+    changes what the guard allows, in a one-liner or a heredoc: `python3 -c
+    "from finops.org import store; store.confirm(...)"` decides an org fact as
+    surely as `nable org confirm`. (The org API also wants a decision the CLI
+    built; this is the seatbelt.) The code is not one shell segment, so the
+    rest of the command after the module's name is searched."""
+
+    def __init__(self, pattern: str, module: str, names: str) -> None:
+        self.pattern = pattern
+        self._module = re.compile(module)
+        self._call = re.compile(rf"(?<![\w])(?:{names})(?![\w])\s*\("
+                                rf"|(?:\.|\bimport\s|,)\s*(?:{names})(?![\w])")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        mod = self._module.search(cmd)
+        return self._call.search(cmd, mod.end()) if mod else None
+
+
 _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for r, action, what in (
     (_VerbWithFlag("ai-budget-change", _NABLE, rf"(?<!\S)ai-budget{_END}",
                    r"\s--(?:plan-cost|spend-cap|tokens|session-cap|reset)(?![\w-])",
@@ -3189,18 +3241,26 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
     # otherwise sign a person's name. Reading (status, review, questions,
     # export) stays silent.
     (_VerbWithFlag("org-decide", _NABLE, rf"(?<!\S)org{_END}",
-                   rf"\s(?:confirm|reject|set){_END}"),
+                   rf"\s(?:confirm|reject|set|trust){_END}"),
      "org_change", "deciding an org model fact for a person"),
     (_VerbWithFlag("org-decide-module", r"(?<![\w.-])finops\.org\.cli(?![\w.])",
-                   rf"(?<!\S)(?:confirm|reject|set){_END}", r""),
+                   rf"(?<!\S)(?:confirm|reject|set|trust){_END}", r""),
      "org_change", "deciding an org model fact for a person"),
+    (_PythonApiCall("org-decide-api", r"finops\.org(?![\w-])",
+                    r"confirm|reject|set_fact|confirm_many|reject_many|import_legacy|trust"),
+     "org_change", "deciding an org model fact for a person"),
+    (_PythonApiCall("guard-off-api", r"finops(?:\.guard_plugin|\.guard)?(?![\w.-])",
+                    r"set_off|uninstall"),
+     "guard_change", "turning the guard off"),
     # Installing a pack grants it capabilities (and may add code the broker
     # runs); updating one can change its rules; removing a guard-rule pack
     # takes its asks and denies away; a signature or a key made here is what
-    # packs.trusted_keys would trust. Reading (list, audit, search, validate,
+    # packs.trusted_keys would trust; a secret set for a pack hands it a
+    # credential from nable's vault. Reading (list, audit, search, validate,
     # new, which writes only the directory it is given) stays silent.
     (_VerbWithFlag("pack-change", _NABLE,
-                   rf"(?<!\S)pack(?:\s+-\S+)*\s+(?:install|update|remove|sign|keygen){_END}",
+                   rf"(?<!\S)pack(?:\s+-\S+)*\s+(?:install|update|remove|sign|keygen"
+                   rf"|secret(?:\s+-\S+)*\s+(?:set|remove)){_END}",
                    r""),
      "pack_change", "changing the installed packs, which decide what the guard asks about"),
 )}
@@ -3247,9 +3307,10 @@ def _self_change(command: str) -> dict[str, Any] | None:
 # `"~/.fin""ops/guard-off"` and `t\ee` are what the shell will run. A path is
 # resolved as the shell would open it: variables assigned earlier on the line
 # and in the environment, `~`, a `cd` earlier in the command, braces, globs
-# and symlinks (guard_paths.match). What it cannot see: a path built at run
-# time (`$(...)`, a loop variable) and a write inside a script the command
-# runs; `nable guard doctor` lists those gaps.
+# and symlinks (guard_paths.match). A command inside `$(...)`, backticks or
+# `<(...)` is read as a command of its own. What it cannot see: a path built
+# at run time (the output of `$(...)`, a loop variable) and a write inside a
+# script the command runs; `nable guard doctor` lists those gaps.
 
 # A cheap first look: nothing that can write a file is named.
 _WRITE_HINT_RE = re.compile(
@@ -3281,6 +3342,19 @@ _WRAPPERS: dict[str, frozenset[str]] = {
 }
 # Wrappers whose first plain word is theirs, not the command's.
 _WRAPPER_ARG = {"timeout": 1, "flock": 1}
+# Project runners: `uv run python -c ...` runs python. The flags each takes a
+# value for, so `uv run --with x python` is python.
+_RUNNERS: dict[str, frozenset[str]] = {
+    "uv": frozenset({"--with", "-w", "--python", "-p", "--project", "--directory", "--package",
+                     "--extra", "--group", "--env-file", "--index", "--index-url",
+                     "--default-index", "--extra-index-url", "--with-requirements",
+                     "--with-editable", "--only-group", "--no-group", "--config-file",
+                     "--cache-dir"}),
+    "poetry": frozenset({"-C", "--directory", "-P", "--project"}),
+    "pipenv": frozenset(), "pdm": frozenset({"-p", "--project"}),
+    "hatch": frozenset({"-e", "--env"}),
+    "conda": frozenset({"-n", "--name", "-p", "--prefix"}),
+}
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "fish", "busybox"})
 _DECLARE = frozenset({"export", "declare", "local", "readonly", "typeset"})
 _DELETES = frozenset({"rm", "unlink", "shred", "rmdir", "srm", "trash", "trash-put", "gio"})
@@ -3293,13 +3367,66 @@ _INTERPRETERS_RE = re.compile(r"(?:python[\d.]*|node(?:js)?|deno|bun|ruby|perl|p
                               r"powershell|osascript|lua|tclsh)")
 # Code that writes, deletes or runs something, in a one-liner or a heredoc.
 _CODE_WRITE_RE = re.compile(
-    r"open\s*\([^)]*,\s*(?:mode\s*=\s*)?[rbt]*[wax+]|write_(?:text|bytes)|\.write\s*\(|"
+    r"write_(?:text|bytes)|\.write\s*\(|"
     r"unlink|remove|rmtree|rename|replace\s*\(|truncate|chmod|chown|symlink|copy|move\s*\(|"
     r"mkdir|makedirs|touch\s*\(|writeFile|appendFile|rmSync|rmdir|system\s*\(|subprocess|"
     r"popen|fopen|file_put_contents|Set-Content|Out-File|Remove-Item|Add-Content|New-Item|"
     r"Copy-Item|Move-Item|shutil|exec")
+# open() with a mode that writes, the call's arguments read up to
+# _OPEN_ARGS_MAX characters on (nested calls included: `open(os.path.
+# expanduser('~/x'), 'w')`). The two halves are found separately and paired
+# by position, so a run of `open(f, ` costs one pass, never one per call.
+_OPEN_CALL_RE = re.compile(r"open\s{0,8}\(")
+_OPEN_MODE_RE = re.compile(r",\s{0,8}(?:mode\s{0,8}=\s{0,8})?[rbt]{0,3}[wax+]")
+_OPEN_ARGS_MAX = 512
 _CODE_TOKEN_SPLIT_RE = re.compile(r"[^\w.~${}/\-]+")
 _CODE_TOKENS_MAX = 400
+# The code of an interpreter one-liner: `python3 -c CODE`, `node -e CODE`,
+# `perl -ne CODE`, `ruby -e CODE`. Code longer than _CODE_MAX_CHARS asks,
+# as a command over MAX_JUDGED_CHARS does: the checks on code are
+# heuristics, and a human should read that much of it.
+_ONE_LINER_RE = re.compile(
+    r"(?<![\w.-])(?:python[\d.]*|node(?:js)?|perl|ruby)(?:\s+-[\w=-]*+)*?"
+    r"\s+(?:-[A-Za-z]*[ceE]|--eval|--print)(?=[\s'\"$])\s*")
+_UNQUOTED_WORD_RE = re.compile(r"\S*")
+_CODE_MAX_CHARS = 16 * 1024
+
+
+def _code_writes(form: str) -> bool:
+    """Does the code in `form` write, delete or run something? Linear."""
+    if _CODE_WRITE_RE.search(form):
+        return True
+    import bisect
+    opens = [m.end() for m in _OPEN_CALL_RE.finditer(form)]
+    if not opens:
+        return False
+    for m in _OPEN_MODE_RE.finditer(form, opens[0]):
+        k = bisect.bisect_right(opens, m.start())
+        if k and m.start() - opens[k - 1] <= _OPEN_ARGS_MAX:
+            return True
+    return False
+
+
+def _oversize_code(command: str) -> dict[str, Any] | None:
+    """An ask for an interpreter one-liner whose code is longer than
+    _CODE_MAX_CHARS, else None. Each one's code is measured once."""
+    if len(command) <= _CODE_MAX_CHARS:
+        return None
+    covered = 0
+    for m in _ONE_LINER_RE.finditer(command):
+        at = m.end()
+        if at < covered or at >= len(command):
+            continue
+        word = (_SHELL_LEX_RE.match(command, at) if command[at] in "'\"$" else None) \
+            or _UNQUOTED_WORD_RE.match(command, at)
+        covered = word.end()
+        if covered - at > _CODE_MAX_CHARS:
+            return {"decision": "ask", "action_type": "oversize_command", "door": None,
+                    "reason": (f"nable guard: this command runs {(covered - at) / 1024:,.0f} KB "
+                               "of code in an interpreter one-liner, longer than the "
+                               f"{_CODE_MAX_CHARS // 1024} KB the guard reads in one. A human "
+                               "should read it before it runs.")}
+    return None
 
 
 def _next_plain(words: list[str], i: int, takes: frozenset[str]) -> int:
@@ -3363,10 +3490,69 @@ def _has_short(words: list[str], letters: str, stop: str = "") -> bool:
     return False
 
 
-def _copy_targets(prog: str, args: list[str]) -> list[tuple[str, bool]]:
+# The paths one command's check looks at, however many readings name them,
+# and the work it may do on them (guard_paths.meter: a unit is a realpath of
+# a path of a dozen parts, or a directory listing of a few dozen names). A command that
+# names more than this asks instead, so that one padded with thousands of
+# `a* b* ...` or `cd a/a/a/...` still gets its answer in the hook's time.
+_PATHS_MAX = 2048
+_PATH_UNITS = 4096
+
+
+class _TooManyPaths(Exception):
+    pass
+
+
+class _PathChecks:
+    """What one command's paths were found to be, each looked at once."""
+
+    __slots__ = ("left", "seen")
+
+    def __init__(self) -> None:
+        self.seen: dict[Any, Any] = {}
+        self.left = _PATHS_MAX
+
+    def once(self, key: Any, look: Any) -> Any:
+        if key in self.seen:
+            return self.seen[key]
+        self.left -= 1
+        if self.left < 0:
+            raise _TooManyPaths
+        out = self.seen[key] = look()
+        return out
+
+
+def _env_key(path: str, env: dict[str, str] | None) -> tuple[Any, ...] | None:
+    """The values of the variables `path` reads, and of those theirs read:
+    what a look at it depends on besides the path."""
+    if "$" not in path or not env:
+        return None
+    from . import guard_paths
+    out: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    todo = [path]
+    for _ in range(4):                  # as deep as guard_paths expands them
+        nxt = []
+        for text in todo:
+            for a, b in guard_paths._VAR_RE.findall(text):
+                if (a or b) not in seen:
+                    seen.add(a or b)
+                    val = env.get(a or b)
+                    out.append((a or b, val))
+                    if val and "$" in val:
+                        nxt.append(val)
+        todo = nxt
+    return tuple(out)
+
+
+def _copy_targets(prog: str, args: list[str], base: str = "",
+                  env: dict[str, str] | None = None, entries: list[Any] = (),
+                  checks: _PathChecks | None = None) -> list[tuple[str, bool]]:
     """(path, ancestors too) for what cp, install, rsync, ln, scp and mv
-    write: the destination, and the file each source lands as in it. mv
-    also takes its sources away, and ln links to them."""
+    write: the destination, and the file each source lands as in it when the
+    destination is a directory (a glob source, as each name it expands to).
+    mv also takes its sources away, and ln links to them."""
+    from . import guard_paths
     target = _flag_value(args, ("-t",), ("--target-directory",))
     plain = _plain_args(args)
     if target is not None:
@@ -3381,18 +3567,47 @@ def _copy_targets(prog: str, args: list[str]) -> list[tuple[str, bool]]:
     recursive = _has_short(args, "rRa") or any(
         a in ("--recursive", "--archive", "--no-target-directory") for a in args)
     out: list[tuple[str, bool]] = []
+    wanted: set[str] | None = None
     for d in dests:
         out.append((d, recursive and (_has_short(args, "T") or any(
             s.endswith(("/.", "/")) for s in srcs))))
+        # `cp budget.yml budget.yml.bak` writes budget.yml.bak, not
+        # budget.yml.bak/budget.yml: a source lands inside the destination
+        # only when that is a directory (or cannot be told not to be one).
+        if target is None and len(srcs) == 1 and not d.endswith("/") and prog != "scp":
+            real = guard_paths.resolve(d.replace("\x00", " "), base or None, env=env)
+            if real is not None and not os.path.isdir(real):
+                continue
         for s in srcs:
-            base = s.rstrip("/").rsplit("/", 1)[-1]
-            if base and base not in (".", ".."):
-                out.append((f"{d.rstrip('/')}/{base}", recursive))
+            name = s.rstrip("/").rsplit("/", 1)[-1]
+            if not name or name in (".", ".."):
+                continue
+            landed = [name]
+            if guard_paths._GLOB_CHARS & set(name):
+                # `cp config/*.yaml deploy/` lands budget.yaml in deploy/ only
+                # when config/ holds one: the names the glob expands to that
+                # could be (or lead to) a protected file.
+                src = s.rstrip("/").replace("\x00", " ")
+                names = (checks or _PathChecks()).once(
+                    ("glob", src, base, _env_key(src, env)),
+                    lambda src=src: guard_paths.glob_names(src, base or None, env=env))
+                wanted = wanted if wanted is not None else _landing_names(entries)
+                landed = sorted(wanted) if names is None else [
+                    n for n in names if (n.casefold() if guard_paths._FOLD else n) in wanted]
+            out += [(f"{d.rstrip('/')}/{n}", recursive) for n in landed]
     if prog == "mv" or (prog == "rsync" and "--remove-source-files" in args):
         out += [(s, True) for s in srcs]
     elif prog == "ln":
         out += [(s, False) for s in srcs]
     return out
+
+
+def _landing_names(entries: list[Any]) -> set[str]:
+    """The file names a copy could land as and change something protected:
+    each part of each protected path, a budget file's name, nable.org."""
+    from . import guard_paths
+    out = {part for e in entries for part in e.path.split(os.sep) if part}
+    return out | set(guard_paths.PROTECTED_NAMES) | {guard_paths.ORG_DIR_NAME}
 
 
 def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str]:
@@ -3414,7 +3629,22 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
     if sub in ("checkout", "restore"):
         rest = [w for j, w in enumerate(rest)
                 if not (j and rest[j - 1] in ("-b", "-B", "--orphan", "-s", "--source"))]
-        return [(p, False) for p in _plain_args(rest)], base
+        # A path named, and what is there under one (`git checkout .` puts
+        # back every file under it, the org model's among them).
+        paths = _plain_args(rest)
+        return [(p, False) for p in paths] + [(p, "exists") for p in paths], base
+    if sub == "stash" and (not rest or rest[0] in ("push", "save", "pop", "apply")
+                           or rest[0].startswith("-")):
+        # It takes back (or puts back) the changes to every tracked file in
+        # the repo, or under the pathspecs after `--` when there are any.
+        from . import guard_paths
+        spec = rest[rest.index("--") + 1:] if "--" in rest else []
+        root = guard_paths.git_root(base)
+        return [(p, "exists") for p in (spec or [str(root) if root else "."])], base
+    if sub == "rm" and "--cached" in rest:
+        # The index only: the files stay, but the next commit drops what is
+        # there from the repo (nable.org/ with it) for everyone else.
+        return [(p, "exists") for p in _plain_args(rest)], base
     if sub in ("rm", "mv"):
         return [(p, True) for p in _plain_args(rest)], base
     if sub == "clean" and (_has_short(rest, "f") or "--force" in rest) and not (
@@ -3424,8 +3654,9 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
     return [], base
 
 
-def _write_targets(prog: str, args: list[str], base: str
-                   ) -> tuple[list[tuple[str, Any]], str]:
+def _write_targets(prog: str, args: list[str], base: str,
+                   env: dict[str, str] | None = None, entries: list[Any] = (),
+                   checks: _PathChecks | None = None) -> tuple[list[tuple[str, Any]], str]:
     """(path, ancestors) for each path this command writes, and the
     directory its relative paths are from. `ancestors` is True when writing
     to a directory also changes what is in it (rm -r, mv, chmod -R), and
@@ -3437,7 +3668,7 @@ def _write_targets(prog: str, args: list[str], base: str
     if prog in _WRITES or prog in _EDITORS:
         return [(p, False) for p in _plain_args(args)], base
     if prog in _COPIES:
-        return _copy_targets(prog, args), base
+        return _copy_targets(prog, args, base, env, entries, checks), base
     if prog == "dd":
         return [(a[3:], False) for a in args if a.startswith("of=")], base
     if prog == "sed" and (_has_short(args, "i") or any(a.startswith("--in-place") for a in args)):
@@ -3460,8 +3691,10 @@ def _write_targets(prog: str, args: list[str], base: str
         # It deletes (or runs something on) what it finds: a protected file
         # that is there, under a starting point, with a name its -name tests
         # allow. `find . -name '*.pyc' -delete` finds none of them.
-        names = tuple(args[i + 1] for i, a in enumerate(args[:-1])
+        names = tuple((args[i + 1], a == "-iname") for i, a in enumerate(args[:-1])
                       if a in ("-name", "-iname"))
+        if len(names) > _FIND_NAMES_MAX:
+            names = ()                  # read as no filter: anything it finds
         starts = []
         for a in args:
             if a.startswith(("-", "(", "!")):
@@ -3499,6 +3732,13 @@ def _command_words(words: list[str], env: dict[str, str]) -> list[str]:
             i = _next_plain(words, i + 1, _WRAPPERS.get(prog, frozenset()))
             i += _WRAPPER_ARG.get(prog, 0)
             continue
+        if prog in _RUNNERS:
+            j = _next_plain(words, i + 1, _RUNNERS[prog])
+            if prog == "uv" and words[j:j + 2] == ["tool", "run"]:
+                j += 1
+            if j < len(words) and words[j] == "run":
+                i = _next_plain(words, j + 1, _RUNNERS[prog])
+                continue
         if prog in _SHELLS:
             j = i + 1
             if prog == "busybox" and j < len(words) and words[j].rsplit("/", 1)[-1] in _SHELLS:
@@ -3515,24 +3755,54 @@ def _command_words(words: list[str], env: dict[str, str]) -> list[str]:
 def _code_target(form: str, cwd: str | None, entries: list[Any]) -> Any:
     """For a command that runs an interpreter: a protected path the code
     names, when the code also writes, deletes or runs something."""
-    if not _CODE_WRITE_RE.search(form):
+    if not _code_writes(form):
         return None
     from . import guard_paths
     by_name = {os.path.basename(e.path): e for e in entries}
-    for n, tok in enumerate(_CODE_TOKEN_SPLIT_RE.split(form)):
-        if n > _CODE_TOKENS_MAX:
-            break
+    looked: set[str] = set()
+    for tok in _CODE_TOKEN_SPLIT_RE.split(form):
         if not tok:
             continue
         name = tok.rstrip("/").rsplit("/", 1)[-1]
         if name in guard_paths.DISTINCTIVE_NAMES:
             return by_name.get(name) or guard_paths.Protected(tok, tok, f"{name}, one of the "
                                                                    "guard's own files")
-        if "/" in tok or tok.startswith("~"):
+        if ("/" in tok or tok.startswith("~")) and tok not in looked \
+                and len(looked) < _CODE_TOKENS_MAX:
+            looked.add(tok)
             hit = guard_paths.match(tok, cwd, entries=entries, ancestors=True)
             if hit is not None:
                 return hit
     return None
+
+
+# The entries of a protected tree find's -name tests are tried against
+# before the tree is taken to hold a match, and the -name tests read.
+_FIND_WALK_MAX = 2048
+_FIND_NAMES_MAX = 64
+
+
+def _find_names_reach(entry: Any, names: tuple[tuple[str, bool], ...]) -> bool:
+    """Could `find ... -name PATTERN` reach `entry`? Its own name, or for a
+    tree (`find nable.org -name '*.yaml' -exec sed -i ...`), any name inside
+    it. A tree larger than _FIND_WALK_MAX entries is taken to hold one."""
+    import fnmatch
+
+    def hit(name: str) -> bool:
+        return any(fnmatch.fnmatchcase(name.casefold(), n.casefold()) if ci
+                   else fnmatch.fnmatchcase(name, n) for n, ci in names)
+    if hit(os.path.basename(entry.path)):
+        return True
+    if not entry.tree:
+        return False
+    from . import guard_paths
+    seen = 0
+    for _dirpath, dirnames, filenames in os.walk(entry.path):
+        seen += len(dirnames) + len(filenames) + 1
+        guard_paths.charge(1 + (len(dirnames) + len(filenames)) // guard_paths._UNIT_ENTRIES)
+        if seen > _FIND_WALK_MAX or any(hit(n) for n in (*dirnames, *filenames)):
+            return True
+    return False
 
 
 def _spaced(form: str, entries: list[Any]) -> str:
@@ -3546,33 +3816,110 @@ def _spaced(form: str, entries: list[Any]) -> str:
     return form
 
 
-def _protected_target(form: str, cwd: str | None, entries: list[Any]) -> Any:
-    """The protected entry one normalized form of a command writes to, or None."""
-    from . import guard_paths
+# What starts a command substitution (`$(...)`, a backtick) or a process
+# substitution (`<(...)`, `>(...)`), and the parentheses that close one.
+_SUBST_TOKEN_RE = re.compile(r"\$\(|[<>]\(|[()`]")
+_SUBST_OPENERS = ("$(", "<(", ">(")
+# Between the bodies of substitutions judged together: a word no command has,
+# which puts the directory back where the command's own `cd`s left it.
+_BODY_BREAK = "\x01"
+_BODY_BASES_MAX = 8
+
+
+def _substitutions(form: str) -> tuple[str, list[str]]:
+    """(`form` with the body of each substitution in it replaced by a plain
+    word, those bodies with theirs replaced likewise). `x=$(touch F)` writes F
+    as surely as `touch F` does, but read as words it is an assignment and a
+    word `F)`. One pass: each character is copied once, however deep the
+    nesting. An unterminated body runs to the end."""
+    stack: list[list[Any]] = [[[], 0, None]]      # [parts, open parens, opener]
+    bodies: list[str] = []
+    last = 0
+    for m in _SUBST_TOKEN_RE.finditer(form):
+        top = stack[-1]
+        top[0].append(form[last:m.start()])
+        last = m.end()
+        tok = m.group()
+        if tok in _SUBST_OPENERS or (tok == "`" and top[2] != "`"):
+            top[0].append(" _ ")
+            stack.append([[], 0, tok])
+        elif len(stack) > 1 and (tok == "`" or (tok == ")" and top[1] == 0 and top[2] != "`")):
+            bodies.append("".join(stack.pop()[0]))
+        else:
+            top[1] = top[1] + 1 if tok == "(" else max(0, top[1] - (tok == ")"))
+            top[0].append(tok)
+    stack[-1][0].append(form[last:])
+    while len(stack) > 1:
+        bodies.append("".join(stack.pop()[0]))
+    return "".join(stack[0][0]), bodies
+
+
+def _protected_target(form: str, cwd: str | None, entries: list[Any],
+                      checks: _PathChecks | None = None) -> Any:
+    """The protected entry one normalized form of a command writes to, or None.
+    The body of each substitution is judged as a command of its own, from
+    every directory a `cd` in the command moves to."""
     # `>|` (write even under noclobber) is a redirection, not a pipe.
     form = _spaced(form, entries).replace(">|", "> ")
     base = cwd or os.getcwd()
+    checks = checks or _PathChecks()
+    if "(" not in form and "`" not in form:
+        return _protected_commands(form, form, base, entries, {}, [], checks)
+    outer, bodies = _substitutions(form)
     env: dict[str, str] = {}
+    bases: list[str] = []
+    hit = _protected_commands(outer, form, base, entries, env, bases, checks)
+    if hit is not None or not bodies:
+        return hit
+    joined = f" ; {_BODY_BREAK} ; ".join(bodies)
+    if not _WRITE_HINT_RE.search(joined):
+        return None
+    for b in dict.fromkeys([base, *bases][:_BODY_BASES_MAX]):
+        hit = _protected_commands(joined, joined, b, entries, dict(env), [], checks)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _protected_commands(form: str, code: str, base: str, entries: list[Any],
+                        env: dict[str, str], bases: list[str], checks: _PathChecks) -> Any:
+    """_protected_target over the commands of `form`, from `base`, with `env`
+    (assignments, updated) and `bases` (each `cd`, appended). `code` is what
+    an interpreter's code is read from."""
+    from . import guard_paths
+    start = base
     interpreter = False
 
     def hit_of(path: str, ancestors: Any = False, where: str | None = None) -> Any:
         path = path.replace("\x00", " ")
         if path in _SPECIAL_FILES or path.startswith("/dev/fd/") or not path:
             return None
+        key = (path, repr(ancestors), where or base, _env_key(path, env))
+        return checks.once(key, lambda: look(path, ancestors, where))
+
+    def look(path: str, ancestors: Any, where: str | None) -> Any:
         if isinstance(ancestors, tuple) or ancestors == "exists":
             # Only what is there: a clean of untracked files, a find -delete
-            # (whose -name patterns, when it has any, must match the name).
-            import fnmatch
+            # (whose -name patterns, when it has any, must match a name in
+            # it), a checkout or stash that puts files back.
             names = ancestors[1] if isinstance(ancestors, tuple) else ()
             real = guard_paths.resolve(path, where or base, env=env)
-            return next((e for e in entries if real and guard_paths.is_under(e.path, real)
-                         and os.path.lexists(e.path)
-                         and (not names or any(fnmatch.fnmatch(os.path.basename(e.path), n)
-                                               for n in names))), None)
+            if real is None:
+                return None
+            for e in entries:
+                if e.tree and guard_paths.is_under(real, e.path) and os.path.lexists(real):
+                    return e            # it starts inside a protected tree
+                if (guard_paths.is_under(e.path, real) and os.path.lexists(e.path)
+                        and (not names or _find_names_reach(e, names))):
+                    return e
+            return None
         return guard_paths.match(path, where or base, entries=entries, ancestors=ancestors,
                                  env=env)
 
     for seg, _at in _commands_in(form):
+        if seg.strip() == _BODY_BREAK:
+            base = start
+            continue
         for m in _REDIRECT_RE.finditer(seg):
             hit = hit_of(m.group(1))
             if hit is not None:
@@ -3586,18 +3933,22 @@ def _protected_target(form: str, cwd: str | None, entries: list[Any]) -> Any:
             plain = _plain_args(args)
             dest = plain[0] if plain else "~"
             if dest != "-":
-                dest = guard_paths.resolve(dest.replace("\x00", " "), base, env=env)
+                dest = dest.replace("\x00", " ")
+                dest = checks.once(("cd", dest, base, _env_key(dest, env)),
+                                   lambda d=dest, b=base: guard_paths.resolve(d, b, env=env))
                 base = dest or base
+                if len(bases) < _BODY_BASES_MAX:
+                    bases.append(base)
             continue
         if _INTERPRETERS_RE.fullmatch(prog):
             interpreter = True
-        targets, where = _write_targets(prog, args, base)
+        targets, where = _write_targets(prog, args, base, env, entries, checks)
         for path, ancestors in targets:
             hit = hit_of(path, ancestors, where)
             if hit is not None:
                 return hit
     if interpreter:
-        return _code_target(form, cwd, entries)
+        return _code_target(code, start, entries)
     return None
 
 
@@ -3611,21 +3962,35 @@ def _protected_write(command: str, cwd: str | None = None) -> dict[str, Any] | N
     from . import guard_paths
     entries = guard_paths.protected(cwd)
     found: dict[str, Any] = {}
+    checks = _PathChecks()
 
     def judge(form: str) -> tuple[str, str] | None:
-        hit = _protected_target(form, cwd, entries)
+        hit = _protected_target(form, cwd, entries, checks)
         if hit is None:
             return None
         found[hit.path] = hit
         return ("protected", hit.path)
 
     r = _readings(command)
-    for masked in (True, False):
-        for split in (False, True):
-            h = judge(_segmented(command, split, masked))
-            if h is not None and (masked or not _only_in_data(r, h, judge)):
-                return _protected_verdict(found[h[1]], command=command)
+    token = guard_paths.meter(_PATH_UNITS)
+    try:
+        for masked in (True, False):
+            for split in (False, True):
+                h = judge(_segmented(command, split, masked))
+                if h is not None and (masked or not _only_in_data(r, h, judge)):
+                    return _protected_verdict(found[h[1]], command=command)
+    except (_TooManyPaths, guard_paths.TooMuch):
+        return _too_many_paths_verdict()
+    finally:
+        guard_paths.unmeter(token)
     return None
+
+
+def _too_many_paths_verdict() -> dict[str, Any]:
+    return {"decision": "ask", "action_type": "oversize_command", "door": None,
+            "reason": ("nable guard: this command names more paths than the guard checks for "
+                       "its own files before its hook times out. A human should read it "
+                       "before it runs.")}
 
 
 def _protected_verdict(entry: Any, *, command: str | None = None,
@@ -3672,25 +4037,63 @@ def gate_editor(tool_name: str, tool_input: Any, *, cwd: str | None = None,
 
 # MCP tools: a command line in the arguments of any tool (a shell server's
 # {"command": "rm ~/.finops/guard-off"}), and a path argument of a tool whose
-# name says it writes (mcp__filesystem__write_file {"path": ...}).
-_MCP_WRITE_NAME_RE = re.compile(r"write|edit|create|move|rename|delete|remove|patch|append|"
-                                r"replace|put|upload|copy|save|mkdir|touch|chmod|trash|insert",
-                                re.IGNORECASE)
-_MCP_DELETE_NAME_RE = re.compile(r"move|rename|delete|remove|trash", re.IGNORECASE)
+# name says it writes (mcp__filesystem__write_file {"path": ...}). The name is
+# read a word at a time (write_file, writeFile, createDirectory), so compute
+# and output are not put.
+_MCP_NAME_WORD_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+_MCP_WRITE_WORDS = frozenset({
+    "write", "overwrite", "edit", "create", "move", "mv", "rename", "delete", "del", "remove",
+    "rm", "rmdir", "unlink", "patch", "append", "replace", "put", "upload", "copy", "cp",
+    "save", "mkdir", "makedirs", "touch", "chmod", "chown", "trash", "insert"})
+_MCP_DELETE_WORDS = frozenset({"move", "mv", "rename", "delete", "del", "remove", "rm",
+                               "rmdir", "unlink", "trash"})
+# A verb run into the noun it acts on: writefile, mkdirs, deletefiles.
+_MCP_NOUN_RE = re.compile(r"(?:s|d|file|files|dir|dirs|directory|directories|text|bytes|"
+                          r"object|objects|blob|path|paths|content|contents|notebook|cell)?")
 _MCP_PATH_KEYS = frozenset({"path", "paths", "file_path", "filepath", "file", "filename",
                             "file_name", "destination", "dest", "target", "target_path",
                             "source", "src", "new_path", "old_path", "notebook_path",
                             "directory", "dir"})
 _MCP_WALK_MAX = 512
+# A key the walk checks, in the JSON of the arguments it did not reach.
+_MCP_CHECKED_KEY_RE = re.compile(
+    r'"(?:path|paths|file_path|filepath|file|filename|file_name|destination|dest|target|'
+    r'target_path|source|src|new_path|old_path|notebook_path|directory|dir|command|commands|'
+    r'cmd|script|args|arguments|argv|input|code|cli_command|shell)"\s*:', re.IGNORECASE)
+
+
+def _mcp_name_says(name: str, verbs: frozenset[str]) -> bool:
+    """Does one word of an MCP tool's name (or a verb with its noun run on)
+    say it is one of `verbs`?"""
+    for w in _MCP_NAME_WORD_RE.findall(name):
+        w = w.lower()
+        if w in verbs or any(w.startswith(v) and _MCP_NOUN_RE.fullmatch(w, len(v))
+                             for v in verbs):
+            return True
+    return False
 
 
 def _protected_mcp(tool_name: str, arguments: Any) -> dict[str, Any] | None:
+    """An ask for an MCP call that writes one of the guard's own files (a
+    path argument of a tool that writes, or a command line), or None. Metered
+    as the shell check is."""
+    from . import guard_paths
+    token = guard_paths.meter(_PATH_UNITS)
+    try:
+        return _protected_mcp_walk(tool_name, arguments)
+    except guard_paths.TooMuch:
+        return {**_too_many_paths_verdict(), "summary": tool_name.rsplit("__", 1)[-1]}
+    finally:
+        guard_paths.unmeter(token)
+
+
+def _protected_mcp_walk(tool_name: str, arguments: Any) -> dict[str, Any] | None:
     from . import guard_paths
     from .guard_mcp import _COMMAND_KEYS
 
     name = tool_name.rsplit("__", 1)[-1]
-    writes = _MCP_WRITE_NAME_RE.search(name) is not None
-    ancestors = _MCP_DELETE_NAME_RE.search(name) is not None
+    writes = _mcp_name_says(name, _MCP_WRITE_WORDS)
+    ancestors = _mcp_name_says(name, _MCP_DELETE_WORDS)
     entries: list[Any] | None = None
     stack: list[tuple[Any, str, int]] = [(arguments, "", 0)]
     seen = 0
@@ -3698,12 +4101,15 @@ def _protected_mcp(tool_name: str, arguments: Any) -> dict[str, Any] | None:
         v, key, depth = stack.pop()
         seen += 1
         if isinstance(v, dict) and depth < 8:
-            stack += [(x, str(k).lower(), depth + 1) for k, x in v.items()]
+            # Paths and command lines last onto the stack, so first off it.
+            items = [(x, str(k).lower(), depth + 1) for k, x in v.items()]
+            stack += sorted(items, key=lambda it: it[1] in _MCP_PATH_KEYS
+                            or it[1] in _COMMAND_KEYS)
         elif isinstance(v, list) and depth < 8:
-            stack += [(x, key, depth + 1) for x in v]
+            stack += [(x, key, depth + 1) for x in reversed(v)]
         elif isinstance(v, str) and v.strip():
             if key in _COMMAND_KEYS and len(v) <= MAX_JUDGED_CHARS:
-                hit = _protected_write(v)
+                hit = _self_change(v) or _protected_write(v) or _oversize_code(v)
                 if hit is not None:
                     return {**hit, "summary": f"{name} {v.strip()[:_SHOWN_VALUE_MAX]}"}
             elif writes and key in _MCP_PATH_KEYS:
@@ -3713,6 +4119,17 @@ def _protected_mcp(tool_name: str, arguments: Any) -> dict[str, Any] | None:
                 if e is not None:
                     return {**_protected_verdict(e, tool=tool_name),
                             "summary": f"{name} {v.strip()[:_SHOWN_VALUE_MAX]}"}
+    if stack and writes and (
+            any(k in _MCP_PATH_KEYS or k in _COMMAND_KEYS for _v, k, _d in stack)
+            or _MCP_CHECKED_KEY_RE.search(json.dumps([v for v, _k, _d in stack], default=str))):
+        # More arguments than the guard reads, from a tool that writes files,
+        # and a path or a command line among those left: it could be one of
+        # the guard's own files.
+        return {"decision": "ask", "action_type": "protected_write", "door": None,
+                "reason": (f"nable guard: {tool_name} writes files, and its arguments hold more "
+                           f"than the {_MCP_WALK_MAX} values the guard checks for the guard's "
+                           "own files. A human should confirm."),
+                "summary": f"{name} ({_MCP_WALK_MAX}+ values)"}
     return None
 
 
