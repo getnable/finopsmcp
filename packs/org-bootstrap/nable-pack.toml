@@ -1,0 +1,50 @@
+# Org bootstrap: a code pack of two org-context adapters. nable never imports
+# this code; the broker runs each adapter in its own process with only what
+# is declared below, and `nable org init` writes what they return as
+# proposals a person confirms.
+#
+# Code runs only from a pack signed by a key the org trusts, or one the org
+# allowlists by content digest in its policy file:
+#   nable pack validate packs/org-bootstrap          (prints the digest)
+#   packs: {allow_unsigned_code: [io.github.getnable/org-bootstrap@<digest>]}
+#   nable pack install packs/org-bootstrap
+#   nable pack secret set io.github.getnable/org-bootstrap GITHUB_TOKEN
+#   nable pack secret set io.github.getnable/org-bootstrap GITHUB_ORG
+#   nable org init
+#
+# support is "community" until nable's first-party signing key is published:
+# a first-party claim is honoured only with that key's signature.
+[pack]
+name        = "org-bootstrap"
+namespace   = "io.github.getnable"
+version     = "1.0.0"
+description = "Proposes owners and teams from Backstage catalog files (and API) and from GitHub teams, for nable org init"
+license     = "Apache-2.0"
+nable_api   = ">=1.0,<2.0"
+maintainers = ["@getnable"]
+support     = "community"
+repository  = "https://github.com/getnable/packs"
+status      = "active"
+
+# repo.files: catalog-info.yaml files nable reads from the repos org init
+#   reads, handed over as text (the backstage adapter needs no network).
+# secrets: each from this pack's own vault entries, never the environment.
+#   BACKSTAGE_URL and BACKSTAGE_TOKEN are optional (the catalog API);
+#   GITHUB_API_URL is optional (GitHub Enterprise Server).
+# network: only the GitHub API. A Backstage or Enterprise Server host is the
+#   org's own: add it here and approve the changed pack.
+[capabilities]
+read_data    = ["repo.files"]
+secrets      = ["BACKSTAGE_TOKEN", "BACKSTAGE_URL", "GITHUB_API_URL", "GITHUB_ORG", "GITHUB_TOKEN"]
+network      = ["api.github.com"]
+write_org    = ["proposals"]
+max_autonomy = "L1"
+
+[provides]
+adapters = [
+  {id = "backstage", entry = "org_bootstrap.backstage:propose"},
+  {id = "github-teams", entry = "org_bootstrap.github_teams:propose"},
+]
+
+[compat]
+clouds = ["any"]
