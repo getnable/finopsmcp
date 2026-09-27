@@ -21,10 +21,12 @@
     nable pack run <ns/name> <entry-id> [--start D --end D] [--context K=V]
                                          run a connector (or adapter) through the
                                          broker and summarize what it returned
-    nable pack report <ns/name> <report> [--since 30d] [--set K=V] [--each PATH]
+    nable pack report <ns/name> [<report>] [--since 30d | --days N] [--until D]
+                      [--set K=V] [--each PATH] [--out FILE]
                                          render a pack's report template over the
                                          data scopes it declares (markdown, or
-                                         the values too with --json)
+                                         the values too with --json); the report
+                                         may be left out when the pack has one
     nable pack secret set <ns/name> <NAME>
                                          store a secret the pack declares, in
                                          its own vault namespace (the value is
@@ -109,11 +111,17 @@ def add_parser(sub) -> None:
                     help="an adapter's context entry (repeatable), e.g. repo=. or "
                          "branch_protection=protection.json; `cwd` is always the directory "
                          "this ran in")
-    rp = ps.add_parser("report", help="Render an installed pack's report template")
+    rp = ps.add_parser("report", help="Render an installed pack's report template "
+                                      "from nable's data")
     rp.add_argument("pack_id", metavar="ns/name")
-    rp.add_argument("report", help="the report's file name, stem or path in the pack")
+    rp.add_argument("report", nargs="?", default=None, metavar="REPORT",
+                    help="the report's file name, stem or path in the pack (default: the "
+                         "pack's only report)")
     rp.add_argument("--since", dest="pack_since", default=None, metavar="WHEN",
-                    help="from this long ago (24h, 30d, 2w) or this date; default: all")
+                    help="from this long ago (24h, 30d, 2w) or this date; default: all of "
+                         "the ledger, the last 30 days of spend")
+    rp.add_argument("--days", dest="pack_days", type=int, default=None, metavar="N",
+                    help="the last N days (the same as --since Nd)")
     rp.add_argument("--until", dest="pack_until", default=None, metavar="WHEN",
                     help="up to this date or time; default: now")
     rp.add_argument("--set", dest="pack_set", action="append", default=None,
@@ -388,10 +396,13 @@ def _run_code(parsed, as_json: bool) -> int:
         summary = {"rows": len(rows), "billed_total": round(total, 6),
                    "by_service": by_service, "start": str(start), "end": str(end)}
     else:
+        from ..org.store import git_root
+        here = git_root()
         context = {**_pairs(getattr(parsed, "pack_context", None), "--context"),
                    "today": broker.local_today().isoformat(), "cwd": os.getcwd()}
         r = broker.propose_facts(parsed.pack_id, parsed.entry_id, context,
-                                 timeout=parsed.pack_timeout)
+                                 timeout=parsed.pack_timeout,
+                                 repos=broker.repo_refs(roots=[here] if here else []))
         lines = [(f"{r.pack} adapter {r.entry}: {len(r.output)} proposed facts "
                   "(shown, not written; `nable org init` proposes them)")]
         lines += [f"  {f.fact} {f.subject}: {json.dumps(f.value, sort_keys=True)} "
@@ -458,7 +469,8 @@ def _report(parsed, as_json: bool) -> int:
         raise PackError("--since and --until take 24h, 30d, 2w, or a date such as "
                         "2026-09-01") from None
     r = render(parsed.pack_id, parsed.report, since=since, until=until,
-               sets=_pairs(parsed.pack_set, "--set"), each=parsed.pack_each)
+               days=parsed.pack_days, sets=_pairs(parsed.pack_set, "--set"),
+               each=parsed.pack_each)
     text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
     body = {"ok": True, **r}
     if parsed.pack_out:
@@ -468,7 +480,8 @@ def _report(parsed, as_json: bool) -> int:
             fh.write(out if out.endswith("\n") else out + "\n")
         print(f"Wrote {r['report']} of {r['pack']} to {parsed.pack_out}")
         return EXIT_OK
-    _out(body, as_json, text)
+    # On a terminal, nothing a template or the data under it holds can drive it.
+    _out(body, as_json, safe_text(text).rstrip())
     return EXIT_OK
 
 

@@ -1,0 +1,71 @@
+# Per-feature and per-customer attribution of AI spend.
+#
+# The convention: every LLM call carries a request tag (LiteLLM) or a trace
+# tag (Langfuse) named feature:<feature> and customer:<customer id>. No AI
+# vendor records a feature or a customer on its own, so those tags are the
+# only way to answer "what does search cost us" or "which customer is
+# unprofitable".
+#
+# `nable pack report io.github.getnable/ai-spend` evaluates these rules
+# against a finding shaped like:
+#   {type: ai_attribution, period_days, total_usd,
+#    feature_tagged_pct, customer_tagged_pct,
+#    untagged_feature_usd, untagged_customer_usd, tag_sources}
+# A share nable cannot compute (no AI spend read at all) is null, and a rule
+# on a null share does not match. When spend is read and no tag source is
+# connected, the share is 0: untagged is what nable can see, never a guess
+# that the tags are fine.
+version: 1
+rules:
+  - id: ai-feature-tags-missing
+    description: >-
+      Less than 80 percent of AI spend over 100 USD in the period carries a
+      feature tag.
+    applies_to: finding
+    match:
+      all:
+        - {field: type, op: eq, value: ai_attribution}
+        - {field: total_usd, op: gt, value: 100}
+        - {field: feature_tagged_pct, op: lt, value: 80}
+    effect:
+      action: flag
+      severity: medium
+      message: >-
+        Only ${feature_tagged_pct}% of ${total_usd} USD of AI spend carries a
+        feature tag; ${untagged_feature_usd} USD cannot be tied to a feature.
+        Tag each call feature:<name> (a LiteLLM request tag or a Langfuse
+        trace tag).
+
+  - id: ai-customer-tags-missing
+    description: >-
+      Less than 80 percent of AI spend over 100 USD in the period carries a
+      customer tag.
+    applies_to: finding
+    match:
+      all:
+        - {field: type, op: eq, value: ai_attribution}
+        - {field: total_usd, op: gt, value: 100}
+        - {field: customer_tagged_pct, op: lt, value: 80}
+    effect:
+      action: flag
+      severity: medium
+      message: >-
+        Only ${customer_tagged_pct}% of ${total_usd} USD of AI spend carries a
+        customer tag; ${untagged_customer_usd} USD cannot be tied to a
+        customer. Tag each call customer:<id> so unit economics per customer
+        hold.
+
+  - id: ai-untagged-spend-large
+    description: >-
+      More than 5,000 USD of AI spend in the period has no feature tag at all.
+    applies_to: finding
+    match:
+      all:
+        - {field: type, op: eq, value: ai_attribution}
+        - {field: untagged_feature_usd, op: gt, value: 5000}
+    effect:
+      action: escalate
+      severity: high
+      message: >-
+        ${untagged_feature_usd} USD of AI spend has no feature tag. At this
+        size an owner should know which product feature it pays for.

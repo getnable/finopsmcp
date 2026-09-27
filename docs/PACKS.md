@@ -150,17 +150,32 @@ installed pack with policies cannot be loaded, purchase advice is withheld.
 ## Report templates over nable's data
 
 ```
-nable pack report <ns/name> <report> [--since 30d] [--set key=value] [--each PATH] [--json]
+nable pack report <ns/name> [<report>] [--since 30d | --days N] [--until WHEN]
+                  [--set key=value] [--each PATH] [--json] [--out FILE]
 ```
 
-renders an installed pack's report template. A placeholder under a data
-scope's name reads that scope (`${ledger.guard.counts.asked}`), and only
-when the pack declares the scope in `read_data`; nable builds the values in
-its own process and the template stays text (`content.render`: dict lookups,
-nothing evaluated). `ledger.guard` is served today: change-management
-evidence from the guard ledger (`finops.change_evidence`). `--set` fills
-plain placeholders and can never stand in for a scope; `--each` renders once
-per record of a list; `--json` exports the values the text was rendered from.
+renders an installed pack's report template. `<report>` is the template's
+path in the pack, its file name or its stem, and may be left out when the
+pack has only one. A placeholder under a source's name reads that source,
+and only when the pack declares the source's `read_data` scope; a template
+that reads a scope its pack did not declare is refused, and the source never
+runs. nable builds the values in its own process and the template stays text
+(`content.render`: dict lookups, nothing evaluated); a placeholder nothing
+fills stays as written. The sources (`finops/packs/reports.py`):
+
+| Placeholder | Reads | What it holds |
+|---|---|---|
+| `${ledger.guard.*}` | `ledger.guard` | change-management evidence from the guard ledger (`finops.change_evidence`) |
+| `${ai.*}` | `focus.cost` | AI and LLM spend by vendor, model, feature tag and customer tag, and what the pack's own attribution policies flag |
+
+The window is `--since` (24h, 30d, 2w or a date) and `--until`, or `--days
+N`, which is the same as `--since Nd` (the AI source counts it in local
+calendar days up to today). With neither, the ledger is read from its first
+record and AI spend over the last 30 days. `--set` fills plain placeholders
+and can never stand in for a source; `--each` renders once per record of a
+list; `--json` exports the values the text was rendered from; `--out` writes
+the report (or the JSON) to a file and refuses the guard's own files (its
+ledger, the installed packs, the org model, the policy).
 
 ## Running code
 
@@ -187,8 +202,11 @@ call the broker:
    pack's requests unanswered at once, and an output cap; stderr goes, truncated and with
    secret values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
 4. answers `data.read` only for declared `read_data` scopes (`focus.cost`,
-   `org.owners` and `org.environments` today; the other scopes say they are not
-   available yet);
+   `org.owners`, `org.environments`, and `repo.files` from the repos an
+   adapter call names, today; the other scopes say they are not available
+   yet). `ledger.guard` and `recommendations` are not handed to code: nable
+   reads them in its own process, for report templates and commitment
+   bounds;
 5. checks what comes back: FOCUS rows against nable's schema (invalid rows are
    dropped and reported), org facts as proposals whose source starts with the
    pack id, sink deliveries against the declared `act` kinds and
@@ -276,13 +294,30 @@ without the broker.
 
 nable's own packs live in `packs/` in this repository, in the
 `io.github.getnable` namespace. Each is an ordinary pack: it validates with
-`nable pack validate`, declares only what it uses, and installs only when
-signed by nable's first-party key (the copies here are unsigned until a
-release signs them).
+`nable pack validate`, declares only what it uses, and declares `support =
+"first-party"`. Releases are signed with nable's first-party key, and a
+first-party claim is honoured only with that key's signature: the copies here
+are unsigned, and install refuses them until a release signs them. For the
+code pack (org-bootstrap) that signature is also what lets its code run; an
+org's own changed copy declares `support = "community"` and runs only when
+the org signs it or allowlists its digest.
 
 | Pack | What it does | Capabilities |
 |---|---|---|
 | `io.github.getnable/change-control` ("Change control (SOC 2)", `packs/change-control`) | Guard rules that ask about deploys and deny teardowns during a change freeze, and always deny admin merges, force pushes to protected branches and branch protection changes; freeze-window templates as proposed org facts; an adapter that proposes approval chains from CODEOWNERS and exported GitHub branch protection and environment settings; CC8.1 change-management evidence and change tickets from the guard ledger, as markdown and JSON. Evidence, not a certification. | `read_data = ["ledger.guard"]`, `write_org = ["proposals"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no network, no secrets |
 | `io.github.getnable/commitments-bounds` ("Commitments with bounds", `packs/commitments-bounds`) | Commitment bounds (coverage target, longest term, payment options, migration blackouts) that cut nable's commitment advice to them; guard rules that ask before every commitment purchase on AWS, Google Cloud and Azure and name the bound it would breach. Never buys anything. | `read_data = ["recommendations"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
+| `io.github.getnable/ai-spend` ("AI spend", `packs/ai-spend`) | A policy that flags AI spend without `feature:` or `customer:` request tags; guard rules that make every GPU or accelerator launch ask (AWS p, g, trn, inf and dl families, GCP a2, a3, a4, g2 and TPU types, Azure N-series); the skill `check-ai-budget` for coding agents; a report of AI spend by vendor, model, feature and customer. | `read_data = ["focus.cost"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
+| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`, `BACKSTAGE_TOKEN`), `max_autonomy = "L1"` |
 
-Each pack's README says what it reads, and why.
+Each pack's README says what it reads, its secrets and its network, and why.
+
+### The `repo.files` data scope
+
+An adapter that declares `read_data = ["repo.files"]` gets, in its context,
+each repo `nable org init` (or `nable pack run`) reads: a name, a label and
+the `repo_path` subject prefix, not where the repo is on this machine (every
+adapter's context does carry `cwd`, the directory nable ran in). It asks
+nable for files by plain name (`{"names": ["catalog-info.yaml"]}`, never a path or a glob);
+nable walks the repos itself, skips `.git`, `node_modules`, vendored and
+build trees and every symlink, and caps the count and size of what it hands
+over.

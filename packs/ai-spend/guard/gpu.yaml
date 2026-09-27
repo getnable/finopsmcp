@@ -1,0 +1,71 @@
+# GPU and accelerator launches ask, whatever they cost.
+#
+# The guard already asks when a launch it can price is over the auto
+# threshold (500 USD a month by default). A single g4dn.xlarge is about 380
+# USD a month, and a GCP g2 or an Azure NC launch is not priced at all, so
+# each would go through silently. These rules lower the threshold for GPU
+# and accelerator families to zero: every such launch asks. They only
+# tighten: an ask stays an ask, a deny stays a deny, and nothing here can
+# turn an ask into an allow.
+version: 1
+rules:
+  - id: ask-aws-gpu-launch
+    target: command
+    # EC2, SageMaker, EKS, Auto Scaling, Batch and EMR calls that create,
+    # update or resize something with a GPU or accelerator type: p2 to p6
+    # (p4d, p4de, p5, p5e, p5en, p6-b200), g3 to g6 (g4dn, g5, g5g, g6e),
+    # gr6, trn1, trn1n, trn2, inf1, inf2, dl1 and dl2q, SageMaker's ml.*
+    # names included.
+    pattern: '(?i)\baws\s+(ec2|sagemaker|eks|autoscaling|batch|emr)\s+(run-instances|request-spot-[a-z-]*|modify-instance-attribute|create-[a-z-]*|update-[a-z-]*|add-instance-[a-z-]*)\b.*\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12]n?|inf[12]|dl[12]q?)\.([0-9]*xlarge|large|metal[a-z0-9-]*)\b'
+    verdict: ask
+    reason: >-
+      This launches a GPU or accelerator instance. The AI spend pack asks for
+      every one, whatever its size: one p4d.24xlarge is about 24,000 USD a
+      month on demand, and even a small g4dn runs all month if nobody stops
+      it. Check the owner and the budget (nable brief, or check_ai_budget for
+      an agent's own spend) before you confirm.
+    price_hint:
+      monthly_usd: 24000
+      note: One p4d.24xlarge on demand in us-east-1, for scale.
+
+  - id: ask-gcp-gpu-launch
+    target: command
+    # Compute Engine, GKE, Vertex AI, Workbench, Batch and Dataproc calls
+    # that create or change something with an accelerator flag or a GPU or
+    # TPU machine type (a2, a3, a4, a4x, g2, g4, ct5 and later).
+    pattern: '(?i)\bgcloud\s+(beta\s+|alpha\s+)?(compute|container|ai|workbench|notebooks|batch|dataproc)\b.*\b(create|update|add|set-machine-type|resize|deploy-model)\b.*(--accelerator|accelerator-type|\b(a2|a3|a4x?|g2|g4)-(high|ultra|mega|edge|standard)|\bct[3-6][a-z]*-)'
+    verdict: ask
+    reason: >-
+      This creates or changes a Google Cloud resource with GPUs or TPUs
+      attached. The AI spend pack asks for every one: an a3-highgpu-8g is
+      over 60,000 USD a month on demand. Check the owner and the budget
+      before you confirm.
+    price_hint:
+      monthly_usd: 64000
+      note: One a3-highgpu-8g on demand in us-central1, for scale.
+
+  - id: ask-azure-gpu-launch
+    target: command
+    # VM, scale set, AKS, Azure ML and Batch calls that create, add, update,
+    # resize or scale with an N-series size (NC, ND, NV, NG).
+    pattern: '(?i)\baz\s+(vm|vmss|aks|ml|batch)\b.*\b(create|add|update|resize|scale)\b.*\bStandard_N[CDVG][a-z0-9_]*'
+    verdict: ask
+    reason: >-
+      This creates or resizes an Azure N-series (GPU) machine. The AI spend
+      pack asks for every one: an ND96isr_H100_v5 is over 70,000 USD a month
+      on demand. Check the owner and the budget before you confirm.
+    price_hint:
+      monthly_usd: 72000
+      note: One Standard_ND96isr_H100_v5 on demand in East US, for scale.
+
+  - id: ask-mcp-gpu-launch
+    target: mcp
+    # An MCP tool whose name says it launches or creates compute, called with
+    # a GPU type in its arguments. (A tool the guard recognises, such as one
+    # that runs an AWS CLI command, is also judged as that command above.)
+    pattern: '(?i)^mcp__\S*(run_?instances|create_?(instance|vm|node_?pool|nodegroup|training_?job|endpoint|cluster|notebook)|launch)\S* .*(\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12]n?|inf[12])\.[0-9]*x?large\b|\bStandard_N[CDVG]|\b(a2|a3|a4x?|g2)-(high|ultra|mega|standard))'
+    verdict: ask
+    reason: >-
+      This tool call launches compute with GPUs or accelerators. The AI spend
+      pack asks for every one, whatever its size. Check the owner and the
+      budget before you confirm.

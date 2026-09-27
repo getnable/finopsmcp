@@ -1,0 +1,39 @@
+# AI spend: a data pack. nable validates everything here and nothing here runs.
+# It bundles what nable already reads (OpenAI, Anthropic, Bedrock, Vertex,
+# LiteLLM, Langfuse and the coding agents) rather than shipping connectors.
+#
+#   nable pack validate packs/ai-spend
+#   nable pack install <a release of it>
+#   nable pack report io.github.getnable/ai-spend --days 30
+#
+# Releases are signed with nable's first-party key. A first-party claim is
+# honoured only with that key's signature, so install refuses this unsigned
+# copy until a release signs it.
+[pack]
+name        = "ai-spend"
+namespace   = "io.github.getnable"
+version     = "1.0.0"
+description = "AI spend: feature and customer attribution policy, GPU launch guard rules, a check-the-budget skill and a report by vendor, model and feature"
+license     = "Apache-2.0"
+nable_api   = ">=1.0,<2.0"
+maintainers = ["@getnable"]
+support     = "first-party"
+repository  = "https://github.com/getnable/packs"
+status      = "active"
+
+# focus.cost: the report reads AI spend nable already has (by vendor, model
+# and request tag). guard: its rules only ever turn allow into ask.
+[capabilities]
+read_data    = ["focus.cost"]
+guard        = "tighten-only"
+max_autonomy = "L1"
+
+[provides]
+policies    = ["policies/*.yaml"]
+guard_rules = ["guard/*.yaml"]
+reports     = ["reports/ai-spend.md"]
+skills      = ["skills/check-ai-budget/SKILL.md"]
+
+[compat]
+clouds    = ["aws", "gcp", "azure", "any"]
+harnesses = ["claude-code", "cursor", "codex", "copilot", "gemini", "cline"]

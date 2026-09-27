@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pack report templates rendered over nable's own data (finops.packs.reports)
-and the evidence the ledger scope builds (finops.change_evidence).
+"""`nable pack report`: pack report templates rendered over nable's own data
+(finops.packs.reports), the evidence the ledger scope builds
+(finops.change_evidence) and the AI spend the `ai` source reads.
 
 What has to stay true:
-  - a template reads a data scope only when its pack declares it
+  - a template reads a data scope only when its pack declares it; one that
+    reads an undeclared scope is refused and the source never runs
+  - with no report named, a pack's only report; a pack with several asks
+  - --days N is --since Nd, and the two are not given together
   - `--set` fills plain placeholders and can never stand in for a scope
   - nothing in a template is evaluated
   - the evidence says what it is, and an empty ledger is evidence of nothing
@@ -11,6 +15,7 @@ What has to stay true:
 from __future__ import annotations
 
 import json
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -125,3 +130,104 @@ def test_evidence_keeps_allows_out_of_the_change_list_but_counts_them():
     [c] = ev["changes"]
     assert c["outcome"] == "not_examined" and c["error"] == "boom"
     assert c["show"]["approved_by"] == "-"
+
+
+# ── the `ai` source (focus.cost), and picking a report ────────────────────────
+
+AI_TEMPLATE = "Total ${ai.total_usd} for ${ai.period}; ${who.knows} stays; ${period}\n"
+
+
+@pytest.fixture
+def filled(monkeypatch):
+    calls = []
+
+    def fill(*, days, pack_id, **_):
+        calls.append((days, pack_id))
+        return {"total_usd": "12.50", "period": "last week", "table": ["not", "a", "scalar"]}
+
+    monkeypatch.setitem(reports.SOURCES, "ai", reports.Source("focus.cost", fill, "test"))
+    return calls
+
+
+def _pack(tmp_path, *, caps: str, reports_: dict[str, str]):
+    src = make_pack(tmp_path / "src", capabilities=caps,
+                    provides='reports = ["reports/*.md"]\n')
+    for name, text in reports_.items():
+        (src / "reports").mkdir(exist_ok=True)
+        (src / "reports" / name).write_text(text)
+    inst.install(str(src), yes=True)
+    return "io.github.example/demo"
+
+
+def test_a_declared_source_fills_its_placeholders(packs_env, tmp_path, filled, capsys):
+    pid = _pack(tmp_path, caps='read_data = ["focus.cost"]\n', reports_={"r.md": AI_TEMPLATE})
+    assert reports.scopes_in(AI_TEMPLATE) == ["focus.cost"]
+    r = reports.render(pid, days=7)
+    assert r["text"] == "Total 12.50 for last week; ${who.knows} stays; ${period}\n"
+    assert r["sources"] == ["ai"] and r["scopes"] == ["focus.cost"] and filled == [(7, pid)]
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "r"])
+    assert ei.value.code == 0 and "Total 12.50" in capsys.readouterr().out
+
+
+def test_an_undeclared_source_is_not_read_and_is_refused(packs_env, tmp_path, filled, capsys):
+    # The two report designs differed here: one left the placeholders as
+    # written with a note, the other refused. A report that silently lacks
+    # its numbers is easy to mistake for one that has none, so it refuses.
+    pid = _pack(tmp_path, caps='read_data = ["org.owners"]\n', reports_={"r.md": AI_TEMPLATE})
+    with pytest.raises(PolicyRefusal, match="focus.cost, which the pack does not declare"):
+        reports.render(pid)
+    assert filled == []
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid])
+    assert ei.value.code == 1 and "does not declare" in capsys.readouterr().err
+    assert filled == []
+
+
+def test_picking_a_report(packs_env, tmp_path, filled, capsys):
+    pid = _pack(tmp_path, caps='read_data = ["focus.cost"]\n',
+                reports_={"a.md": "A ${ai.total_usd}", "b.md": "B"})
+    with pytest.raises(PackError, match="has 2 reports; name one"):
+        reports.render(pid)
+    assert reports.render(pid, "reports/a.md")["text"] == "A 12.50"
+    assert reports.render(pid, "b.md")["text"] == "B"
+    with pytest.raises(PackError, match="has no report 'c'"):
+        reports.render(pid, "c")
+    with pytest.raises(PackError, match="not installed"):
+        reports.render("io.github.example/absent")
+    with pytest.raises(PackError, match="at least 1"):
+        reports.render(pid, "a", days=0)
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid])
+    assert ei.value.code == 1 and "name one" in capsys.readouterr().err
+
+
+def test_days_is_since_in_days_and_not_both(packs_env, tmp_path, filled, capsys):
+    pid = _pack(tmp_path, caps='read_data = ["focus.cost"]\n', reports_={"r.md": AI_TEMPLATE})
+    with pytest.raises(PackError, match="give one of them"):
+        reports.render(pid, days=7, since=datetime(2026, 9, 1, tzinfo=UTC))
+    now = datetime(2026, 9, 27, 12, tzinfo=UTC)
+    r = reports.render(pid, days=7, now=now)
+    assert r["values"]["since"] == "2026-09-20T12:00:00+00:00"
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "--days", "3", "--since", "3d"])
+    assert ei.value.code == 1 and "give one of them" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "--days", "3", "--json"])
+    assert ei.value.code == 0 and json.loads(capsys.readouterr().out)["sources"] == ["ai"]
+    assert filled[-1] == (3, pid)
+
+
+def test_the_ai_window_counts_local_days():
+    today = date(2026, 9, 27)
+    assert reports._ai_window(None, None, 7, today) == (date(2026, 9, 20), today, 7)
+    assert reports._ai_window(None, None, None, today) == (date(2026, 8, 28), today, 30)
+    since = datetime(2026, 9, 13, 12, tzinfo=UTC)
+    _start, end, days = reports._ai_window(since, None, None, today)
+    assert end == today and days == (today - since.astimezone().date()).days
+
+
+def test_set_cannot_stand_in_for_the_ai_source(packs_env, tmp_path, filled):
+    pid = _pack(tmp_path, caps='read_data = ["focus.cost"]\n', reports_={"r.md": AI_TEMPLATE})
+    with pytest.raises(PackError, match="data scope"):
+        reports.render(pid, sets={"ai": "forged"})

@@ -4,21 +4,36 @@ All notable changes to finops-mcp (nable).
 
 ## Unreleased
 
-- **First-party packs.** `packs/change-control` (Change control, SOC 2):
-  guard rules that ask about deploys and deny teardowns during a change
-  freeze, and always deny admin merges, force pushes to protected branches
-  and branch protection changes; freeze-window templates; approval chains
-  proposed from CODEOWNERS and exported GitHub settings; CC8.1
-  change-management evidence and change tickets from the guard ledger, as
-  markdown and JSON. `packs/commitments-bounds` (Commitments with bounds):
-  a coverage target, a longest term, payment options and migration
-  blackouts that cut commitment advice to them, and guard rules that ask
-  before every commitment purchase and name the bound it would breach.
+- **First-party packs.** Four packs in `packs/`, in the `io.github.getnable`
+  namespace, each declaring `support = "first-party"`: releases are signed
+  with nable's first-party key, and install refuses an unsigned copy.
+  - `packs/change-control` (Change control, SOC 2): guard rules that ask
+    about deploys and deny teardowns during a change freeze, and always deny
+    admin merges, force pushes to protected branches and branch protection
+    changes; freeze-window templates; approval chains proposed from
+    CODEOWNERS and exported GitHub settings; CC8.1 change-management
+    evidence and change tickets from the guard ledger, as markdown and JSON.
+  - `packs/commitments-bounds` (Commitments with bounds): a coverage target,
+    a longest term, payment options and migration blackouts that cut
+    commitment advice to them, and guard rules that ask before every
+    commitment purchase and name the bound it would breach.
+  - `packs/ai-spend` (AI spend): a policy that flags AI spend without
+    feature or customer tags, guard rules that make every GPU or accelerator
+    launch ask on AWS, Google Cloud and Azure, a `check-ai-budget` skill, and
+    a report of AI spend by vendor, model, feature and customer.
+  - `packs/org-bootstrap` (Org bootstrap): two `nable org init` adapters
+    that propose owners and teams from Backstage `catalog-info.yaml` files
+    (and, when configured, the catalog API) and from GitHub teams. The
+    week-one questions name the pack and the reader that proposed a fact.
 - **Pack SDK.** Guard rules may apply `during: freeze` only. A pack rule at
   the guard's own verdict adds its reason to it. Policy files may declare
-  `commitment_bounds`. `nable pack report` renders a pack's report template
-  over the data scopes it declares. `nable pack run --context key=value`
-  passes an adapter its inputs.
+  `commitment_bounds`. `nable pack report <ns/name> [<report>]` renders a
+  pack's report template over the data scopes it declares (`ledger.guard`
+  evidence, `ai` spend from `focus.cost`), with `--since`/`--until` or
+  `--days N`, `--set`, `--each`, `--json` and `--out`; a template that reads
+  an undeclared scope is refused. The `repo.files` data scope hands an
+  adapter files it names from the repos it is run for. Adapters get context:
+  `cwd`, and `nable pack run --context key=value` for their inputs.
 
 ## 0.10.0
 
