@@ -205,8 +205,29 @@ def lessons(include_history: bool = False) -> list[dict[str, Any]]:
     return out
 
 
-def rollback(lesson_id: int, note: str = "") -> dict[str, Any]:
-    """Overrule a lesson: its key is pinned to standard ranking until restored."""
+def lesson(lesson_id: int) -> dict[str, Any] | None:
+    """One lesson by id, whatever its status (superseded included), or None."""
+    return next((x for x in lessons(include_history=True) if x["id"] == lesson_id), None)
+
+
+def _decided_by(by: Any) -> str:
+    """Who is overruling or restoring a lesson: the HumanDecision only the
+    CLI makes (`nable learn rollback|restore`, on a terminal or with --as),
+    the same as an org fact's confirm. A script or an agent calling this API
+    has none, so it cannot quietly change what nable learned."""
+    from ...org.store import HumanDecision, OrgError
+    if not isinstance(by, HumanDecision):
+        raise OrgError("rolling back or restoring a lesson is a person's decision: run "
+                       "`nable learn rollback|restore` in a terminal (or with --as WHO)")
+    return by.who
+
+
+def rollback(lesson_id: int, note: str = "", *, by: Any = None) -> dict[str, Any]:
+    """Overrule a lesson: its key is pinned to standard ranking until restored.
+    `by` is the person's HumanDecision (see _decided_by); who it was is kept
+    in the rollback note."""
+    who = _decided_by(by)
+    note = f"by {who}" + (f": {note}" if note else "")
     ll = learning_lessons
     with get_engine().begin() as conn:
         row = conn.execute(select(ll).where(ll.c.id == lesson_id)).fetchone()
@@ -220,8 +241,10 @@ def rollback(lesson_id: int, note: str = "") -> dict[str, Any]:
             "effect": "standard ranking applies for this key until you restore the lesson"}
 
 
-def restore(lesson_id: int) -> dict[str, Any]:
-    """Lift a rollback. The next sync re-evaluates the key from live evidence."""
+def restore(lesson_id: int, *, by: Any = None) -> dict[str, Any]:
+    """Lift a rollback. The next sync re-evaluates the key from live evidence.
+    `by` is the person's HumanDecision, as for rollback()."""
+    who = _decided_by(by)
     ll = learning_lessons
     with get_engine().begin() as conn:
         row = conn.execute(select(ll).where(ll.c.id == lesson_id)).fetchone()
@@ -233,7 +256,8 @@ def restore(lesson_id: int) -> dict[str, Any]:
         # evidence at the next sync, rather than us asserting the old verdict
         # still holds.
         conn.execute(ll.update().where(ll.c.id == lesson_id).values(
-            status="superseded", superseded_at=_now()))
+            status="superseded", superseded_at=_now(),
+            rollback_note=f"{row.rollback_note or ''} (restored by {who})".strip()))
     return {"ok": True, "key": row.key,
             "effect": "the next sync re-evaluates this key from current evidence"}
 

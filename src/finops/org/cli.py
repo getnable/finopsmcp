@@ -17,6 +17,10 @@
   nable org set threshold --subject team:payments --max-auto-usd 200
   nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
+                                 (init and questions first read the guard's
+                                 decision ledger and propose the thresholds
+                                 what people keep deciding supports:
+                                 nable learn infer --dry-run shows why)
   nable org export [--format json|yaml] [--out PATH]
 
 Confirming, rejecting and `set` are the human path the whole model rests on.
@@ -444,9 +448,36 @@ def _trust(parsed, org) -> int:
     return 0
 
 
+def _learn(d, *, out=None) -> None:
+    """Read the guard's decision ledger for what people keep deciding and
+    propose the thresholds it supports (learning.policy_inference): the
+    proposals then come up as questions like any other. Proposals only, and
+    never on the hook path. A ledger or model that cannot be read costs the
+    lessons, never the questions."""
+    out = out or sys.stdout
+    try:
+        from ..recommendations.learning.policy_inference import propose_guard_facts
+        from .store import _data_dir, resolve_dir
+        if d is None and resolve_dir(None)[1] == "repo":
+            # As init does: never into a repo's tracked files unasked; the
+            # data dir's model is read under the repo's.
+            d = _data_dir() / "org"
+        got = propose_guard_facts(d)
+    except Exception as e:  # noqa: BLE001 - lessons are optional; questions are not
+        print(f"  (the guard's ledger was not read for lessons: {type(e).__name__}: {e})",
+              file=sys.stderr)
+        return
+    new = [p for p in got["proposals"] if p.get("result") in ("added", "conflict")]
+    if new:
+        print(f"  learned from the guard's asks: {len(new)} threshold proposal(s), asked below "
+              "(nable learn infer --dry-run shows the evidence)", file=out)
+
+
 def _questions(parsed, org) -> int:
+    as_json = getattr(parsed, "org_json", False)
+    _learn(parsed.org_dir, out=sys.stderr if as_json else sys.stdout)
     qs = org.questions(parsed.org_limit, model=org.load(parsed.org_dir))
-    if getattr(parsed, "org_json", False):
+    if as_json:
         print(json.dumps({"questions": [q.to_dict() for q in qs]}, default=str))
         return 0
     if not qs:
@@ -627,6 +658,7 @@ def _init(parsed, org) -> int:
           "FINOPS_REQUIRED_TAGS/FINOPS_PROTECTED_TAGS)")
     if not getattr(parsed, "org_no_adapters", False):
         _print_runs(org.run_adapters(d, repos=getattr(parsed, "org_repos", None) or ()))
+    _learn(d)
     m = org.load(d)
     qs = org.questions(parsed.org_limit, model=m)
     if not qs:

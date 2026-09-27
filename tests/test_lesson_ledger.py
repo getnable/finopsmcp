@@ -15,7 +15,12 @@ from pathlib import Path
 
 import pytest
 
+from finops.org.cli import _who
 from finops.recommendations.learning.rescorer import rescore
+
+# A person's decision, as `nable learn rollback --as` makes it: rollback and
+# restore take nothing else.
+_ME = _who("tester@example.com")
 
 
 @pytest.fixture
@@ -160,7 +165,7 @@ def test_rollback_neutralises_the_signal_and_the_rescorer(ledger_db):
     out = rescore([rec], customer_signal(), use_context=False)
     assert out["suppressed_count"] == 1, "precondition: the source is suppressed"
 
-    result = rollback(lessons()[0]["id"], note="we are ramping commitments now")
+    result = rollback(lessons()[0]["id"], note="we are ramping commitments now", by=_ME)
     assert result["ok"]
 
     sig = customer_signal()
@@ -175,7 +180,7 @@ def test_sync_never_relearns_a_rolled_back_key(ledger_db):
     from finops.recommendations.learning.ledger import lessons, rollback, sync_lessons
     _suppressed_source()
     sync_lessons()
-    rollback(lessons()[0]["id"])
+    rollback(lessons()[0]["id"], by=_ME)
     # More rejections make the raw signal argue even harder for suppression.
     _seed("commitment", "dismissed", n=6)
     counts = sync_lessons()
@@ -192,8 +197,8 @@ def test_restore_lets_the_signal_decide_again(ledger_db):
     _suppressed_source()
     sync_lessons()
     lid = lessons()[0]["id"]
-    rollback(lid)
-    restore(lid)
+    rollback(lid, by=_ME)
+    restore(lid, by=_ME)
     counts = sync_lessons()
     assert counts["new"] == 1, "after restore, live evidence re-creates the lesson"
     sig = customer_signal()
@@ -208,7 +213,7 @@ def test_rolled_back_floor_removes_the_dollar_floor(ledger_db):
     _seed("idle", "dismissed", est=20.0, n=4)
     sync_lessons()
     floor_lesson = [l for l in lessons() if l["key"] == "approval_floor"][0]
-    rollback(floor_lesson["id"])
+    rollback(floor_lesson["id"], by=_ME)
     sig = customer_signal()
     assert sig["approval_profile"]["approval_floor_usd"] is None
     assert "approval_floor" in sig["overrides_applied"]
@@ -216,8 +221,8 @@ def test_rolled_back_floor_removes_the_dollar_floor(ledger_db):
 
 def test_rollback_of_a_missing_lesson_is_an_error_not_a_crash(ledger_db):
     from finops.recommendations.learning.ledger import restore, rollback
-    assert "error" in rollback(99999)
-    assert "error" in restore(99999)
+    assert "error" in rollback(99999, by=_ME)
+    assert "error" in restore(99999, by=_ME)
 
 
 def test_the_raw_signal_flag_bypasses_overrides(ledger_db):
@@ -227,7 +232,7 @@ def test_the_raw_signal_flag_bypasses_overrides(ledger_db):
     from finops.recommendations.learning.signal import customer_signal
     _suppressed_source()
     sync_lessons()
-    rollback(lessons()[0]["id"])
+    rollback(lessons()[0]["id"], by=_ME)
     raw = customer_signal(apply_learned_overrides=False)
     entry = [s for s in raw["by_source"] if s["source"] == "commitment"][0]
     assert entry["verdict"] == "suppress", "raw signal must show the true verdict"
