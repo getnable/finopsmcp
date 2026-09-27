@@ -724,12 +724,18 @@ rates:
 P4D = "aws ec2 run-instances --instance-type p4d.24xlarge --count 2"
 
 
-def _install_prices(tmp_path: Path) -> None:
+def _install_prices(tmp_path: Path, text: str = PRICES, name: str = "prices") -> None:
     from finops.packs import install as inst
-    src = make_pack(tmp_path / "price-pack", name="prices")
-    (src / "prices" / "book.yaml").write_text(PRICES)
+    src = make_pack(tmp_path / f"{name}-pack", name=name)
+    (src / "prices" / "book.yaml").write_text(text)
     inst.install(str(src), yes=True)
     gpk.invalidate()
+
+
+def _book(sku: str, rate: float, unit: str = "hour", provider: str = "aws") -> str:
+    return (f"version: 1\nrates:\n  - provider: {provider}\n    sku: {sku}\n"
+            f"    unit: {unit}\n    rate: {rate}\n    currency: USD\n"
+            "    effective_from: 2020-01-01\n")
 
 
 def test_without_a_price_book_the_list_price_stands(packs_env):
@@ -738,28 +744,76 @@ def test_without_a_price_book_the_list_price_stands(packs_env):
     assert "price book" not in est["line"] and "price_book" not in est
 
 
-def test_a_price_book_prices_at_the_orgs_rate_and_says_so(packs_env, tmp_path):
+def test_a_price_book_below_list_is_shown_and_the_list_price_is_judged(packs_env, tmp_path):
+    # review2 pb.py: a price book used to replace the list price in the
+    # figure the thresholds judge, so a book could make any launch look cheap.
     _install_prices(tmp_path)
+    listed = EC2_HOURLY["p4d.24xlarge"]
+    assert 21.5 < listed
     est = g.estimate_command_monthly_cost(P4D)
-    assert est["hourly_usd"] == 21.5
-    assert est["monthly_usd"] == round(21.5 * 2 * HOURS_PER_MONTH, 2)
-    assert "at your price book rate of $21.50/hr" in est["line"]
-    assert "io.github.example/prices" in est["basis"]
+    assert est["hourly_usd"] == listed
+    assert est["monthly_usd"] == round(listed * 2 * HOURS_PER_MONTH, 2)
+    assert "at your price book rate of $21.50/hr (io.github.example/prices)" in est["line"]
+    assert f"~${21.5 * 2 * HOURS_PER_MONTH:,.0f}/mo" in est["line"]
+    assert "use the list price" in est["line"]
     assert est["price_book"]["pack"] == "io.github.example/prices"
+    assert est["price_book"]["below_list"] is True
     v = g.gate_command(P4D, cwd=os.getcwd())
     assert v["decision"] == "ask" and "at your price book rate" in v["reason"]
+    assert v["monthly_delta_usd"] == round(listed * 2 * HOURS_PER_MONTH, 2)
     [rec] = [r for r in _records() if r["decision"] == "ask"]
     assert rec["price_book"]["pack"] == "io.github.example/prices"
+
+
+def test_a_price_book_above_list_prices_at_the_orgs_rate(packs_env, tmp_path):
+    _install_prices(tmp_path, _book("m5.xlarge", 1.5))
+    est = g.estimate_command_monthly_cost("aws ec2 run-instances --instance-type m5.xlarge")
+    assert est["hourly_usd"] == 1.5
+    assert est["monthly_usd"] == round(1.5 * HOURS_PER_MONTH, 2)
+    assert "at your price book rate of $1.50/hr" in est["line"]
+    assert "io.github.example/prices" in est["basis"]
+    assert "below_list" not in est["price_book"]
+
+
+def test_a_zero_price_book_rate_still_asks_on_a_64k_launch(packs_env, tmp_path):
+    # A rate of 0 is a rate, not "no price": the launch keeps its list figure.
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge --count 4"
+    listed = round(EC2_HOURLY["p4d.24xlarge"] * 4 * HOURS_PER_MONTH, 2)
+    assert listed > 64_000
+    _install_prices(tmp_path, _book("p4d.24xlarge", 0))
+    est = g.estimate_command_monthly_cost(cmd)
+    assert est is not None and est["monthly_usd"] == listed
+    assert "at your price book rate of $0.00/hr" in est["line"]
+    v = g.gate_command(cmd, cwd=os.getcwd(), record=False)
+    assert v["decision"] == "ask" and f"${listed:,.0f}" in v["reason"]
+
+
+def test_a_zero_rate_for_a_sku_the_tables_do_not_know_is_priced_not_dropped(packs_env,
+                                                                             tmp_path):
+    _install_prices(tmp_path, _book("db.custom9.large", 0))
+    est = g.estimate_command_monthly_cost(
+        "aws rds create-db-instance --db-instance-class db.custom9.large --engine oracle-ee")
+    assert est is not None and est["monthly_usd"] == 0.0
+    assert "at your price book rate of" in est["line"]
 
 
 def test_a_monthly_rate_and_the_vm_tables(packs_env, tmp_path):
     _install_prices(tmp_path)
     est = g.estimate_command_monthly_cost(
         "aws rds create-db-instance --db-instance-class db.r6g.large --engine postgres")
-    assert est["monthly_usd"] == 100.0 and "at your price book rate" in est["line"]
+    # the book's 100/mo is below list, so it is shown and list is judged
+    assert est["monthly_usd"] > 100.0 and est["price_book"]["below_list"] is True
+    assert "at your price book rate" in est["line"] and "~$100/mo" in est["line"]
     est = g.estimate_command_monthly_cost(
         "gcloud compute instances create vm-1 vm-2 --machine-type e2-standard-4")
-    assert est["monthly_usd"] == 100.0 and "at your price book rate of $50.00/mo" in est["line"]
+    assert est["monthly_usd"] == round(97.82 * 2, 2)
+    assert "at your price book rate of $50.00/mo each" in est["line"] and "~$100/mo" in est["line"]
+    _install_prices(tmp_path, _book("e2-standard-4", 120, unit="month", provider="gcp"),
+                    name="dearer")
+    gpk.invalidate()
+    est = g.estimate_command_monthly_cost(
+        "gcloud compute instances create vm-1 vm-2 --machine-type e2-standard-4")
+    assert est["monthly_usd"] == 240.0 and "at your price book rate of $120.00/mo" in est["line"]
 
 
 def test_a_rate_in_another_currency_is_not_guessed_at(packs_env, tmp_path):
@@ -785,6 +839,27 @@ def test_the_plan_estimator_shares_the_price_book(packs_env, tmp_path):
     assert after["price_books"] == {"packs": ["io.github.example/prices"], "resources": 1}
     web = next(line for line in after["lines"] if line["address"] == "aws_instance.web")
     assert web == next(line for line in before["lines"] if line["address"] == "aws_instance.web")
+    # What gates the change is never cheaper than list.
+    listed = (EC2_HOURLY["p4d.24xlarge"] + EC2_HOURLY["t3.micro"]) * HOURS_PER_MONTH
+    assert after["gate_monthly_delta_usd"] == round(listed, 2) == before["monthly_delta_usd"]
+
+
+def test_a_saved_plan_is_judged_at_list_when_a_book_is_below_it(packs_env, tmp_path,
+                                                                monkeypatch):
+    plan = {"resource_changes": [
+        {"address": "aws_instance.gpu", "type": "aws_instance",
+         "change": {"actions": ["create"], "after": {"instance_type": "p4d.24xlarge"}}},
+        {"address": "aws_instance.old", "type": "aws_instance",
+         "change": {"actions": ["delete"], "before": {"instance_type": "m5.xlarge"}}}]}
+    monkeypatch.setattr(g, "_read_saved_plan", lambda *a, **k: ("terraform", "plan.out", plan))
+    _install_prices(tmp_path, _book("p4d.24xlarge", 0) + "  - provider: aws\n"
+                    "    sku: m5.xlarge\n    unit: hour\n    rate: 5\n    currency: USD\n"
+                    "    effective_from: 2020-01-01\n")
+    est = g._price_planfile("terraform apply plan.out")
+    # added at the higher of list and book, removed at the lower
+    judged = (EC2_HOURLY["p4d.24xlarge"] - EC2_HOURLY["m5.xlarge"]) * HOURS_PER_MONTH
+    assert est["monthly_usd"] == round(judged, 2)
+    assert "a price book can only raise the figure the guard judges by" in est["line"]
 
 
 # ── the doctor ─────────────────────────────────────────────────────────────────

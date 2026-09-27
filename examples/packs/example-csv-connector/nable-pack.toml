@@ -1,12 +1,15 @@
 # A code pack: a connector and an org-context adapter. nable never imports this
 # code; the broker runs it in a subprocess with only what is declared below.
 # Code runs only from a pack signed by a key the org trusts, or one the org
-# allowlists by id (packs.allow_unsigned_code). Check, sign and run it with:
+# allowlists by content digest (packs.allow_unsigned_code: [id@<digest>]).
+# Its secrets come only from its own vault entries, never the environment.
+# Check, sign, install, give it its secret and run it with:
 #   nable pack validate examples/packs/example-csv-connector
 #   nable pack sign examples/packs/example-csv-connector --key org-packs.pem
 #   nable pack install examples/packs/example-csv-connector
-#   EXAMPLE_COSTS_CSV=$PWD/examples/packs/example-csv-connector/samples/costs.csv \
-#     nable pack run com.example/example-csv-connector csv-costs --start 2026-09-01 --end 2026-10-01
+#   echo "$PWD/examples/packs/example-csv-connector/samples/costs.csv" | \
+#     nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
+#   nable pack run com.example/example-csv-connector csv-costs --start 2026-09-01 --end 2026-10-01
 [pack]
 name        = "example-csv-connector"
 namespace   = "com.example"

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Data-pack content: six small schemas, their validators, and typed loaders.
 
-Nothing a data pack ships can execute. YAML is read with yaml.safe_load, so a
-`!!python/object` tag is a parse error rather than a constructor call. Text is
-filled in by `render()`, a string.Template over dotted keys that reads dict
-entries and nothing else: no attribute access, no calls, no format specs, no
-Jinja. A report template called `showback.md.j2` is plain text with `${...}`
+Nothing a data pack ships can execute. YAML is read with PyYAML's SafeLoader
+(nesting bounded by MAX_YAML_DEPTH), so a `!!python/object` tag is a parse
+error rather than a constructor call. Text is filled in by `render()`, a
+string.Template over dotted keys that reads dict entries and nothing else: no
+attribute access, no calls, no format specs, no Jinja. A report template called `showback.md.j2` is plain text with `${...}`
 placeholders; `{{ ''.__class__ }}` in it stays exactly those characters.
 
     policies     rules: {id, description, applies_to, match, effect}
@@ -52,6 +52,10 @@ from .rules import (  # noqa: F401  (re-exported: finops.packs.content.tighten)
 MAX_CONTENT_BYTES = 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
 MAX_REGEX_LEN = 500
+# How deeply a YAML document may nest. Loading and validating walk it
+# recursively; with a bound, whether a pack validates never depends on how much
+# stack the process that reads it has left.
+MAX_YAML_DEPTH = 64
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,79}$")
 _PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$")
@@ -59,7 +63,10 @@ _PLACEHOLDER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _SKILL_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _PROVIDER = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# C0 and C1 control characters, DEL included; tab, newline and carriage return
+# are text. An escape sequence in a skill or a description would otherwise
+# reach the terminal of the person approving the pack.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 # The data content types, in [provides] order. manifest.DATA_KINDS is the same.
 KINDS = ("policies", "guard_rules", "playbooks", "price_books", "reports", "skills")
@@ -198,6 +205,90 @@ class PolicyRule:
                 "severity": self.severity, "message": render(self.message, obj)}
 
 
+# A repeat whose upper bound is above this counts as unbounded for the nesting
+# check: (a{1,1000}){1,1000} backtracks as badly as (a+)+.
+_WIDE_REPEAT = 16
+
+
+def regex_problem(pattern: str) -> str | None:
+    """Why a pack pattern could backtrack catastrophically, or None.
+
+    Read with the standard library's own regex parser (re._parser; the
+    sre_parse module before it). Refused:
+
+      - a repeat inside a repeat where both are unbounded (or wider than
+        {0,16}): (a+)+, (\\S+\\s*)*, (x*y?)*, the classic exponential shapes;
+      - backreferences (\\1, (?P=name), (?(1)...)), which make matching
+        NP-hard in general;
+      - lookarounds ((?=...), (?!...), (?<=...), (?<!...));
+      - possessive repeats and atomic groups (a++, (?>...)), which the
+        engine supports only from Python 3.11 and which a pack has no need of.
+
+    This is a static check of shape, not a proof: a pattern it passes can
+    still be slow (overlapping alternatives under a repeat, many .* in a row),
+    and the guard's hook stops any pattern that runs past its time budget
+    (rules.MATCH_BUDGET_S)."""
+    try:
+        from re import _constants as c  # type: ignore[attr-defined]
+        from re import _parser as parser  # type: ignore[attr-defined]
+    except ImportError:  # Python 3.10 and earlier
+        import sre_constants as c  # type: ignore[no-redef]
+        import sre_parse as parser  # type: ignore[no-redef]
+    try:
+        tree = parser.parse(pattern)
+    except (re.error, RecursionError, OverflowError) as e:
+        return f"is not a valid regular expression ({e})"
+    repeats = {c.MAX_REPEAT, c.MIN_REPEAT}
+    banned = {c.GROUPREF: "uses a backreference",
+              c.GROUPREF_EXISTS: "uses a conditional backreference",
+              c.ASSERT: "uses a lookahead or lookbehind",
+              c.ASSERT_NOT: "uses a negative lookahead or lookbehind"}
+    for name in ("POSSESSIVE_REPEAT", "ATOMIC_GROUP"):
+        op = getattr(c, name, None)
+        if op is not None:
+            banned[op] = "uses a possessive repeat or an atomic group"
+
+    def wide(hi: int) -> bool:
+        return hi == c.MAXREPEAT or hi > _WIDE_REPEAT
+
+    nested = ("repeats a group that itself holds a variable-length repeat (like (a+)+ or "
+              "(a{1,3})+), which can backtrack exponentially")
+
+    def walk(items: Any, depth: int) -> tuple[str | None, bool, bool]:
+        """(the first problem, whether `items` holds a wide repeat, whether it
+        holds any repeat of variable length)."""
+        if depth > 100:
+            return "is nested too deeply", False, False
+        has_wide = has_var = False
+        for op, av in items:
+            if op in banned:
+                return banned[op], False, False
+            subs: list[Any] = []
+            if op in repeats:
+                lo, hi, body = av
+                why, inner_wide, inner_var = walk(body, depth + 1)
+                if why:
+                    return why, False, False
+                # An unbounded repeat of anything that can match in more than
+                # one length, or any repeat of an unbounded one.
+                if (wide(hi) and inner_var) or (inner_wide and hi > 1):
+                    return nested, False, False
+                has_wide = has_wide or wide(hi) or inner_wide
+                has_var = has_var or hi != lo or inner_var
+            elif op == c.SUBPATTERN:
+                subs = [av[-1]]
+            elif op == c.BRANCH:
+                subs = list(av[1])
+            for sub in subs:
+                why, inner_wide, inner_var = walk(sub, depth + 1)
+                if why:
+                    return why, False, False
+                has_wide, has_var = has_wide or inner_wide, has_var or inner_var
+        return None, has_wide, has_var
+
+    return walk(tree, 0)[0]
+
+
 def _compile_regex(pattern: Any, where: str, problems: list[Problem]) -> re.Pattern[str] | None:
     if not isinstance(pattern, str) or not pattern:
         problems.append(Problem(where, "must be a non-empty regular expression"))
@@ -206,10 +297,15 @@ def _compile_regex(pattern: Any, where: str, problems: list[Problem]) -> re.Patt
         problems.append(Problem(where, f"is longer than {MAX_REGEX_LEN} characters"))
         return None
     try:
-        return re.compile(pattern)
+        rx = re.compile(pattern)
     except re.error as e:
         problems.append(Problem(where, f"is not a valid regular expression ({e})"))
         return None
+    why = regex_problem(pattern)
+    if why:
+        problems.append(Problem(where, f"{pattern!r} {why}; rewrite it without that shape"))
+        return None
+    return rx
 
 
 def _condition(raw: Any, where: str, problems: list[Problem]) -> Condition | None:
@@ -382,7 +478,8 @@ def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[Guard
         if target not in GUARD_TARGETS:
             problems.append(Problem(f"{where}.target",
                                     f"{target!r} is not one of {', '.join(GUARD_TARGETS)}"))
-        rx = _compile_regex(r.get("pattern"), f"{where}.pattern", problems)
+        named = f" (rule {rid})" if isinstance(rid, str) and _ID.match(rid) else ""
+        rx = _compile_regex(r.get("pattern"), f"{where}.pattern{named}", problems)
         if rx is not None and rx.search("") is not None:
             problems.append(Problem(f"{where}.pattern",
                                     "matches an empty string, so it would fire on every call"))
@@ -656,8 +753,8 @@ def parse_skill(text: str, rel: str, problems: list[Problem]) -> Skill | None:
         problems.append(Problem(rel, "frontmatter is not closed with ---"))
         return None
     try:
-        meta = yaml.safe_load("".join(lines[1:end]))
-    except yaml.YAMLError as e:
+        meta = safe_load("".join(lines[1:end]))
+    except (yaml.YAMLError, RecursionError) as e:
         problems.append(Problem(rel, f"frontmatter is not valid YAML ({_yaml_reason(e)})"))
         return None
     if not isinstance(meta, dict):
@@ -680,6 +777,10 @@ def parse_skill(text: str, rel: str, problems: list[Problem]) -> Skill | None:
     body = "".join(lines[end + 1:]).strip()
     if not body:
         problems.append(Problem(rel, "has no instructions after the frontmatter"))
+    if _CONTROL.search(text):
+        # The whole skill is shown at approval: no escape sequences.
+        problems.append(Problem(rel, "contains control characters (such as a terminal "
+                                "escape sequence)"))
     if len(problems) > n:
         return None
     return Skill(rel, name, desc, body, text, lic)
@@ -714,9 +815,40 @@ def read_text(path: Path, rel: str, problems: list[Problem], *, limit: int) -> s
         return None
 
 
+class _TooDeep(yaml.YAMLError):
+    pass
+
+
+class _BoundedLoader(yaml.SafeLoader):
+    """yaml.SafeLoader that refuses a document nested past MAX_YAML_DEPTH."""
+
+    _depth = 0
+
+    def compose_node(self, parent, index):  # type: ignore[no-untyped-def]
+        self._depth += 1
+        try:
+            if self._depth > MAX_YAML_DEPTH:
+                raise _TooDeep(f"it is nested more than {MAX_YAML_DEPTH} levels deep")
+            return super().compose_node(parent, index)
+        finally:
+            self._depth -= 1
+
+
+def safe_load(text: str) -> Any:
+    """yaml.safe_load with a nesting bound (raises yaml.YAMLError past it)."""
+    loader = _BoundedLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
 def _load_yaml(text: str, rel: str, problems: list[Problem]) -> Any:
     try:
-        return yaml.safe_load(text)
+        return safe_load(text)
+    except RecursionError:
+        problems.append(Problem(rel, "is nested too deeply to read"))
+        return None
     except yaml.YAMLError as e:
         # A !!python/object tag lands here: safe_load constructs no objects.
         problems.append(Problem(rel, f"is not valid YAML for a data pack ({_yaml_reason(e)})"))
@@ -732,6 +864,10 @@ def load_file(kind: str, path: Path, rel: str, problems: list[Problem]) -> list[
         return []
     n = len(problems)
     if kind == "reports":
+        if _CONTROL.search(text):
+            problems.append(Problem(rel, "contains control characters (such as a terminal "
+                                    "escape sequence)"))
+            return []
         return [ReportTemplate(rel, text)]
     if kind == "skills":
         if path.name != "SKILL.md":

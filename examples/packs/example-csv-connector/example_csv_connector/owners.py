@@ -18,8 +18,9 @@ import csv
 def propose(ctx, context: dict):
     path = ctx.secret("EXAMPLE_OWNERS_CSV")
     if not path:
-        raise RuntimeError("EXAMPLE_OWNERS_CSV is not set: put the CSV's path in nable's "
-                           "vault or environment")
+        raise RuntimeError("EXAMPLE_OWNERS_CSV is not set: store the CSV's path with `nable "
+                           "pack secret set com.example/example-csv-connector "
+                           "EXAMPLE_OWNERS_CSV`")
     known = {o["subject"] for o in (ctx.read_data("org.owners") or {}).get("owners", [])}
     facts = []
     with open(path, encoding="utf-8", newline="") as f:

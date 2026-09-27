@@ -8,7 +8,8 @@ sinks** (delivering a ticket or a PR proposal). nable never imports that code.
 It runs out of process, behind a broker in the core, and gets only the data,
 secrets and network hosts its manifest declares.
 
-This page covers signing and the broker. `nable pack --help` covers the rest.
+This page covers signing, what data packs may and may not do to the guard,
+and the broker. `nable pack --help` covers the rest.
 
 ## Signing
 
@@ -43,8 +44,9 @@ nable trusts two kinds of key, and nothing else:
 - Under `packs.require_signed: true`, a pack must be signed by the first-party
   key or an org-trusted key. `--yes` stays refused under it.
 - Audit, the runtime and the broker verify again from the installed files
-  against today's keys, so removing a key from `trusted_keys` stops its packs
-  loading.
+  against today's keys. A pack that was approved with a trusted signature must
+  keep one: removing its key from `trusted_keys` stops it loading, data packs
+  included, until the key is restored or the pack is approved again.
 
 The manifest's `[integrity].attestation` (a PEP 740 or Sigstore bundle
 reference) is parsed and shown, and **not verified yet**. Nothing relies on it.
@@ -60,11 +62,46 @@ packs:
   trusted_keys:
     - name: acme-platform
       key: <base64 Ed25519 public key from `nable pack keygen`>
-  allow_unsigned_code: [io.github.acme/internal-connector]
+  allow_unsigned_code:
+    - io.github.acme/internal-connector@<content digest from `nable pack validate`>
 ```
 
 A malformed key or pack id fails closed: every install is refused until it is
 fixed.
+
+`allow_unsigned_code` entries name exact files: `id@<content digest>` holds
+only while the installed files hash to that digest, so an update needs a new
+entry. A bare `id` would name whatever pack claims that namespace, which
+nothing verifies for an unsigned pack; it is honoured only when
+`allowed_sources` is also set, so the org has pinned where packs may come from.
+
+The index (`<data dir>/packs/index.json`) records what was approved. Every
+entry's namespace, name and version are checked when it is read, and the
+capabilities and tier nable enforces are read from the installed manifest,
+which the index's hashes pin. An entry's `source` is shown and matched against
+`allowed_sources` as recorded: it is only as trustworthy as the index file.
+
+## What data packs can do to the guard
+
+**Guard rules** only tighten: allow to ask, ask to deny, never the reverse.
+Their patterns (and policy `regex` conditions) are checked when the pack is
+validated: a repeat inside a repeat (`(a+)+`, `(\S+\s*)*`), backreferences,
+lookarounds, and possessive or atomic constructs are refused, because they can
+backtrack for hours on a short command. In the guard's hook each pattern also
+runs under a 50 ms timer (POSIX, main thread); a pattern that runs out of time
+counts as a match that asks, with a reason that names the rule. Where no
+timer is available (Windows) only the validation-time check applies.
+
+**Price books** need `pricing = ["override"]` in `[capabilities]`, which is
+shown at install, diffed on update, and limited by
+`allowed_capabilities.pricing`. A price book informs the estimates nable
+shows ("at your price book rate"). It never makes a change look cheaper to
+anything that allows, asks or denies: the guard's thresholds, velocity cap
+and budget checks, and the cost preflight's budget verdict, judge at the
+higher of the list price and the book rate (for a Terraform plan, the higher
+for what is added and the lower for what is removed). A book rate below list
+is shown beside the list figure the guard judges by. A book rate of 0 is a
+rate, not "no price".
 
 ## Running code
 
@@ -78,13 +115,18 @@ call the broker:
 
 1. re-checks the installed pack: files match what was approved, the org policy
    allows it, the signature holds;
-2. starts `python -I -B` running `finops.packs.host` in a new process group, in
-   a throwaway HOME, with only `PATH`, `HOME`, `LANG` and the declared secrets
-   in its environment (read from nable's vault, else from nable's own
-   environment). No `FINOPS_*`, `NABLE_*` or cloud credentials cross;
-3. speaks JSON-RPC 2.0 over stdin and stdout with a per-call timeout and an
-   output cap; stderr goes, truncated and with secret values redacted, to
-   `<data dir>/packs/logs/<namespace>/<name>.log`;
+2. copies the pack's files into a private temporary directory, hashing each
+   against what was approved as it copies, and runs the pack from the copy (a
+   file swapped in the packs root after the check is not the file that runs);
+   starts `python -I -B` running `finops.packs.host` in a new process group,
+   in a throwaway HOME, with only `PATH`, `HOME`, `LANG` and the declared
+   secrets in its environment. No `FINOPS_*`, `NABLE_*` or cloud credentials
+   cross;
+3. speaks JSON-RPC 2.0 over stdin and stdout with a per-call timeout that
+   holds even when the pack stops reading (writes to it are bound by the same
+   deadline, and the process is killed when it passes), at most 64 of the
+   pack's requests unanswered at once, and an output cap; stderr goes, truncated and with
+   secret values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
 4. answers `data.read` only for declared `read_data` scopes (`focus.cost`,
    `org.owners` and `org.environments` today; the other scopes say they are not
    available yet);
@@ -101,6 +143,26 @@ a pack the org allowlists.
 hands a pack no cloud credentials. A connector that needs an API key declares
 it in `secrets`.
 
+### Secrets
+
+A pack's secrets come only from its own entries in nable's vault, stored under
+`pack:<namespace>/<name>:<NAME>`:
+
+```
+nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
+echo "$VALUE" | nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
+nable pack secret remove com.example/example-csv-connector EXAMPLE_COSTS_CSV
+```
+
+The value is read from a prompt (not echoed) or from stdin, never from the
+command line. A declared secret is never read from nable's environment or its
+provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack the
+keys nable itself uses. Cloud credential names are refused at validation for
+every pack that is not first-party: `AWS_*`, `GOOGLE_*`, `CLOUDSDK_*`,
+`AZURE_*`, `ARM_*`, `KUBECONFIG`, and anything ending in `_SECRET_ACCESS_KEY`
+or `_SESSION_TOKEN`. Each either is a cloud credential or points a cloud SDK at
+one; a connector that needs cloud data waits for `read_cloud`.
+
 ## What the laptop sandbox does not do
 
 This is a seatbelt, not a security boundary.
@@ -113,8 +175,14 @@ This is a seatbelt, not a security boundary.
   starting programs and loading native libraries through ctypes, and reports
   every connection it sees to the log. A hook that runs inside the process it
   watches can be bypassed by a determined pack (through the garbage collector,
-  or a C extension that calls `connect()` directly). That is why unsigned code
-  does not run.
+  or a C extension that calls `connect()` directly), and it cannot stop a
+  program started through `_posixsubprocess.fork_exec`, which raises no audit
+  event of its own. That is why unsigned code does not run.
+- **Code.** A pack ships source only: a `__pycache__` directory or a `.pyc` or
+  `.pyo` file is refused from every source, and the host never reads bytecode
+  beside the source (a fresh, empty `pycache_prefix`). Native libraries
+  (`.so`, `.pyd`, `.dylib`) are refused for every pack that is not
+  first-party.
 - **Files.** Not sandboxed. A pack runs as your user and can read what you can
   read, including, on Linux, other processes' environments under `/proc` that
   your user may read. The scrubbed environment keeps secrets out of the pack's

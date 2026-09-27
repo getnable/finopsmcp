@@ -5,19 +5,29 @@ A pack declares what it needs in `[capabilities]`. The core shows that list at
 install, diffs it on every update, and for code-bearing packs enforces it in
 the broker (broker.py: secrets, read_data, network, write_org, act and
 max_autonomy; read_cloud is shown and approved but not brokered yet, since
-the broker hands a pack no cloud credentials). A value outside this module's
-vocabulary is a validation error, not a warning: an unknown capability is one
-nobody can review, so it is one nobody can approve.
+the broker hands a pack no cloud credentials). pricing is required by the
+manifest check: a pack that ships price books must declare it. A value outside
+this module's vocabulary is a validation error, not a warning: an unknown
+capability is one nobody can review, so it is one nobody can approve.
 
     read_data     nable data scopes (READ_DATA_SCOPES)
     read_cloud    provider:service:Action, read verbs only, no credential or
                   secret services (aws:ce:GetCostAndUsage, k8s:pods:list)
     secrets       environment-variable names the core passes in from the
-                  keyring; nable's own (FINOPS_*, NABLE_*) are never grantable
+                  pack's own vault namespace (`nable pack secret set`);
+                  nable's own (FINOPS_*, NABLE_*) are never grantable, and
+                  cloud credential names (AWS_*, GOOGLE_*, AZURE_CLIENT_SECRET,
+                  ...) only to a first-party pack (is_cloud_credential)
     network       host[:port] egress allowlist; empty means none
     write_org     "proposals" only: a pack may propose org facts, never confirm
     act           "pr" and "ticket"; "execute" is first-party only
-    guard         "tighten-only", the only relationship a pack has to the guard
+    guard         "tighten-only": its guard rules can turn allow into ask and
+                  ask into deny, never the reverse
+    pricing       "override": its price books replace list prices in the
+                  estimates nable shows. They inform displayed estimates only:
+                  the guard and the cost preflight judge at the higher of the
+                  list price and the book rate, so a price book can never make
+                  a change look cheaper to anything that allows or asks
     max_autonomy  L0..L2 for everyone, L3 for first-party; L4 for no pack
 
 Absent keys mean nothing: no data, no cloud, no secrets, no network.
@@ -57,6 +67,11 @@ GUARD: dict[str, str] = {
     "tighten-only": "guard rules may turn allow into ask and ask into deny, never the reverse",
 }
 
+PRICING: dict[str, str] = {
+    "override": ("its price books replace list prices in the estimates nable shows; the "
+                 "guard and budget checks still judge at the higher of list and book rate"),
+}
+
 AUTONOMY_LEVELS: tuple[str, ...] = ("L0", "L1", "L2", "L3", "L4")
 MAX_AUTONOMY_COMMUNITY = "L2"
 MAX_AUTONOMY_FIRST_PARTY = "L3"
@@ -85,6 +100,25 @@ _DENIED_CLOUD: tuple[tuple[str, str, str], ...] = (
 )
 
 RESERVED_SECRET_PREFIXES: tuple[str, ...] = ("FINOPS_", "NABLE_")
+# Secret names that are cloud credentials, or point a cloud SDK or CLI at
+# them. A pack's secrets come only from its own vault entries (never from the
+# environment or nable's provider keys), but a pack asking for one of these
+# is asking the person approving it to paste in their cloud keys, and code
+# that runs out of process with a cloud credential is exactly what read_cloud
+# (not brokered yet) exists to replace. So only a first-party pack may
+# declare them. The families:
+#   AWS_*         every AWS SDK setting (keys, session token, profile, the
+#                 container and web-identity credential URLs and files)
+#   GOOGLE_*, CLOUDSDK_*   Google client libraries and gcloud (
+#                 GOOGLE_APPLICATION_CREDENTIALS, access-token files)
+#   AZURE_*, ARM_*         Azure SDK EnvironmentCredential and Terraform's
+#                 azurerm provider (client secrets, certificates, passwords)
+#   KUBECONFIG    a kubeconfig holds cluster credentials
+#   *_SECRET_ACCESS_KEY, *_SESSION_TOKEN   the same credentials under
+#                 another vendor's prefix (S3-compatible stores, for example)
+CLOUD_CREDENTIAL_PREFIXES: tuple[str, ...] = ("AWS_", "GOOGLE_", "CLOUDSDK_", "AZURE_", "ARM_")
+CLOUD_CREDENTIAL_NAMES: frozenset[str] = frozenset({"KUBECONFIG"})
+CLOUD_CREDENTIAL_SUFFIXES: tuple[str, ...] = ("_SECRET_ACCESS_KEY", "_SESSION_TOKEN")
 # Cloud instance metadata endpoints: reaching one hands a process the
 # machine's own cloud credentials, whatever the pack declared.
 _METADATA_HOSTS = frozenset({
@@ -93,7 +127,7 @@ _METADATA_HOSTS = frozenset({
 })
 
 LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "network", "write_org",
-                              "act")
+                              "act", "pricing")
 SCALAR_KEYS: tuple[str, ...] = ("guard", "max_autonomy")
 KEYS: tuple[str, ...] = LIST_KEYS + SCALAR_KEYS
 
@@ -161,11 +195,20 @@ def check_network(value: str) -> str | None:
     return None
 
 
-def check_secret(value: str) -> str | None:
-    if not _SECRET.match(value):
-        return "must be an environment-variable name such as KUBECONFIG"
+def is_cloud_credential(value: str) -> bool:
+    return (value.startswith(CLOUD_CREDENTIAL_PREFIXES) or value in CLOUD_CREDENTIAL_NAMES
+            or value.endswith(CLOUD_CREDENTIAL_SUFFIXES))
+
+
+def check_secret(value: str, *, first_party: bool = False) -> str | None:
+    if not isinstance(value, str) or not _SECRET.match(value):
+        return "must be an environment-variable name such as EXAMPLE_API_TOKEN"
     if value.startswith(RESERVED_SECRET_PREFIXES):
         return f"{value} is one of nable's own settings, which no pack may read"
+    if is_cloud_credential(value) and not first_party:
+        return (f"{value} is a cloud credential (or points a cloud SDK at one), which only a "
+                "first-party pack may declare; a connector that needs cloud data waits for "
+                "read_cloud")
     return None
 
 
@@ -232,11 +275,13 @@ def _check_value(key: str, v: str, *, first_party: bool) -> str | None:
     if key == "read_cloud":
         return check_read_cloud(v)
     if key == "secrets":
-        return check_secret(v)
+        return check_secret(v, first_party=first_party)
     if key == "network":
         return check_network(v)
     if key == "write_org":
         return None if v in WRITE_ORG else "the only value is \"proposals\""
+    if key == "pricing":
+        return None if v in PRICING else 'the only value is "override"'
     if key == "act":
         if v not in ACT:
             return f"not an action kind; known: {', '.join(ACT)}"
@@ -249,13 +294,14 @@ def _check_value(key: str, v: str, *, first_party: bool) -> str | None:
 def describe(key: str, value: str) -> str:
     """One line a person approving the pack can read."""
     table = {"read_data": READ_DATA_SCOPES, "write_org": WRITE_ORG, "act": ACT,
-             "guard": GUARD}.get(key, {})
+             "guard": GUARD, "pricing": PRICING}.get(key, {})
     if value in table:
         return f"{value}: {table[value]}"
     if key == "network":
         return f"{value}: may connect to this host"
     if key == "secrets":
-        return f"{value}: receives this secret from your keyring"
+        return (f"{value}: receives this secret from its own vault entry (`nable pack secret "
+                f"set <pack> {value}`), never from your environment or nable's own keys")
     if key == "read_cloud":
         return f"{value}: may call this read-only cloud API"
     if key == "max_autonomy":

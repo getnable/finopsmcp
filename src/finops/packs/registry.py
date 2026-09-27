@@ -23,8 +23,9 @@ DEFAULT_REGISTRY_URL. The org policy wins over both (a `--registry` that
 disagrees with it is refused) so an agent cannot point a managed machine at a
 registry of its choosing. A local path (or file:// URL) works too, and a
 relative `source` in a local registry resolves against the registry's folder.
-A remote (https) registry may only list pinned git+ sources: a path in a
-remote index would mean whatever that path is on the reader's machine.
+A remote (https) registry may only list pinned git+https:// or git+ssh://
+sources: a path, or a git+file:// URL, in a remote index would mean whatever
+that path is on the reader's machine.
 """
 from __future__ import annotations
 
@@ -157,10 +158,11 @@ def _entry(raw: Any, base: Path | None, loc: str) -> tuple[Entry | None, str | N
         return None, f"{label}: tier {tier!r} is not one of {', '.join(TIERS)}"
     desc = raw.get("description") or ""
     src = src.strip()
-    if base is None and not src.startswith("git+"):
-        # A remote index naming a path would install from whatever that path
-        # is on the reader's machine (their working directory, even).
-        return None, f"{label}: a remote registry may only list pinned git+ sources"
+    if base is None and not src.startswith(("git+https://", "git+ssh://")):
+        # A remote index naming a path, or a git+file:// URL, would install
+        # from whatever that path is on the reader's machine.
+        return None, (f"{label}: a remote registry may only list pinned git+https:// or "
+                      "git+ssh:// sources")
     if base is not None and not src.startswith("git+") \
             and not Path(src).expanduser().is_absolute():
         src = str((base / src).resolve())

@@ -4,8 +4,9 @@
 broker.py starts this as `python -I -B -c <bootstrap> <dir containing finops>`
 (the bootstrap puts nable's own package directory first on sys.path and calls
 main(); `-I` ignores PYTHON* variables, the user site and the working
-directory, `-B` keeps bytecode out of the installed pack, whose files are
-hashed). It then speaks JSON-RPC 2.0, one JSON object per line:
+directory, `-B` keeps bytecode out of the pack, and main() points
+sys.pycache_prefix at a fresh empty directory so no .pyc beside the source
+is ever read). It then speaks JSON-RPC 2.0, one JSON object per line:
 
     core -> host   initialize {pack, kind, entry_id, entry, pack_root,
                                api_version, capabilities, network,
@@ -31,11 +32,14 @@ Before any pack code is imported this module:
 
 This is auditing, not isolation. An audit hook runs inside the process it
 watches: a determined pack can reach the hook's state through the garbage
-collector, load a C extension that calls connect() directly, or read the
-private protocol descriptors. That is why the broker runs code only from a
-pack signed by a key the org trusts (or allowlisted by name), and on Linux
-puts a pack that declares no network in its own empty network namespace when
-the kernel allows it.
+collector, load a C extension that calls connect() directly, read the
+private protocol descriptors, or start a program through
+_posixsubprocess.fork_exec, which raises no audit event at all (the
+subprocess module's audit event is raised by its Python wrapper, which such a
+pack skips). That is why the broker runs code only from a pack signed by a
+key the org trusts (or allowlisted by content digest), and on Linux puts a
+pack that declares no network in its own empty network namespace when the
+kernel allows it.
 """
 from __future__ import annotations
 
@@ -292,7 +296,15 @@ def _call(kind: str, fn: Any, ctx: Any, params: dict[str, Any]) -> Any:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Compiled bytecode is never read from the pack: import looks for it only
+    # under a fresh, empty pycache_prefix, so it always compiles the source
+    # that was reviewed and hashed (install also refuses __pycache__ and
+    # .pyc files outright), and -B with dont_write_bytecode writes none.
     sys.dont_write_bytecode = True
+    import tempfile
+    home = os.environ.get("HOME")   # the broker's throwaway HOME, removed after the call
+    sys.pycache_prefix = tempfile.mkdtemp(prefix="nable-pack-pycache-",
+                                          dir=home if home and os.path.isdir(home) else None)
     proto_in = os.fdopen(os.dup(0), "r", encoding="utf-8", newline="\n")
     proto_out = os.fdopen(os.dup(1), "w", encoding="utf-8", newline="\n")
     null = os.open(os.devnull, os.O_RDONLY)

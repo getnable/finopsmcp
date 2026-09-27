@@ -40,7 +40,8 @@ from typing import Any
 from . import __version__
 
 CACHE_NAME = "packs-guard-cache.json"
-_CACHE_VERSION = 1
+# 2: packs validated with the regex, pricing and control-character checks.
+_CACHE_VERSION = 2
 # The content types the guard reads. A pack that provides one of them and is
 # not loaded is a pack the guard is judging without.
 GUARD_KINDS = ("guard_rules", "price_books")
@@ -115,7 +116,7 @@ def _key() -> tuple[str | None, dict[str, Any]]:
             try:
                 root = store.install_dir(e["namespace"], e["name"], e["version"])
                 parts["packs"][pid] = _tree(root)
-            except (KeyError, TypeError, OSError, ValueError):
+            except (KeyError, TypeError, OSError, ValueError, store.PackError):
                 parts["packs"][pid] = None
     blob = json.dumps(parts, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest(), packs if isinstance(packs, dict) else {}

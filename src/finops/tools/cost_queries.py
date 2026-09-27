@@ -995,7 +995,10 @@ def estimate_change_cost(
                 est = estimate_from_dir(safe)
             if isinstance(est, dict) and est.get("error"):
                 return est
-            delta = float(est.get("monthly_delta_usd", 0.0) or 0.0)
+            # The budget verdict judges at a figure a price book can raise,
+            # never lower (terraform_estimate.estimate_plan).
+            delta = float(est.get("gate_monthly_delta_usd", est.get("monthly_delta_usd", 0.0))
+                          or 0.0)
             breakdown = (est.get("lines") or [])[:20]
             change_kind = "terraform"
         elif helm_diff:

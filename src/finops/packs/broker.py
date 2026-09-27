@@ -8,15 +8,24 @@ carry code. The core never imports that code. For each call it:
   1. checks the installed pack as the runtime does (files match what was
      approved, today's org policy allows it, its signature holds), and refuses
      code from a pack that is not signed by the first-party key or an
-     org-trusted key unless the org allowlists it by id
-     (`packs.allow_unsigned_code`);
-  2. starts `python -I -B` running finops.packs.host in a fresh process group,
-     in a throwaway HOME, with a scrubbed environment: PATH, HOME, LANG, and
-     the values of the secrets the manifest declares (read by the core from
-     nable's vault, else from its own environment). Nothing else crosses:
-     no FINOPS_*, no AWS_*, no cloud credentials, no vault key;
+     org-trusted key unless the org allowlists it (`packs.allow_unsigned_code`,
+     as `id@<content digest>`: an id alone names whatever a namespace claim
+     says, a digest names these files; a bare id is honoured only under
+     `packs.allowed_sources`, which pins where the pack came from);
+  2. copies the verified files into a private temporary directory and runs
+     the pack from there, so a file swapped in the packs root after the check
+     is not the file that runs; starts `python -I -B` running
+     finops.packs.host in a fresh process group, in a throwaway HOME, with a
+     scrubbed environment: PATH, HOME, LANG, and the values of the secrets the
+     manifest declares, read only from the pack's own vault namespace
+     (`pack:<namespace>/<name>:<NAME>`, set with `nable pack secret set`).
+     Never from nable's environment or its provider keys: no FINOPS_*, no
+     AWS_*, no cloud credentials, no vault key cross;
   3. speaks JSON-RPC 2.0 over the child's stdin/stdout, one object per line
-     (host.py lists the methods), with a per-call timeout and a cap on
+     (host.py lists the methods), with a per-call timeout that holds even when
+     the child stops reading (writes go through a bounded queue and a writer
+     thread; past the deadline the child is killed), at most
+     MAX_INFLIGHT of the child's requests unanswered at once, and a cap on
      everything the child writes to stdout; the child's stderr is kept,
      truncated and with declared secret values redacted, in
      <packs root>/logs/<namespace>/<name>.log;
@@ -49,6 +58,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import hashlib
 import json
 import logging
 import math
@@ -81,6 +91,15 @@ MAX_LOG_BYTES = 1024 * 1024
 MAX_PAYLOAD_BYTES = 1024 * 1024
 MAX_DATA_ROWS = 5000
 MAX_PROBLEMS = 20
+# Requests from the child (data.read) whose answers the core has not yet
+# written to it. A pack that reads its answers never has more than one; one
+# that sends requests and stops reading fills the pipe, and past this many the
+# call fails.
+MAX_INFLIGHT = 64
+# Messages queued for the child's stdin before the writer thread must drain
+# them: room for every answer in flight and the core's own request. When it
+# fills anyway, the call waits no longer than its deadline.
+_WRITE_QUEUE = MAX_INFLIGHT + 4
 # "auto": an empty network namespace for packs that declare no hosts, when
 # the platform allows one; "off": always audit mode (tests, or a kernel whose
 # user namespaces misbehave).
@@ -110,6 +129,9 @@ class Prepared:
     capabilities: dict[str, Any]
     signature: signing.Verdict
     allowlisted: bool
+    tier: str = ""
+    digest: str = ""
+    files: dict[str, str] = field(default_factory=dict)
 
 
 def prepare(pack_id: str, entry_id: str, kind: str | None = None, *,
@@ -127,22 +149,49 @@ def prepare(pack_id: str, entry_id: str, kind: str | None = None, *,
     root, verdict, why = check_installed(pack_id, e, pp)
     if why:
         raise PolicyRefusal(f"{pack_id} cannot run", [Problem("pack", w) for w in why])
+    # check_installed hashed the files against the index; the manifest read
+    # here is one of those files, so its capabilities and tier are the ones
+    # approved (install.check_installed also refuses an index whose recorded
+    # capabilities or tier differ from the manifest's).
     manifest = load_manifest(root)
+    if manifest.id != pack_id:
+        raise PolicyRefusal(f"{pack_id} cannot run: its manifest says it is {manifest.id}")
     matches = [c for c in manifest.code if c.id == entry_id and (kind is None or c.kind == kind)]
     if not matches:
         have = ", ".join(f"{c.kind[:-1]} {c.id}" for c in manifest.code) or "no code"
         what = kind[:-1] if kind else "code entry"
         raise PackError(f"{pack_id} has no {what} {entry_id!r} (it has {have})")
     code = matches[0]
-    allowlisted = pack_id in (pp.get("allow_unsigned_code") or [])
+    # Of the files check_installed just hashed, not the index's recorded digest.
+    digest = store.content_digest(e.get("files") or {})
+    allowlisted = allowlisted_unsigned(pack_id, digest, pp)
     if not signing.trusted(verdict) and not allowlisted:
+        bare = pack_id in (pp.get("allow_unsigned_code") or [])
         raise PolicyRefusal(
             f"{pack_id} carries code and is not signed by a key this org trusts "
             f"({verdict.reason}). Unsigned code does not run: sign it with a key in "
-            "packs.trusted_keys, or have an admin allowlist it in the org policy "
-            f"(packs.allow_unsigned_code: [{pack_id}])")
+            "packs.trusted_keys, or have an admin allowlist these exact files in the org "
+            f"policy (packs.allow_unsigned_code: [{pack_id}@{digest}])"
+            + (". The bare id it lists now is honoured only when packs.allowed_sources "
+               "pins where packs may come from" if bare else ""))
     return Prepared(pack_id, manifest.namespace, manifest.name, manifest.version, code.kind,
-                    code.id, code.entry, root, dict(manifest.capabilities), verdict, allowlisted)
+                    code.id, code.entry, root, dict(manifest.capabilities), verdict, allowlisted,
+                    manifest.tier, digest, dict(e.get("files") or {}))
+
+
+def allowlisted_unsigned(pack_id: str, digest: str, pp: dict[str, Any]) -> bool:
+    """Whether packs.allow_unsigned_code lets this pack's code run unsigned.
+
+    An entry `id@<content digest>` names exact files, so it holds only while
+    the installed files hash to that digest. A bare `id` names whatever
+    carries that namespace, which nothing verifies for an unsigned pack; it
+    is honoured only when packs.allowed_sources is set, so the org has also
+    pinned where packs may come from (check_installed refuses any other
+    source)."""
+    allowed = pp.get("allow_unsigned_code") or []
+    if digest and f"{pack_id}@{digest}" in allowed:
+        return True
+    return pack_id in allowed and pp.get("allowed_sources") is not None
 
 
 # ── secrets and the child's environment ──────────────────────────────────────
@@ -158,14 +207,74 @@ def _vault_get(name: str) -> str | None:
         return None
 
 
-def secret_value(name: str) -> str | None:
-    v = _vault_get(name)
-    return v if v is not None else os.environ.get(name)
+def secret_key(pack_id: str, name: str) -> str:
+    """The vault key a pack's secret lives under: pack:<namespace>/<name>:<NAME>.
+    A namespace of its own, so a pack never reads nable's provider keys (or
+    another pack's) by declaring the same name."""
+    return f"pack:{pack_id}:{name}"
+
+
+def secret_value(pack_id: str, name: str) -> str | None:
+    """A pack's secret, from its own vault namespace only. Never from nable's
+    environment or its provider keys: `nable pack secret set` stores it."""
+    return _vault_get(secret_key(pack_id, name))
+
+
+def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | None]:
+    """(why the pair is refused, a note) for `nable pack secret`."""
+    from .manifest import FIRST_PARTY_NAMESPACES, check_name, check_namespace
+    ns, sep, pname = pack_id.partition("/")
+    if not sep or check_namespace(ns) or check_name(pname):
+        return f"{pack_id!r} is not a pack id such as io.github.acme/connector", None
+    try:
+        e = store.read_index()["packs"].get(pack_id)
+    except PackError:
+        e = None
+    first_party = (e.get("tier") == "first-party") if e else ns in FIRST_PARTY_NAMESPACES
+    why = caps_mod.check_secret(name, first_party=first_party)
+    if why:
+        return f"{name}: {why}", None
+    note = None
+    if e is None:
+        note = f"{pack_id} is not installed; the secret waits for it"
+    elif name not in ((e.get("capabilities") or {}).get("secrets") or ()):
+        note = (f"the installed {pack_id} does not declare {name}, so it is not passed to it "
+                "until a version that declares it is approved")
+    return None, note
+
+
+def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
+    """Store `value` as the pack's secret `name` in nable's vault."""
+    why, note = _check_secret_target(pack_id, name)
+    if why:
+        raise PackError(why)
+    try:
+        from ..security.vault import Vault
+        Vault.default().store(secret_key(pack_id, name), value)
+    except Exception as err:  # noqa: BLE001 - the vault says why; never the value
+        raise PackError(f"The secret could not be stored in nable's vault "
+                        f"({type(err).__name__})") from None
+    return {"pack": pack_id, "name": name, "key": secret_key(pack_id, name), "note": note}
+
+
+def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
+    why, _ = _check_secret_target(pack_id, name)
+    if why:
+        raise PackError(why)
+    removed = False
+    try:
+        from ..security.vault import Vault, _vault_dir
+        if (_vault_dir() / "vault.db").is_file():
+            removed = Vault.default().delete(secret_key(pack_id, name))
+    except Exception as err:  # noqa: BLE001
+        raise PackError(f"nable's vault could not be read ({type(err).__name__})") from None
+    return {"pack": pack_id, "name": name, "removed": removed}
 
 
 def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]]:
     """(the child's environment, the secret values in it). Only PATH, HOME,
-    LANG and the declared secrets; nothing inherited beyond those."""
+    LANG and the declared secrets, each from the pack's own vault namespace;
+    nothing inherited beyond those."""
     env = {"PATH": os.environ.get("PATH") or os.defpath, "HOME": home,
            "LANG": os.environ.get("LANG") or "C.UTF-8"}
     if os.name == "nt":  # Python on Windows needs these to start and to open sockets
@@ -173,10 +282,11 @@ def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]
             if os.environ.get(k):
                 env[k] = os.environ[k]
     secrets: dict[str, str] = {}
+    first_party = prep.tier == "first-party"
     for name in prep.capabilities.get("secrets") or ():
-        if caps_mod.check_secret(name):
-            continue  # validated at install; a reserved name never crosses
-        v = secret_value(name)
+        if caps_mod.check_secret(name, first_party=first_party):
+            continue  # validated at install; a reserved or cloud name never crosses
+        v = secret_value(prep.pack_id, name)
         if v is not None:
             env[name] = secrets[name] = v
     return env, secrets
@@ -235,6 +345,13 @@ class _Session:
         self.max_output = max_output
         self.on_request, self.on_notify = on_request, on_notify
         self._q: queue.Queue = queue.Queue()
+        # Writes to the child go through a bounded queue and one writer
+        # thread, so a child that stops reading blocks that thread, never the
+        # call: the call waits on the queue with its own deadline.
+        self._wq: queue.Queue = queue.Queue(maxsize=_WRITE_QUEUE)
+        self._write_error: BaseException | None = None
+        self._inflight = 0                  # answers queued, not yet written
+        self._inflight_lock = threading.Lock()
         self._stderr = bytearray()
         self._stderr_dropped = 0
         self._next = 0
@@ -248,7 +365,8 @@ class _Session:
             raise BrokerError(f"{label}: could not start the pack's process "
                               f"({e.strerror or e})") from None
         self._threads = [threading.Thread(target=self._read_out, daemon=True),
-                         threading.Thread(target=self._read_err, daemon=True)]
+                         threading.Thread(target=self._read_err, daemon=True),
+                         threading.Thread(target=self._write_in, daemon=True)]
         for t in self._threads:
             t.start()
 
@@ -289,25 +407,60 @@ class _Session:
             text += f"\n[... {self._stderr_dropped} more bytes of stderr dropped]"
         return text
 
-    def _send(self, obj: dict[str, Any]) -> None:
+    def _write_in(self) -> None:
+        stdin = self.proc.stdin
+        while True:
+            item = self._wq.get()
+            if item is None:
+                return
+            data, answer = item
+            try:
+                stdin.write(data)
+                stdin.flush()
+            except (BrokenPipeError, OSError, ValueError) as e:
+                self._write_error = e
+                return
+            if answer:
+                with self._inflight_lock:
+                    self._inflight -= 1
+
+    def _send(self, obj: dict[str, Any], deadline: float, *, answer: bool = False) -> None:
+        """Queue one message for the child, waiting no later than `deadline`."""
         data = (json.dumps(obj, separators=(",", ":"), default=str) + "\n").encode("utf-8")
-        try:
-            self.proc.stdin.write(data)
-            self.proc.stdin.flush()
-        except (BrokenPipeError, OSError, ValueError):
+        if self._write_error is not None:
             raise BrokerError(f"{self.label}: the pack's process stopped reading "
-                              f"(exit code {self.proc.poll()})") from None
+                              f"(exit code {self.proc.poll()})")
+        if answer:
+            with self._inflight_lock:
+                self._inflight += 1
+        try:
+            self._wq.put((data, answer), timeout=max(deadline - time.monotonic(), 0.001))
+        except queue.Full:
+            self.kill()
+            raise BrokerError(f"{self.label}: the pack stopped reading its input and was "
+                              "stopped") from None
 
     def request(self, method: str, params: dict[str, Any], timeout: float) -> Any:
         self._next += 1
         mid = self._next
-        self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})
         deadline = time.monotonic() + timeout
+
+        def late() -> BrokerError:
+            self.kill()
+            return BrokerError(f"{self.label}: {method} took longer than {timeout:g}s and "
+                               "was stopped")
+
+        try:
+            self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params},
+                       deadline)
+        except BrokerError:
+            if time.monotonic() >= deadline:
+                raise late() from None
+            raise
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise BrokerError(f"{self.label}: {method} took longer than {timeout:g}s and "
-                                  "was stopped")
+                raise late()
             try:
                 what, line = self._q.get(timeout=remaining)
             except queue.Empty:
@@ -322,13 +475,23 @@ class _Session:
                                   f"(exit code {self.proc.poll()})")
             try:
                 msg = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):
                 raise BrokerError(f"{self.label}: the pack broke the protocol (a line that is "
-                                  "not JSON)") from None
+                                  "not JSON, or nested too deeply)") from None
             if not isinstance(msg, dict):
                 raise BrokerError(f"{self.label}: the pack broke the protocol (not an object)")
             if "method" in msg:
-                self._incoming(msg)
+                if "id" in msg and self._inflight >= MAX_INFLIGHT:
+                    self.kill()
+                    raise BrokerError(f"{self.label}: the pack had more than {MAX_INFLIGHT} "
+                                      f"requests of the core in flight during {method} (it "
+                                      "stopped reading the answers) and was stopped")
+                try:
+                    self._incoming(msg, deadline)
+                except BrokerError:
+                    if time.monotonic() >= deadline:
+                        raise late() from None
+                    raise
                 continue
             if msg.get("id") != mid:
                 raise BrokerError(f"{self.label}: the pack answered a request nobody made")
@@ -338,7 +501,7 @@ class _Session:
                 raise BrokerError(f"{self.label}: {method} failed: {str(detail)[:500]}")
             return msg.get("result")
 
-    def _incoming(self, msg: dict[str, Any]) -> None:
+    def _incoming(self, msg: dict[str, Any], deadline: float) -> None:
         method, params = str(msg.get("method")), msg.get("params")
         if not isinstance(params, dict):
             params = {}
@@ -350,11 +513,23 @@ class _Session:
             result = self.on_request(method, params)
         except _RpcError as e:
             self._send({"jsonrpc": "2.0", "id": msg["id"],
-                        "error": {"code": e.code, "message": e.message}})
+                        "error": {"code": e.code, "message": e.message}}, deadline, answer=True)
             return
-        self._send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
+        self._send({"jsonrpc": "2.0", "id": msg["id"], "result": result}, deadline, answer=True)
 
     def close(self) -> int | None:
+        # Stop the writer: drop what it has not sent, then tell it to end.
+        with contextlib.suppress(queue.Empty):
+            while True:
+                self._wq.get_nowait()
+        with contextlib.suppress(queue.Full):
+            self._wq.put_nowait(None)
+        # A writer still blocked on a full pipe means the child stopped
+        # reading: kill it, so the write fails and closing stdin cannot wait
+        # on the writer's lock.
+        self._threads[2].join(timeout=1)
+        if self._threads[2].is_alive():
+            self.kill()
         with contextlib.suppress(OSError, ValueError):
             self.proc.stdin.close()
         try:
@@ -514,6 +689,42 @@ def _write_log(path: Path, header: str, body: str) -> None:
         log.warning("finops.packs: could not write the pack log %s (%s)", path, e)
 
 
+def _private_copy(prep: Prepared) -> Path:
+    """The pack's files, copied into a new private directory and hashed as
+    they are copied against what was approved. The child imports from the
+    copy, so a file swapped in the packs root after prepare() checked it is
+    not the file that runs. Raises PolicyRefusal on any difference."""
+    from pathlib import PurePosixPath
+    dest = Path(tempfile.mkdtemp(prefix="nable-pack-code-"))
+    try:
+        if not prep.files:
+            raise PolicyRefusal(f"{prep.pack_id}: the index lists no files for it")
+        for rel, want in sorted(prep.files.items()):
+            parts = PurePosixPath(rel).parts
+            if not parts or rel.startswith("/") or "\\" in rel or ".." in parts:
+                raise PolicyRefusal(f"{prep.pack_id}: the index lists a file outside the pack "
+                                    f"({rel!r})")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(prep.root.joinpath(*parts), flags)
+                with os.fdopen(fd, "rb") as f:
+                    data = f.read(store.MAX_FILE_BYTES + 1)
+            except OSError as e:
+                raise PolicyRefusal(f"{prep.pack_id}: {rel} could not be read "
+                                    f"({e.strerror or e})") from None
+            if len(data) > store.MAX_FILE_BYTES or hashlib.sha256(data).hexdigest() != want:
+                raise PolicyRefusal(f"{prep.pack_id}: {rel} changed after it was checked; "
+                                    "run `nable pack audit`")
+            target = dest.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "xb") as out:
+                out.write(data)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    return dest
+
+
 def execute(prep: Prepared, method: str, params: dict[str, Any], *,
             timeout: float | None = None, max_output: int | None = None
             ) -> tuple[Any, dict[str, Any]]:
@@ -530,6 +741,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
                                           "declared": hosts, "observed": observed},
                               "log": str(log_path(prep))}
     label = f"{prep.pack_id} {prep.kind[:-1]} {prep.entry_id}"
+    code_root = _private_copy(prep) if prep.files else prep.root
     home = tempfile.mkdtemp(prefix="nable-pack-")
     env, secrets = child_env(prep, home)
 
@@ -553,7 +765,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
         try:
             init = session.request("initialize", {
                 "pack": prep.pack_id, "kind": prep.kind, "entry_id": prep.entry_id,
-                "entry": prep.entry, "pack_root": str(prep.root), "api_version": API_VERSION,
+                "entry": prep.entry, "pack_root": str(code_root), "api_version": API_VERSION,
                 "capabilities": caps, "network": hosts,
                 "allow_external_code": prep.allowlisted}, timeout)
         except BrokerError as e:
@@ -586,6 +798,8 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
                             prep.pack_id, o.get("host"), o.get("port"))
         report["seconds"] = time.monotonic() - started
         shutil.rmtree(home, ignore_errors=True)
+        if code_root != prep.root:
+            shutil.rmtree(code_root, ignore_errors=True)
 
 
 # ── output validation ────────────────────────────────────────────────────────

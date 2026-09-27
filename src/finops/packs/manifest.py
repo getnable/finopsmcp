@@ -73,6 +73,10 @@ _COMMIT = re.compile(r"^[0-9a-f]{7,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LICENSE = re.compile(r"^[A-Za-z0-9.+() -]{1,80}$")
 _MAINTAINER = re.compile(r"^\S.{0,98}\S$|^\S$")
+# One-line fields shown at approval: no C0 or C1 control character at all
+# (content._CONTROL, plus tab, newline and carriage return), so a description
+# cannot carry a terminal escape sequence or fake a line of the prompt.
+_LINE_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 def check_namespace(ns: object) -> str | None:
@@ -228,6 +232,9 @@ def _parse_pack(raw: Any, problems: list[Problem], api_version: str) -> dict[str
             problems.append(Problem("pack.description", "must be a non-empty string"))
         elif len(d) > 300:
             problems.append(Problem("pack.description", "must be 300 characters or fewer"))
+        elif _LINE_CONTROL.search(d):
+            problems.append(Problem("pack.description", "must be one line with no control "
+                                    "characters (such as a terminal escape sequence)"))
         else:
             out["description"] = d.strip()
     if "nable_api" in raw:
@@ -245,10 +252,11 @@ def _parse_pack(raw: Any, problems: list[Problem], api_version: str) -> dict[str
                 out["nable_api"] = spec
     if "maintainers" in raw:
         m = _str_list(raw["maintainers"], "pack.maintainers", problems, nonempty=True)
-        bad = [x for x in m if not _MAINTAINER.match(x)]
+        bad = [x for x in m if not _MAINTAINER.match(x) or _LINE_CONTROL.search(x)]
         if bad:
             problems.append(Problem("pack.maintainers",
-                                    f"{bad[0]!r} must be a handle or a name, 1 to 100 characters"))
+                                    f"{bad[0]!r} must be a handle or a name, 1 to 100 characters "
+                                    "with no control characters"))
         out["maintainers"] = m
     if "support" in raw:
         s = raw["support"]
@@ -407,8 +415,11 @@ def _parse_integrity(raw: Any, problems: list[Problem]) -> tuple[dict[str, str] 
                 else:
                     files[path] = digest
     att = raw.get("attestation")
-    if att is not None and (not isinstance(att, str) or not att.strip()):
-        problems.append(Problem("integrity.attestation", "must be a non-empty string"))
+    if att is not None and (not isinstance(att, str) or not att.strip()
+                            or _LINE_CONTROL.search(att) or len(att) > 500):
+        problems.append(Problem("integrity.attestation",
+                                "must be one line of text (500 characters at most, no control "
+                                "characters)"))
         att = None
     return files, att
 
@@ -437,6 +448,11 @@ def parse_manifest(text: str, *, api_version: str | None = None) -> Manifest:
     provides, code = _parse_provides(doc.get("provides"), problems)
     compat = _parse_compat(doc.get("compat"), problems)
     files, attestation = _parse_integrity(doc.get("integrity"), problems)
+    if provides.get("price_books") and "override" not in capabilities.get("pricing", ()):
+        problems.append(Problem("capabilities.pricing",
+                                "the pack provides price_books, so it must declare "
+                                'pricing = ["override"]: its rates replace list prices in the '
+                                "estimates nable shows, and that is shown for approval"))
     if problems:
         raise ValidationError(f"{MANIFEST_NAME} is not valid", problems)
     return Manifest(

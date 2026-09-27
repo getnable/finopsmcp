@@ -114,6 +114,37 @@ def net(ctx, payload):
 
 def deliver(ctx, payload):
     return {"id": "T-1", "kind": payload["kind"]}
+
+
+def flood(ctx, start, end):
+    # review2 hang.py: requests the core answers, with the answers never read
+    # back, so the core's writes to this process's stdin block once the pipe
+    # fills; then sleep far past the call's timeout.
+    chan = ctx._request.__self__          # the host's Channel
+    for i in range(5000):
+        chan.send({"jsonrpc": "2.0", "id": f"x{i}", "method": "data.read",
+                   "params": {"scope": "nope", "query": {"pad": "x" * 2000}}})
+    time.sleep(3600)
+    return []
+
+
+def stall(ctx, start, end):
+    # Stops reading before the core answers anything, and sleeps. Each
+    # refusal quotes the scope back, so the answers overfill the pipe.
+    chan = ctx._request.__self__
+    for i in range(40):
+        chan.send({"jsonrpc": "2.0", "id": f"y{i}", "method": "data.read",
+                   "params": {"scope": "s" * 200000, "query": {}}})
+    time.sleep(3600)
+    return []
+
+
+def deep(ctx, start, end):
+    chan = ctx._request.__self__
+    chan._out.write("[" * 200000 + "]" * 200000 + "\\n")
+    chan._out.flush()
+    time.sleep(3600)
+    return []
 '''
 
 SINK_CAPS = 'act = ["ticket"]\nmax_autonomy = "L2"\n'
@@ -126,7 +157,10 @@ def build_pack(root: Path, *, name: str = "probe", caps: str = SINK_CAPS,
                  {id = "data", entry = "probe_code:data"}, {id = "net", entry = "probe_code:net"},
                  {id = "deliver", entry = "probe_code:deliver"}]
         connectors = [{id = "rows", entry = "probe_code:rows", output = "focus-1.3"},
-                      {id = "big", entry = "probe_code:big", output = "focus-1.3"}]
+                      {id = "big", entry = "probe_code:big", output = "focus-1.3"},
+                      {id = "flood", entry = "probe_code:flood", output = "focus-1.3"},
+                      {id = "stall", entry = "probe_code:stall", output = "focus-1.3"},
+                      {id = "deep", entry = "probe_code:deep", output = "focus-1.3"}]
         adapters = [{id = "facts", entry = "probe_code:facts"}]
         ''')
     (root / "probe_code").mkdir(parents=True)
@@ -175,8 +209,10 @@ def test_the_pack_sees_a_scrubbed_environment_and_only_its_declared_secret(
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
     monkeypatch.setenv("UNDECLARED_TOKEN", "undeclared")
-    monkeypatch.setenv("DECLARED_TOKEN", "declared-value-123")
+    monkeypatch.setenv("DECLARED_TOKEN", "from-the-environment")
     monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    monkeypatch.setattr(broker, "_vault_get", lambda key: "declared-value-123"
+                        if key == "pack:io.github.example/probe:DECLARED_TOKEN" else None)
     pid = code_env.install(caps=SINK_CAPS + 'secrets = ["DECLARED_TOKEN"]\n')
     r = _deliver(pid, "env")
     env = r.output["env"]
@@ -193,12 +229,82 @@ def test_the_pack_sees_a_scrubbed_environment_and_only_its_declared_secret(
     assert "declared-value-123" not in log and "[redacted DECLARED_TOKEN]" in log
 
 
-def test_a_secret_comes_from_the_vault_before_the_environment(code_env, monkeypatch):
-    monkeypatch.setattr(broker, "_vault_get",
-                        lambda name: "from-vault" if name == "DECLARED_TOKEN" else None)
+def test_a_secret_comes_only_from_the_packs_own_vault_entry(code_env, monkeypatch):
+    # review2 sec.py: a declared secret used to fall back to nable's shared
+    # vault keys and its own environment, which is where cloud keys live.
+    vault = {"DECLARED_TOKEN": "nables-own-key",
+             "pack:io.github.example/probe:DECLARED_TOKEN": "the-packs-own"}
+    monkeypatch.setattr(broker, "_vault_get", vault.get)
     monkeypatch.setenv("DECLARED_TOKEN", "from-env")
     pid = code_env.install(caps=SINK_CAPS + 'secrets = ["DECLARED_TOKEN"]\n')
-    assert _deliver(pid, "env").output["declared"] == "from-vault"
+    assert _deliver(pid, "env").output["declared"] == "the-packs-own"
+    del vault["pack:io.github.example/probe:DECLARED_TOKEN"]
+    out = _deliver(pid, "env").output
+    assert out["declared"] is None and "DECLARED_TOKEN" not in out["env"]
+
+
+def test_cloud_credential_names_are_refused_for_packs_that_are_not_first_party(monkeypatch):
+    from finops.packs import capabilities as caps
+    names = ["AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN", "AWS_PROFILE",
+             "GOOGLE_APPLICATION_CREDENTIALS", "AZURE_CLIENT_SECRET", "ARM_CLIENT_SECRET",
+             "CLOUDSDK_AUTH_ACCESS_TOKEN_FILE", "KUBECONFIG", "R2_SECRET_ACCESS_KEY",
+             "STS_SESSION_TOKEN"]
+    _, probs = caps.validate({"secrets": names}, first_party=False)
+    assert len(probs) == len(names)
+    assert all("cloud credential" in p.reason for p in probs)
+    _, probs = caps.validate({"secrets": names}, first_party=True)
+    assert probs == []
+    _, probs = caps.validate({"secrets": ["EXAMPLE_API_TOKEN"]}, first_party=False)
+    assert probs == []
+    # and the environment never supplies one, even to a pack that declares it
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "not-a-real-key")
+    monkeypatch.setattr(broker, "_vault_get", lambda key: None)
+    caps_fp, _ = caps.validate({"secrets": ["AWS_SECRET_ACCESS_KEY"]}, first_party=True)
+    prep = broker.Prepared("io.github.getnable/x", "io.github.getnable", "x", "1.0.0",
+                           "connectors", "c", "m:f", Path("/nonexistent"), caps_fp,
+                           broker.signing.UNSIGNED, False, "first-party")
+    env, secrets = broker.child_env(prep, "/tmp/h")
+    assert "AWS_SECRET_ACCESS_KEY" not in env and secrets == {}
+
+
+def test_nable_pack_secret_set_stores_under_the_packs_namespace(code_env, monkeypatch,
+                                                                capsys):
+    import io
+
+    from finops.security import vault as vault_mod
+    stored: dict[str, str] = {}
+
+    class FakeVault:
+        def store(self, k, v):
+            stored[k] = v
+
+        def delete(self, k):
+            return stored.pop(k, None) is not None
+
+    monkeypatch.setattr(vault_mod.Vault, "default", classmethod(lambda cls: FakeVault()))
+    (code_env.tmp / "vault").mkdir()
+    (code_env.tmp / "vault" / "vault.db").write_bytes(b"")
+    monkeypatch.setattr(vault_mod, "_vault_dir", lambda: code_env.tmp / "vault")
+    monkeypatch.setattr(broker, "_vault_get", stored.get)
+    pid = code_env.install(caps=SINK_CAPS + 'secrets = ["DECLARED_TOKEN"]\n')
+    monkeypatch.setattr("sys.stdin", io.StringIO("s3cret-value\n"))
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "secret", "set", pid, "DECLARED_TOKEN"])
+    out = capsys.readouterr()
+    assert ei.value.code == 0 and "s3cret-value" not in out.out + out.err
+    assert stored == {f"pack:{pid}:DECLARED_TOKEN": "s3cret-value"}
+    assert _deliver(pid, "env").output["declared"] == "s3cret-value"
+    # the value never comes from argv, and a cloud credential name is refused
+    monkeypatch.setattr("sys.stdin", io.StringIO("AKIA..."))
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "secret", "set", pid, "AWS_ACCESS_KEY_ID"])
+    assert ei.value.code == 1 and "cloud credential" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["pack", "secret", "set", pid, "DECLARED_TOKEN", "inline-value"])
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "secret", "remove", pid, "DECLARED_TOKEN"])
+    assert ei.value.code == 0 and stored == {}
 
 
 def test_an_undeclared_secret_is_refused_inside_the_pack_too():
@@ -219,6 +325,34 @@ def test_a_call_past_its_timeout_is_stopped(code_env):
     assert "took longer than 1.5s" in str(ei.value)
     assert time.monotonic() - t0 < 15
     assert "FAILED" in broker.log_path(broker.prepare(pid, "sleep")).read_text()
+
+
+def test_a_pack_that_floods_the_core_with_requests_is_stopped(code_env):
+    # review2 hang.py: 5000 requests whose answers the pack never reads. The
+    # core's writes used to block on the full pipe, past any timeout.
+    pid = code_env.install()
+    t0 = time.monotonic()
+    with pytest.raises(BrokerError) as ei:
+        broker.fetch_costs(pid, "flood", "2026-09-01", "2026-09-02", timeout=3)
+    assert time.monotonic() - t0 < 15
+    assert f"more than {broker.MAX_INFLIGHT} requests of the core in flight" in str(ei.value)
+
+
+def test_a_pack_that_stops_reading_cannot_outlast_its_timeout(code_env):
+    # Too few requests for the in-flight cap, but the answers overfill the
+    # pipe: the write is bound by the call's deadline and the process killed.
+    pid = code_env.install()
+    t0 = time.monotonic()
+    with pytest.raises(BrokerError) as ei:
+        broker.fetch_costs(pid, "stall", "2026-09-01", "2026-09-02", timeout=2)
+    assert time.monotonic() - t0 < 15
+    assert "took longer than 2s" in str(ei.value) or "stopped reading" in str(ei.value)
+
+
+def test_a_line_nested_too_deeply_is_a_protocol_error(code_env):
+    pid = code_env.install()
+    with pytest.raises(BrokerError, match="broke the protocol"):
+        broker.fetch_costs(pid, "deep", "2026-09-01", "2026-09-02", timeout=20)
 
 
 def test_output_past_the_cap_is_stopped(code_env):
@@ -386,21 +520,52 @@ def test_a_pack_that_declares_no_network_reaches_nothing(code_env, listeners, mo
 
 # ── what may run ─────────────────────────────────────────────────────────────
 
+def _digest(pid: str) -> str:
+    return store.content_digest(store.read_index()["packs"][pid]["files"])
+
+
 def test_unsigned_code_does_not_run_unless_the_org_allowlists_it(code_env):
     pid = code_env.install(sign=False)
     with pytest.raises(PolicyRefusal) as ei:
         _deliver(pid, "deliver")
     msg = str(ei.value)
-    assert "Unsigned code does not run" in msg and f"allow_unsigned_code: [{pid}]" in msg
-    code_env.trust(f"  allow_unsigned_code: [{pid}]\n")
+    digest = _digest(pid)
+    assert "Unsigned code does not run" in msg
+    assert f"allow_unsigned_code: [{pid}@{digest}]" in msg
+    code_env.trust(f"  allow_unsigned_code: [{pid}@{digest}]\n")
     assert _deliver(pid, "deliver").output == {"id": "T-1", "kind": "ticket"}
+
+
+def test_a_bare_id_allowlists_nothing_without_allowed_sources(code_env, tmp_path):
+    # review2: the allowlist was keyed on a namespace nothing verifies for an
+    # unsigned pack, so any pack claiming the id ran.
+    pid = code_env.install(sign=False)
+    code_env.trust(f"  allow_unsigned_code: [{pid}]\n")
+    with pytest.raises(PolicyRefusal, match="honoured only when packs.allowed_sources"):
+        _deliver(pid, "deliver")
+    # a digest pins files: other files under the same id do not run
+    code_env.trust(f"  allow_unsigned_code: [{pid}@{'0' * 64}]\n")
+    with pytest.raises(PolicyRefusal, match="Unsigned code does not run"):
+        _deliver(pid, "deliver")
+    # with allowed_sources pinning where packs come from, the bare id holds
+    src = str(tmp_path / "src-probe")
+    code_env.trust(f"  allow_unsigned_code: [{pid}]\n  allowed_sources: ['{src}']\n")
+    assert _deliver(pid, "deliver").output["kind"] == "ticket"
 
 
 def test_code_signed_by_a_key_nobody_trusts_does_not_run(code_env, tmp_path):
     pid = code_env.install()
     code_env.policy("packs:\n  trusted_keys: []\n")
-    with pytest.raises(PolicyRefusal, match="not signed by a key this org trusts"):
+    with pytest.raises(PolicyRefusal, match="signature no longer holds"):
         _deliver(pid, "deliver")
+    # signed by a key nobody here trusted to begin with
+    other = new_key(tmp_path, "stranger")
+    src = build_pack(tmp_path / "src-stranger", name="stranger")
+    sign_pack(src, other)
+    code_env.trust()
+    inst.install(str(src), yes=True)
+    with pytest.raises(PolicyRefusal, match="not signed by a key this org trusts"):
+        _deliver("io.github.example/stranger", "deliver")
 
 
 def test_code_edited_after_install_does_not_run(code_env):
@@ -436,10 +601,15 @@ def example_pack(code_env, tmp_path, monkeypatch):
     src = copy_pack(EXAMPLE_CODE_PACK, tmp_path / "example")
     sign_pack(src, code_env.key)
     inst.install(str(src), yes=True)
-    monkeypatch.setenv("EXAMPLE_COSTS_CSV", str(EXAMPLE_CODE_PACK / "samples" / "costs.csv"))
-    monkeypatch.setenv("EXAMPLE_OWNERS_CSV", str(EXAMPLE_CODE_PACK / "samples" / "owners.csv"))
+    pid = "com.example/example-csv-connector"
+    # As `nable pack secret set` stores them: in the pack's own vault entries.
+    vault = {broker.secret_key(pid, "EXAMPLE_COSTS_CSV"):
+             str(EXAMPLE_CODE_PACK / "samples" / "costs.csv"),
+             broker.secret_key(pid, "EXAMPLE_OWNERS_CSV"):
+             str(EXAMPLE_CODE_PACK / "samples" / "owners.csv")}
+    monkeypatch.setattr(broker, "_vault_get", vault.get)
     monkeypatch.setenv("FINOPS_ORG_DIR", str(tmp_path / "org"))
-    return "com.example/example-csv-connector"
+    return pid
 
 
 def test_the_example_connector_runs_from_the_cli(example_pack, capsys):
@@ -482,7 +652,8 @@ def test_the_example_adapter_feeds_org_init_as_proposals(example_pack, monkeypat
 def test_org_adapters_skips_packs_that_may_not_run(code_env):
     code_env.install(sign=False, caps='write_org = ["proposals"]\n')
     assert broker.org_adapters() == []
-    code_env.trust("  allow_unsigned_code: [io.github.example/probe]\n")
+    pid = "io.github.example/probe"
+    code_env.trust(f"  allow_unsigned_code: [{pid}@{_digest(pid)}]\n")
     assert [a.pack_id for a in broker.org_adapters()] == ["io.github.example/probe"]
 
 
