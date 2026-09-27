@@ -171,6 +171,10 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
 #       network: []
 #       max_autonomy: L1
 #     registry: https://packs.example.com/index.json
+#     trusted_keys:                         # org signing keys (`nable pack keygen`)
+#       - name: acme-platform
+#         key: <base64 Ed25519 public key>
+#     allow_unsigned_code: [io.github.acme/internal-connector]   # by pack id
 #
 # Unlike the keys above, a packs section that cannot be used does not fall back
 # to "no restrictions": it fails closed. `invalid` is set and every install is
@@ -178,13 +182,56 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
 # meant to restrict something.
 
 PACK_POLICY_KEYS = ("allowed_sources", "blocked_sources", "require_signed",
-                    "allowed_capabilities", "registry")
+                    "allowed_capabilities", "registry", "trusted_keys",
+                    "allow_unsigned_code")
 
 
 def _pack_policy_default() -> dict[str, Any]:
     return {"allowed_sources": None, "blocked_sources": [], "require_signed": False,
-            "allowed_capabilities": None, "registry": None, "invalid": False,
-            "problems": [], "path": None}
+            "allowed_capabilities": None, "registry": None, "trusted_keys": [],
+            "allow_unsigned_code": [], "invalid": False, "problems": [], "path": None}
+
+
+def _ed25519_public_key(text: Any) -> bytes | None:
+    """The 32 raw bytes of a base64 (standard or URL-safe) Ed25519 public
+    key, or None. Stdlib only: the signature itself is checked in
+    finops.packs.signing, which loads cryptography when it needs it."""
+    import base64
+    import binascii
+    if not isinstance(text, str) or not text.strip():
+        return None
+    raw = text.strip()
+    try:
+        data = base64.b64decode(raw.replace("-", "+").replace("_", "/")
+                                + "=" * (-len(raw) % 4), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return data if len(data) == 32 else None
+
+
+def _parse_trusted_keys(val: Any, path: Path, refused: str,
+                        probs: list[str]) -> list[dict[str, str]]:
+    if not isinstance(val, list):
+        probs.append(f"{path} sets packs.trusted_keys to {val!r}, which is not a list of "
+                     f"{{name, key}} entries, {refused}")
+        return []
+    keys: list[dict[str, str]] = []
+    for i, item in enumerate(val):
+        where = f"{path} sets packs.trusted_keys[{i}]"
+        if not isinstance(item, dict) or set(item) - {"name", "key"}:
+            probs.append(f"{where} to {item!r}, which is not a mapping with name and key, "
+                         f"{refused}")
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            probs.append(f"{where}.name to {name!r}, which is not a non-empty name, {refused}")
+            continue
+        if _ed25519_public_key(item.get("key")) is None:
+            probs.append(f"{where}.key ({name}), which is not a base64 Ed25519 public key "
+                         f"(32 bytes), {refused}")
+            continue
+        keys.append({"name": name.strip(), "key": str(item["key"]).strip()})
+    return keys
 
 
 def _str_list(val: Any) -> list[str] | None:
@@ -253,6 +300,18 @@ def _parse_packs_section(doc: Any, path: Path, *, readable: bool) -> dict[str, A
         else:
             probs.append(f"{path} sets packs.registry to {reg!r}, which is not a URL or a "
                          f"path, {refused}")
+    if "trusted_keys" in sec and sec["trusted_keys"] is not None:
+        out["trusted_keys"] = _parse_trusted_keys(sec["trusted_keys"], path, refused, probs)
+    if "allow_unsigned_code" in sec:
+        from .packs.registry import parse_ref  # light, stdlib only
+        val = sec["allow_unsigned_code"]
+        ids = [] if val == [] else _str_list(val)
+        bad = [x for x in ids or [] if not parse_ref(x) or "@" in x]
+        if ids is None or bad:
+            probs.append(f"{path} sets packs.allow_unsigned_code to {val!r}, which is not a "
+                         f"list of pack ids such as io.github.acme/connector, {refused}")
+        else:
+            out["allow_unsigned_code"] = ids
     out["invalid"] = bool(probs)
     return out
 
@@ -261,7 +320,8 @@ def pack_policy() -> dict[str, Any]:
     """The packs: section of the policy file, validated. Keys:
     allowed_sources (list, or None for no allowlist), blocked_sources (list),
     require_signed (bool), allowed_capabilities (dict, or None for no
-    ceiling), registry (str or None), invalid (bool: refuse every install),
+    ceiling), registry (str or None), trusted_keys (list of {name, key}),
+    allow_unsigned_code (list of pack ids), invalid (bool: refuse every install),
     problems, path. No policy file means no restrictions. Never raises."""
     try:
         policy_file_path().stat()

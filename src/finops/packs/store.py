@@ -28,6 +28,9 @@ from typing import Any
 from .errors import PackError, Problem
 
 INDEX_NAME = "index.json"
+# A pack's detached signature (signing.py). It signs content_digest(), so the
+# digest leaves it out; the file is still hashed, installed and audited.
+SIG_NAME = "nable-pack.sig"
 INDEX_SCHEMA = 1
 MAX_FILES = 2000
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -122,9 +125,12 @@ def hash_tree(root: Path, *, skip_ignored: bool = False) -> dict[str, str]:
 
 def content_digest(files: dict[str, str]) -> str:
     """One sha256 over the pack's file list and hashes, independent of how
-    it was transported. This is what a registry entry's `sha256` pins."""
+    it was transported. This is what a registry entry's `sha256` pins and
+    what a signature signs, so the signature file itself is left out."""
     h = hashlib.sha256()
     for rel in sorted(files):
+        if rel == SIG_NAME:
+            continue
         h.update(f"{rel}\0{files[rel]}\n".encode())
     return h.hexdigest()
 

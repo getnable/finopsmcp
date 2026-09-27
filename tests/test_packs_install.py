@@ -19,13 +19,17 @@ from finops.packs.errors import ApprovalRequired, IntegrityError, PackError, Val
 from tests import packs_support
 from tests.packs_support import (
     EXAMPLE_PACK,
+    copy_pack,
     make_git_repo,
     make_pack,
     make_tarball,
+    sign_pack,
 )
 
-# The shared fixture: an isolated packs root, policy file and registry setting.
+# The shared fixtures: an isolated packs root, policy file and registry
+# setting; a throwaway key standing in for nable's first-party key.
 packs_env = packs_support.packs_env
+first_party_key = packs_support.first_party_key
 
 
 def _index() -> dict:
@@ -322,12 +326,16 @@ def test_scaffold_is_a_valid_pack(tmp_path):
         inst.new_pack("Bad Name", tmp_path / "x")
 
 
-def test_the_example_pack_validates_and_does_what_it_says(packs_env):
+def test_the_example_pack_validates_and_does_what_it_says(packs_env, tmp_path, first_party_key):
     r = inst.validate_dir(EXAMPLE_PACK)
     assert r["ok"], r["problems"]
     assert r["id"] == "io.github.getnable/startup-credits-runway" and r["tier"] == "first-party"
     assert r["provides"] == {"policies": 1, "guard_rules": 1, "reports": 1, "skills": 1}
-    inst.install(str(EXAMPLE_PACK), yes=True)
+    # Unsigned, the first-party claim is a warning here and a refusal at install.
+    assert any("install will refuse it" in w for w in r["warnings"])
+    signed = sign_pack(copy_pack(EXAMPLE_PACK, tmp_path / "fp"), first_party_key)
+    assert signed["digest"] == r["digest"]
+    inst.install(str(tmp_path / "fp"), yes=True)
     (rule,) = packs.active("policies")
     hit = rule.evaluate({"type": "credits_runway",
                          "credits": {"balance_usd": 40000, "runway_months": 4},

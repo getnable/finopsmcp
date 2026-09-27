@@ -49,7 +49,7 @@ def _load() -> dict[str, Any]:
     from . import store
     from .content import load_content
     from .errors import PackError
-    from .install import policy_violations
+    from .install import check_installed
     from .manifest import load_manifest
 
     items: dict[str, list[Any]] = {k: [] for k in _KINDS}
@@ -62,18 +62,9 @@ def _load() -> dict[str, Any]:
     pp = pack_policy()
     for pid, e in sorted(idx["packs"].items()):
         try:
-            root = store.install_dir(e["namespace"], e["name"], e["version"])
-            viol = policy_violations(pid, e.get("tier", ""), e.get("capabilities") or {},
-                                     e.get("source") or {}, pp)
-            if viol:
-                problems.append(f"{pid} is not loaded: " + "; ".join(p.reason for p in viol))
-                continue
-            actual = store.hash_tree(root)
-            cmp = store.compare_files(e.get("files") or {}, actual)
-            if any(cmp.values()):
-                changed = cmp["modified"] + cmp["missing"] + cmp["added"]
-                problems.append(f"{pid} is not loaded: its files changed since it was approved "
-                                f"({', '.join(changed[:5])}); run `nable pack audit`")
+            root, _, why = check_installed(pid, e, pp)
+            if why:
+                problems.append(f"{pid} is not loaded: " + "; ".join(why))
                 continue
             manifest = load_manifest(root)
             content = load_content(root, manifest.provides)
@@ -168,5 +159,8 @@ def summary() -> dict[str, Any]:
         })
     return {"packs": rows, "count": len(rows), "problems": list(state["problems"]),
             "api_version": API_VERSION,
-            "note": ("Packs are data: nable validates them and nothing in them runs. "
+            "note": ("Most packs are data: nable validates them and nothing in them runs. "
+                     "Connectors, adapters and sinks run only out of process through the "
+                     "broker, with the secrets, data scopes and hosts they declared, and only "
+                     "when signed by a trusted key or allowlisted by the org. "
                      "`nable pack audit` re-hashes every file against what was approved.")}

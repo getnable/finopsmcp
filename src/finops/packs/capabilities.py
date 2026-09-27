@@ -2,10 +2,12 @@
 """The capability vocabulary: everything a pack may ask for, as a closed set.
 
 A pack declares what it needs in `[capabilities]`. The core shows that list at
-install, diffs it on every update, and (in part 2, for code-bearing packs)
-enforces it in the broker. A value outside this module's vocabulary is a
-validation error, not a warning: an unknown capability is one nobody can
-review, so it is one nobody can approve.
+install, diffs it on every update, and for code-bearing packs enforces it in
+the broker (broker.py: secrets, read_data, network, write_org, act and
+max_autonomy; read_cloud is shown and approved but not brokered yet, since
+the broker hands a pack no cloud credentials). A value outside this module's
+vocabulary is a validation error, not a warning: an unknown capability is one
+nobody can review, so it is one nobody can approve.
 
     read_data     nable data scopes (READ_DATA_SCOPES)
     read_cloud    provider:service:Action, read verbs only, no credential or

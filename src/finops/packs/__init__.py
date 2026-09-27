@@ -5,13 +5,16 @@ A pack is a directory with a `nable-pack.toml` manifest and the content it
 provides. Six content types are data (policies, guard rules, playbooks, price
 books, report templates, skills): the core validates and loads them, and
 nothing in them can execute. Three are code (connectors, adapters, sinks):
-declared in the manifest and discovered through typed entry points, but not
-loaded or run until the part 2 broker exists.
+declared in the manifest, never imported by the core, and run out of process
+by the broker (broker.py), which hands them only the secrets, data scopes and
+network hosts their manifest declares. Code runs only from a pack signed by a
+trusted key (signing.py) or one the org allowlists by name.
 
     from finops import packs
     packs.active("policies")              # validated rules from installed packs
     packs.price_override("aws", "p4d.24xlarge")
     packs.guard_rules()                   # for the guard; may only tighten
+    packs.org_adapters()                  # pack adapters for `nable org init`
 
 The pack API is versioned separately from nable (API_VERSION); a manifest's
 `nable_api` range must include it. This module stays light: everything is
@@ -27,7 +30,16 @@ MANIFEST_NAME = "nable-pack.toml"
 DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/getnable/registry/main/index.json"
 
 __all__ = ["API_VERSION", "DEFAULT_REGISTRY_URL", "MANIFEST_NAME", "active", "guard_rules",
-           "installed", "load_problems", "price_override", "summary"]
+           "installed", "load_problems", "org_adapters", "price_override", "summary"]
+
+
+def org_adapters() -> list[Any]:
+    """Org-context adapters from installed, runnable packs, as callables with
+    the finops.org ADAPTERS signature: adapter(model) -> iterable of Facts,
+    every one a proposal whose source starts with the pack id. See
+    broker.org_adapters for how `nable org init` should call them."""
+    from .broker import org_adapters as _oa
+    return _oa()
 
 
 def active(kind: str) -> list[Any]:

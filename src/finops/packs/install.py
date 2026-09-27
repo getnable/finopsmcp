@@ -16,6 +16,13 @@ manifest has it, computes the sha256 of every file always, checks the org's
 packs: policy, shows the capabilities and waits for approval, and only then
 moves the files into place and records them in the index.
 
+Signatures (signing.py) are checked at the same point: a `nable-pack.sig`
+inside the pack, or beside a tarball. A first-party or verified claim needs
+nable's first-party key; an invalid signature is refused everywhere; under
+packs.require_signed the pack must be signed by the first-party key or a key
+in packs.trusted_keys. The verdict is recorded in the index and re-checked
+from the installed files by audit, the runtime and the broker.
+
 Approval: an interactive prompt, or `--yes`. `--yes` is refused when the org
 policy sets packs.require_signed, because a flag an agent can type is not a
 person reviewing a pack. An unattended update (`auto`) applies only when it
@@ -45,7 +52,7 @@ from urllib.parse import urlparse
 
 from . import capabilities as caps_mod
 from . import registry as registry_mod
-from . import store
+from . import signing, store
 from .content import PackContent, load_content
 from .errors import (
     ApprovalRequired,
@@ -68,9 +75,6 @@ from .versions import version_key
 GIT_TIMEOUT_S = 120
 _COMMIT40 = re.compile(r"^[0-9a-f]{40}$")
 TARBALL_SUFFIXES = (".tar.gz", ".tgz", ".tar")
-# Where a first-party pack must come from when the org requires signed packs,
-# until part 2 verifies signatures instead.
-FIRST_PARTY_GIT_PREFIXES = ("https://github.com/getnable/",)
 
 
 # ── sources ───────────────────────────────────────────────────────────────────
@@ -292,6 +296,7 @@ class Plan:
     files: dict[str, str]
     digest: str
     content: PackContent
+    signature: signing.Verdict = signing.UNSIGNED
     previous: dict[str, Any] | None = None
     added: dict[str, list[str]] = field(default_factory=dict)
     removed: dict[str, list[str]] = field(default_factory=dict)
@@ -305,6 +310,7 @@ class Plan:
         return {"id": m.id, "version": m.version, "tier": m.tier,
                 "description": m.description, "maintainers": list(m.maintainers),
                 "source": self.source.record(), "digest": self.digest,
+                "signature": self.signature.to_dict(), "attestation": m.attestation,
                 "capabilities": m.to_dict()["capabilities"],
                 "provides": self.content.counts(),
                 "code": [c.to_dict() for c in m.code],
@@ -312,12 +318,40 @@ class Plan:
                 "capabilities_added": self.added, "capabilities_removed": self.removed}
 
 
+def _sidecar_sig(src: Source, root: Path, digest: str) -> None:
+    """A tarball's signature may sit beside it: `<tarball>.sig`, or a
+    `nable-pack.sig` in the same folder whose digest is this pack's. It is
+    copied into the pack, so it is installed and audited with the rest."""
+    if src.kind != "tarball" or (root / store.SIG_NAME).exists():
+        return
+    archive = Path(src.location)
+    own = archive.with_name(archive.name + ".sig")
+    beside = archive.with_name(store.SIG_NAME)
+    chosen = None
+    if own.is_file() and not own.is_symlink():
+        chosen = own
+    elif beside.is_file() and not beside.is_symlink():
+        try:
+            doc = signing.read_sig_file(beside)
+        except ValueError:
+            doc = None
+        if doc and doc.get("digest") == digest:
+            chosen = beside
+    if chosen is not None:
+        if chosen.stat().st_size > signing.MAX_SIG_BYTES:
+            raise IntegrityError(f"{chosen} is larger than {signing.MAX_SIG_BYTES} bytes")
+        shutil.copyfile(chosen, root / store.SIG_NAME)
+
+
 def _prepare(src: Source, work: Path, *, expected_digest: str | None = None,
-             registry_tier: str | None = None) -> Plan:
+             registry_tier: str | None = None, pp: dict[str, Any] | None = None) -> Plan:
     root = _stage(src, work)
     # Not skip_ignored: staging already left .git behind for directories and
     # git checkouts, and whatever a tarball carries is installed, so it is hashed.
     files = store.hash_tree(root)
+    if src.kind == "tarball" and store.SIG_NAME not in files:
+        _sidecar_sig(src, root, store.content_digest(files))
+        files = store.hash_tree(root)
     manifest = load_manifest(root)
     if manifest.status == "archived":
         raise PackError(f"{manifest.id} {manifest.version} is archived by its maintainers, so "
@@ -328,7 +362,7 @@ def _prepare(src: Source, work: Path, *, expected_digest: str | None = None,
         raise ValidationError(f"{manifest.id} {manifest.version} has invalid content",
                               content.problems)
     if manifest.integrity_files is not None:
-        actual = {k: v for k, v in files.items() if k != MANIFEST_NAME}
+        actual = {k: v for k, v in files.items() if k not in (MANIFEST_NAME, store.SIG_NAME)}
         cmp = store.compare_files(manifest.integrity_files, actual)
         problems = ([Problem(p, "does not match its [integrity] sha256") for p in cmp["modified"]]
                     + [Problem(p, "is pinned in [integrity] but missing") for p in cmp["missing"]]
@@ -345,7 +379,12 @@ def _prepare(src: Source, work: Path, *, expected_digest: str | None = None,
     if registry_tier and registry_tier != manifest.tier:
         raise IntegrityError(f"{manifest.id}: the registry lists it as {registry_tier}, but its "
                              f"manifest says {manifest.tier}; nothing was installed")
-    return Plan(manifest, src, root, files, digest, content)
+    verdict = signing.verify_pack(root, digest, pp)
+    why = signing.claim_problem(manifest.id, manifest.tier, verdict)
+    if why:
+        raise IntegrityError(f"{manifest.id} {manifest.version} was refused and nothing was "
+                             "installed", [Problem("signature", why)])
+    return Plan(manifest, src, root, files, digest, content, signature=verdict)
 
 
 # ── org policy ────────────────────────────────────────────────────────────────
@@ -355,21 +394,16 @@ def _matches(patterns: list[str] | None, *candidates: str) -> bool:
     return any(fnmatch.fnmatchcase(c, p) for p in patterns or [] for c in candidates if c)
 
 
-def provably_first_party(source: dict[str, Any]) -> bool:
-    """Until signing (part 2), the only first-party provenance the core can
-    check is where the files came from: a pinned commit in nable's own GitHub
-    organization. A local copy proves nothing about who wrote it."""
-    return source.get("kind") == "git" and str(source.get("location", "")).startswith(
-        FIRST_PARTY_GIT_PREFIXES)
-
-
 def policy_violations(pack_id: str, tier: str, caps: dict[str, Any], source: dict[str, Any],
-                      pp: dict[str, Any]) -> list[Problem]:
-    """What the org's packs: policy says about this pack. Empty means allowed.
+                      pp: dict[str, Any], signature: signing.Verdict | dict[str, Any] | None = None
+                      ) -> list[Problem]:
+    """What the org's packs: policy, and the pack's signature, say about this
+    pack. Empty means allowed. `signature` is its signing.Verdict (None reads
+    as unsigned).
 
     allowed_sources globs match the source spec only (a namespace is a claim
-    until part 2 verifies it, so it cannot earn a pack a place on an
-    allowlist); blocked_sources globs match the source spec or the pack id."""
+    a signature backs, not a place on an allowlist); blocked_sources globs
+    match the source spec or the pack id."""
     out: list[Problem] = []
     spec = str(source.get("spec", ""))
     where = pp.get("path") or "the org policy"
@@ -377,22 +411,20 @@ def policy_violations(pack_id: str, tier: str, caps: dict[str, Any], source: dic
         out.append(Problem("policy", f"{where} has a packs section (or file) that cannot be "
                            "read, so pack installs are refused until it is fixed"))
         return out
+    why = signing.claim_problem(pack_id, tier, signature)
+    if why:
+        out.append(Problem("signature", why))
     if _matches(pp.get("blocked_sources"), spec, pack_id):
         out.append(Problem("policy", f"{pack_id} from {spec} matches packs.blocked_sources"))
     allowed = pp.get("allowed_sources")
     if allowed is not None and not _matches(allowed, spec):
         out.append(Problem("policy", f"{spec} is not in packs.allowed_sources"))
-    if pp.get("require_signed"):
-        if tier != "first-party":
-            out.append(Problem("policy", f"{pack_id} is {tier}, and the org policy sets "
-                               "packs.require_signed. Pack signatures arrive in pack SDK part 2; "
-                               "until then only first-party packs can be installed under it"))
-        elif not provably_first_party(source):
-            out.append(Problem("policy", f"{pack_id} says it is first-party, but it comes from "
-                               f"{spec}, and the org policy sets packs.require_signed. Until "
-                               "signatures arrive (pack SDK part 2) a first-party pack must "
-                               "come from a pinned commit under "
-                               + ", ".join(FIRST_PARTY_GIT_PREFIXES)))
+    if pp.get("require_signed") and not signing.trusted(signature):
+        v = signature.to_dict() if isinstance(signature, signing.Verdict) else (
+            signature or signing.UNSIGNED.to_dict())
+        out.append(Problem("policy", f"{pack_id} is not signed by nable's first-party key or a "
+                           f"key in packs.trusted_keys ({v.get('reason', 'unsigned')}), and "
+                           "the org policy sets packs.require_signed"))
     ceiling = pp.get("allowed_capabilities")
     if ceiling is not None:
         out.extend(caps_mod.exceeds(caps, ceiling))
@@ -468,9 +500,10 @@ def install(source: str | Source, *, yes: bool = False, auto: bool = False,
         work = Path(tempfile.mkdtemp(prefix="stage-", dir=staging))
         try:
             plan = _prepare(src, work, expected_digest=expected_digest,
-                            registry_tier=registry_tier)
+                            registry_tier=registry_tier, pp=pp)
             m = plan.manifest
-            violations = policy_violations(m.id, m.tier, m.capabilities, src.record(), pp)
+            violations = policy_violations(m.id, m.tier, m.capabilities, src.record(), pp,
+                                           plan.signature)
             if violations:
                 raise PolicyRefusal(f"{m.id} {m.version} is not allowed by the org policy; "
                                     "nothing was installed", violations)
@@ -515,6 +548,28 @@ def _intact(entry: dict[str, Any]) -> bool:
         return False
 
 
+def check_installed(pack_id: str, entry: dict[str, Any], pp: dict[str, Any]
+                    ) -> tuple[Path, signing.Verdict, list[str]]:
+    """Whether an installed pack may be used right now: today's org policy
+    allows it, its files are exactly the approved ones, and its signature
+    holds against today's trusted keys. Returns (root, signature verdict, why
+    not); an empty list means it may. The runtime and the broker both ask."""
+    root = store.install_dir(entry["namespace"], entry["name"], entry["version"])
+    try:
+        actual = store.hash_tree(root)
+    except PackError as err:
+        return root, signing.UNSIGNED, [err.message] + [str(p) for p in err.problems[:3]]
+    cmp = store.compare_files(entry.get("files") or {}, actual)
+    if any(cmp.values()):
+        changed = cmp["modified"] + cmp["missing"] + cmp["added"]
+        return root, signing.UNSIGNED, [(f"its files changed since it was approved "
+                                         f"({', '.join(changed[:5])}); run `nable pack audit`")]
+    verdict = signing.verify_pack(root, store.content_digest(actual), pp)
+    viol = policy_violations(pack_id, entry.get("tier", ""), entry.get("capabilities") or {},
+                             entry.get("source") or {}, pp, verdict)
+    return root, verdict, [p.reason for p in viol]
+
+
 def _approve(plan: Plan, pp: dict[str, Any], *, yes: bool, auto: bool,
              approve: Callable[[Plan], bool] | None) -> str:
     m = plan.manifest
@@ -553,6 +608,7 @@ def _commit(plan: Plan, idx: dict[str, Any], how: str) -> dict[str, Any]:
         "description": m.description, "maintainers": list(m.maintainers),
         "nable_api": m.nable_api, "status": m.status,
         "source": plan.source.record(), "files": plan.files, "digest": plan.digest,
+        "signature": plan.signature.to_dict(), "attestation": m.attestation,
         "capabilities": m.to_dict()["capabilities"],
         "provides": {k: list(v) for k, v in m.provides.items()},
         "code": [c.to_dict() for c in m.code],
@@ -622,7 +678,8 @@ def audit() -> dict[str, Any]:
     """Every installed pack: tier, capabilities, a fresh hash of every file
     against what was approved, and whether today's org policy still allows it.
     `ok` is False when any pack is tampered, missing, invalid or outside
-    policy."""
+    policy. The signature is verified again from the installed files, against
+    today's trusted keys; `signature` holds that verdict."""
     from ..policy import pack_policy
     idx = store.read_index()
     pp = pack_policy()
@@ -632,6 +689,7 @@ def audit() -> dict[str, Any]:
         row = _public(e)
         problems: list[str] = []
         status = "ok"
+        verdict = signing.UNSIGNED
         if not root.is_dir():
             status = "missing"
             problems.append(f"{root} is gone")
@@ -650,18 +708,21 @@ def audit() -> dict[str, Any]:
                     problems += [f"{p}: missing" for p in cmp["missing"]]
                     problems += [f"{p}: added after install" for p in cmp["added"]]
                 row["integrity"] = cmp
+                verdict = signing.verify_pack(root, store.content_digest(actual), pp)
             if status == "ok":
                 try:
                     load_manifest(root)
                 except ValidationError as err:
                     status = "invalid"
                     problems.append(str(err))
+        row["signature"] = verdict.to_dict()
         viol = policy_violations(pid, e.get("tier", ""), e.get("capabilities") or {},
-                                 e.get("source") or {}, pp)
+                                 e.get("source") or {}, pp, verdict)
         if viol:
             problems += [p.reason for p in viol]
             if status == "ok":
-                status = "outside-policy"
+                status = ("untrusted" if any(p.field == "signature" for p in viol)
+                          else "outside-policy")
         row["status"] = status
         row["problems"] = problems
         packs.append(row)
@@ -669,30 +730,84 @@ def audit() -> dict[str, Any]:
             "index": str(store.index_path())}
 
 
-def validate_dir(path: str | Path) -> dict[str, Any]:
+def validate_dir(path: str | Path, *, skip_ignored: bool = True) -> dict[str, Any]:
     """`nable pack validate`: everything install checks except policy and
-    approval, run in place. {"ok": bool, "problems": [...], ...}."""
+    approval, run in place. {"ok": bool, "problems": [...], "warnings": [...],
+    "digest": ..., "signature": {...}, ...}.
+
+    `digest` is what `nable pack sign` signs. An invalid signature (the pack
+    changed after signing) is a problem; an unsigned first-party or verified
+    claim is a warning, because authors validate before they sign, and
+    install refuses it."""
     root = Path(path).expanduser()
     if not root.is_dir():
-        return {"ok": False, "problems": [f"{root} is not a directory"]}
+        return {"ok": False, "problems": [f"{root} is not a directory"], "warnings": []}
     try:
-        files = store.hash_tree(root, skip_ignored=True)
+        files = store.hash_tree(root, skip_ignored=skip_ignored)
         manifest = load_manifest(root)
     except PackError as err:
-        return {"ok": False, "problems": [err.message] + [str(p) for p in err.problems]}
+        return {"ok": False, "problems": [err.message] + [str(p) for p in err.problems],
+                "warnings": []}
     content = load_content(root, manifest.provides)
     problems = [str(p) for p in content.problems]
+    warnings: list[str] = []
     if manifest.integrity_files is not None:
-        actual = {k: v for k, v in files.items() if k != MANIFEST_NAME}
+        actual = {k: v for k, v in files.items() if k not in (MANIFEST_NAME, store.SIG_NAME)}
         cmp = store.compare_files(manifest.integrity_files, actual)
         problems += [f"{p}: does not match its [integrity] sha256" for p in cmp["modified"]]
         problems += [f"{p}: is pinned in [integrity] but missing" for p in cmp["missing"]]
         problems += [f"{p}: is in the pack but not pinned in [integrity]" for p in cmp["added"]]
-    return {"ok": not problems, "problems": problems, "id": manifest.id,
+    digest = store.content_digest(files)
+    verdict = signing.verify_pack(root, digest)
+    why = signing.claim_problem(manifest.id, manifest.tier, verdict)
+    if verdict.status == "invalid":
+        problems.append(f"{store.SIG_NAME}: {verdict.reason}")
+    elif why:
+        warnings.append(f"install will refuse it: {why}")
+    if manifest.attestation:
+        warnings.append("[integrity].attestation is recorded but not verified by this nable "
+                        "(PEP 740 verification is not built yet)")
+    return {"ok": not problems, "problems": problems, "warnings": warnings, "id": manifest.id,
             "version": manifest.version, "tier": manifest.tier,
-            "digest": store.content_digest(files), "files": len(files),
+            "digest": digest, "files": len(files), "signature": verdict.to_dict(),
             "provides": content.counts(), "code": [c.to_dict() for c in manifest.code],
             "capabilities": manifest.to_dict()["capabilities"]}
+
+
+def sign(path: str | Path, key_path: str | Path, *, passphrase: bytes | None = None
+         ) -> dict[str, Any]:
+    """`nable pack sign`: sign a pack directory (writes <dir>/nable-pack.sig)
+    or a tarball (writes <tarball>.sig) with the Ed25519 key in `key_path`.
+    The pack must validate first; the signature is over its content digest."""
+    target = Path(path).expanduser()
+    if target.is_file() and target.name.endswith(TARBALL_SUFFIXES):
+        with tempfile.TemporaryDirectory(prefix="nable-sign-") as tmp:
+            src = Source("tarball", str(target.resolve()))
+            root = _stage(src, Path(tmp))
+            # Hashed as install hashes a tarball: every member, nothing skipped.
+            r = _sign_dir(root, key_path, passphrase, whole=True,
+                          out=target.with_name(target.name + ".sig"))
+    elif target.is_dir():
+        r = _sign_dir(target, key_path, passphrase, whole=False, out=target / store.SIG_NAME)
+    else:
+        raise PackError(f"{target} is neither a pack directory nor a .tar.gz, .tgz or .tar file")
+    return r
+
+
+def _sign_dir(root: Path, key_path: str | Path, passphrase: bytes | None, *, whole: bool,
+              out: Path) -> dict[str, Any]:
+    r = validate_dir(root, skip_ignored=not whole)
+    problems = [p for p in r["problems"] if not p.startswith(store.SIG_NAME + ":")]
+    if problems:
+        raise ValidationError(f"{root} does not validate, so it was not signed",
+                              [Problem("pack", p) for p in problems])
+    key = signing.load_private_key(key_path, passphrase)
+    doc = signing.sign_digest(r["digest"], key)
+    del key
+    signing.write_sig(out, doc)
+    return {"ok": True, "id": r["id"], "version": r["version"], "tier": r["tier"],
+            "digest": r["digest"], "key_id": doc["key_id"], "signed_at": doc["signed_at"],
+            "signature_path": str(out)}
 
 
 # ── scaffold ──────────────────────────────────────────────────────────────────
