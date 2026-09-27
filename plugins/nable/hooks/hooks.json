@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --python 3.12 --from finops-mcp==0.9.0 finops guard hook --via plugin; exit 0",
+            "command": "uvx --python 3.12 --from finops-mcp==0.10.0 finops guard hook --via plugin; exit 0",
             "timeout": 30
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --python 3.12 --from finops-mcp==0.9.0 finops guard hook --via plugin --post; exit 0",
+            "command": "uvx --python 3.12 --from finops-mcp==0.10.0 finops guard hook --via plugin --post; exit 0",
             "timeout": 30
           }
         ]

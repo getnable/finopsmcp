@@ -1,7 +1,7 @@
 {
   "name": "nable",
   "displayName": "nable, local-first FinOps",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Prices what your coding agent is about to do before it runs: asks before costly launches and destroys, tracks AI spend, and answers cost questions across AWS, Azure, GCP, Kubernetes and AI providers. Local, read-only. The guard is on once the plugin is installed; nable guard off pauses it. Credentials stay on your machine.",
   "author": {
     "name": "Chandan Bukkapatnam",
@@ -27,7 +27,7 @@
       "args": [
         "--python",
         "3.12",
-        "finops-mcp==0.9.0"
+        "finops-mcp==0.10.0"
       ]
     }
   }

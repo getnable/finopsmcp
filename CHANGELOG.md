@@ -2,7 +2,7 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.10.0
 
 Decisions become policy: nable stops asking the same thing twice.
 
@@ -35,6 +35,14 @@ Decisions become policy: nable stops asking the same thing twice.
   minutes, recorded with who approved. An agent cannot approve, and a deny
   set by policy is never approvable. On a terminal the command shows the
   call, its directory and why it was stopped, and approves only on a yes.
+- Fixed in a pre-release review: a freeze time past the last UTC instant
+  switched the org model off in the hook; an inferred "tighten" for a team
+  could lift an environment's lower threshold, and was offered with a yes;
+  an agent could record outcomes itself to turn a no into a yes; a retry
+  the person declined counted as an approval; an MCP approval carried
+  across directories; terminal escapes in a command could disguise what a
+  person approved; runs with permissions bypassed counted as approvals; and
+  `$(which nable) guard off` and similar spellings skipped the self rules.
 
 ## 0.9.0
 
