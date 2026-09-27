@@ -182,12 +182,45 @@ def test_the_cli_is_a_human_decision(work, monkeypatch, capsys):
     # The Python API wants the decision the CLI makes, not a name.
     with pytest.raises(guard_approvals.ApprovalError, match="person's decision"):
         guard_approvals.approve(aid, "maria")
-    # A terminal names the person.
+    # A terminal names the person (who says yes to what it shows).
     monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
     monkeypatch.setattr(org_cli, "_git_email", lambda: "maria@example.com")
+    monkeypatch.setattr("builtins.input", lambda _p="": "y")
     assert cli_approve(aid) == 0
     assert codex(DESTROY, work) is None
     assert _records()[-1]["approved_out_of_band"]["by"] == "maria@example.com"
+
+
+def test_on_a_terminal_the_person_sees_what_they_approve_before_it_is_approved(
+        work, monkeypatch, capsys):
+    """The id reaches the person through the agent, which can say it is for
+    anything. On a terminal the CLI shows the call, where, and why the guard
+    stopped it, and approves only on a yes; before, it approved at once and
+    showed the call afterwards."""
+    from finops.org import cli as org_cli
+    aid = approval_id(codex_reason(codex(DESTROY, work)))
+    capsys.readouterr()
+    monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
+    monkeypatch.setattr(org_cli, "_git_email", lambda: "maria@example.com")
+    said: list[str] = []
+
+    def answer(text):
+        def ask(prompt=""):
+            said.append(capsys.readouterr().out + prompt)
+            return text
+        return ask
+    for reply in ("", "n", "no thanks"):
+        monkeypatch.setattr("builtins.input", answer(reply))
+        assert cli_approve(aid, "--as", "maria") == 1
+        assert "Not approved" in capsys.readouterr().out
+    shown = said[0]
+    assert DESTROY in shown and str(work) in shown and "codex" in shown
+    assert "deletes" in shown or "destroy" in shown.split(DESTROY, 1)[1], shown
+    assert approval_id(codex_reason(codex(DESTROY, work))) == aid        # still waiting
+
+    monkeypatch.setattr("builtins.input", answer("y"))
+    assert cli_approve(aid) == 0
+    assert codex(DESTROY, work) is None
 
 
 def test_the_store_is_private_and_protected(work):

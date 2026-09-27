@@ -2797,7 +2797,8 @@ def _guard_approve(parsed) -> int:
     was stopped on run once (guard_approvals). With no id, the approvals
     waiting. A human decision: without a terminal it needs --as, the same
     rule as `nable org confirm`, and the guard asks (or, in those harnesses,
-    denies) when an agent runs it."""
+    denies) when an agent runs it. On a terminal it shows the call, where,
+    and why it was stopped, and approves only on a yes."""
     from . import guard_approvals as ga
     from .org.cli import _need_human, _who
     from .welcome import cyan, dim, green
@@ -2822,6 +2823,27 @@ def _guard_approve(parsed) -> int:
     who = _who(getattr(parsed, "guard_as", None))
     if who is None:
         return _need_human()
+    from .org import cli as org_cli
+    if org_cli._is_tty():
+        # The id reaches the person through the agent, which can say it is
+        # for anything: show what it lets through, and why the guard stopped
+        # it, before a yes. (An unknown or expired id is refused below.)
+        row = next((r for r in ga.waiting() if r.get("id") == aid.lower()), None)
+        if row is not None and not row.get("approved_by") and not row.get("used_at"):
+            usd = f", ~${row['monthly_usd']:,.0f}/mo" if row.get("monthly_usd") else ""
+            print()
+            print(f"  {cyan(row['id'])}  {row.get('harness')}, in "
+                  f"{row.get('cwd') or '(no directory given)'}")
+            print(f"    {row.get('call')}{usd}")
+            if row.get("why"):
+                print(dim(f"    why it was stopped: {row['why']}"))
+            try:
+                yes = input("  Let this run once? [y/N] ").strip().lower() in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                yes = False
+            if not yes:
+                print("  Not approved.\n")
+                return 1
     try:
         r = ga.approve(aid, who)
     except ga.ApprovalError as e:
