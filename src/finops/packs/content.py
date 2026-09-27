@@ -9,7 +9,8 @@ attribute access, no calls, no format specs, no Jinja. A report template called 
 placeholders; `{{ ''.__class__ }}` in it stays exactly those characters.
 
     policies     rules: {id, description, applies_to, match, effect}
-    guard_rules  rules: {id, target, pattern, verdict (ask|deny), reason, price_hint}
+    guard_rules  rules: {id, target, pattern, verdict (ask|deny), reason, price_hint,
+                 during (optional: "freeze", only while a change freeze is in force)}
     playbooks    playbooks: {id, finding_type, iac, description, placeholders,
                  diff_template, verify, rollback}
     price_books  rates: {provider, sku, unit, rate, currency, effective_from,
@@ -41,6 +42,7 @@ import yaml
 
 from .errors import Problem
 from .rules import (  # noqa: F401  (re-exported: finops.packs.content.tighten)
+    GUARD_DURING,
     GUARD_TARGETS,
     GUARD_VERDICTS,
     MAX_MATCH_INPUT,
@@ -467,8 +469,8 @@ def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[Guard
             problems.append(Problem(where, "must be a mapping"))
             continue
         n = len(problems)
-        _strict_keys(r, ("id", "target", "pattern", "verdict", "reason", "price_hint"),
-                     where, problems)
+        _strict_keys(r, ("id", "target", "pattern", "verdict", "reason", "price_hint",
+                         "during"), where, problems)
         rid = r.get("id")
         if not isinstance(rid, str) or not _ID.match(rid):
             problems.append(Problem(f"{where}.id", "must be a short lowercase id"))
@@ -489,6 +491,11 @@ def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[Guard
                                     f"{verdict!r} is not ask or deny: a guard pack may only "
                                     "tighten, so allow and warn are not verdicts it can give"))
         reason = _text(r.get("reason"), f"{where}.reason", problems, limit=500)
+        during = r.get("during")
+        if during is not None and during not in GUARD_DURING:
+            problems.append(Problem(f"{where}.during",
+                                    f"{during!r} is not one of {', '.join(GUARD_DURING)}: a "
+                                    "condition only narrows when a rule fires"))
         hint = r.get("price_hint")
         if hint is not None:
             if not isinstance(hint, dict):
@@ -505,7 +512,7 @@ def parse_guard_rules(doc: Any, rel: str, problems: list[Problem]) -> list[Guard
                     _text(note, f"{where}.price_hint.note", problems, limit=300)
                 hint = {"monthly_usd": usd, "note": note} if usd is not None else None
         if len(problems) == n and rx is not None:
-            out.append(GuardRule(rid, target, rx, verdict, reason, hint))
+            out.append(GuardRule(rid, target, rx, verdict, reason, hint, during=during))
     return out
 
 
