@@ -40,7 +40,7 @@ rules:
       can end the freeze early, or run it themselves with a change record.
   - id: merge-during-freeze
     during: freeze
-    pattern: '\bgh\s+pr\s+merge\b|\bgit\s+push\b[^;&|\n]*[\s:](?:main|master|production|release/[\w.-]+)\b'
+    pattern: '\bgh\s+pr\s+merge\b|\bgit\b[^;&|\n]*\spush\b[^;&|\n]*[\s:+](?:refs/heads/)?(?:main|master|production|release/[\w.-]+)(?:[\s;&|)]|$)'
     verdict: ask
     reason: >-
       Merging or pushing to a release branch during a change freeze ships a

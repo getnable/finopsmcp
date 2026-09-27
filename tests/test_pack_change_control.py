@@ -154,6 +154,34 @@ def test_admin_merges_force_pushes_and_protection_changes_are_always_denied(inst
     assert _verdict("gh api repos/acme/infra/branches/main/protection") is None
 
 
+def test_a_force_push_is_denied_by_the_branch_it_lands_on_not_a_word_in_it(installed):
+    # A rebased feature branch whose name holds "main" is force-pushed every
+    # day; denying that would teach people to turn the pack off.
+    for command in ("git push --force origin feature/main-menu",
+                    "git push -f origin fix-main-page",
+                    "git push origin main-fix --force",
+                    "git push -f origin my-production-notes",
+                    "git push -f origin main:feature/x"):
+        assert _verdict(command) is None, command
+    for command in ("git push -uf origin main",
+                    "git push -fu origin master",
+                    "git -C infra push -f origin main",
+                    "git push -f origin HEAD:main",
+                    "git push -f origin refs/heads/production",
+                    "git push origin +HEAD:main",
+                    "git push -f main"):
+        assert _verdict(command) == "deny", command
+
+
+def test_during_a_freeze_only_a_push_to_a_release_branch_asks(installed):
+    _freeze(confirmed=True)
+    assert _verdict("git push origin main") == "ask"
+    assert _verdict("git push origin release/1.2") == "ask"
+    assert _verdict("git -C infra push origin HEAD:main") == "ask"
+    assert _verdict("git push origin fix-main-page") is None
+    assert _verdict("git push origin feature/release-notes") is None
+
+
 def test_a_confirmed_freeze_makes_deploys_ask_and_teardowns_deny(installed):
     _freeze(confirmed=True)
     v = g.gate_command(DEPLOY, record=False)

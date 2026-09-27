@@ -14,9 +14,9 @@ rules:
     # EC2, SageMaker, EKS, Auto Scaling, Batch and EMR calls that create,
     # update or resize something with a GPU or accelerator type: p2 to p6
     # (p4d, p4de, p5, p5e, p5en, p6-b200), g3 to g6 (g4dn, g5, g5g, g6e),
-    # gr6, trn1, trn1n, trn2, inf1, inf2, dl1 and dl2q, SageMaker's ml.*
+    # gr6, trn1, trn1n, trn2, trn2u, inf1, inf2, dl1 and dl2q, SageMaker's ml.*
     # names included.
-    pattern: '(?i)\baws\s+(ec2|sagemaker|eks|autoscaling|batch|emr)\s+(run-instances|request-spot-[a-z-]*|modify-instance-attribute|create-[a-z-]*|update-[a-z-]*|add-instance-[a-z-]*)\b.*\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12]n?|inf[12]|dl[12]q?)\.([0-9]*xlarge|large|metal[a-z0-9-]*)\b'
+    pattern: '(?i)\baws\s+(ec2|sagemaker|eks|autoscaling|batch|emr)\s+(run-instances|request-spot-[a-z-]*|modify-instance-attribute|create-[a-z-]*|update-[a-z-]*|add-instance-[a-z-]*)\b.*\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12][nu]?|inf[12]|dl[12]q?)\.([0-9]*xlarge|large|metal[a-z0-9-]*)\b'
     verdict: ask
     reason: >-
       This launches a GPU or accelerator instance. The AI spend pack asks for
@@ -63,7 +63,7 @@ rules:
     # An MCP tool whose name says it launches or creates compute, called with
     # a GPU type in its arguments. (A tool the guard recognises, such as one
     # that runs an AWS CLI command, is also judged as that command above.)
-    pattern: '(?i)^mcp__\S*(run_?instances|create_?(instance|vm|node_?pool|nodegroup|training_?job|endpoint|cluster|notebook)|launch)\S* .*(\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12]n?|inf[12])\.[0-9]*x?large\b|\bStandard_N[CDVG]|\b(a2|a3|a4x?|g2)-(high|ultra|mega|standard))'
+    pattern: '(?i)^mcp__\S*(run_?instances|create_?(instance|vm|node_?pool|nodegroup|training_?job|endpoint|cluster|notebook)|launch)\S* .*(\b(ml\.)?(p[2-6][a-z0-9-]*|g[3-6][a-z]*|gr6|trn[12][nu]?|inf[12])\.[0-9]*x?large\b|\bStandard_N[CDVG]|\b(a2|a3|a4x?|g2)-(high|ultra|mega|standard))'
     verdict: ask
     reason: >-
       This tool call launches compute with GPUs or accelerators. The AI spend

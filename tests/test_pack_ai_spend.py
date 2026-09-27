@@ -42,6 +42,10 @@ GPU_LAUNCHES = [
     "gcloud container node-pools create gpu --cluster c --accelerator type=nvidia-l4,count=1",
     "az vm create -g rg -n vm1 --image Ubuntu2204 --size Standard_NC6s_v3",
     "az aks nodepool add -g rg --cluster-name c -n gpu --node-vm-size Standard_ND96asr_v4",
+    # the AWS CLI's global options go before the service as often as after
+    "aws --region us-east-1 ec2 run-instances --image-id ami-1 --instance-type g4dn.xlarge",
+    "aws --profile ml --output json ec2 run-instances --instance-type g4dn.xlarge",
+    "aws ec2 run-instances --image-id ami-1 --instance-type trn2u.48xlarge",
 ]
 NOT_GPU = [
     "aws ec2 run-instances --image-id ami-1 --instance-type m5.large",

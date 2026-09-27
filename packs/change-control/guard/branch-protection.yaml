@@ -9,8 +9,12 @@ rules:
     reason: >-
       Merging with --admin skips the required reviews that approve a change.
       A person who holds that right uses it themselves, with a change record.
+  # The branch is the ref a push lands on (after a space, or the ":" of
+  # src:dst), whole: a feature branch whose name holds "main" is not main.
+  # -f counts inside combined flags (-uf), and git's own options (git -C dir)
+  # may come before push.
   - id: no-force-push-to-protected-branch
-    pattern: '\bgit\s+push\b[^;&|\n]*\s(?:-f|--force\S*)\s[^;&|\n]*\b(?:main|master|production)\b|\bgit\s+push\b[^;&|\n]*\b(?:main|master|production)\b[^;&|\n]*\s(?:-f|--force\S*)(?:\s|$)|\bgit\s+push\b[^;&|\n]*\s\+(?:refs/heads/)?(?:main|master|production)\b'
+    pattern: '\bgit\b[^;&|\n]*\spush\b[^;&|\n]*\s(?:-[a-zA-Z]*f[a-zA-Z]*|--force\S*)(?:\s[^;&|\n]*)?[\s:](?:refs/heads/)?(?:main|master|production)(?:[\s;&|)]|$)|\bgit\b[^;&|\n]*\spush\b[^;&|\n]*[\s:](?:refs/heads/)?(?:main|master|production)(?:\s[^;&|\n]*)?\s(?:-[a-zA-Z]*f[a-zA-Z]*|--force\S*)(?:[\s;&|)]|$)|\bgit\b[^;&|\n]*\spush\b[^;&|\n]*\s\+(?:[^\s:;&|]*:)?(?:refs/heads/)?(?:main|master|production)(?:[\s;&|)]|$)'
     verdict: deny
     reason: >-
       A force push to a protected branch rewrites the history that shows who
