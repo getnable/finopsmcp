@@ -223,6 +223,30 @@ def test_on_a_terminal_the_person_sees_what_they_approve_before_it_is_approved(
     assert codex(DESTROY, work) is None
 
 
+def test_the_call_a_person_approves_cannot_redraw_their_terminal(work, monkeypatch, capsys):
+    """The call shown to the person is the agent's command. Escape sequences
+    in it (erase the line, move the cursor) or a bidi override could make
+    `terraform destroy` read as something harmless on their screen."""
+    from finops.org import cli as org_cli
+    sneaky = f"{DESTROY} \x1b[2K\x1b[1G‮# ls -la \x9b2K"
+    aid = approval_id(codex_reason(codex(sneaky, work)))
+    capsys.readouterr()
+    assert cli_approve() == 0
+    listed = capsys.readouterr().out
+    monkeypatch.setattr(org_cli, "_is_tty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p="": "n")
+    assert cli_approve(aid, "--as", "maria") == 1
+    shown = listed + capsys.readouterr().out
+    assert DESTROY in shown
+    for c in ("\x1b", "‮", "\x9b"):
+        assert c not in shown, repr(c)
+    assert "\\x1b[2K" in shown
+    row = guard_approvals.waiting()[0]
+    assert not any(c in row["call"] + row["why"] for c in ("\x1b", "‮", "\x9b"))
+    # The ledger keeps the same visible spelling.
+    assert "\x1b" not in gl.ledger_path().read_text()
+
+
 def test_the_store_is_private_and_protected(work):
     codex(DESTROY, work)
     p = guard_approvals.store_path()

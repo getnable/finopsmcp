@@ -255,6 +255,9 @@ def _pulumi_config(segment: str) -> str:
 # and Slack tokens, JWT segments). A run counts when it mixes upper case, lower
 # case and digits, which a hex digest, a path or a resource name rarely does.
 _LONG_TOKEN_RE = _LazyRe(r"[A-Za-z0-9+/_-]{32,}={0,2}")
+# C0 and C1 controls, DEL, and the Unicode bidi marks, embeddings, overrides
+# and isolates: what could make a summary display as something it is not.
+_CONTROL_RE = _LazyRe("[\x00-\x1f\x7f-\x9f‎‏‪-‮⁦-⁩]")
 
 
 def _long_token(m: re.Match[str]) -> str:
@@ -278,6 +281,11 @@ def redact(text: Any, limit: int = _SUMMARY_MAX) -> str:
     s = " ".join(raw[:_REDACT_INPUT_MAX].split())
     if cut:
         s = s.rsplit(" ", 1)[0] + " ..." if " " in s else "..."
+    # A summary is printed to a person's terminal (the report, `nable guard
+    # approve`): an escape sequence or a bidi override from the agent's
+    # command must show as text, not redraw what they read.
+    s = _CONTROL_RE.sub(lambda m: f"\\x{ord(m.group()):02x}" if ord(m.group()) < 0x100
+                        else f"\\u{ord(m.group()):04x}", s)
     for pattern, repl in _REDACTIONS:
         s = pattern.sub(repl, s)
     s = _LONG_TOKEN_RE.sub(_long_token, s)
