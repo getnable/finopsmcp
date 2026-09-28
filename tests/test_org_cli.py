@@ -138,6 +138,37 @@ def test_review_status_questions_export(odir, tmp_path, capsys):
     assert code == 0 and json.loads((tmp_path / "o.json").read_text())[0]["key"] == f.key
 
 
+UNSAFE = ("\x1b", "\x07", "\x9b", "\u202e", "\x08")
+
+
+def test_read_commands_print_nothing_that_can_drive_a_terminal(odir, tmp_path, capsys):
+    # A fact's text comes from adapters, packs and repos: it may hold terminal
+    # escapes. On a terminal they are shown as visible escapes; JSON stays JSON.
+    f = org.make_fact("owner", "service:a\x1b[2Jb", {"team": "pay\x1b]0;owned\x07ments"},
+                      source="codeowners:\x9b31m\u202eevil\x08", confidence=0.8,
+                      dollars_monthly=100)
+    org.propose(f)
+    org.propose(org.make_fact("freeze", "environment:prod", {
+        "start": "2099-01-01T00:00:00+00:00", "end": "2099-01-02T00:00:00+00:00",
+        "reason": "Black Friday\x1b[1A\x1b[2K\u202e"}, source="pack:x:\x1b[31m"))
+    for argv in (("status",), ("review",), ("questions",), ("export",),
+                 ("export", "--format", "json")):
+        code, out, err = run(capsys, *argv)
+        assert code == 0, (argv, err)
+        assert not [c for c in UNSAFE if c in out + err], (argv, out)
+    code, out, _ = run(capsys, "review")
+    assert "service:a\\x1b[2Jb" in out and "codeowners:\\x9b31m\\u202eevil\\x08" in out
+    code, out, _ = run(capsys, "status")
+    assert "Black Friday\\x1b[1A\\x1b[2K\\u202e" in out
+    for argv in (("status", "--json"), ("review", "--json"), ("questions", "--json"),
+                 ("export", "--format", "json")):
+        code, out, _ = run(capsys, *argv)
+        assert "\x1b" not in out and json.loads(out), argv
+    code, out, _ = run(capsys, "review", "--json")
+    rows = {r["fact"]: r for r in json.loads(out)["proposed"]}
+    assert rows["owner"]["source"] == "codeowners:\x9b31m\u202eevil\x08"
+
+
 def test_init_without_a_terminal_prints_the_questions(odir, capsys):
     proposed(dollars_monthly=100)
     code, out, _ = run(capsys, "init")

@@ -2982,7 +2982,7 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
             forms = ()
         # Installed guard-rule packs may tighten any of that, never loosen it.
         v, pack_error, pack_problem = _with_packs(
-            v, forms=forms, commands=() if forms else (command,))
+            v, forms=forms, commands=() if forms else (command,), cwd=cwd)
         if record:
             _record_pack_trouble(pack_error, pack_problem, judged=v is not None or stop is not None,
                                  harness=harness, tool=tool, command=command,
@@ -3044,16 +3044,41 @@ class _PackRuleHit(NamedTuple):
     pack: str
     verdict: str
     reason: str
+    freeze: dict[str, Any] | None = None
 
 
-def _pack_command_results(base: str, rules: Any, tighten: Any, command: str) -> list[Any]:
+def _freeze_lookup(cwd: str | None) -> Any:
+    """freeze_of(command): the change freeze in force over what `command`
+    touches (_OrgLens.freeze), for pack rules that apply `during: freeze`.
+    Read once per command and only when such a rule matches. An org model
+    that cannot be read raises, and tighten() then asks: nobody can say
+    whether a freeze is in force."""
+    memo: dict[str, Any] = {}
+
+    def freeze_of(command: str | None) -> dict[str, Any] | None:
+        key = command or ""
+        if key not in memo:
+            lens = _OrgLens(key, cwd)
+            found = lens.freeze()
+            memo[key] = lens.error if lens.error is not None else found
+        got = memo[key]
+        if isinstance(got, BaseException):
+            raise got
+        return got
+    return freeze_of
+
+
+def _pack_command_results(base: str, rules: Any, tighten: Any, command: str,
+                          freeze_of: Any = None) -> list[Any]:
     """tighten() over the readings of one command line. The reading with
     quoted data blanked counts as it is; a rule that only the others (as
     written, aliases expanded, nothing blanked) match counts unless all it
     matches is inside one quoted data argument (_only_in_data): a commit
-    message or a search pattern that names a command is not that command."""
+    message or a search pattern that names a command is not that command.
+    A `during: freeze` rule asks freeze_of about the command as written."""
+    freeze = (lambda: freeze_of(command)) if freeze_of is not None else None
     r = _readings(command)
-    out = [tighten(base, rules, command=r.masked)]
+    out = [tighten(base, rules, command=r.masked, freeze=freeze)]
     for rule in rules:
         if rule.matches_command(r.masked):
             continue
@@ -3062,13 +3087,13 @@ def _pack_command_results(base: str, rules: Any, tighten: Any, command: str) -> 
             return rule.id if rule.matches_command(form) else None
         for form in dict.fromkeys((r.expanded, r.raw, command)):
             if judge(form) is not None and not _only_in_data(r, rule.id, judge):
-                out.append(tighten(base, [rule], command=form))
+                out.append(tighten(base, [rule], command=form, freeze=freeze))
                 break
     return out
 
 
 def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = (),
-                tool: str | None = None, args: Any = None
+                tool: str | None = None, args: Any = None, cwd: str | None = None
                 ) -> tuple[dict[str, Any] | None, BaseException | None, BaseException | None]:
     """(v after the installed packs' guard rules, an error reading them, a
     pack with guard rules or a price book that is not loaded).
@@ -3076,9 +3101,14 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = ()
     finops.packs.content.tighten() over every reading of each of `commands`
     (_pack_command_results), over each of `forms` as it is (a command too
     long to read), and over the MCP call: the strictest answer wins, and it
-    is never looser than `v`. A rule that matches without tightening is
-    named in the ledger only. An error keeps `v` as it was: the caller
-    records it as a fail-open (check "packs")."""
+    is never looser than `v`. A rule that matches at the verdict the guard
+    already gave adds its reason to that ask or deny (a pack can say which
+    of its bounds a call would breach) without changing the decision; one
+    that matches below it is named in the ledger only. A rule that applies
+    `during: freeze` reads the change freeze over the command from the org
+    model, seen from `cwd`, and the freeze it applied under is kept on the
+    verdict for the ledger. An error keeps `v` as it was: the caller records
+    it as a fail-open (check "packs")."""
     try:
         from . import guard_packs
         st = guard_packs.state()
@@ -3092,26 +3122,57 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = ()
             return v, None, problem
         hits: dict[tuple[str, str], _PackRuleHit] = {}
         worst = base
-        results = [tighten(base, rules, command=f) for f in forms]
+        freeze_of = _freeze_lookup(cwd) if any(getattr(r, "during", None) for r in rules) \
+            else None
+        # A form is a command too long to read whole: the freeze over it is
+        # read from as much of it as the guard reads, or the lookup (which
+        # parses what it touches) would run past the hook's timeout.
+        results = [tighten(base, rules, command=f,
+                           freeze=(lambda f=f: freeze_of(f[:MAX_JUDGED_CHARS]))
+                           if freeze_of else None)
+                   for f in forms]
         for c in commands:
-            results += _pack_command_results(base, rules, tighten, c)
+            results += _pack_command_results(base, rules, tighten, c, freeze_of)
         if tool is not None:
-            results.append(tighten(base, rules, tool=tool, args=args))
+            every = tuple(commands) or (None,)
+
+            def call_freeze() -> dict[str, Any] | None:
+                # The call is under a freeze when any command it amounts to
+                # is; a sure one over any of them outranks a guess.
+                found = None
+                for c in every:
+                    fz = freeze_of(c)
+                    if fz and (found is None or (fz.get("sure") and not found.get("sure"))):
+                        found = fz
+                return found
+            results.append(tighten(base, rules, tool=tool, args=args,
+                                   freeze=call_freeze if freeze_of else None))
         for t in results:
             if VERDICT_ORDER.index(t["verdict"]) > VERDICT_ORDER.index(worst):
                 worst = t["verdict"]
             for h in t["rules"]:
                 hits.setdefault((h["pack"], h["id"]),
-                                _PackRuleHit(h["id"], h["pack"], h["verdict"], h["reason"]))
+                                _PackRuleHit(h["id"], h["pack"], h["verdict"], h["reason"],
+                                             h.get("freeze")))
     except Exception as exc:
         return v, exc, None
     if not hits:
         return v, None, problem
     named = [f"{h.pack}:{h.rule}" for h in hits.values()]
-    if worst == base:
-        return ({**v, "pack_rules": named} if v is not None else v), None, problem
     said = " ".join(f"{h.reason.rstrip('. ')} (rule {h.rule} of pack {h.pack})."
                     for h in hits.values() if h.verdict == worst)
+    frozen = next((h.freeze for h in hits.values() if h.verdict == worst and h.freeze), None)
+    if worst == base:
+        if v is None:
+            return v, None, problem
+        out = {**v, "pack_rules": named}
+        # The same decision, with the pack's reason beside the guard's own.
+        reason = str(v.get("reason") or "")
+        if said and base in ("ask", "deny") and said not in reason:
+            out["reason"] = f"{reason.rstrip()} {said}".strip()
+        if frozen and not v.get("freeze"):
+            out["freeze"] = frozen
+        return out, None, problem
     closing = ("It was stopped by an installed pack; do not run it."
                if worst == "deny" else "Confirm to proceed.")
     if v is None or base in ("allow", "warn"):
@@ -3125,6 +3186,8 @@ def _with_packs(v: dict[str, Any] | None, *, forms: Any = (), commands: Any = ()
         out = {**v, "decision": worst,
                "reason": f"{v['reason']} {said} {closing if worst == 'deny' else ''}".rstrip()}
     out["pack_rules"] = named
+    if frozen and not out.get("freeze"):
+        out["freeze"] = frozen
     return out, None, problem
 
 
@@ -3366,7 +3429,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         # on each command line it amounts to. They only tighten.
         commands = [act.command for act in actions if len(act.command) <= MAX_JUDGED_CHARS]
         worst, pack_error, pack_problem = _with_packs(
-            worst, commands=tuple(dict.fromkeys(commands)), tool=tool_name, args=arguments)
+            worst, commands=tuple(dict.fromkeys(commands)), tool=tool_name, args=arguments,
+            cwd=cwd if isinstance(cwd, str) else None)
         if record:
             _record_pack_trouble(pack_error, pack_problem,
                                  judged=worst is not None or stop is not None, harness=harness,

@@ -227,6 +227,15 @@ def _fmt_usd(x: float | None) -> str:
     return f"${x:,.0f}/mo" if x else ""
 
 
+def _print(*args: Any, **kw: Any) -> None:
+    """print(), with every control and invisible format character written
+    as a visible escape (the packs CLI's safe_text): a fact's subject, value,
+    source and reason come from adapters, packs and repos, and nothing in
+    them may drive the terminal. JSON output is already escaped."""
+    from ..packs.cli import safe_text
+    print(*(safe_text(str(a)) for a in args), **kw)
+
+
 def _status(parsed, org) -> int:
     m = org.load(parsed.org_dir)
     cov = org.coverage(m)
@@ -238,7 +247,7 @@ def _status(parsed, org) -> int:
     freezes = _freeze_rows(m)
     approvals = [f for f in m.by_kind("approval") if f.live]
     if getattr(parsed, "org_json", False):
-        print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
+        _print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
                           "freezes": [{**f.summary(), "state": state, "applies_as": how}
                                       for f, state, how in freezes],
                           "approvals": [f.summary() for f in approvals],
@@ -253,60 +262,60 @@ def _status(parsed, org) -> int:
         return 0
     where = {"argument": "--dir", "FINOPS_ORG_DIR": "FINOPS_ORG_DIR", "repo": "this repo",
              "data_dir": "nable data dir"}.get(m.dir_source, m.dir_source)
-    print(f"Org model: {m.dir} ({where})" + ("" if exists else ", not created yet: "
+    _print(f"Org model: {m.dir} ({where})" + ("" if exists else ", not created yet: "
                                              "run `nable org init`"))
     for layer in m.layers[1:]:
-        print(f"  read under it: {layer.dir} (nable data dir)")
+        _print(f"  read under it: {layer.dir} (nable data dir)")
     if untrusted:
-        print("  not trusted: this repo's nable.org/ came with the repo. Its owners do not "
+        _print("  not trusted: this repo's nable.org/ came with the repo. Its owners do not "
               "pick the guard's team and its thresholds may only lower limits; "
               "`nable org trust --here` if it is yours.")
     c = m.status_counts()
-    print(f"  facts: {c['confirmed']} confirmed, {c['proposed']} proposed, "
+    _print(f"  facts: {c['confirmed']} confirmed, {c['proposed']} proposed, "
           f"{c['rejected']} rejected, {c['expired']} expired")
     for kind, kc in sorted(m.kind_counts().items()):
-        print(f"    {kind}: " + ", ".join(f"{n} {s}" for s, n in kc.items() if n))
-    print(f"  coverage: {cov['summary']}")
+        _print(f"    {kind}: " + ", ".join(f"{n} {s}" for s, n in kc.items() if n))
+    _print(f"  coverage: {cov['summary']}")
     if freezes:
-        print(f"  freezes: {len(freezes)}")
+        _print(f"  freezes: {len(freezes)}")
         for f, state, how in freezes:
             v = f.value
-            print(f"    {f.key}  {f.subject}  {v['start']} to {v['end']}  {state}, "
+            _print(f"    {f.key}  {f.subject}  {v['start']} to {v['end']}  {state}, "
                   f"{how}: {v['reason']}")
     if approvals:
-        print(f"  approvals: {len(approvals)}")
+        _print(f"  approvals: {len(approvals)}")
         for f in approvals:
             v = f.value
             sure = "confirmed" if m._sure(f, True) else (
                 "proposed" if not f.confirmed else "not trusted, names nobody")
-            print(f"    {f.key}  {f.subject}  {', '.join(v['action_classes'])}: "
+            _print(f"    {f.key}  {f.subject}  {', '.join(v['action_classes'])}: "
                   f"{v.get('min', 1)} of {', '.join(v['approvers'])}"
                   + (", change ticket required" if v.get("change_ticket") else "")
                   + f"  ({sure})")
     if cov["basis"] == "subjects" and cov["subjects"]["total"]:
         s = cov["subjects"]
-        print(f"    subjects: {s['confirmed_owner']} of {s['total']} with a confirmed owner, "
+        _print(f"    subjects: {s['confirmed_owner']} of {s['total']} with a confirmed owner, "
               f"{s['proposed_owner']} proposed")
     if stale:
-        print(f"  stale (past review_after, still used): {len(stale)}")
+        _print(f"  stale (past review_after, still used): {len(stale)}")
         for f in stale[:10]:
-            print(f"    {f.key}  {f.subject}  review was due {f.review_after}")
+            _print(f"    {f.key}  {f.subject}  review was due {f.review_after}")
     if conflicts:
-        print(f"  conflicts (a fact disagrees with a confirmed one): {len(conflicts)}")
+        _print(f"  conflicts (a fact disagrees with a confirmed one): {len(conflicts)}")
         for w, p in conflicts[:10]:
             if p.confirmed:
-                print(f"    {p.key} is also confirmed, as {p.value} for {p.subject}; {w.key} "
+                _print(f"    {p.key} is also confirmed, as {p.value} for {p.subject}; {w.key} "
                       f"says {w.value} and answers. Keep one: nable org confirm KEY")
             else:
-                print(f"    {p.key} proposes {p.value} for {p.subject}; confirmed {w.key} "
+                _print(f"    {p.key} proposes {p.value} for {p.subject}; confirmed {w.key} "
                       f"says {w.value}")
     if loose:
-        print(f"  repo paths that name no repo: {len(loose)} ({', '.join(str(f.subject) for f in loose[:3])}"
+        _print(f"  repo paths that name no repo: {len(loose)} ({', '.join(str(f.subject) for f in loose[:3])}"
               f"{', ...' if len(loose) > 3 else ''}). Fix: rewrite each id as "
               "repo_path:<repo>//<path> (`nable org set owner --subject repo_path:PATH` "
               "run inside the repo does), or move them into that repo's nable.org/.")
     for w in m.warnings:
-        print(f"  warning: {w}", file=sys.stderr)
+        _print(f"  warning: {w}", file=sys.stderr)
     return 0
 
 
@@ -347,17 +356,17 @@ def _review(parsed, org) -> int:
             if f.key in conflicted:
                 d["conflicts_with"] = conflicted[f.key].key
             rows.append(d)
-        print(json.dumps({"dir": str(m.dir), "proposed": rows}, default=str))
+        _print(json.dumps({"dir": str(m.dir), "proposed": rows}, default=str))
         return 0
     if not props:
-        print("Nothing waiting for review.")
+        _print("Nothing waiting for review.")
         return 0
     for f in sorted(props, key=lambda f: (-(f.dollars_monthly or 0), f.fact, str(f.subject))):
         note = f"  [conflicts with confirmed {conflicted[f.key].key}]" if f.key in conflicted else ""
         usd = _fmt_usd(f.dollars_monthly)
-        print(f"  {f.key}  {describe(f)}" + (f"  {usd}" if usd else "") +
+        _print(f"  {f.key}  {describe(f)}" + (f"  {usd}" if usd else "") +
               f"  ({f.source}, confidence {f.confidence:.2f}){note}")
-    print("\n  Confirm: nable org confirm KEY...    Reject: nable org reject KEY...")
+    _print("\n  Confirm: nable org confirm KEY...    Reject: nable org reject KEY...")
     return 0
 
 
@@ -381,16 +390,16 @@ def _bulk_keys(parsed, org, verb: str) -> tuple[list[str], str] | int | None:
         if digest == now and keys:
             return keys, f"--{name}-bulk {what}"
         if not keys:
-            print(f"  --{name}-bulk {what}: nothing proposed to {verb}", file=sys.stderr)
+            _print(f"  --{name}-bulk {what}: nothing proposed to {verb}", file=sys.stderr)
             return 1
         why = ("a bulk answer needs the digest its question printed" if digest is None
                else "the proposals in this group changed since the question was shown")
-        print(f"  --{name}-bulk {what}: not decided, {why}. The group is now "
+        _print(f"  --{name}-bulk {what}: not decided, {why}. The group is now "
               f"{len(facts)} fact(s):", file=sys.stderr)
         for f in facts:
-            print(f"    {f.key}  {_label(m, f)}: {f.fact} {f.value}  ({f.source})",
+            _print(f"    {f.key}  {_label(m, f)}: {f.fact} {f.value}  ({f.source})",
                   file=sys.stderr)
-        print(f"  To {verb} exactly these: nable org {verb} --{name}-bulk "
+        _print(f"  To {verb} exactly these: nable org {verb} --{name}-bulk "
               f"{shlex.quote(what + '@' + now)}", file=sys.stderr)
         return 1
     return None
@@ -404,7 +413,7 @@ def _decide(parsed, org, verb: str) -> int:
     if isinstance(bulk, int):
         return bulk
     if bulk is None and not parsed.org_keys:
-        print(f"nable org {verb}: give KEY..., or --owner-bulk TEAM@DIGEST, --env-bulk "
+        _print(f"nable org {verb}: give KEY..., or --owner-bulk TEAM@DIGEST, --env-bulk "
               "ENV@DIGEST or --kind-bulk KIND@DIGEST (as `nable org questions` prints them)",
               file=sys.stderr)
         return 2
@@ -412,19 +421,19 @@ def _decide(parsed, org, verb: str) -> int:
         keys, what = bulk
         many = org.confirm_many if verb == "confirm" else org.reject_many
         done = many(keys, who, parsed.org_dir)
-        print(f"  {what}: {len(done)} fact(s) {done[0].status} by {who}")
+        _print(f"  {what}: {len(done)} fact(s) {done[0].status} by {who}")
         for f in done:
-            print(f"    {f.key}  {f.fact} {f.subject} {f.value}")
+            _print(f"    {f.key}  {f.fact} {f.subject} {f.value}")
     fn = org.confirm if verb == "confirm" else org.reject
     code = 0
     for key in parsed.org_keys:
         try:
             f = fn(key, who, parsed.org_dir)
         except org.OrgError as e:
-            print(f"  {key}: {e}", file=sys.stderr)
+            _print(f"  {key}: {e}", file=sys.stderr)
             code = 1
             continue
-        print(f"  {f.key}  {f.status} by {f.confirmed_by or who}: {f.fact} {f.subject} {f.value}")
+        _print(f"  {f.key}  {f.status} by {f.confirmed_by or who}: {f.fact} {f.subject} {f.value}")
     return code
 
 
@@ -608,12 +617,12 @@ def _learn(d, *, out=None) -> None:
             d = _data_dir() / "org"
         got = propose_guard_facts(d)
     except Exception as e:  # noqa: BLE001 - lessons are optional; questions are not
-        print(f"  (the guard's ledger was not read for lessons: {type(e).__name__}: {e})",
+        _print(f"  (the guard's ledger was not read for lessons: {type(e).__name__}: {e})",
               file=sys.stderr)
         return
     new = [p for p in got["proposals"] if p.get("result") in ("added", "conflict")]
     if new:
-        print(f"  learned from the guard's asks: {len(new)} threshold proposal(s), asked below "
+        _print(f"  learned from the guard's asks: {len(new)} threshold proposal(s), asked below "
               "(nable learn infer --dry-run shows the evidence)", file=out)
 
 
@@ -622,10 +631,10 @@ def _questions(parsed, org) -> int:
     _learn(parsed.org_dir, out=sys.stderr if as_json else sys.stdout)
     qs = org.questions(parsed.org_limit, model=org.load(parsed.org_dir))
     if as_json:
-        print(json.dumps({"questions": [q.to_dict() for q in qs]}, default=str))
+        _print(json.dumps({"questions": [q.to_dict() for q in qs]}, default=str))
         return 0
     if not qs:
-        print("No questions: nothing proposed, stale or unowned.")
+        _print("No questions: nothing proposed, stale or unowned.")
         return 0
     for i, q in enumerate(qs, 1):
         _print_question(i, q)
@@ -633,21 +642,28 @@ def _questions(parsed, org) -> int:
 
 
 def _print_question(i: int, q) -> None:
-    print(f"  {i}. {q.text}")
+    _print(f"  {i}. {q.text}")
     # A bulk answer decides every fact listed here, so every one is shown.
     for item in q.items:
-        print(f"       {item}")
-    print(f"     yes: {q.command}" + (f"    no: {q.no_command}" if q.no_command else ""))
+        _print(f"       {item}")
+    _print(f"     yes: {q.command}" + (f"    no: {q.no_command}" if q.no_command else ""))
 
 
 def _export(parsed, org) -> int:
+    import io
     try:
-        org.export(parsed.org_out, parsed.org_format, dir=parsed.org_dir)
+        if parsed.org_out:
+            org.export(parsed.org_out, parsed.org_format, dir=parsed.org_dir)
+        else:
+            # To the terminal: YAML can carry a format character (a bidi
+            # override) as it is, so it goes through _print. JSON is escaped.
+            text = org.export(io.StringIO(), parsed.org_format, dir=parsed.org_dir)
+            _print(text, end="")
     except OSError as e:
-        print(f"Export failed: {e}", file=sys.stderr)
+        _print(f"Export failed: {e}", file=sys.stderr)
         return 1
     if parsed.org_out:
-        print(f"Wrote {parsed.org_out}", file=sys.stderr)
+        _print(f"Wrote {parsed.org_out}", file=sys.stderr)
     return 0
 
 
@@ -655,7 +671,7 @@ def _ask(prompt: str) -> str | None:
     try:
         return input(prompt).strip()
     except (EOFError, KeyboardInterrupt):
-        print()
+        _print()
         return None
 
 
@@ -684,9 +700,9 @@ def _interview(qs, org, d, who: str) -> None:
     question's yes confirms every fact it lists, its no rejects them all, and
     edit walks through them one at a time."""
     for i, q in enumerate(qs, 1):
-        print(f"\n  {i}. {q.text}")
+        _print(f"\n  {i}. {q.text}")
         for item in q.items:
-            print(f"       {item}")
+            _print(f"       {item}")
         if q.kind == "bulk":
             ans = _ask("     yes / no / edit, one by one [Y/n/e/q] ")
             if ans is None or ans.lower() == "q":
@@ -694,10 +710,10 @@ def _interview(qs, org, d, who: str) -> None:
             ans = (ans or q.default).lower()[:1]
             if ans == "y":
                 org.confirm_many(q.keys, who, d)
-                print(f"     Confirmed {len(q.keys)} fact(s).")
+                _print(f"     Confirmed {len(q.keys)} fact(s).")
             elif ans == "n":
                 org.reject_many(q.keys, who, d)
-                print(f"     Rejected {len(q.keys)} fact(s); they will not be proposed again.")
+                _print(f"     Rejected {len(q.keys)} fact(s); they will not be proposed again.")
             elif ans == "e" and not _one_by_one(q, org, d, who):
                 return
             continue
@@ -710,7 +726,7 @@ def _interview(qs, org, d, who: str) -> None:
                                         "value": {"team": team}, "source": "human",
                                         "status": "confirmed"})
                 org.set_fact(f, who, d)
-                print(f"     Recorded: {q.subject} is owned by {team}.")
+                _print(f"     Recorded: {q.subject} is owned by {team}.")
             continue
         choices = "[Y/n/e/q]" if q.default == "y" else "[y/N/e/q]"
         ans = _ask(f"     {choices} ")
@@ -719,14 +735,14 @@ def _interview(qs, org, d, who: str) -> None:
         ans = (ans or q.default).lower()[:1]
         if ans == "y":
             org.confirm(q.key, who, d)
-            print("     Confirmed.")
+            _print("     Confirmed.")
         elif ans == "n":
             org.reject(q.key, who, d)
-            print("     Rejected; it will not be proposed again.")
+            _print("     Rejected; it will not be proposed again.")
         elif ans == "e":
             fact = q.fact or {}
             if fact.get("fact") != "owner":
-                print(f"     Edit it by hand in {d}, then confirm with {q.command}.")
+                _print(f"     Edit it by hand in {d}, then confirm with {q.command}.")
                 continue
             team = _ask("     The owning team: ")
             if not team:
@@ -736,7 +752,7 @@ def _interview(qs, org, d, who: str) -> None:
                                     "source": "human", "status": "confirmed"})
             org.set_fact(f, who, d)
             org.reject(q.key, who, d)
-            print(f"     Recorded: {fact['subject']} is owned by {team}.")
+            _print(f"     Recorded: {fact['subject']} is owned by {team}.")
 
 
 _RESULT = {"added": "new", "duplicate": "already there", "suppressed_rejected":
@@ -749,19 +765,19 @@ def _print_runs(runs) -> None:
     from .questions import describe
     if not runs:
         return
-    print("  adapters (they only propose; nothing here is confirmed until you say so):")
+    _print("  adapters (they only propose; nothing here is confirmed until you say so):")
     for run in runs:
         if run.error:
-            print(f"    {run.id}: failed, {run.error}")
+            _print(f"    {run.id}: failed, {run.error}")
             continue
         if not run.facts:
-            print(f"    {run.id}: nothing to propose")
+            _print(f"    {run.id}: nothing to propose")
             continue
         counts = ", ".join(f"{n} {_RESULT.get(k, k)}" for k, n in sorted(run.counts.items()))
-        print(f"    {run.id}: {len(run.facts)} proposed ({counts})")
+        _print(f"    {run.id}: {len(run.facts)} proposed ({counts})")
         for f in run.top(3):
             usd = _fmt_usd(f.dollars_monthly)
-            print(f"      {describe(f)}" + (f"  {usd}" if usd else "") +
+            _print(f"      {describe(f)}" + (f"  {usd}" if usd else "") +
                   f"  (confidence {f.confidence:.2f})")
 
 

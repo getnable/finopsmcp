@@ -16,27 +16,34 @@ carry code. The core never imports that code. For each call it:
      the pack from there, so a file swapped in the packs root after the check
      is not the file that runs; starts `python -I -B` running
      finops.packs.host in a fresh process group, in a throwaway HOME, with a
-     scrubbed environment: PATH, HOME, LANG, and the values of the secrets the
-     manifest declares, read only from the pack's own vault namespace
-     (`pack:<namespace>/<name>:<NAME>`, set with `nable pack secret set`).
-     Never from nable's environment or its provider keys: no FINOPS_*, no
-     AWS_*, no cloud credentials, no vault key cross;
+     scrubbed environment: PATH, HOME, LANG, and the values of the secrets
+     (credentials) and settings the manifest declares, read only from the
+     pack's own vault namespace (`pack:<namespace>/<name>:<NAME>`, set with
+     `nable pack secret set` and `nable pack setting set`). Never from
+     nable's environment or its provider keys: no FINOPS_*, no AWS_*, no
+     cloud credentials, no vault key cross;
   3. speaks JSON-RPC 2.0 over the child's stdin/stdout, one object per line
      (host.py lists the methods), with a per-call timeout that holds even when
      the child stops reading (writes go through a bounded queue and a writer
      thread; past the deadline the child is killed), at most
      MAX_INFLIGHT of the child's requests unanswered at once, and a cap on
      everything the child writes to stdout; the child's stderr is kept,
-     truncated and with declared secret values redacted, in
+     truncated and with its credential values redacted, in
      <packs root>/logs/<namespace>/<name>.log;
   4. answers the child's data.read requests only for scopes the manifest
      declares in read_data (focus.cost from the cost store, org.owners and
-     org.environments from finops.org; the others return "not available");
+     org.environments from finops.org, repo.files from the repositories an
+     adapter call names, read here and handed over as text; the others
+     return "not available");
   5. validates what comes back: FOCUS rows against finops.focus's schema
      (invalid rows are dropped and reported), org facts through
      finops.org.make_fact (always status proposed, source prefixed with the
      pack id), and sink deliveries against the declared `act` kinds and
-     `max_autonomy`, checked before the child is even started.
+     `max_autonomy`, checked before the child is even started. A fact or a
+     row that carries the value of one of the pack's credentials anywhere
+     (subject, value, source, any field) is refused and reported by the
+     credential's name; a sink's receipt and every problem and error have
+     them redacted. Settings are not credentials and pass as they are.
 
 Network, honestly. On Linux, a pack that declares no network runs in its own
 empty network namespace (`unshare --user --net`) when the kernel allows
@@ -66,6 +73,7 @@ import os
 import queue
 import shutil
 import signal
+import stat
 
 # The broker's job is to run pack code in a child process, never in this one.
 import subprocess  # nosec B404
@@ -220,8 +228,12 @@ def secret_value(pack_id: str, name: str) -> str | None:
     return _vault_get(vault_entry_name(pack_id, name))
 
 
-def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | None]:
-    """(why the pair is refused, a note) for `nable pack secret`."""
+def _check_secret_target(pack_id: str, name: str, *, setting: bool = False
+                         ) -> tuple[str | None, str | None]:
+    """(why the pair is refused, a note) for `nable pack secret` (or, with
+    `setting`, `nable pack setting`). A name the installed pack declares as
+    a credential is never stored as a setting, whose value is taken from the
+    command line."""
     from .manifest import FIRST_PARTY_NAMESPACES, check_name, check_namespace
     ns, sep, pname = pack_id.partition("/")
     if not sep or check_namespace(ns) or check_name(pname):
@@ -231,21 +243,35 @@ def _check_secret_target(pack_id: str, name: str) -> tuple[str | None, str | Non
     except PackError:
         e = None
     first_party = (e.get("tier") == "first-party") if e else ns in FIRST_PARTY_NAMESPACES
-    why = caps_mod.check_secret(name, first_party=first_party)
+    caps = (e.get("capabilities") or {}) if e else {}
+    secrets, settings = caps.get("secrets") or (), caps.get("settings") or ()
+    if setting:
+        if name in secrets:
+            return (f"{name}: {pack_id} declares it as a credential, whose value never comes "
+                    f"from the command line: `nable pack secret set {pack_id} {name}`"), None
+        why = caps_mod.check_setting(name, first_party=first_party)
+    else:
+        why = caps_mod.check_secret(name, first_party=first_party)
     if why:
         return f"{name}: {why}", None
+    what = "setting" if setting else "secret"
     note = None
     if e is None:
-        note = f"{pack_id} is not installed; the secret waits for it"
-    elif name not in ((e.get("capabilities") or {}).get("secrets") or ()):
+        note = f"{pack_id} is not installed; the {what} waits for it"
+    elif name not in secrets and name not in settings:
         note = (f"the installed {pack_id} does not declare {name}, so it is not passed to it "
                 "until a version that declares it is approved")
+    elif not setting and name in settings:
+        note = (f"{pack_id} declares {name} as a setting, not a credential: `nable pack "
+                f"setting set {pack_id} {name} VALUE` sets it too")
     return None, note
 
 
-def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
-    """Store `value` as the pack's secret `name` in nable's vault."""
-    why, note = _check_secret_target(pack_id, name)
+def set_secret(pack_id: str, name: str, value: str, *, setting: bool = False
+               ) -> dict[str, Any]:
+    """Store `value` as the pack's secret (or, with `setting`, its setting)
+    `name` in nable's vault. Both live under pack:<id>:<NAME>."""
+    why, note = _check_secret_target(pack_id, name, setting=setting)
     if why:
         raise PackError(why)
     try:
@@ -257,8 +283,8 @@ def set_secret(pack_id: str, name: str, value: str) -> dict[str, Any]:
     return {"pack": pack_id, "name": name, "vault_entry": vault_entry_name(pack_id, name), "note": note}
 
 
-def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
-    why, _ = _check_secret_target(pack_id, name)
+def remove_secret(pack_id: str, name: str, *, setting: bool = False) -> dict[str, Any]:
+    why, _ = _check_secret_target(pack_id, name, setting=setting)
     if why:
         raise PackError(why)
     removed = False
@@ -272,9 +298,10 @@ def remove_secret(pack_id: str, name: str) -> dict[str, Any]:
 
 
 def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]]:
-    """(the child's environment, the secret values in it). Only PATH, HOME,
-    LANG and the declared secrets, each from the pack's own vault namespace;
-    nothing inherited beyond those."""
+    """(the child's environment, the credential values in it). Only PATH,
+    HOME, LANG and the declared secrets and settings, each from the pack's
+    own vault namespace; nothing inherited beyond those. Only the secrets
+    are credentials, redacted from and refused in what the pack returns."""
     env = {"PATH": os.environ.get("PATH") or os.defpath, "HOME": home,
            "LANG": os.environ.get("LANG") or "C.UTF-8"}
     if os.name == "nt":  # Python on Windows needs these to start and to open sockets
@@ -289,6 +316,12 @@ def child_env(prep: Prepared, home: str) -> tuple[dict[str, str], dict[str, str]
         v = secret_value(prep.pack_id, name)
         if v is not None:
             env[name] = secrets[name] = v
+    for name in prep.capabilities.get("settings") or ():
+        if name in secrets or caps_mod.check_setting(name, first_party=first_party):
+            continue  # validated at install; a credential is never passed as a setting
+        v = secret_value(prep.pack_id, name)
+        if v is not None:
+            env[name] = v
     return env, secrets
 
 
@@ -613,12 +646,111 @@ def _data_org_environments(query: dict[str, Any]) -> dict[str, Any]:
     return {"environments": _org_facts("environment")}
 
 
+# repo.files: files a pack names, from the repos the call names (an adapter
+# call from `nable org init` names the repos init reads). Only what its
+# manifest declares in repo_files (names, repo-relative paths, simple
+# globs), never an absolute path or a .., so a pack cannot ask for
+# ~/.ssh/id_rsa or ../../anything, and never a sensitive file
+# (capabilities.SENSITIVE_FILES: state, keys, .env, credentials), declared or
+# not. The walk never follows a symlink and skips vendored and generated
+# trees. Bounded in count, size and time.
+REPO_FILE_NAMES_MAX = 16
+REPO_FILE_MAX_BYTES = 256 * 1024
+REPO_FILES_MAX = 500
+REPO_FILES_TOTAL_BYTES = 8 * 1024 * 1024
+REPO_WALK_MAX_ENTRIES = 200_000
+_REPO_SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", ".terraform", ".venv",
+                             "venv", "__pycache__", "vendor", "dist", "build", ".tox",
+                             ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache", ".next",
+                             ".idea", "target"})
+
+
+def _read_repo_file(path: Path) -> bytes | None:
+    """A regular file's bytes, or None: never through a symlink (one put
+    there after the walk saw the name included), never a FIFO or a device
+    (opened without blocking, then checked), never more than
+    REPO_FILE_MAX_BYTES however big it has grown since."""
+    if path.is_symlink():
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > REPO_FILE_MAX_BYTES:
+            return None
+        chunks: list[bytes] = []
+        left = REPO_FILE_MAX_BYTES + 1
+        while left > 0:
+            chunk = os.read(fd, min(left, 64 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        raw = b"".join(chunks)
+        return raw if len(raw) <= REPO_FILE_MAX_BYTES else None
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _data_repo_files(query: dict[str, Any], repos: list[Path],
+                     declared: tuple[str, ...] = ()) -> dict[str, Any]:
+    names = query.get("names")
+    if not isinstance(names, list) or not 1 <= len(names) <= REPO_FILE_NAMES_MAX or not all(
+            isinstance(n, str) and caps_mod.repo_file_syntax(n) is None for n in names):
+        raise _RpcError(-32602, f"repo.files takes {{names: [...]}}: 1 to {REPO_FILE_NAMES_MAX} "
+                        "file names or repo-relative paths such as catalog-info.yaml or "
+                        ".github/CODEOWNERS, as the manifest's repo_files declares them")
+    for n in names:
+        if not caps_mod.repo_file_covered(n, declared):
+            raise _RpcError(-32001, f"{n} is not in the pack's declared repo_files "
+                            f"({', '.join(declared) or 'none'})")
+        if caps_mod.is_sensitive_file(n):
+            raise _RpcError(-32001, f"{n} is a sensitive file, which is never read, whatever "
+                            "repo_files declares")
+    wanted = list(dict.fromkeys(names))
+    files: list[dict[str, Any]] = []
+    total = seen = 0
+    truncated = False
+    for i, root in enumerate(repos):
+        if truncated:
+            break
+        for dirpath, dirnames, filenames in os.walk(root):   # never follows a symlink
+            dirnames[:] = sorted(d for d in dirnames if d not in _REPO_SKIP_DIRS)
+            seen += len(dirnames) + len(filenames)
+            if seen > REPO_WALK_MAX_ENTRIES:
+                truncated = True
+                break
+            for fn in sorted(filenames):
+                path = Path(dirpath) / fn
+                rel = path.relative_to(root).as_posix()
+                if caps_mod.is_sensitive_file(fn) or not any(
+                        caps_mod.repo_file_matches(w, rel) for w in wanted):
+                    continue
+                raw = _read_repo_file(path)
+                if raw is None:
+                    continue
+                if len(files) >= REPO_FILES_MAX or total + len(raw) > REPO_FILES_TOTAL_BYTES:
+                    truncated = True
+                    break
+                total += len(raw)
+                files.append({"repo": i, "path": rel, "text": raw.decode("utf-8", "replace")})
+            if truncated:
+                break
+    return {"files": files, "truncated": truncated}
+
+
 DATA_SCOPES = {"focus.cost": _data_focus_cost, "org.owners": _data_org_owners,
-               "org.environments": _data_org_environments}
+               "org.environments": _data_org_environments, "repo.files": _data_repo_files}
 
 
-def read_data(prep: Prepared, params: dict[str, Any]) -> Any:
-    """Answer a pack's data.read: only a declared scope, only one nable serves."""
+def read_data(prep: Prepared, params: dict[str, Any], repos: list[Path] | None = None) -> Any:
+    """Answer a pack's data.read: only a declared scope, only one nable serves.
+    `repos` are the repositories this call names, for repo.files."""
     scope = params.get("scope")
     query = params.get("query") or {}
     if not isinstance(scope, str) or not isinstance(query, dict):
@@ -630,6 +762,9 @@ def read_data(prep: Prepared, params: dict[str, Any]) -> Any:
         raise _RpcError(-32002, f"{scope} is declared, but this nable does not serve it to "
                         f"packs yet (available: {', '.join(sorted(DATA_SCOPES))})")
     try:
+        if scope == "repo.files":
+            return _data_repo_files(query, list(repos or ()),
+                                    tuple(prep.capabilities.get("repo_files") or ()))
         return fn(query)
     except _RpcError:
         raise
@@ -669,11 +804,50 @@ def log_path(prep: Prepared) -> Path:
     return store.packs_root() / "logs" / prep.namespace / f"{prep.name}.log"
 
 
+# A credential shorter than this is not looked for: it would match (and
+# redact) ordinary text.
+MIN_REDACT = 4
+
+
 def _redact(text: str, secrets: dict[str, str]) -> str:
     for name, value in secrets.items():
-        if len(value) >= 4:
+        if len(value) >= MIN_REDACT:
             text = text.replace(value, f"[redacted {name}]")
     return text
+
+
+def _carries(obj: Any, secrets: dict[str, str]) -> str | None:
+    """The name of a credential whose value appears in any string of `obj`
+    (keys included, at any depth), or None."""
+    live = [(n, v) for n, v in secrets.items() if len(v) >= MIN_REDACT]
+    if not live:
+        return None
+    stack: list[Any] = [obj]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str):
+            for n, v in live:
+                if v in cur:
+                    return n
+        elif isinstance(cur, dict):
+            stack.extend(cur.keys())
+            stack.extend(cur.values())
+        elif isinstance(cur, list | tuple):
+            stack.extend(cur)
+    return None
+
+
+def _scrub(obj: Any, secrets: dict[str, str]) -> Any:
+    """`obj` with every credential value redacted from its strings."""
+    if not secrets:
+        return obj
+    if isinstance(obj, str):
+        return _redact(obj, secrets)
+    if isinstance(obj, dict):
+        return {_scrub(k, secrets): _scrub(v, secrets) for k, v in obj.items()}
+    if isinstance(obj, list | tuple):
+        return [_scrub(v, secrets) for v in obj]
+    return obj
 
 
 def _write_log(path: Path, header: str, body: str) -> None:
@@ -726,11 +900,14 @@ def _private_copy(prep: Prepared) -> Path:
 
 
 def execute(prep: Prepared, method: str, params: dict[str, Any], *,
-            timeout: float | None = None, max_output: int | None = None
-            ) -> tuple[Any, dict[str, Any]]:
+            timeout: float | None = None, max_output: int | None = None,
+            repos: list[Path] | None = None) -> tuple[Any, dict[str, Any]]:
     """Start the host, initialize it, make one call, stop it. Returns (the raw
     result, a report: network mode, declared and observed hosts, where the
-    entry was loaded from, the log path). Raises BrokerError."""
+    entry was loaded from, the log path, and under "credentials" the values
+    of the pack's credentials, which run() checks the result against and
+    never returns). `repos` are the repositories this call may read through
+    repo.files. Raises BrokerError, with the credentials redacted."""
     timeout = DEFAULT_TIMEOUT_S if timeout is None else float(timeout)
     max_output = MAX_OUTPUT_BYTES if max_output is None else int(max_output)
     from . import API_VERSION
@@ -744,6 +921,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
     code_root = _private_copy(prep) if prep.files else prep.root
     home = tempfile.mkdtemp(prefix="nable-pack-")
     env, secrets = child_env(prep, home)
+    report["credentials"] = secrets
 
     def on_notify(m: str, p: dict[str, Any]) -> None:
         if m == "audit.network" and len(observed) < 200:
@@ -751,7 +929,7 @@ def execute(prep: Prepared, method: str, params: dict[str, Any], *,
 
     def on_request(m: str, p: dict[str, Any]) -> Any:
         if m == "data.read":
-            return read_data(prep, p)
+            return read_data(prep, p, repos)
         raise _RpcError(-32601, f"{m} is not something a pack can ask the core for")
 
     started = time.monotonic()
@@ -921,8 +1099,13 @@ def check_delivery(prep: Prepared, payload: Any) -> dict[str, Any]:
 
 def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
         timeout: float | None = None, max_output: int | None = None,
-        pp: dict[str, Any] | None = None) -> RunResult:
-    """Run one call of an installed pack's code and validate what it returns."""
+        pp: dict[str, Any] | None = None, repos: list[RepoRef] | None = None) -> RunResult:
+    """Run one call of an installed pack's code and validate what it returns.
+
+    `repos` (adapters): the repositories the call is about. A pack that
+    declares read_data = ["repo.files"] gets each one's name, label and
+    repo_path subject prefix in its context (never its path on this machine)
+    and may read files from them by name; any other pack gets neither."""
     kind = METHOD_KIND.get(method)
     if kind is None:
         raise PackError(f"{method} is not a broker method; known: {', '.join(METHOD_KIND)}")
@@ -932,7 +1115,15 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
                             "adapter cannot propose org facts")
     if kind == "sinks":
         check_delivery(prep, params.get("payload"))
-    raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output)
+    roots: list[Path] = []
+    if kind == "adapters" and "repo.files" in (prep.capabilities.get("read_data") or ()):
+        refs = list(repos or ())
+        roots = [r.path for r in refs]
+        params = {**params, "context": {**dict(params.get("context") or {}),
+                                        "repos": [r.public(i) for i, r in enumerate(refs)]}}
+    raw, report = execute(prep, method, params, timeout=timeout, max_output=max_output,
+                          repos=roots)
+    creds: dict[str, str] = report.pop("credentials", None) or {}
     problems: list[str] = []
     dropped = 0
     output: Any
@@ -942,6 +1133,12 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
             raise BrokerError(f"{pack_id} {entry_id}: fetch_costs returned no rows list")
         output = []
         for i, r in enumerate(rows):
+            leaked = _carries(r, creds)
+            if leaked:
+                dropped += 1
+                _note(problems, f"row {i} dropped: it carries the value of the credential "
+                      f"{leaked}")
+                continue
             try:
                 output.append(focus_row(r))
             except (ValueError, TypeError) as e:
@@ -953,6 +1150,15 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
             raise BrokerError(f"{pack_id} {entry_id}: propose returned no facts list")
         output = []
         for i, f in enumerate(facts):
+            # A credential in any field (subject, value, source, a note) would
+            # land in nable.org YAML, a report or a terminal: the proposal is
+            # refused, and the problem names the credential, never its value.
+            leaked = _carries(f, creds)
+            if leaked:
+                dropped += 1
+                _note(problems, f"fact[{i}] dropped: it carries the value of the credential "
+                      f"{leaked}")
+                continue
             try:
                 output.append(_fact(pack_id, f, problems, i))
             except (ValueError, TypeError) as e:
@@ -962,7 +1168,8 @@ def run(pack_id: str, entry_id: str, method: str, params: dict[str, Any], *,
         receipt = raw.get("receipt") if isinstance(raw, dict) else None
         if not isinstance(receipt, dict):
             raise BrokerError(f"{pack_id} {entry_id}: deliver returned no receipt object")
-        output = receipt
+        output = _scrub(receipt, creds)
+    problems = [_redact(p, creds) for p in problems]
     if len(problems) >= MAX_PROBLEMS and dropped > MAX_PROBLEMS:
         problems.append(f"... and {dropped - MAX_PROBLEMS} more dropped")
     return RunResult(pack_id, entry_id, kind, method, output, dropped, problems,
@@ -979,7 +1186,8 @@ def fetch_costs(pack_id: str, entry_id: str, start: str | date, end: str | date,
 
 def propose_facts(pack_id: str, entry_id: str, context: dict[str, Any] | None = None,
                   **kw) -> RunResult:
-    """An adapter's org facts, validated, every one a proposal."""
+    """An adapter's org facts, validated, every one a proposal. `repos=`
+    (RepoRefs) names the repositories it may read through repo.files."""
     return run(pack_id, entry_id, "adapter.propose", {"context": dict(context or {})}, **kw)
 
 
@@ -989,6 +1197,41 @@ def deliver(pack_id: str, entry_id: str, payload: dict[str, Any], **kw) -> RunRe
 
 
 # ── org-context adapters for `nable org init` ─────────────────────────────────
+
+@dataclass(frozen=True)
+class RepoRef:
+    """A repository an adapter call is about. `subject_prefix` is what a
+    repo_path subject in it starts with where the proposals are written
+    ("repo_path:" in that repo's own nable.org/, "repo_path:<repo>//"
+    elsewhere); `label` prefixes source locators ("" for the repo nable runs
+    in). The path stays in the core: the pack sees the rest."""
+    path: Path
+    name: str
+    subject_prefix: str
+    label: str = ""
+
+    def public(self, i: int) -> dict[str, Any]:
+        return {"id": i, "name": self.name, "subject_prefix": self.subject_prefix,
+                "label": self.label}
+
+
+def repo_refs(ctx: Any = None, roots: list[Path] | None = None) -> list[RepoRef]:
+    """RepoRefs for an org AdapterContext's repos (subjects as its
+    repo_subject writes them), or for bare roots (subjects that name the
+    repo, as in the data dir's model)."""
+    from ..org.store import repo_identity
+    out: list[RepoRef] = []
+    if ctx is not None and hasattr(ctx, "repos"):
+        for repo in list(ctx.repos or ()):
+            prefix = ctx.repo_subject(repo, "") if hasattr(ctx, "repo_subject") else \
+                f"repo_path:{repo_identity(repo)}//"
+            label = ctx.repo_label(repo) if hasattr(ctx, "repo_label") else ""
+            out.append(RepoRef(Path(repo), repo_identity(repo), prefix, label))
+        return out
+    for repo in roots or ():
+        out.append(RepoRef(Path(repo), repo_identity(repo), f"repo_path:{repo_identity(repo)}//"))
+    return out
+
 
 class PackAdapter:
     """One pack adapter as a finops.org ADAPTERS callable: adapter(model) ->
@@ -1001,8 +1244,13 @@ class PackAdapter:
         self.last: RunResult | None = None
 
     def __call__(self, model: Any = None) -> list[Any]:
+        # `cwd`: where `nable org init` runs, which is the repo it is about.
+        # The pack runs in a throwaway directory of its own and would not
+        # otherwise know. run_adapters passes its AdapterContext: the repos
+        # it reads go along (as RepoRefs), for a pack that declares repo.files.
         self.last = propose_facts(self.pack_id, self.entry_id,
-                                  {"today": local_today().isoformat()})
+                                  {"today": local_today().isoformat(), "cwd": os.getcwd()},
+                                  repos=repo_refs(model))
         return list(self.last.output)
 
     def __repr__(self) -> str:

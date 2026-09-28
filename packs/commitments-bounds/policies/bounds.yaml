@@ -1,0 +1,59 @@
+# The most a commitment recommendation may be. nable applies these to the
+# commitment purchases it recommends itself, the Compute and Database Savings
+# Plan advice (finops.recommendations.commitment_bounds):
+#
+#   coverage_target_pct  a purchase that would take coverage of eligible
+#                        spend past the target is cut to the amount that
+#                        reaches it; one that starts at or over it is dropped
+#   max_term_months      a longer term is dropped (a shorter offering has
+#                        other rates, so nable does not re-price it)
+#   payment_options      any other payment option is dropped
+#   blackouts            a purchase whose term would run into a migration
+#                        blackout over its scope is dropped; a scope nable
+#                        cannot pin down (a Compute Savings Plan spans every
+#                        region) counts as overlapping
+#
+# Bounds only restrict, and bounds from several packs combine to the
+# strictest. To set your own, publish a copy of this pack under your org's
+# namespace with your figures and your blackouts, sign it with your org key,
+# and remove this one: another pack can make these stricter, never looser.
+#
+# A blackout names a window and a scope; an empty scope list means any:
+#
+#   blackouts:
+#     - id: eu-graviton-move
+#       start: "2027-01-01T00:00:00+00:00"
+#       end: "2027-04-01T00:00:00+00:00"
+#       reason: Moving eu-west-1 compute to Graviton
+#       providers: [aws]
+#       types: [savings_plan, reserved_instance]
+#       services: [ec2, fargate, lambda]
+#       regions: [eu-west-1]
+#       accounts: ["123456789012"]
+#
+# Service names are nable's short ones: ec2, fargate and lambda (Compute
+# Savings Plans), rds and aurora (Database Savings Plans).
+version: 1
+commitment_bounds:
+  - id: default-bounds
+    description: >-
+      Cover at most 80% of eligible spend with commitments, for at most 12
+      months at a time, with no money up front.
+    coverage_target_pct: 80
+    max_term_months: 12
+    payment_options: [no-upfront]
+    blackouts: []
+rules:
+  - id: agent-tried-to-buy-a-commitment
+    description: A change record where an agent tried to buy a commitment.
+    applies_to: action
+    match:
+      all:
+        - {field: action_type, op: eq, value: purchase_commitment}
+    effect:
+      action: escalate
+      severity: high
+      message: >-
+        An agent tried to buy a commitment (${command}). nable never buys one;
+        a person decides, within the commitment bounds (coverage at most 80%,
+        a term of at most 12 months, no money up front).

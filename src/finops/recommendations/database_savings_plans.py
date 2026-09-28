@@ -229,7 +229,8 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 },
             )
 
-        return {
+        from . import commitment_bounds as cb
+        return cb.apply_database({
             "current_monthly_rds_spend": round(monthly_rds_spend, 2),
             "current_sp_coverage_pct": round(sp_coverage_pct, 1),
             "uncovered_monthly_spend": round(uncovered_monthly, 2),
@@ -239,7 +240,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
             "payback_days": 0,  # no-upfront has no upfront cost
             "recommendation_type": "database_savings_plan_1yr_no_upfront",
             "finding": finding.to_dict() if finding else None,
-        }
+        }, cb.safely(cb.in_force))
 
     except Exception as e:
         log.error("Database SP recommendation failed: %s", e)

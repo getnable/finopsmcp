@@ -18,14 +18,26 @@
                                          and orgs with a private registry key)
     nable pack keygen --out <path>       a new Ed25519 signing key (PEM, 0600)
                                          and its public half for packs.trusted_keys
-    nable pack run <ns/name> <entry-id> [--start D --end D]
+    nable pack run <ns/name> <entry-id> [--start D --end D] [--context K=V]
                                          run a connector (or adapter) through the
                                          broker and summarize what it returned
+    nable pack report <ns/name> [<report>] [--since 30d | --days N] [--until D]
+                      [--set K=V] [--each PATH] [--out FILE]
+                                         render a pack's report template over the
+                                         data scopes it declares (markdown, or
+                                         the values too with --json); the report
+                                         may be left out when the pack has one
     nable pack secret set <ns/name> <NAME>
                                          store a secret the pack declares, in
                                          its own vault namespace (the value is
                                          read from a prompt or stdin, never argv)
     nable pack secret remove <ns/name> <NAME>
+    nable pack setting set <ns/name> <NAME> [VALUE]
+                                         store a setting the pack declares (not
+                                         a credential: an org name, a URL), in
+                                         the same vault namespace; the value may
+                                         be given on the command line
+    nable pack setting remove <ns/name> <NAME>
 
 Exit codes: 0 done, 1 refused or failed (nothing changed), 2 usage.
 """
@@ -100,11 +112,42 @@ def add_parser(sub) -> None:
                     help="window end, exclusive (default today)")
     rn.add_argument("--timeout", dest="pack_timeout", type=float, default=None,
                     metavar="SECONDS", help="stop the pack after this long")
+    rn.add_argument("--context", dest="pack_context", action="append", default=None,
+                    metavar="KEY=VALUE",
+                    help="an adapter's context entry (repeatable), e.g. repo=. or "
+                         "branch_protection=protection.json; `cwd` is always the directory "
+                         "this ran in")
+    rp = ps.add_parser("report", help="Render an installed pack's report template "
+                                      "from nable's data")
+    rp.add_argument("pack_id", metavar="ns/name")
+    rp.add_argument("report", nargs="?", default=None, metavar="REPORT",
+                    help="the report's file name, stem or path in the pack (default: the "
+                         "pack's only report)")
+    rp.add_argument("--since", dest="pack_since", default=None, metavar="WHEN",
+                    help="from this long ago (24h, 30d, 2w) or this date; default: all of "
+                         "the ledger, the last 30 days of spend")
+    rp.add_argument("--days", dest="pack_days", type=int, default=None, metavar="N",
+                    help="the last N days (the same as --since Nd)")
+    rp.add_argument("--until", dest="pack_until", default=None, metavar="WHEN",
+                    help="up to this date or time; default: now")
+    rp.add_argument("--set", dest="pack_set", action="append", default=None,
+                    metavar="KEY=VALUE", help="fill a plain placeholder (repeatable)")
+    rp.add_argument("--each", dest="pack_each", default=None, metavar="PATH",
+                    help="render once per record of this list (e.g. ledger.guard.changes)")
+    rp.add_argument("--out", dest="pack_out", default=None, metavar="FILE",
+                    help="write the report (or, with --json, the JSON) to this file")
     sec = ps.add_parser("secret", help="Store or remove a secret a code pack declares")
     sec.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
     sec.add_argument("pack_id", metavar="ns/name")
     sec.add_argument("env_var_name", metavar="NAME")
-    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, sec, ps.choices["audit"]):
+    st = ps.add_parser("setting", help="Store or remove a setting (not a credential) a code "
+                                       "pack declares")
+    st.add_argument("pack_verb", metavar="set|remove", choices=("set", "remove"))
+    st.add_argument("pack_id", metavar="ns/name")
+    st.add_argument("env_var_name", metavar="NAME")
+    st.add_argument("setting_value", nargs="?", default=None, metavar="VALUE",
+                    help="the value (default: read from stdin or a prompt)")
+    for sp in (v, n, i, u, r, ls, s, sg, kg, rn, rp, sec, st, ps.choices["audit"]):
         sp.add_argument("--json", dest="pack_json", action="store_true",
                         help="machine-readable output on stdout")
     for sp in (i, u, r):
@@ -179,11 +222,16 @@ def _describe_plan(plan) -> str:
         for val in (vals if isinstance(vals, tuple) else (vals,)):
             lines.append(f"    {k:<12} {caps_mod.describe(k, val)}")
     if caps.get("secrets"):
-        lines.append(f"    Secrets come only from this pack's own vault entries (`nable pack "
-                     f"secret set {m.id} NAME`), never from your environment or the cloud and "
-                     "provider keys nable itself uses. Cloud credential names (AWS_*, "
-                     "GOOGLE_*, AZURE_*, KUBECONFIG, ...) are refused for a pack that is not "
-                     "first-party.")
+        lines.append(f"    Secrets are credentials. They come only from this pack's own vault "
+                     f"entries (`nable pack secret set {m.id} NAME`), never from your "
+                     "environment or the cloud and provider keys nable itself uses, and a "
+                     "proposal or a row that carries one is refused. Cloud credential names "
+                     "(AWS_*, GOOGLE_*, AZURE_*, KUBECONFIG, ...) are refused for a pack that "
+                     "is not first-party.")
+    if caps.get("settings"):
+        lines.append(f"    Settings are configuration, not credentials (`nable pack setting set "
+                     f"{m.id} NAME VALUE`): the pack may use their values in what it "
+                     "proposes.")
     if caps.get("pricing"):
         lines.append("    Its price books change the estimates nable shows. They never make a "
                      "change look cheaper to the guard or a budget check, which judge at the "
@@ -310,20 +358,32 @@ def _read_secret_value(name: str) -> str:
     return value
 
 
-def _secret(parsed, as_json: bool) -> int:
+def _secret(parsed, as_json: bool, *, setting: bool = False) -> int:
+    """`nable pack secret` (a credential: never from argv) and `nable pack
+    setting` (configuration: from argv, stdin or a prompt). Both store under
+    the pack's own vault namespace; a setting never overwrites a name the
+    pack declares as a credential."""
     from . import broker
     from .errors import PackError
     verb = parsed.pack_verb
+    what = "setting" if setting else "secret"
     if verb == "set":
-        why, _ = broker._check_secret_target(parsed.pack_id, parsed.env_var_name)
+        why, _ = broker._check_secret_target(parsed.pack_id, parsed.env_var_name,
+                                             setting=setting)
         if why:
             raise PackError(why)          # before asking for a value it would refuse
-        value = _read_secret_value(parsed.env_var_name)
-        r = broker.set_secret(parsed.pack_id, parsed.env_var_name, value)
+        given = getattr(parsed, "setting_value", None) if setting else None
+        value = given if given is not None else _read_secret_value(parsed.env_var_name)
+        if not value or len(value) > 64 * 1024:
+            raise PackError(f"A pack {what} is 1 byte to 64 KiB; nothing was stored")
+        r = broker.set_secret(parsed.pack_id, parsed.env_var_name, value, setting=setting)
         del value
-        text = (f"Stored {r['name']} for {r['pack']} in nable's vault (entry {r['vault_entry']}).")
+        text = (f"Stored the {what} {r['name']} for {r['pack']} in nable's vault "
+                f"(entry {r['vault_entry']}).")
     else:
-        r = broker.remove_secret(parsed.pack_id, parsed.env_var_name)
+        if setting and getattr(parsed, "setting_value", None) is not None:
+            raise PackError("nable pack setting remove takes no value")
+        r = broker.remove_secret(parsed.pack_id, parsed.env_var_name, setting=setting)
         text = (f"Removed {r['name']} for {r['pack']}." if r["removed"]
                 else f"{r['pack']} had no {r['name']} stored.")
     if r.get("note"):
@@ -366,9 +426,13 @@ def _run_code(parsed, as_json: bool) -> int:
         summary = {"rows": len(rows), "billed_total": round(total, 6),
                    "by_service": by_service, "start": str(start), "end": str(end)}
     else:
-        r = broker.propose_facts(parsed.pack_id, parsed.entry_id,
-                                 {"today": broker.local_today().isoformat()},
-                                 timeout=parsed.pack_timeout)
+        from ..org.store import git_root
+        here = git_root()
+        context = {**_pairs(getattr(parsed, "pack_context", None), "--context"),
+                   "today": broker.local_today().isoformat(), "cwd": os.getcwd()}
+        r = broker.propose_facts(parsed.pack_id, parsed.entry_id, context,
+                                 timeout=parsed.pack_timeout,
+                                 repos=broker.repo_refs(roots=[here] if here else []))
         lines = [(f"{r.pack} adapter {r.entry}: {len(r.output)} proposed facts "
                   "(shown, not written; `nable org init` proposes them)")]
         lines += [f"  {f.fact} {f.subject}: {json.dumps(f.value, sort_keys=True)} "
@@ -392,7 +456,89 @@ def _run_code(parsed, as_json: bool) -> int:
     if prep.kind == "connectors":
         body["output"] = body["output"][:50]
         body["output_truncated"] = len(r.output) > 50
-    _out(body, as_json, "\n".join(lines))
+    # What the pack returned (sources, values, problems) cannot drive the terminal.
+    _out(body, as_json, safe_text("\n".join(lines)))
+    return EXIT_OK
+
+
+def _pairs(raw: list[str] | None, flag: str) -> dict[str, str]:
+    """KEY=VALUE arguments as a dict."""
+    from .errors import PackError
+    out: dict[str, str] = {}
+    for item in raw or []:
+        key, sep, value = item.partition("=")
+        if not sep or not re.fullmatch(r"[a-z_][a-z0-9_]{0,63}", key.strip()):
+            raise PackError(f"{flag} {item!r}: write it as key=value, the key in lowercase "
+                            "letters, digits and _")
+        out[key.strip()] = value
+    return out
+
+
+def _not_a_guard_file(path: str) -> None:
+    """Refuse to write a report over one of the guard's own files (the
+    ledger it reports on, the installed packs, the org model, the policy, a
+    budget file): `--out` is not a way around the guard's protected paths.
+    The path is read as open() reads it, symlinks resolved and case folded
+    where the disk folds it (guard_paths.match_file)."""
+    from .. import guard_paths
+    from .errors import PackError
+    hit = guard_paths.match_file(path, os.getcwd())
+    if hit is not None:
+        raise PackError(f"--out {path}: that is {hit.what}, which a report never writes "
+                        "over; choose another file")
+
+
+def _write_out(path: str, text: str) -> None:
+    """Write `text` to the file _not_a_guard_file cleared: the resolved path,
+    never through a symlink put there since, and never a file with another
+    name (a hard link to the ledger is the ledger)."""
+    import stat
+
+    from .errors import PackError
+    _not_a_guard_file(path)
+    real = os.path.realpath(os.path.expanduser(path))
+    try:
+        fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+    except OSError as e:
+        raise PackError(f"--out {path}: {e.strerror or e}") from None
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            if st.st_nlink > 1:
+                raise PackError(f"--out {path}: that file has other names (hard links), and "
+                                "a report never writes through one; choose another file")
+            os.ftruncate(fd, 0)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fd = -1
+            fh.write(text)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _report(parsed, as_json: bool) -> int:
+    from ..guard_ledger import parse_since
+    from .errors import PackError
+    from .reports import render
+    try:
+        since = parse_since(parsed.pack_since)
+        until = parse_since(parsed.pack_until) if parsed.pack_until else None
+    except ValueError:
+        raise PackError("--since and --until take 24h, 30d, 2w, or a date such as "
+                        "2026-09-01") from None
+    r = render(parsed.pack_id, parsed.report, since=since, until=until,
+               days=parsed.pack_days, sets=_pairs(parsed.pack_set, "--set"),
+               each=parsed.pack_each)
+    text = r["text"] if isinstance(r["text"], str) else "\n\n---\n\n".join(r["text"])
+    body = {"ok": True, **r}
+    if parsed.pack_out:
+        # A file is cat-ed to a terminal later: it holds no more than stdout would.
+        out = json.dumps(body, indent=2, default=str) if as_json else safe_text(text)
+        _write_out(parsed.pack_out, out if out.endswith("\n") else out + "\n")
+        print(f"Wrote {r['report']} of {r['pack']} to {parsed.pack_out}")
+        return EXIT_OK
+    # On a terminal, nothing a template or the data under it holds can drive it.
+    _out(body, as_json, safe_text(text).rstrip())
     return EXIT_OK
 
 
@@ -431,8 +577,10 @@ def run(parsed) -> int:
             return _keygen(parsed, as_json)
         if action == "run":
             return _run_code(parsed, as_json)
-        if action == "secret":
-            return _secret(parsed, as_json)
+        if action == "report":
+            return _report(parsed, as_json)
+        if action in ("secret", "setting"):
+            return _secret(parsed, as_json, setting=action == "setting")
         if action == "new":
             root = inst.new_pack(parsed.name, parsed.pack_dir, namespace=parsed.pack_namespace)
             _out({"ok": True, "path": str(root)}, as_json,
@@ -500,6 +648,6 @@ def run(parsed) -> int:
         _err("Stopped; nothing was changed.")
         return EXIT_FAIL
     _err("usage: nable pack {validate,new,install,update,remove,list,audit,search,sign,"
-         "keygen,run,secret} ...")
+         "keygen,run,report,secret,setting} ...")
     return 2
 
