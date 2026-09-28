@@ -2,7 +2,7 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.11.0
 
 - **First-party packs.** Four packs in `packs/`, in the `io.github.getnable`
   namespace, each declaring `support = "first-party"`: releases are signed
