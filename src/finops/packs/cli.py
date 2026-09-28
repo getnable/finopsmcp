@@ -498,7 +498,8 @@ def _write_out(path: str, text: str) -> None:
     _not_a_guard_file(path)
     real = os.path.realpath(os.path.expanduser(path))
     try:
-        fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+        # 0600: a report can name approvers and what they approved.
+        fd = os.open(real, os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     except OSError as e:
         raise PackError(f"--out {path}: {e.strerror or e}") from None
     try:

@@ -220,6 +220,17 @@ def test_out_writes_nothing_that_can_drive_a_terminal(packs_env, tmp_path, capsy
     assert "wiped" in text and "\x1b" not in text and "\\x1b[2J" in text
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_out_writes_a_file_only_its_owner_can_read(packs_env, tmp_path):
+    # A report can name approvers and what they approved: private by default.
+    pid = _install(tmp_path, caps='read_data = ["ledger.guard"]\n', text="brief\n")
+    target = tmp_path / "evidence.md"
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "report", pid, "brief", "--out", str(target)])
+    assert ei.value.code == 0
+    assert target.stat().st_mode & 0o077 == 0
+
+
 def test_set_cannot_stand_in_for_what_nable_fills(packs_env, tmp_path):
     # The period, the time it was made and the report's own name are nable's:
     # an evidence report that claims another period than it read is forged.

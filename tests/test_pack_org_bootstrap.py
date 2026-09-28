@@ -239,6 +239,10 @@ def test_backstage_reads_entities_into_owner_and_team_proposals(pack_code):
     assert person["confidence"] == pytest.approx(0.48)
     assert backstage.file_facts(repo, "x/catalog-info.yaml", "kind: [unclosed") == []
     assert backstage.file_facts(repo, "x/catalog-info.yaml", "apiVersion: v1\nkind: Pod\n") == []
+    # The API group is compared whole: a look-alike group is not Backstage's.
+    for api in ("evil.example/backstage.io/v1", "backstage.io.evil/v1", "backstage.io/"):
+        assert backstage.file_facts(repo, "x/catalog-info.yaml",
+                                    CATALOG.replace("backstage.io/v1alpha1", api)) == [], api
 
 
 def test_backstage_asks_nable_for_the_files_by_name_only(pack_code):

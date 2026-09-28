@@ -93,8 +93,12 @@ def owner_value(ref: Any) -> tuple[dict[str, Any], float] | None:
 
 def entity_facts(entity: Any, source: str) -> list[dict[str, Any]]:
     """Facts one catalog entity supports."""
-    if not isinstance(entity, dict) or not str(entity.get("apiVersion") or "").startswith(
-            "backstage.io/"):
+    if not isinstance(entity, dict):
+        return []
+    # apiVersion is "<group>/<version>", e.g. backstage.io/v1alpha1: the group
+    # must be Backstage's own, compared whole.
+    group, _, version = str(entity.get("apiVersion") or "").partition("/")
+    if not (group == "backstage.io" and version):
         return []
     kind = str(entity.get("kind") or "").strip().lower()
     named = _entity_name(entity)
