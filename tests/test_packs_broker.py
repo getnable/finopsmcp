@@ -145,6 +145,28 @@ def deep(ctx, start, end):
     chan._out.flush()
     time.sleep(3600)
     return []
+
+
+def leak(ctx, context):
+    token = ctx.secret("LEAK_TOKEN") or ""
+    org = ctx.setting("LEAK_ORG") or ""
+    print("leaking", token, "for", org, file=sys.stderr)
+    base = {"fact": "owner", "value": {"team": "payments"}}
+    return [dict(base, subject={"kind": "service", "id": "svc-" + token}),
+            dict(base, subject="service:b", value={"team": "t-" + token}),
+            dict(base, subject="service:c", source="catalog:" + token),
+            dict(base, subject="service:d", note="see " + token),
+            dict(base, subject="service:" + org, source="github:" + org)]
+
+
+def leakrows(ctx, start, end):
+    out = rows(ctx, start, end)[:2]
+    out[1] = dict(out[1], Tags={"k": ctx.secret("LEAK_TOKEN")})
+    return out
+
+
+def leakreceipt(ctx, payload):
+    return {"id": "T-1", "url": "https://tickets.example/?t=" + (ctx.secret("LEAK_TOKEN") or "")}
 '''
 
 SINK_CAPS = 'act = ["ticket"]\nmax_autonomy = "L2"\n'
@@ -155,13 +177,16 @@ def build_pack(root: Path, *, name: str = "probe", caps: str = SINK_CAPS,
     provides = provides if provides is not None else textwrap.dedent('''\
         sinks = [{id = "env", entry = "probe_code:env"}, {id = "sleep", entry = "probe_code:sleep"},
                  {id = "data", entry = "probe_code:data"}, {id = "net", entry = "probe_code:net"},
-                 {id = "deliver", entry = "probe_code:deliver"}]
+                 {id = "deliver", entry = "probe_code:deliver"},
+                 {id = "leakreceipt", entry = "probe_code:leakreceipt"}]
         connectors = [{id = "rows", entry = "probe_code:rows", output = "focus-1.3"},
+                      {id = "leakrows", entry = "probe_code:leakrows", output = "focus-1.3"},
                       {id = "big", entry = "probe_code:big", output = "focus-1.3"},
                       {id = "flood", entry = "probe_code:flood", output = "focus-1.3"},
                       {id = "stall", entry = "probe_code:stall", output = "focus-1.3"},
                       {id = "deep", entry = "probe_code:deep", output = "focus-1.3"}]
-        adapters = [{id = "facts", entry = "probe_code:facts"}]
+        adapters = [{id = "facts", entry = "probe_code:facts"},
+                    {id = "leak", entry = "probe_code:leak"}]
         ''')
     (root / "probe_code").mkdir(parents=True)
     (root / "probe_code" / "__init__.py").write_text(PROBE)
@@ -216,8 +241,9 @@ def test_the_pack_sees_a_scrubbed_environment_and_only_its_declared_secret(
     pid = code_env.install(caps=SINK_CAPS + 'secrets = ["DECLARED_TOKEN"]\n')
     r = _deliver(pid, "env")
     env = r.output["env"]
-    assert env["DECLARED_TOKEN"] == "declared-value-123"
-    assert r.output["declared"] == "declared-value-123"
+    # The pack got the value; what it hands back has it redacted.
+    assert env["DECLARED_TOKEN"] == "[redacted DECLARED_TOKEN]"
+    assert r.output["declared"] == "[redacted DECLARED_TOKEN]"
     assert set(env) <= {"PATH", "HOME", "LANG", "LC_CTYPE", "DECLARED_TOKEN"}, sorted(env)
     assert not [k for k in env if k.startswith(("FINOPS_", "NABLE_", "AWS_", "PYTHON"))]
     assert "UNDECLARED_TOKEN" not in env
@@ -237,7 +263,8 @@ def test_a_secret_comes_only_from_the_packs_own_vault_entry(code_env, monkeypatc
     monkeypatch.setattr(broker, "_vault_get", vault.get)
     monkeypatch.setenv("DECLARED_TOKEN", "from-env")
     pid = code_env.install(caps=SINK_CAPS + 'secrets = ["DECLARED_TOKEN"]\n')
-    assert _deliver(pid, "env").output["declared"] == "the-packs-own"
+    # Redacted in the receipt, so it was the pack's own value that crossed.
+    assert _deliver(pid, "env").output["declared"] == "[redacted DECLARED_TOKEN]"
     del vault["pack:io.github.example/probe:DECLARED_TOKEN"]
     out = _deliver(pid, "env").output
     assert out["declared"] is None and "DECLARED_TOKEN" not in out["env"]
@@ -293,7 +320,7 @@ def test_nable_pack_secret_set_stores_under_the_packs_namespace(code_env, monkey
     out = capsys.readouterr()
     assert ei.value.code == 0 and "s3cret-value" not in out.out + out.err
     assert stored == {f"pack:{pid}:DECLARED_TOKEN": "s3cret-value"}
-    assert _deliver(pid, "env").output["declared"] == "s3cret-value"
+    assert _deliver(pid, "env").output["declared"] == "[redacted DECLARED_TOKEN]"
     # the value never comes from argv, and a cloud credential name is refused
     monkeypatch.setattr("sys.stdin", io.StringIO("AKIA..."))
     with pytest.raises(SystemExit) as ei:
@@ -313,6 +340,172 @@ def test_an_undeclared_secret_is_refused_inside_the_pack_too():
     assert ctx.secret("A_TOKEN") == "a"
     with pytest.raises(PermissionError):
         ctx.secret("B_TOKEN")
+
+
+# ── credentials (secrets) and settings ───────────────────────────────────────
+
+# Made up for this run, and long enough for the broker's redaction.
+LEAK_TOKEN = "tok-" + "a1b2c3d4e5f6a7b8"  # pragma: allowlist secret
+LEAK_CAPS = ('write_org = ["proposals"]\nact = ["ticket"]\nmax_autonomy = "L2"\n'
+             'secrets = ["LEAK_TOKEN"]\nsettings = ["LEAK_ORG"]\n')
+
+
+@pytest.fixture
+def leaky(code_env, monkeypatch):
+    vault = {"pack:io.github.example/probe:LEAK_TOKEN": LEAK_TOKEN,
+             "pack:io.github.example/probe:LEAK_ORG": "acme-org"}
+    monkeypatch.setattr(broker, "_vault_get", vault.get)
+    return code_env.install(caps=LEAK_CAPS)
+
+
+def test_a_proposal_that_carries_a_credential_is_refused(leaky):
+    # review: the log was redacted, but what the adapter returned was not, so a
+    # pack could write its token into a proposal that lands in nable.org YAML.
+    r = broker.propose_facts(leaky, "leak")
+    assert [str(f.subject) for f in r.output] == ["service:acme-org"]    # a setting passes
+    assert r.output[0].source == f"pack:{leaky}:github:acme-org"
+    assert r.dropped == 4
+    for i in range(4):
+        assert f"fact[{i}] dropped: it carries the value of the credential LEAK_TOKEN" \
+            in r.problems
+    body = json.dumps(r.to_dict())
+    assert LEAK_TOKEN not in body
+    log = Path(r.log).read_text()
+    assert LEAK_TOKEN not in log and "[redacted LEAK_TOKEN]" in log
+    assert "acme-org" in log                      # a setting is not a credential
+    # What `nable org init` writes goes through the same adapter: nothing to leak.
+    assert LEAK_TOKEN not in repr(broker.PackAdapter(leaky, "leak")())
+
+
+def test_rows_and_receipts_never_carry_a_credential(leaky):
+    r = broker.fetch_costs(leaky, "leakrows", "2026-09-01", "2026-09-02")
+    assert len(r.output) == 1 and r.dropped == 1
+    assert "row 1 dropped: it carries the value of the credential LEAK_TOKEN" in r.problems
+    r = _deliver(leaky, "leakreceipt")
+    assert r.output["url"] == "https://tickets.example/?t=[redacted LEAK_TOKEN]"
+    assert LEAK_TOKEN not in json.dumps(r.to_dict())
+
+
+def test_nable_pack_run_prints_no_credential(leaky, capsys):
+    for args in (["pack", "run", leaky, "leak"], ["pack", "run", leaky, "leak", "--json"],
+                 ["pack", "run", leaky, "leakrows", "--start", "2026-09-01",
+                  "--end", "2026-09-02"]):
+        with pytest.raises(SystemExit) as ei:
+            main(args)
+        out = capsys.readouterr()
+        assert ei.value.code == 0, out
+        assert LEAK_TOKEN not in out.out + out.err
+
+
+def test_settings_are_passed_like_secrets_but_are_not_credentials(code_env, monkeypatch):
+    from finops.packs import capabilities as caps
+    monkeypatch.setattr(broker, "_vault_get", {
+        "pack:io.github.example/probe:LEAK_ORG": "acme-org"}.get)
+    pid = code_env.install(caps=LEAK_CAPS)
+    prep = broker.prepare(pid, "env")
+    env, credentials = broker.child_env(prep, "/tmp/h")
+    assert env["LEAK_ORG"] == "acme-org" and credentials == {}
+    ctx = sdk.Context.for_testing(capabilities={"secrets": ["A_TOKEN"], "settings": ["A_ORG"]},
+                                  secrets={"A_TOKEN": "a"}, settings={"A_ORG": "o"})
+    assert ctx.setting("A_ORG") == "o" and ctx.secret("A_TOKEN") == "a"
+    with pytest.raises(PermissionError):
+        ctx.setting("A_TOKEN")                  # a credential is never a setting
+    with pytest.raises(PermissionError):
+        ctx.secret("A_ORG")
+    # Validation: a name is one or the other, a setting never looks like a
+    # credential, and a cloud credential is never a setting.
+    _, probs = caps.validate({"secrets": ["A_ORG"], "settings": ["A_ORG"]}, first_party=True)
+    assert [p.field for p in probs] == ["capabilities.settings"]
+    assert "both" in probs[0].reason
+    for name in ("GITHUB_TOKEN", "API_KEY", "DB_PASSWORD", "CLIENT_SECRET", "AWS_REGION",
+                 "FINOPS_DIR"):
+        _, probs = caps.validate({"settings": [name]}, first_party=True)
+        assert probs, name
+    got, probs = caps.validate({"settings": ["GITHUB_ORG", "BACKSTAGE_URL"]}, first_party=False)
+    assert probs == [] and got["settings"] == ("BACKSTAGE_URL", "GITHUB_ORG")
+    # A manifest with only secrets still works, and each one is a credential.
+    got, probs = caps.validate({"secrets": ["GITHUB_ORG"]}, first_party=False)
+    assert probs == [] and got == {"secrets": ("GITHUB_ORG",)}
+
+
+def test_a_new_credential_or_setting_is_shown_and_needs_approval_again():
+    from finops.packs import capabilities as caps
+    old = {"secrets": ("GITHUB_ORG", "GITHUB_TOKEN")}
+    new = {"secrets": ("GITHUB_TOKEN", "BACKSTAGE_TOKEN"), "settings": ("GITHUB_ORG",)}
+    d = caps.diff(old, new)
+    assert d["added"] == {"secrets": ["BACKSTAGE_TOKEN"], "settings": ["GITHUB_ORG"]}
+    assert d["removed"] == {"secrets": ["GITHUB_ORG"]}
+    assert "setting" in caps.describe("settings", "GITHUB_ORG")
+    assert "credential" in caps.describe("secrets", "GITHUB_TOKEN")
+    # An org that allowed a name as a secret allows it as a setting too.
+    assert caps.exceeds({"settings": ("GITHUB_ORG",)}, {"secrets": ["GITHUB_*"]}) == []
+    assert caps.exceeds({"settings": ("GITHUB_ORG",)}, {"settings": ["BACKSTAGE_*"]})
+
+
+def test_install_audit_and_update_show_credentials_and_settings(code_env, tmp_path, capsys):
+    from finops.packs import cli
+    from finops.packs.errors import ApprovalRequired
+    shown: list[str] = []
+
+    def approve(plan):
+        shown.append(cli.describe_plan(plan))
+        return True
+
+    src = build_pack(tmp_path / "v1", caps=LEAK_CAPS)
+    sign_pack(src, code_env.key)
+    inst.install(str(src), approve=approve)
+    assert "secrets      LEAK_TOKEN: receives this credential" in shown[0]
+    assert "settings     LEAK_ORG: receives this setting, not a credential" in shown[0]
+    with pytest.raises(SystemExit):
+        main(["pack", "audit"])
+    out = capsys.readouterr().out
+    assert "secrets=LEAK_TOKEN" in out and "settings=LEAK_ORG" in out
+    src2 = build_pack(tmp_path / "v2", caps=LEAK_CAPS.replace(
+        '"LEAK_TOKEN"]', '"LEAK_TOKEN", "NEW_TOKEN"]').replace('"LEAK_ORG"]',
+                                                             '"LEAK_ORG", "NEW_URL"]'))
+    m = src2 / "nable-pack.toml"
+    m.write_text(m.read_text().replace('version = "1.0.0"', 'version = "1.0.1"'))
+    sign_pack(src2, code_env.key)
+    with pytest.raises(ApprovalRequired) as ei:
+        inst.install(str(src2), auto=True)
+    assert "secrets: NEW_TOKEN" in str(ei.value) and "settings: NEW_URL" in str(ei.value)
+    inst.install(str(src2), approve=approve)
+    assert "+ secrets: NEW_TOKEN" in shown[1] and "+ settings: NEW_URL" in shown[1]
+
+
+def test_nable_pack_setting_set_takes_the_value_and_refuses_a_credential(
+        code_env, monkeypatch, capsys):
+    from finops.security import vault as vault_mod
+    stored: dict[str, str] = {}
+
+    class FakeVault:
+        def store(self, k, v):
+            stored[k] = v
+
+        def delete(self, k):
+            return stored.pop(k, None) is not None
+
+    monkeypatch.setattr(vault_mod.Vault, "default", classmethod(lambda cls: FakeVault()))
+    (code_env.tmp / "vault").mkdir()
+    (code_env.tmp / "vault" / "vault.db").write_bytes(b"")
+    monkeypatch.setattr(vault_mod, "_vault_dir", lambda: code_env.tmp / "vault")
+    monkeypatch.setattr(broker, "_vault_get", stored.get)
+    pid = code_env.install(caps=LEAK_CAPS)
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "setting", "set", pid, "LEAK_ORG", "acme-org"])
+    out = capsys.readouterr()
+    assert ei.value.code == 0, out
+    assert stored == {f"pack:{pid}:LEAK_ORG": "acme-org"}
+    assert "LEAK_ORG" in out.out
+    # A credential's value never comes from the command line.
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "setting", "set", pid, "LEAK_TOKEN", "value-on-argv"])
+    err = capsys.readouterr().err
+    assert ei.value.code == 1 and "nable pack secret set" in err
+    assert f"pack:{pid}:LEAK_TOKEN" not in stored
+    with pytest.raises(SystemExit) as ei:
+        main(["pack", "setting", "remove", pid, "LEAK_ORG"])
+    assert ei.value.code == 0 and stored == {}
 
 
 # ── limits ───────────────────────────────────────────────────────────────────
@@ -654,7 +847,7 @@ def test_org_adapters_skips_packs_that_may_not_run(code_env):
     assert broker.org_adapters() == []
     pid = "io.github.example/probe"
     code_env.trust(f"  allow_unsigned_code: [{pid}@{_digest(pid)}]\n")
-    assert [a.pack_id for a in broker.org_adapters()] == ["io.github.example/probe"]
+    assert [a.name for a in broker.org_adapters()] == [f"pack:{pid}/facts", f"pack:{pid}/leak"]
 
 
 def test_a_pack_tests_its_own_entry_points_without_the_broker(monkeypatch):

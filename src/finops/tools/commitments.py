@@ -77,6 +77,11 @@ def get_commitment_analysis() -> dict:
                 f"via the AWS console, or list on the RI Marketplace."
             )
 
+        # Commitment bounds from installed packs cut the projection and the
+        # coverage target to them; they never raise either.
+        from ..recommendations import commitment_bounds as cb
+        actionable = cb.cap_projection(actionable, coverage_pct=combined_coverage,
+                                       bounds=cb.safely(cb.in_force))
         result["actionable_analysis"] = actionable
 
         # Strip purchase recommendations on free tier -- coverage/utilization/waste stays free

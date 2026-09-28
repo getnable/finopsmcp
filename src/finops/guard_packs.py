@@ -41,7 +41,8 @@ from . import __version__
 
 CACHE_NAME = "packs-guard-cache.json"
 # 2: packs validated with the regex, pricing and control-character checks.
-_CACHE_VERSION = 2
+# 3: guard rules carry `during` (a rule that applies only during a freeze).
+_CACHE_VERSION = 3
 # The content types the guard reads. A pack that provides one of them and is
 # not loaded is a pack the guard is judging without.
 GUARD_KINDS = ("guard_rules", "price_books")
