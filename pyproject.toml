@@ -71,7 +71,7 @@ dependencies = [
 
 [project.optional-dependencies]
 snowflake = ["snowflake-connector-python>=3.6.0"]
-azure-oauth = ["msal>=1.28.0"]
+azure-oauth = ["msal>=1.39.0"]
 azure = [
     "azure-mgmt-costmanagement>=4.0.0",
     "azure-identity>=1.15.0",
@@ -110,7 +110,7 @@ croniter = [
 ]
 all = [
     "snowflake-connector-python>=3.6.0",
-    "msal>=1.28.0",
+    "msal>=1.39.0",
     "keyring>=25.0.0",
     "pdfplumber>=0.10.0",
     "pillow>=12.3.0",  # see [pdf] extra: keep pillow off the 12.2.0 CVEs
