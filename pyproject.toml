@@ -53,7 +53,7 @@ dependencies = [
     # probe degrades, not because nothing looks.)
     "boto3>=1.34.0",
     # storage + scheduling
-    "sqlalchemy>=2.0.0",
+    "sqlalchemy>=2.1.1",
     "apscheduler>=3.10.0",
     # security
     "cryptography>=48.0.1",  # 48.0.1 fixes GHSA-537c-gmf6-5ccf; keep the floor at or above it
