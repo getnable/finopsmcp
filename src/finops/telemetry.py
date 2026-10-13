@@ -137,7 +137,7 @@ def _can_ask() -> bool:
         return False                       # they already said no, louder
     if _opt_in_env() is not None:
         return False                       # they already answered, yes or no
-    if os.environ.get("FINOPS_AIRGAP", "").strip() not in ("", "0", "false", "no"):
+    if env_flag_set("FINOPS_AIRGAP"):
         return False
     if is_ci():
         return False
@@ -279,8 +279,7 @@ def _is_opted_out() -> bool:
     """
     if not _POSTHOG_KEY:
         return True  # no key configured — silently skip all telemetry
-    _airgap = os.environ.get("FINOPS_AIRGAP", "").strip()
-    if _airgap not in ("", "0", "false", "no"):
+    if env_flag_set("FINOPS_AIRGAP"):
         return True  # air-gap mode: no non-provider outbound allowed
     if is_ci():
         return True  # CI / build runners are not users; never count or ping

@@ -88,6 +88,7 @@ def _check_keyring_storage() -> dict:
     keyring_detail = "keyring library not installed"
     try:
         from .security.vault import _active_profile, _data_dir
+        from .telemetry import env_flag_set as _env_flag_set
         _profile = _active_profile()
         if _profile:
             _key_path = Path.home() / ".finops" / "profiles" / _profile / "vault.key"
@@ -97,7 +98,7 @@ def _check_keyring_storage() -> dict:
             keyring_ok, keyring_detail = True, "master key provided via FINOPS_VAULT_KEY"
         elif _key_path.exists():
             keyring_ok, keyring_detail = True, "master key stored (file, chmod 600)"
-        elif os.environ.get("FINOPS_NO_KEYRING") == "1" or os.environ.get("FINOPS_AIRGAP") == "1":
+        elif os.environ.get("FINOPS_NO_KEYRING") == "1" or _env_flag_set("FINOPS_AIRGAP"):
             keyring_detail = "OS keychain access disabled (FINOPS_NO_KEYRING); no master key file yet"
         else:
             try:
