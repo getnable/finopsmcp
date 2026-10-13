@@ -87,3 +87,30 @@ def test_the_cli_count_and_list_are_nable_help():
     assert in_doc == set(listed), (
         f"not in CAPABILITIES.md: {sorted(set(listed) - in_doc)}; "
         f"not in nable --help: {sorted(in_doc - set(listed))}")
+
+
+_TOOL_PREFIXES = (
+    "get_", "list_", "audit_", "scan_", "check_", "set_", "send_", "create_", "open_",
+    "estimate_", "recommend_", "forecast_", "explain_", "run_", "verify_", "mark_",
+    "dismiss_", "compare_", "connect_", "push_", "subscribe_", "cancel_", "acknowledge_",
+    "generate_", "export_", "take_", "what_", "optimize_", "propose_", "identify_",
+    "suggest_", "sync_", "pin_", "unpin_", "remember_", "forget_", "benchmark_",
+    "slice_", "cleanup_", "delete_", "revoke_", "activate_", "publish_", "fetch_",
+)
+
+
+def test_every_tool_the_docs_name_is_registered():
+    """docs/RECOMMENDATIONS.md listed get_llm_unit_economics and
+    get_llm_unit_economics_full, which moved to the hosted package, and
+    docs/COST-ATTRIBUTION.md listed get_untagged_resource_cost, which was never
+    an MCP tool. A reader who asks for them gets "Unknown tool"."""
+    from finops import server
+    registered = {t.name for t in server.mcp._tool_manager.list_tools()}
+    docs = [ROOT / "README.md", ROOT / "CAPABILITIES.md", *sorted((ROOT / "docs").glob("*.md"))]
+    unknown = []
+    for doc in docs:
+        text = doc.read_text(encoding="utf-8")
+        for name in set(re.findall(r"`([a-z][a-z0-9_]+)(?:\([^`]*\))?`", text)):
+            if name.startswith(_TOOL_PREFIXES) and name not in registered:
+                unknown.append(f"{doc.relative_to(ROOT)}: {name}")
+    assert not unknown, "docs name tools the server does not have:\n  " + "\n  ".join(unknown)

@@ -22,11 +22,10 @@ convention.
 covered in its own section below.
 
 **A rules file** at `~/.finops/tag_rules.yaml` (override with `FINOPS_TAG_RULES`).
-Generate a starting point:
-
-```
-nable tags
-```
+There is no command that writes one; start from the example below. `nable org
+init` can also propose which of your tag keys mean team, environment or
+service, and once a person confirms them the org model's facts are read as
+rules on top of this file (`src/finops/attribution/mapper.py`).
 
 ## Writing rules
 
@@ -116,9 +115,10 @@ This is optional and Terraform-only. Opening PRs is off by default; see
 (`~/.finops`) or at the path in `FINOPS_POLICY_FILE`. A policy file in the working
 directory is ignored, so a repository cannot enable PRs for itself.
 
-For the reporting side, `get_untagged_resource_cost` tells you how much spend is
-missing a given tag and which services are the worst offenders, which is usually
-the more useful number when you are trying to get a tagging push funded.
+For the reporting side, `get_tag_cost_breakdown_cur` groups AWS spend by a tag
+key straight from the CUR, with resources missing the tag under `__untagged__`,
+which is usually the more useful number when you are trying to get a tagging
+push funded.
 
 ## What this does not do yet
 
@@ -145,8 +145,7 @@ If any of these block you, that is useful signal and worth telling us.
 | Tool | What it answers |
 |---|---|
 | `get_costs_by_team` | Spend split by team over a period |
-| `get_tag_cost_breakdown_cur` | Spend by any tag key, straight from the CUR |
-| `get_untagged_resource_cost` | How much spend is missing a tag, by service |
+| `get_tag_cost_breakdown_cur` | Spend by any tag key, straight from the CUR, untagged spend included |
 | `get_team_scorecards` | Efficiency scores per team |
 | `get_commitment_coverage_by_tag` | RI and Savings Plan coverage by tag |
 | `run_attribution_now` | Recompute attribution against current rules |

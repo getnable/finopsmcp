@@ -87,11 +87,10 @@ Each entry lists the MCP tool name and which providers support it.
 
 | Type | MCP Tool | Providers |
 |------|----------|-----------|
-| Total LLM spend by provider | `get_llm_costs` | OpenAI, Anthropic, Bedrock, Azure OpenAI, Vertex AI |
+| Total LLM spend by provider | `get_llm_costs` | OpenAI, Anthropic, Bedrock, Vertex AI, OpenRouter, LiteLLM |
 | Cost breakdown by model | `get_llm_cost_by_model` | OpenAI, Anthropic, Bedrock |
 | Model switching recommendations | `get_llm_cost_by_model` | OpenAI, Anthropic, Bedrock |
-| Cost per unit (per request, per user) | `get_llm_unit_economics` | All LLM providers |
-| Full LLM unit economics with team benchmarks | `get_llm_unit_economics_full` | All LLM providers |
+| AI cost health KPIs (cache hit rate, context use, model sprawl) | `get_ai_kpis` | Connected AI providers |
 | Langfuse model costs and token usage | `get_langfuse_model_costs` | Langfuse |
 | Langfuse trace volume trends | `get_langfuse_trace_volume` | Langfuse |
 | Databricks DBU breakdown | `get_databricks_dbu_breakdown` | Databricks |
@@ -113,7 +112,7 @@ Each entry lists the MCP tool name and which providers support it.
 | Full AWS deep audit (10+ check types) | `audit_aws_waste` | AWS |
 | Pattern-based waste fingerprints (13 patterns) | `scan_waste_patterns` | AWS |
 | Idle resource detection | `list_idle_resources` | AWS |
-| Idle resource cleanup | `cleanup_idle_resources` | AWS |
+| Idle resource cleanup, as commands for a person to run (nable deletes nothing) | `cleanup_idle_resources` | AWS |
 
 ## Cost Attribution and Reporting
 
@@ -159,4 +158,4 @@ Each entry lists the MCP tool name and which providers support it.
 | Databricks | Compute efficiency, Job costs, DBU breakdown |
 | Langfuse | LLM model costs, Trace volume |
 | OpenAI / Anthropic / Bedrock / Vertex AI | LLM spend by model |
-| Snowflake, Datadog, GitHub, Stripe, Twilio, Vercel, Cloudflare, PagerDuty, New Relic, MongoDB Atlas | Cost queries, anomaly detection |
+| Snowflake, Datadog, Twilio, Vercel, Cloudflare, New Relic, MongoDB Atlas | Cost queries, anomaly detection |
