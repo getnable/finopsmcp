@@ -3497,7 +3497,95 @@ def _post_connect_message(provider: str | None) -> str:
     return f'Done. Restart Claude Desktop, then ask:  "{q}"'
 
 
+def _nable_dirs() -> list[Path]:
+    """The directories nable keeps its own files in, without creating any."""
+    raw = os.environ.get("FINOPS_DATA_DIR", "")
+    dirs = [Path(raw).expanduser()] if raw else []
+    return dirs + [Path.home() / ".finops", Path.home() / ".finops-mcp", Path.home() / ".nable"]
+
+
+def _user_name(uid: int) -> str:
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError):
+        return f"uid {uid}"
+
+
+def _owner_of(path: Path) -> "tuple[int, str] | None":
+    """(uid, name) of the nearest existing path at or above `path`, or None
+    where the platform has no uids."""
+    if not hasattr(os, "getuid"):
+        return None
+    for p in (path, *path.parents):
+        try:
+            uid = p.stat().st_uid
+        except OSError:
+            continue
+        return uid, _user_name(uid)
+    return None
+
+
+def _as_refusal(e: BaseException) -> "OSError | None":
+    """The file system refusal behind `e`, or None when it is something else.
+
+    A data directory this user cannot write surfaces two ways: as the
+    PermissionError itself, or, when SQLite meets it first, as "unable to
+    open database file" (which is only a refusal when the directory is there
+    and is not this user's to write)."""
+    import errno as _errno
+    if isinstance(e, PermissionError) or (isinstance(e, OSError) and e.errno == _errno.EROFS):
+        return e
+    if type(e).__name__ == "OperationalError" and "unable to open database file" in str(e):
+        for d in _nable_dirs():
+            owner = _owner_of(d) if d.is_dir() else None
+            if owner is not None and (owner[0] != os.getuid() or not os.access(d, os.W_OK)):
+                return PermissionError(_errno.EACCES, "Permission denied", str(d / "finops.db"))
+    return None
+
+
+def _cannot_write_message(e: OSError) -> str:
+    """What a permission refusal means and the one step that fixes it.
+
+    The common cause is a `sudo nable ...` run that left nable's data
+    directory owned by root: from then on every command that writes there
+    (doctor, org init, learn, brief) ended in a Python traceback."""
+    raw = e.filename or ""
+    path = Path(raw).expanduser() if raw else None
+    why = e.strerror or type(e).__name__
+    lines = [f"nable cannot write {raw or 'a file it needs'}: {why}."]
+    home = next((d for d in _nable_dirs() if path is not None
+                 and (path == d or d in path.parents)), None)
+    if home is not None:
+        owner = _owner_of(home)
+        me = _user_name(os.getuid()) if hasattr(os, "getuid") else "$USER"
+        if owner is not None and owner[0] != os.getuid():
+            lines.append(f"  {home} belongs to {owner[1]}, not to you; a `sudo nable ...` "
+                         "run leaves it that way.")
+        lines.append(f"  fix: sudo chown -R {me} {home}")
+        lines.append("  or:  point FINOPS_DATA_DIR at a directory you own, "
+                     "then run the command again")
+    else:
+        parent = path.parent if path is not None else Path.cwd()
+        lines.append(f"  fix: check who owns it (ls -ld {parent}) and that you can write "
+                     "there, then run the command again")
+    return "\n".join(lines)
+
+
 def main(args: list[str] | None = None) -> None:
+    """The CLI. A file system refusal ends in what it means and how to fix
+    it rather than a traceback; FINOPS_DEBUG=1 keeps the traceback."""
+    try:
+        _main(args)
+    except Exception as e:
+        refusal = _as_refusal(e)
+        if refusal is None or os.environ.get("FINOPS_DEBUG") == "1":
+            raise
+        print(_cannot_write_message(refusal), file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+def _main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
         args = _sys.argv[1:]

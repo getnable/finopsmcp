@@ -102,6 +102,11 @@ def run(args) -> int:
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
         return EXIT_ERROR
+    except PermissionError:
+        # A data directory this user cannot write: the CLI says which one and
+        # how to fix it (setup_wizard.main), which "failed (PermissionError)"
+        # did not. A local path, never an account id.
+        raise
     except Exception as exc:
         # The type, never the message: it can carry account ids and ARNs.
         if as_json:

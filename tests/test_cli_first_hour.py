@@ -5,14 +5,22 @@ Each test here started as a finding from walking that path:
 
   - `nable doctor --json` was refused ("unrecognized arguments") although
     `finops-doctor --json` and every other read command take --json
+  - a data directory the user cannot write (the `sudo nable ...` once case)
+    made `nable doctor`, `nable org init` and `nable learn list` end in a
+    Python traceback, with no word on what to do
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+from finops import setup_wizard
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -42,3 +50,82 @@ def test_doctor_audit_flags_reach_the_doctor(tmp_path):
     r = _cli(["doctor", "--audit", "--hours", "1", "--limit", "5", "--json"], tmp_path)
     assert r.returncode == 0, r.stderr
     assert isinstance(json.loads(r.stdout), (list, dict))
+
+
+# ── a data directory this user cannot write ───────────────────────────────────
+
+@pytest.fixture
+def unwritable_data_dir(tmp_path, monkeypatch):
+    """~/.finops exists, and every attempt to write under it fails the way it
+    does when a `sudo nable ...` run left it owned by root. Running as root,
+    the suite cannot get that refusal from the file system, so the two calls
+    the tracebacks went through raise it."""
+    home = tmp_path / "home"
+    data = home / ".finops"
+    data.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("FINOPS_DATA_DIR", raising=False)
+    monkeypatch.delenv("FINOPS_DEBUG", raising=False)
+    monkeypatch.chdir(home)
+
+    def refuse(*_a, **_k):
+        raise PermissionError(errno.EACCES, "Permission denied", str(data / "org"))
+    monkeypatch.setattr("finops.org.store.ensure_dir", refuse)
+
+    def refuse_chmod(*_a, **_k):
+        raise PermissionError(errno.EPERM, "Operation not permitted", str(data))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.setattr("finops.storage.db.data_dir", refuse_chmod)
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
+    return data
+
+
+@pytest.mark.parametrize("argv", [["org", "init", "--no-adapters"], ["doctor"]])
+def test_an_unwritable_data_dir_says_what_and_how_without_a_traceback(
+        argv, unwritable_data_dir, capsys):
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(argv)
+    err = capsys.readouterr().err + str(e.value.code if not isinstance(e.value.code, int) else "")
+    assert e.value.code not in (0, None)
+    assert str(unwritable_data_dir) in err
+    assert "chown" in err and "FINOPS_DATA_DIR" in err
+    assert "Traceback" not in err
+
+
+def test_finops_debug_still_shows_the_traceback(unwritable_data_dir, monkeypatch):
+    monkeypatch.setenv("FINOPS_DEBUG", "1")
+    with pytest.raises(PermissionError):
+        setup_wizard.main(["org", "init", "--no-adapters"])
+
+
+def test_a_database_it_cannot_open_in_someone_elses_dir_gets_the_same_fix(
+        tmp_path, monkeypatch, capsys):
+    """`nable learn list` met the unwritable directory in SQLite first and
+    ended in sqlalchemy's "unable to open database file" traceback."""
+    data = tmp_path / "data"
+    (data / "finops.db").mkdir(parents=True)     # SQLite cannot open a directory
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(data))
+    monkeypatch.delenv("FINOPS_DEBUG", raising=False)
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.setattr("finops.storage.db._ENGINE", None)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(data).st_uid + 4242)
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(["learn", "list"])
+    err = capsys.readouterr().err
+    assert e.value.code == 1
+    assert str(data) in err and "chown" in err and "Traceback" not in err
+
+
+def test_brief_names_the_directory_instead_of_the_exception_class(
+        unwritable_data_dir, monkeypatch, capsys):
+    def refuse(**_k):
+        raise PermissionError(errno.EACCES, "Permission denied",
+                              str(unwritable_data_dir / "briefs"))
+    monkeypatch.setattr("finops.briefing.run.run_overnight", refuse)
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(["brief", "--no-save"])
+    err = capsys.readouterr().err
+    assert e.value.code == 1
+    assert "failed (PermissionError)" not in err
+    assert str(unwritable_data_dir) in err and "chown" in err
