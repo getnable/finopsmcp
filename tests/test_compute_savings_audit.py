@@ -368,3 +368,59 @@ def test_the_spot_tool_does_not_promise_60_to_80_percent():
 
     assert "60-80%" not in (server.recommend_spot_adoption.__doc__ or "")
     assert "60-80%" not in (sa.__doc__ or "")
+
+
+# ── a stop schedule saves the hours it stops, and no more ────────────────────
+#
+# The recommendation is Mon-Fri 08:00-18:00 UTC: 50 hours on, 118 off, of a
+# 168-hour week. The saving was cost x (idle hours / 168), counting every idle
+# hour in the week, so an instance idle around the clock was promised its
+# whole bill while the schedule offered stops it for 118/168 of the time.
+
+def _nonprod(cpu_by_instance: dict[str, list[float]], itype: str = "m5.large"):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock, patch
+
+    from finops.recommendations import nonprod_scheduler as ns
+
+    base = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    ec2, cw, boto = MagicMock(), MagicMock(), MagicMock()
+    ec2.get_paginator.return_value.paginate.return_value = [{"Reservations": [{"Instances": [
+        {"InstanceId": iid, "InstanceType": itype,
+         "Tags": [{"Key": "Environment", "Value": "dev"}]}
+        for iid in cpu_by_instance]}]}]
+
+    def stats(**kw):
+        vals = cpu_by_instance.get(kw["Dimensions"][0]["Value"], [])
+        return {"Datapoints": [{"Timestamp": base + timedelta(hours=h), "Maximum": v}
+                               for h, v in enumerate(vals)]}
+
+    cw.get_metric_statistics.side_effect = stats
+    boto.client.side_effect = lambda svc, **kw: ec2 if svc == "ec2" else cw
+    with patch.object(ns, "boto3", boto):
+        return asyncio.run(ns.identify_nonprod_resources(aws_client=None, regions=["us-east-1"]))
+
+
+def test_a_schedule_cannot_save_more_than_the_hours_it_stops(monkeypatch):
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    out = _nonprod({"i-idle": [0.5] * 168})
+    [row] = out["schedulable_instances"]
+    assert row["idle_hours_per_week"] == 168.0
+    # m5.large 70.08 a month on demand; the schedule stops it 118 of 168 hours.
+    assert row["potential_monthly_savings"] == 49.22
+    assert out["total_monthly_waste"] == 49.22
+
+
+def test_each_scheduler_row_says_whether_its_idle_hours_were_measured(monkeypatch):
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    out = _nonprod({"i-seen": [0.5] * 100 + [60.0] * 68, "i-blank": []})
+    rows = {r["instance_id"]: r for r in out["schedulable_instances"]}
+    assert rows["i-seen"]["idle_basis"] == "measured"
+    # No datapoints: the nights-and-weekends figure is an assumption, and a
+    # reader of the row alone could not tell it from a measured 118.
+    assert rows["i-blank"]["idle_basis"] == "assumed"
+    assert rows["i-blank"]["idle_hours_per_week"] == 118.0
