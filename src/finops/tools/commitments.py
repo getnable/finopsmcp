@@ -51,11 +51,16 @@ def get_commitment_analysis() -> dict:
 
         # "If you bought $X more in commitments" projection
         if monthly_uncovered > 100:
-            # Compute SP covers eligible spend at ~34% discount (1yr no-upfront)
-            _COMPUTE_SP_DISCOUNT_RATE = 0.34
-            # Covering the full gap would require this hourly commitment
-            additional_commitment = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
-            projected_savings = additional_commitment * _COMPUTE_SP_DISCOUNT_RATE
+            # A 1-year no-upfront Compute SP at the listed rate (about 26% off
+            # general-purpose on-demand; see recommendations.commitments). This
+            # used 34%, more than even the 1-year all-upfront plan lists, and
+            # quoted the commitment as half the uncovered on-demand dollars. A
+            # commitment is billed at the discounted rate, so covering half the
+            # gap commits half of it times (1 - discount).
+            from ..recommendations.commitments import _COMPUTE_SP_DISCOUNT
+            covered_on_demand = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
+            additional_commitment = covered_on_demand * _COMPUTE_SP_DISCOUNT
+            projected_savings = covered_on_demand * (1 - _COMPUTE_SP_DISCOUNT)
             actionable["if_you_bought_more"] = {
                 "description": (
                     f"Buying a 1-year no-upfront Compute Savings Plan at "

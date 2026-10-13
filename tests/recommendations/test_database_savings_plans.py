@@ -60,8 +60,11 @@ class TestDiscountConstants:
     def test_3yr_all_upfront_highest(self):
         assert DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT > DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT
 
-    def test_no_upfront_is_30_pct(self):
-        assert DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.30
+    def test_no_upfront_is_the_listed_20_pct(self):
+        # AWSDatabaseSavingsPlans us-east-1 offer 20261007173435: 1yr No Upfront
+        # is 20% off every RDS instance-hour rate it lists (db.r7g.large $0.239
+        # -> $0.1912, SKU DZCHH8H3SPVYZ2Z4). This pinned 0.30 before.
+        assert DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.20
 
 
 # ── unit: _get_rds_spend ──────────────────────────────────────────────────────
@@ -203,7 +206,7 @@ class TestRecommendDatabaseSavingsPlans:
         assert result["recommended_sp_hourly_commitment"] == 0.0
         assert result["estimated_monthly_savings"] == 0.0
 
-    def test_savings_is_30_pct_of_uncovered(self):
+    def test_savings_is_the_listed_discount_of_uncovered(self):
         monthly_spend = 8_000.0
         ce = _make_ce_client(spend=monthly_spend, coverage_pct=0.0)
         mock_boto3 = MagicMock()

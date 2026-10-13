@@ -11,7 +11,8 @@ Calculates:
   - Coverage gap (on-demand that commitments could cover)
   - Recommended purchase: type, term, payment, projected ROI
 
-All figures come directly from the Cost Explorer API — no estimates.
+Coverage, utilization and on-demand spend come from the Cost Explorer API. A
+projected purchase saving is an estimate at the listed discount below.
 """
 from __future__ import annotations
 
@@ -23,9 +24,40 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_COMPUTE_SP_DISCOUNT = 0.66   # ~34% off on-demand (1yr no-upfront compute SP)
-_EC2_SP_DISCOUNT = 0.72       # ~28% off on-demand (1yr no-upfront EC2 SP)
-_RI_DISCOUNT = 0.60           # ~40% off on-demand (1yr no-upfront RI)
+# What a 1-year no-upfront commitment costs as a fraction of on-demand, us-east-1
+# Linux, from the AWS Price List (AWSComputeSavingsPlan us-east-1, version
+# 20261013035015, which carries the EC2 Instance SP rates too, and the AmazonEC2
+# offer 20261012193925 for Reserved Instances), read 2026-10-13:
+#   Compute SP      m5.large 26.0% off (SKU BB7BKBSC6NZW7P5B), m6i, m7i and m7g
+#                   26.5%, c and r families 27.5 to 28.3%, GPU 21 to 24%
+#   EC2 Instance SP m6i, m7i, r6i, c6i 33.8 to 33.9% off (m6i SKU
+#                   DC4GCSR3H4S43EMU), m5 and t3 37.5%
+#   Standard RI     the same as the EC2 Instance SP, type for type
+# These used to say 34%, 28% and 40%: the Compute and EC2 Instance figures were
+# the wrong way round (a Compute SP never beats an EC2 Instance SP on the same
+# type), and 40% is the 1-year all-upfront rate, not no-upfront. The values
+# below are the current-generation general-purpose rates, rounded down, so a
+# projected saving is not above what the plan lists for them.
+_COMPUTE_SP_DISCOUNT = 0.74   # 26% off on-demand (1yr no-upfront Compute SP)
+_EC2_SP_DISCOUNT = 0.662      # 33.8% off on-demand (1yr no-upfront EC2 Instance SP)
+_RI_DISCOUNT = 0.662          # 33.8% off on-demand (1yr no-upfront Standard RI)
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_COMPUTE_SP_DISCOUNT": {
+        "source": "AWS Price List, AWSComputeSavingsPlan us-east-1 20261013035015, "
+                  "ComputeSavingsPlans 1yr No Upfront: m5.large $0.071 vs $0.096 "
+                  "(BB7BKBSC6NZW7P5B), m6i.large $0.07053 vs $0.096",
+        "as_of": "2026-10-13"},
+    "_EC2_SP_DISCOUNT": {
+        "source": "AWSComputeSavingsPlan us-east-1 20261013035015, EC2InstanceSavingsPlans "
+                  "1yr No Upfront: m6i.large $0.0635 vs $0.096 (DC4GCSR3H4S43EMU), "
+                  "m7i.large $0.06668 vs $0.1008 (XGZ84KZ7PE29FA8C)",
+        "as_of": "2026-10-13"},
+    "_RI_DISCOUNT": {
+        "source": "AWS Price List, AmazonEC2 us-east-1 20261012193925, Reserved standard "
+                  "1yr No Upfront Linux: m6i.large $0.0635/hr vs $0.096 on demand",
+        "as_of": "2026-10-13"},
+}
 
 
 @dataclass

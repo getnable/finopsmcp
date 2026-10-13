@@ -7,6 +7,8 @@ https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<offer>/<version>/us-eas
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
 from pathlib import Path
 
@@ -208,6 +210,52 @@ def test_kendra_editions_are_list_hours_times_730():
     # AmazonKendra offer 20260911124443: Developer NSTMQK2AFGH9HENZ $1.125/hr,
     # Enterprise 6ENMMB4KRPAZVYZ2 $1.40/hr. The table held $810 and $1,400.
     assert _EDITION_MONTHLY_USD == {"DEVELOPER_EDITION": 821.25, "ENTERPRISE_EDITION": 1022.0}
+
+
+# ── Savings Plans and Reserved Instances ─────────────────────────────────────
+
+def test_commitment_discounts_are_the_listed_one_year_no_upfront_rates():
+    from finops.recommendations import commitments as c
+
+    # AWSComputeSavingsPlan us-east-1 20261013035015, 1yr No Upfront:
+    # Compute SP m5.large $0.071 vs $0.096 on demand (26.0% off, SKU
+    # BB7BKBSC6NZW7P5B); EC2 Instance SP m6i.large $0.0635 (33.9%, DC4GCSR3H4S43EMU).
+    # These were 0.66 (34% off), 0.72 (28%) and 0.60 (40%).
+    assert c._COMPUTE_SP_DISCOUNT == 0.74
+    assert c._EC2_SP_DISCOUNT == 0.662
+    assert c._RI_DISCOUNT == 0.662
+    # A Compute SP never discounts more than an EC2 Instance SP on one type.
+    assert c._COMPUTE_SP_DISCOUNT > c._EC2_SP_DISCOUNT
+
+
+def test_commitment_projection_commits_at_the_discounted_rate(monkeypatch):
+    from finops import server  # noqa: F401  (initialises finops.tools first)
+    from finops.recommendations import commitments as c
+    from finops.tools.commitments import get_commitment_analysis
+
+    analysis = c.CommitmentAnalysis(
+        savings_plan_coverage_pct=20.0, savings_plan_utilization_pct=100.0,
+        savings_plan_unused_usd=0.0, ri_coverage_pct=20.0, ri_utilization_pct=100.0,
+        ri_unused_usd=0.0, uncovered_on_demand_usd=30_000.0)   # $10,000 a month
+    monkeypatch.setattr(c, "analyze_commitments", lambda *a, **k: analysis)
+    monkeypatch.setattr(c, "commitment_summary", lambda *a, **k: {})
+    out = get_commitment_analysis()
+    if inspect.iscoroutine(out):          # the MCP tool wrapper is async
+        out = asyncio.run(out)
+    more = out["actionable_analysis"]["if_you_bought_more"]
+    # Half the $10,000 gap is $5,000 of on-demand; at 26% off that is a $3,700
+    # commitment saving $1,300. It said a $5,000 commitment saving $1,700.
+    assert more["additional_monthly_commitment_usd"] == 3700.0
+    assert more["projected_monthly_savings_usd"] == 1300.0
+
+
+def test_database_savings_plan_is_twenty_percent():
+    from finops.recommendations import database_savings_plans as d
+
+    # AWSDatabaseSavingsPlans us-east-1 20261007173435: 1yr No Upfront only,
+    # 20% off every RDS instance hour it covers (SKU DZCHH8H3SPVYZ2Z4).
+    assert d.DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.20
+    assert d.PRICE_SOURCES["DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT"]["verified"] == "no"
 
 
 _PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / "prices.ts"

@@ -2,14 +2,19 @@
 Database Savings Plans recommender.
 
 AWS launched Database Savings Plans at re:Invent 2025. They cover RDS and
-Aurora spend with up to 45% savings, separate from Compute Savings Plans.
+Aurora spend, separate from Compute Savings Plans. The AWS Price List
+(AWSDatabaseSavingsPlans us-east-1, version 20261007173435, read 2026-10-13)
+offers one term, 1 year No Upfront, at 20% off every RDS instance hour it
+covers, and covers only the 7th-generation and later families (m7g, m7i, r7g,
+r7i, x2m and the m8 and r8 families), not m5, m6i, m6g, r5, r6g, r6i, t3 or
+t4g.
 
 This module:
 1. Pulls current RDS/Aurora spend from Cost Explorer (last 30 days).
 2. Checks existing Savings Plans coverage filtered to database services.
 3. Calculates uncovered RDS/Aurora baseline spend.
 4. Recommends a 1-year no-upfront Database SP sized to the uncovered baseline.
-5. Estimates savings using conservative discount rates.
+5. Estimates savings at the listed 20% instance-hour discount.
 """
 from __future__ import annotations
 
@@ -26,10 +31,30 @@ try:
 except ImportError:  # pragma: no cover
     boto3 = None  # type: ignore[assignment]
 
-# Discount rates relative to on-demand list price
-DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT = 0.30
+# Discount rates relative to on-demand list price. 1-year No Upfront is the
+# only term the offer lists, at 20% off on all 1,328 RDS instance-hour rates it
+# carries (e.g. db.r7g.large $0.239 -> $0.1912, SKU DZCHH8H3SPVYZ2Z4). It used
+# to be 0.30, called "conservative", which overstated every saving by half.
+DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT = 0.20
+# Not offered: the us-east-1 offer has no All Upfront and no 3-year Database
+# Savings Plan. These two are unverified and nothing here prices with them;
+# they stay only as the ordering the tests document if AWS adds the terms.
 DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT = 0.35
 DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT = 0.45
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT": {
+        "source": "AWS Price List, AWSDatabaseSavingsPlans us-east-1, version "
+                  "20261007173435: DatabaseSP:1yrNoUpfront, 20% off every RDS "
+                  "InstanceUsage rate it lists (SKU DZCHH8H3SPVYZ2Z4)",
+        "as_of": "2026-10-13"},
+    "DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+    "DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+}
 
 _RDS_SERVICES = [
     "Amazon Relational Database Service",
@@ -169,8 +194,8 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         # only lands if that RDS/Aurora baseline keeps running for the term. We have only
         # looked at the last 30 days, so we cannot confirm the spend is stable enough to
         # commit to. That makes this an investigation: a band plus the steps to confirm
-        # the baseline holds, not a precise promise. The discount rate is also a
-        # conservative published estimate, not your account's actual SP rate card.
+        # the baseline holds, not a precise promise. The discount rate is the
+        # listed one, not your account's actual SP rate card.
         finding = None
         if uncovered_monthly > 50:
             finding = Finding(
@@ -187,13 +212,15 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                             "but a Savings Plan locks you in for a year. We have not confirmed "
                             "this baseline is stable: if you are about to downsize, migrate "
                             "off RDS, or move to Aurora Serverless, committing to it would "
-                            "strand the commitment. The discount is also a conservative "
-                            "published estimate, not your account's exact SP rate."),
+                            "strand the commitment. Only 7th-generation and later "
+                            "instance families (m7g, m7i, r7g, r7i, m8, r8) are eligible, "
+                            "and the uncovered figure does not split out older ones."),
                 assumptions=[
                     "The uncovered RDS/Aurora baseline keeps running at this level for the "
                     "1-year term.",
-                    "Saving uses a conservative 30% no-upfront discount; your actual SP rate "
-                    "may differ.",
+                    "Saving uses the listed 20% 1-year no-upfront discount on instance "
+                    "hours; older families (m5, m6i, m6g, r5, r6g, r6i, t3, t4g) are not "
+                    "eligible and save nothing.",
                     "Instance-hour line items were identified correctly (storage, IOPS, "
                     "backups, and transfer are excluded, since Database SPs do not cover them).",
                 ],
@@ -210,7 +237,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 pro_unlock=("On Pro, nable reads several months of your CUR to confirm the "
                             "database baseline is stable, models the right commitment to the "
                             "stable floor, and uses your account's actual Savings Plan rates "
-                            "instead of a conservative published estimate."),
+                            "instead of the published list discount."),
                 remediation=[
                     "Confirm first: verify the baseline holds over a longer window and rule out "
                     "planned changes to the fleet.",

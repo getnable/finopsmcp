@@ -297,7 +297,8 @@ def test_the_database_plan_is_bounded_too(installed, monkeypatch):
     r = dsp.recommend_database_savings_plans()
     # 70% covered, 1,500 uncovered: 80% leaves room for 500 of it, a third.
     assert r["bounds"]["cut"] and r["bounds"]["factor"] == pytest.approx(1 / 3, abs=2e-3)
-    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.30 / 3, rel=5e-3)
+    # The Database SP lists 20% off (AWSDatabaseSavingsPlans 20261007173435).
+    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.20 / 3, rel=5e-3)
     monkeypatch.setattr(dsp, "_get_database_sp_coverage", lambda *_a: 85.0)
     r = dsp.recommend_database_savings_plans()
     assert r["bounds"]["dropped"] and r["finding"] is None
