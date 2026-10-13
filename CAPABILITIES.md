@@ -135,7 +135,9 @@ today: the Budget Guard always, the other two while their pricing is decided
 
 - **Budget Guard** checks infra actions against your cost policy before they run.
 - **Savings Analyst** proposes each fix as a pull request you approve.
-- **The Ledger** tracks realized savings, measured against your actual next bill.
+- **The Ledger** tracks realized savings: measured from your bill when CUR line
+  items cover the change and at least a week has settled, otherwise priced at
+  your effective or list rate and labeled as an estimate.
 
 Plus `finops guard` (a cost guardrail your AI agents check before spending) and a
 `estimate_change_cost` preflight on Terraform and Helm diffs.

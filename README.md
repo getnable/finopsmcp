@@ -10,7 +10,7 @@
 
 nable puts a check in front of the commands a coding agent is about to run, in Claude Code, Cursor, Codex CLI, GitHub Copilot, Gemini CLI and Cline (and in front of MCP tool calls in the first three). A launch is priced at list price before it runs, a one-way door (destroy, terminate, a commitment purchase) stops for a human, and every verdict goes to a hash-chained ledger on your machine. The guard needs no cloud account, no API key and no license.
 
-nable is also an open-source (Apache-2.0), local-first FinOps tool for cloud and AI cost: a read-only scan that finds waste in your AWS account using only free APIs, AI coding-agent spend priced per model with per-session caps, and AI cost split by project, team and user. It runs in your terminal or as an MCP server inside Claude, Cursor and VS Code, and your billing data never leaves your machine.
+nable is also an open-source (Apache-2.0), local-first FinOps tool for cloud and AI cost: a read-only scan that finds waste in your AWS account using only free APIs, AI coding-agent spend priced per model with per-session caps, and AI cost split by project, team and user. It runs in your terminal or as an MCP server inside Claude, Cursor and VS Code. nable sends your billing data to no service of its own; in an editor, the answers you ask for reach the model you chat with, as every MCP tool result does.
 
 ## Try it
 
@@ -66,9 +66,9 @@ Uses the AWS credentials already on your machine and reads only free cloud APIs,
 
 From there nable:
 
-- **Shows what you spend** across AWS, Azure, GCP, Kubernetes, and 15+ AI and SaaS providers, in one place.
+- **Shows what you spend** across AWS, Azure, GCP, Kubernetes, and 15 AI, data and SaaS providers, in one place.
 - **Finds what you are wasting** (idle servers, oversized databases, forgotten storage) and puts a dollar figure on each one.
-- **Fixes it, with your approval,** by opening a pull request, then checks your next bill to prove the saving was real.
+- **Fixes it, with your approval,** by opening a pull request, then confirms the change happened and measures the saving: from your bill when CUR line items cover it, otherwise at your effective or list rate, labeled as an estimate.
 - **Budgets your AI agents:** `nable ai-budget` prices Claude Code and Codex CLI usage per model from local logs, with a per-session cap; `nable ai-costs --by project|team|user` splits OpenAI, Anthropic, LiteLLM and Langfuse spend.
 
 ![nable demo: a sample bill in seconds](https://raw.githubusercontent.com/getnable/finopsmcp/main/docs/demo.gif)
@@ -86,17 +86,17 @@ From there nable:
 
 |  | nable | AWS Cost Explorer | Vantage / CloudHealth | Infracost |
 |---|---|---|---|---|
-| Open source | Yes (Apache-2.0) | No | No | Yes |
-| Where your data lives | Your machine | AWS | Vendor SaaS | Your machine / CI |
+| Open source | Yes (Apache-2.0) | No (AWS's Billing MCP server is) | No | The CLI (Apache-2.0); Infracost Cloud is SaaS |
+| Where your data lives | Your machine | AWS | Vendor SaaS | Your machine or CI; resources are priced through Infracost's hosted pricing API |
 | Clouds covered | AWS, Azure, GCP, Kubernetes | AWS only | Multi-cloud | IaC, any cloud |
-| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, GPUs) | Bedrock only | Vantage: yes; CloudHealth: token dashboard | No |
-| Runs in Claude / Cursor / VS Code | Yes (local MCP) | Billing MCP server (read-only) | Vantage: hosted MCP; CloudHealth: no | Yes (MCP, editor extensions) |
-| Prices an agent's command before it runs | Yes: a hook in Claude Code, Cursor, Codex CLI, Copilot, Gemini CLI and Cline prices launches, stops one-way doors, and logs every verdict | No | No | No (prices IaC diffs at pull-request time) |
-| Fixes waste | Opens a pull request, you approve | No | Vantage: in-product agent; no PR to your IaC | AutoFix PRs before deploy, not on running waste |
+| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, Vertex AI, GPUs) | AWS services only (Bedrock, SageMaker, GPU instances) | Vantage: yes; CloudHealth: an AI and token dashboard | No |
+| Runs in Claude / Cursor / VS Code | Yes (local MCP) | AWS's Billing and Cost Management MCP server | Vantage: hosted MCP server; CloudHealth: none found | Agent plugins for Claude Code, Cursor and others; IDE extensions |
+| Prices an agent's command before it runs | Yes: a hook in Claude Code, Cursor, Codex CLI, Copilot, Gemini CLI and Cline prices launches, stops one-way doors, and logs every verdict | No | No | Not as a hook on commands; its agent skills price IaC as it is written, and CI prices the pull request |
+| Fixes waste | Opens a pull request, you approve | No | Vantage: a FinOps agent that remediates with approval; no IaC pull request found | AutoFix PRs for policy issues in IaC code, not from what running resources use |
 | Answers | What an agent is about to spend; what you spend and waste now | AWS spend | Multi-cloud spend | Cost of an IaC change before deploy |
-| Price | Free (local); paid plans are flat, never a percentage of spend | Free tier, then per request | Paid SaaS | Free (OSS), paid cloud |
+| Price | Free (local); paid plans are flat, never a percentage of spend | Console free; API $0.01 per request | Vantage: free up to $2,500/mo of tracked spend, then paid; CloudHealth: paid | CLI free; Infracost Cloud paid |
 
-Infracost prices an infrastructure change in the pull request; nable's guard prices the command an agent is about to run, wherever it came from, and the scan finds waste in what is already running. Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
+Infracost prices an infrastructure change as it is written and in the pull request; nable's guard prices the command an agent is about to run, wherever it came from, and the scan finds waste in what is already running. Other products' rows were checked on 2026-10-13; the sources are listed in [CAPABILITIES.md](CAPABILITIES.md#how-nable-compares). Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
 
 ## Agent guard
 
@@ -341,25 +341,32 @@ credentials and keep write access behind a human.
 </details>
 
 <details>
-<summary><b>Connectors (17)</b> — every provider and what it pulls, plus Azure roles</summary>
+<summary><b>Connectors (20 sources of spend)</b>: every provider and what it pulls, plus Azure roles</summary>
 
 | Provider | What it pulls |
 |---|---|
-| AWS | Cost Explorer (free tier) · CUR via S3 (Pro: line-item granularity, savings plans, reservations) |
+| AWS | Cost Explorer (the API bills $0.01 per request; `nable scan` uses only free APIs unless you pass `--spend`) · CUR line items through Athena (billed per byte scanned) · Organizations |
 | Azure | Cost Management API · Advisor cost recs · VM rightsizing (Azure Monitor) · native budgets · forecast |
-| GCP | Cloud Billing API + BigQuery export |
+| GCP | Cloud Billing API + BigQuery billing export · Recommender |
+| Kubernetes | a list-price estimate from your kubeconfig |
+| OpenCost | its Allocation API, when you run OpenCost in the cluster |
+| OpenAI | API usage and token spend by model |
+| Anthropic | Claude API usage and token spend |
+| Amazon Bedrock | spend by model, through Cost Explorer |
+| Vertex AI | spend from the BigQuery billing export |
+| OpenRouter | gateway usage |
+| LiteLLM | spend logged by a self-hosted proxy |
+| Langfuse | Daily metrics API: model cost, token usage, trace volume |
 | Datadog | Usage Metering API v2: real dollar amounts |
 | Snowflake | ACCOUNT_USAGE.METERING_HISTORY |
-| Langfuse | Daily metrics API: model cost, token usage, trace volume |
+| Databricks | DBU usage and SQL warehouse spend |
 | MongoDB Atlas | Invoice API |
 | Twilio | Usage Records API |
 | Cloudflare | Billing API |
 | Vercel | Invoice API (Enterprise) |
 | New Relic | Data ingest + user counts |
-| Stripe | Fees and billing activity |
-| Databricks | DBU usage and SQL warehouse spend |
-| OpenAI | API usage and token spend by model |
-| Anthropic | Claude API usage and token spend |
+
+Also connected, without a spend figure: Modal, Together and Replicate (nable checks the key, but their public APIs return no per-period cost, so it points you at invoice import), and Cohere and Mistral (`nable cohere` and `nable mistral` store the key; nothing reads their usage yet). Stripe, when `STRIPE_SECRET_KEY` is set, feeds MRR and paying customers into unit economics; it is not a cost source.
 
 **Azure roles.** The Azure tools span three RBAC roles, granted to the service principal on each subscription (run `finops doctor` to check):
 
@@ -379,11 +386,11 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 **Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. Every install starts with a 7-day trial of Pro features. Pro ($25/mo) adds ticket creation (Jira, Linear, GitHub Issues), email reports and digests sent on request, and the org-wide rollup across accounts. Team ($1,000/mo flat, unlimited seats) adds the conversational Slack bot and chat remediation. Forecasts, commitment recommendations, remediation PRs, and the Ledger are free today while their pricing is decided. Reports and alerts on a schedule, sent without anyone asking, are nable Cloud; this install sends them when you ask.
 
-**Does my billing data leave my machine?** No. nable is local-first and read-only by default. It reads your cost data on your machine and never uploads it, and you can confirm the no-egress behavior in the source.
+**Does my billing data leave my machine?** nable never uploads it: it reads your cost data on your machine and sends it to no nable service, and telemetry is off unless you turn it on (and never carries cost figures). In an editor, the answers you ask for reach the model you chat with, as every MCP tool result does; `nable scan` and the rest of the CLI involve no model. You can confirm the no-egress behavior in the source.
 
-**What clouds and providers does it support?** AWS, Azure, GCP, and Vertex; Kubernetes (Kubecost, OpenCost); AI and LLM providers (OpenAI, Anthropic, Bedrock, OpenRouter, LiteLLM, Modal, Together, Replicate, Cohere, Mistral, Langfuse); data platforms (Databricks, Snowflake, MongoDB); and SaaS (Datadog, New Relic, Cloudflare, Twilio, Vercel, Stripe).
+**What clouds and providers does it support?** AWS, Azure and GCP; Kubernetes (a kubeconfig estimate, or OpenCost); AI and LLM providers (OpenAI, Anthropic, Bedrock, Vertex AI, OpenRouter, LiteLLM, Langfuse); data platforms (Databricks, Snowflake, MongoDB Atlas); and SaaS (Datadog, New Relic, Cloudflare, Twilio, Vercel). Modal, Together, Replicate, Cohere and Mistral connect but return no spend figure yet (see Connectors).
 
-**How is it different from AWS Cost Explorer?** Cost Explorer is AWS-only and console-bound. nable is cross-cloud, runs in your terminal and in Claude/Cursor, covers AI and GPU spend no cloud console shows, and proposes fixes as pull requests. `nable scan` also makes zero paid API calls by default.
+**How is it different from AWS Cost Explorer?** Cost Explorer is AWS-only, and its API bills per request. nable is cross-cloud, runs in your terminal and in Claude/Cursor, covers AI provider spend (OpenAI, Anthropic and others) no cloud console shows, and proposes fixes as pull requests. `nable scan` also makes zero paid API calls by default.
 
 **Is there an open-source alternative to Vantage or CloudHealth?** nable is an open-source (Apache-2.0), local-first alternative for cost queries, waste detection, rightsizing, and AI/GPU cost, running on your machine instead of a hosted SaaS.
 
@@ -411,7 +418,7 @@ finops setup claude    # re-run editor configuration only
 
 ## License
 
-Apache-2.0 in full. The hosted enterprise layer (web dashboard, SSO, control plane) lives in a separate private repo. Full tool list in [CAPABILITIES.md](CAPABILITIES.md).
+Apache-2.0 in full. The hosted enterprise layer (web dashboard, scheduler, two-way Slack bot, SSO, control plane) lives in a separate private repo. What is in this one: [CAPABILITIES.md](CAPABILITIES.md); every MCP tool: [docs/tool-inventory.txt](docs/tool-inventory.txt).
 
 [getnable.com](https://getnable.com) · [Docs](https://getnable.com/docs) · [Privacy](https://getnable.com/privacy) · [Security](https://scorecard.dev/viewer/?uri=github.com/getnable/finopsmcp)
 
