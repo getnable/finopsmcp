@@ -1925,9 +1925,10 @@ async def audit_cloudwatch_metric_cardinality(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits CloudWatch custom metric cardinality. Custom metrics above the 10,000
-    free-tier threshold cost $0.30/metric/month. High-cardinality dimensions like
-    pod_id or request_id can cause thousands of metrics per microservice.
+    Audits CloudWatch custom metric cardinality. Custom metrics bill per
+    metric-month at $0.30 for the first 10,000, then $0.10, $0.05 and $0.02
+    (us-east-1 list), with 10 free. High-cardinality dimensions like pod_id or
+    request_id can cause thousands of metrics per microservice.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
@@ -1952,7 +1953,8 @@ async def audit_cloudwatch_metric_cardinality(
 
         lines: list[str] = ["## CloudWatch Custom Metric Cardinality Audit", ""]
         lines.append(f"Total custom metrics found: **{total:,}**")
-        lines.append(f"Estimated monthly cost (above 10k free tier): **${cost:,.2f}**")
+        lines.append(f"Estimated monthly list cost (tiered, 10 metrics free; an upper "
+                     f"bound, see the finding): **${cost:,.2f}**")
         lines.append("")
 
         if not findings:
