@@ -131,10 +131,17 @@ def get_savings_summary() -> dict:
         lines.append(f"Tracking {total} recommendation{'s' if total != 1 else ''}.")
         if potential > 0:
             lines.append(f"  Open potential: ${potential:,.0f}/mo still available.")
+            overlap = summary.get("overlap_excluded_monthly_usd") or 0
+            if overlap > 0:
+                lines.append(f"  (${overlap:,.0f}/mo of alternative fixes on resources already "
+                             "counted is left out: one fix per resource.)")
         if acted > 0:
             lines.append(f"  Acted on: ${acted:,.0f}/mo estimated savings (pending verification).")
         if verified > 0:
-            lines.append(f"  Verified savings: ${verified:,.0f}/mo (${summary['verified_annual_usd']:,.0f}/yr confirmed).")
+            # Confirmed changes; only the bill-measured part was seen on the bill.
+            lines.append(f"  Verified savings: ${verified:,.0f}/mo (${summary['verified_annual_usd']:,.0f}/yr) "
+                         f"from confirmed changes, ${summary.get('verified_bill_measured_monthly_usd') or 0:,.0f}/mo "
+                         "of it measured on the bill.")
 
     # Learning loop: annotate each source with what THIS account's ledger shows
     # about it (act-rate, accuracy, verdict). Propose-only: this adds honest

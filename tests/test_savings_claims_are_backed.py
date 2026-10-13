@@ -177,3 +177,13 @@ def test_one_resource_measured_twice_on_the_bill_counts_once(ledger):
     s = st.get_summary()
     assert s["verified_monthly_usd"] == 84.0
     assert s["verified_bill_measured_monthly_usd"] == 84.0
+
+
+def test_savings_summary_text_says_what_the_bill_measured(ledger):
+    _rec("rightsizing", "i-0abc", 70.08, desc="Downsize m5.xlarge to m5.large")
+    _rec("graviton", "i-0abc", 28.03, desc="Migrate m5.xlarge to Graviton m6g.xlarge")
+    _verified("graviton", "i-0list", 120.0, 120.0, "list_price")
+    text = _run(server.get_savings_summary())["summary"]
+    assert "Open potential: $70/mo" in text, text
+    assert "$28/mo of alternative fixes" in text, text
+    assert "$0/mo of it measured on the bill" in text, text
