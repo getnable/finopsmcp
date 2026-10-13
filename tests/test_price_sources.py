@@ -69,6 +69,8 @@ _OTHER_TABLES: list[tuple[str, str]] = [
     ("finops.connectors.terraform_estimate", "_OPENSEARCH_HOURLY"),
     ("finops.connectors.terraform_estimate", "_MSK_BROKER_HOURLY"),
     ("finops.connectors.terraform_estimate", "_REDSHIFT_HOURLY"),
+    ("finops.connectors.aws_services.documentdb", "_INSTANCE_HOURLY_USD"),
+    ("finops.connectors.aws_services.kendra", "_EDITION_MONTHLY_USD"),
 ]
 
 

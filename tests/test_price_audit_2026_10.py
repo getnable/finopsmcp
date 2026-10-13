@@ -186,6 +186,30 @@ def test_pr_estimator_prices_per_node_services_by_type(monkeypatch):
     assert got["ng"].monthly_usd == 0 and got["ng"].confidence == "low"
 
 
+# ── DocumentDB and Kendra ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("cls,was,now", [
+    # AmazonDocDB offer 20260911124422, InstanceUsage:<class>, standard storage.
+    ("db.t3.medium", 0.076, 0.078),        # H2KGW7B35EBSGXNN
+    ("db.r6g.large", 0.249, 0.26315),      # 772AQPZNUUFB9TKD
+    ("db.r6g.16xlarge", 7.973, 8.41928),   # N8D5QCNAFXE798U4
+    ("db.r5.2xlarge", 1.109, 1.108),       # XSBQ4TEXP5ZUXUUK
+    ("db.r5.24xlarge", 13.308, 13.296),    # YSBXKJMAJKG7E6QA
+])
+def test_documentdb_rows_are_the_listed_rates(cls, was, now):
+    from finops.connectors.aws_services.documentdb import _INSTANCE_HOURLY_USD
+
+    assert _INSTANCE_HOURLY_USD[cls] == now != was
+
+
+def test_kendra_editions_are_list_hours_times_730():
+    from finops.connectors.aws_services.kendra import _EDITION_MONTHLY_USD
+
+    # AmazonKendra offer 20260911124443: Developer NSTMQK2AFGH9HENZ $1.125/hr,
+    # Enterprise 6ENMMB4KRPAZVYZ2 $1.40/hr. The table held $810 and $1,400.
+    assert _EDITION_MONTHLY_USD == {"DEVELOPER_EDITION": 821.25, "ENTERPRISE_EDITION": 1022.0}
+
+
 _PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / "prices.ts"
 
 
