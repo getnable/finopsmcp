@@ -67,3 +67,45 @@ def test_budget_status_for_a_name_that_matches_nothing_says_so(db):
     assert "on track" not in out.get("alert", ""), out
     assert "platform" in out["error"]
     assert out["budgets_available"] == ["data"]
+
+
+# ── slice_costs: total_shown is what the shown rows add up to ─────────────────
+
+def _focus(service: str, cost: float):
+    from datetime import UTC, datetime
+
+    from finops.focus.schema import FocusRecord
+    dt = datetime(2026, 9, 20, tzinfo=UTC)
+    return FocusRecord(
+        BilledCost=cost, EffectiveCost=cost, ListCost=cost,
+        ResourceId="r", ResourceName=None, ResourceType="Instance",
+        ServiceName=service, ServiceCategory="Compute",
+        ProviderName="AWS", PublisherName="AWS",
+        RegionId="us-east-1", RegionName="us-east-1",
+        BillingPeriodStart=dt, BillingPeriodEnd=dt,
+        ChargePeriodStart=dt, ChargePeriodEnd=dt,
+        ChargeCategory="Usage", ChargeDescription=None,
+        CommitmentDiscountId=None, CommitmentDiscountType=None,
+        Tags={}, SubAccountId="1", SubAccountName=None,
+    )
+
+
+@pytest.mark.parametrize(("args", "shown"), [
+    ({}, 1280.0),                                              # one KPI row
+    ({"dimensions": ["ServiceName"]}, 1280.0),                 # every row shown
+    ({"dimensions": ["ServiceName"], "limit": 1}, 1200.0),     # top row only
+])
+def test_slice_total_shown_is_the_sum_of_the_rows_shown(monkeypatch, args, shown):
+    """slice_costs() answered rows=[{"metric": 1280.0}], total 1280.0 and
+    total_shown 0.0: the FOCUS engine summed a key the rows do not have."""
+    from finops import server
+
+    async def _records(sd, ed, provider=None):
+        return [_focus("Amazon EC2", 1200.0), _focus("Amazon S3", 80.0)], {}, ["aws"]
+
+    monkeypatch.setattr(server, "_fetch_focus_records", _records)
+    out = _call("slice_costs", args)["result"]
+
+    assert out["total"] == pytest.approx(1280.0)
+    assert out["total_shown"] == pytest.approx(shown)
+    assert out["total_shown"] == pytest.approx(sum(r["metric"] for r in out["rows"]))
