@@ -5,9 +5,10 @@ or [getnable.com/docs](https://getnable.com/docs) for the quickstart.
 
 ## Guides
 
-- [SLACK.md](SLACK.md) — the conversational Slack bot: ask about spend, run RCA, draft fixes
+- [SLACK.md](SLACK.md): Slack alerts and reports from this package; the two-way bot is hosted nable
 - [RECOMMENDATIONS.md](RECOMMENDATIONS.md) — how the savings and rightsizing engine works
 - [DEPLOY.md](DEPLOY.md) — running nable in shared / team mode
+- [RELEASING.md](RELEASING.md): cutting a release, in order; what each workflow publishes; how to verify
 
 ## Reference artifacts
 
