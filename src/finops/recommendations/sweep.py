@@ -54,7 +54,8 @@ class SweepResult:
     """What every caller gets: findings, and an honest account of what failed."""
 
     findings: list[dict] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)      # scanners that returned nothing
+    # Scanners that raised, and scanners that returned but left a region unread.
+    errors: list[str] = field(default_factory=list)
     learned_note: str | None = None
     timed_out: bool = False
 
@@ -359,6 +360,11 @@ async def sweep(
         if data is None:
             out.errors.append(name)
             continue
+        # A scanner that returned but could not read every region (the idle scan
+        # drops a region that raised) is partial; say which, beside the total.
+        not_read = getattr(data, "regions_not_read", None)
+        if not_read:
+            out.errors.append(f"{name} (could not read {', '.join(sorted(not_read))})")
         for f in normalise(name, data):
             f["source"] = SOURCE_MAP.get(name, name)
             out.findings.append(f)

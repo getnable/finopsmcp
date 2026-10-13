@@ -109,6 +109,9 @@ class NotionConnector:
             f"Total estimated saving: ${monthly:,.2f}/mo  "
             f"${annual:,.2f}/yr"
         )
+        if report.get("partial_note"):
+            # Said where the total is, not only in the chat reply.
+            callout_text += f"\n{report['partial_note']}"
 
         blocks: list[dict[str, Any]] = []
 

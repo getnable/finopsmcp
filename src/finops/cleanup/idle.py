@@ -380,6 +380,19 @@ def _scan_idle_load_balancers(
 
 # ─── public entry point ───────────────────────────────────────────────────────
 
+class IdleScan(list):
+    """The resources found, plus the regions that could not be read.
+
+    A list, so every caller that iterates keeps working. `regions_not_read`
+    maps a region to the error code that stopped it: a region that raised used
+    to be logged and dropped, and the total read as if it had been scanned.
+    """
+
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.regions_not_read: dict[str, str] = {}
+
+
 def scan_idle_resources(
     resource_types: list[str] | None = None,
     regions: list[str] | None = None,
@@ -417,7 +430,7 @@ def scan_idle_resources(
     except Exception:
         account_id = "unknown"
 
-    results: list[IdleResource] = []
+    results = IdleScan()
 
     def _scan_region(region: str) -> list[IdleResource]:
         out: list[IdleResource] = []
@@ -442,6 +455,12 @@ def scan_idle_resources(
 
         except Exception as e:
             log.warning("Idle resource scan failed in region %s: %s", region, e)
+            # The code, never the message (messages carry ARNs and account ids).
+            code = ""
+            resp = getattr(e, "response", None)
+            if isinstance(resp, dict):
+                code = (resp.get("Error") or {}).get("Code", "")
+            results.regions_not_read[region] = code or type(e).__name__
         return out
 
     # Each region runs several independent blocking boto3 calls. Scan regions
@@ -458,7 +477,12 @@ def scan_idle_resources(
 
 
 def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
-    total_monthly = sum(r.monthly_cost_usd for r in resources)
+    # The waste total is what nable would propose acting on. A protected
+    # resource (env=prod, protected=true, ...) is listed and never acted on, so
+    # its cost is reported beside the total, not in it: the cost sweep already
+    # skips it, and the two totals used to disagree by exactly this amount.
+    total_monthly = sum(r.monthly_cost_usd for r in resources if not r.protected)
+    protected_monthly = sum(r.monthly_cost_usd for r in resources if r.protected)
     by_type: dict[str, int] = {}
     for r in resources:
         by_type[r.resource_type] = by_type.get(r.resource_type, 0) + 1
@@ -487,6 +511,7 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
         "total_resources_found": len(resources),
         "total_monthly_waste_usd": round(total_monthly, 2),
         "total_annual_waste_usd": round(total_monthly * 12, 2),
+        "protected_monthly_usd": round(protected_monthly, 2),
         "by_type": by_type,
         "resources": kept,
         "scope": (
@@ -497,6 +522,14 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
             "run_full_cost_audit for the full sweep)."
         ),
     }
+    not_read = dict(getattr(resources, "regions_not_read", None) or {})
+    if not_read:
+        out["partial"] = True
+        out["regions_not_read"] = not_read
+        out["partial_note"] = (
+            f"{len(not_read)} region(s) could not be read ({', '.join(sorted(not_read))}), so "
+            "the total covers only the rest. Their idle resources, if any, are missing "
+            "from it: this is not a finding that they have none.")
     unpriced = sum(1 for r in resources if (r.metadata or {}).get("unpriced"))
     if unpriced:
         out["unpriced_count"] = unpriced

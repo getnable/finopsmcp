@@ -73,6 +73,36 @@ def test_a_partial_read_with_nothing_found_says_it_was_partial(monkeypatch):
     assert "spot" in out and "could not run" in out, out
 
 
+def test_an_idle_scan_with_unread_regions_is_named_beside_the_total(monkeypatch, tmp_path):
+    """The idle scanner returns what it read and drops a region that raised. The
+    sweep counted that as a full read, so the audit total and both exports said
+    nothing about the region that was never scanned."""
+    from finops.cleanup.idle import IdleResource, IdleScan
+    from finops.tools import notifications as nt
+
+    def _partial(**kw):
+        found = IdleScan([IdleResource(
+            resource_type="ebs_volume", resource_id="vol-1", region="us-east-1",
+            account_id="1", name="", idle_since="2026-01-01", idle_days=90,
+            monthly_cost_usd=40.0, reason="Unattached gp3 volume")])
+        found.regions_not_read["eu-west-1"] = "UnauthorizedOperation"
+        return found
+
+    _audit_env(monkeypatch)
+    monkeypatch.setattr(sweep_mod, "build_specs", lambda aws, regions: [
+        ("idle_resources", _partial, {})])
+    out = asyncio.run(server.run_full_cost_audit())
+    assert "$40.00" in out and "eu-west-1" in out, out
+
+    monkeypatch.setattr(server.CLOUD_CONNECTORS.get("aws"), "_account_id",
+                        lambda: "123456789012")
+    dest = tmp_path / "report.csv"
+    monkeypatch.setattr(nt._srv, "_resolve_safe_path", lambda p: str(p))
+    msg = asyncio.run(server.export_cost_report_csv(output_path=str(dest)))
+    assert "eu-west-1" in msg, msg
+    assert "eu-west-1" in dest.read_text(), dest.read_text()
+
+
 def test_a_full_read_with_nothing_found_still_reads_as_clean(monkeypatch):
     _audit_env(monkeypatch)
     monkeypatch.setattr(sweep_mod, "build_specs", lambda aws, regions: [

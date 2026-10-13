@@ -1965,7 +1965,10 @@ async def run_full_cost_audit(
     lines.append("- `tell me more about #1`, deep dive on the top opportunity")
 
     if errors:
-        lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
+        # These raised or left a region unread, so their findings are missing
+        # from the total above; "no data" read as if they had found nothing.
+        lines.append(f"\n*Scanners that could not run or read everything, so the total "
+                     f"above is missing whatever they would have found: {', '.join(errors)}*")
 
     body = "\n".join(lines)
     # Make the token cost visible against the savings found. Under our pricing,
