@@ -3811,7 +3811,15 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
-    sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p = sub.add_parser("doctor", help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p.add_argument("--json", dest="doctor_json", action="store_true",
+                          help="One JSON list of checks on stdout; exit 1 when any check failed")
+    doctor_p.add_argument("--audit", dest="doctor_audit", action="store_true",
+                          help="Print vault audit log entries instead of running health checks")
+    doctor_p.add_argument("--hours", dest="doctor_hours", type=int, default=24,
+                          help="With --audit: hours of audit log to show (default: 24)")
+    doctor_p.add_argument("--limit", dest="doctor_limit", type=int, default=50,
+                          help="With --audit: max entries to show (default: 50)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
@@ -4225,10 +4233,14 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
-        # Pass empty args: doctor.main() defaults to parsing sys.argv, which still
-        # contains the consumed "doctor" token and would error. For flags
-        # (--json/--audit), use the standalone `finops-doctor` command.
-        _doctor_main([])
+        # Explicit args: doctor.main() defaults to parsing sys.argv, which still
+        # contains the consumed "doctor" token and would error. The flags are
+        # parsed here, so `nable doctor --json` works the way `finops-doctor
+        # --json` always did (a pipeline has no other way to read the checks).
+        _dargs = ["--hours", str(parsed.doctor_hours), "--limit", str(parsed.doctor_limit)]
+        _dargs += ["--json"] if parsed.doctor_json else []
+        _dargs += ["--audit"] if parsed.doctor_audit else []
+        _doctor_main(_dargs)
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
