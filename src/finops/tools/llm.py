@@ -58,8 +58,10 @@ async def get_llm_costs(
     end_date: str | None = None,
 ) -> dict:
     """
-    Aggregate AI/LLM spend across all configured providers, OpenAI, Anthropic,
-    AWS Bedrock, Azure OpenAI, and Vertex AI.
+    Aggregate AI/LLM spend across all configured providers: OpenAI, Anthropic,
+    AWS Bedrock, Vertex AI, OpenRouter and a LiteLLM proxy. Azure OpenAI is not
+    read. A LiteLLM proxy's spend is listed under gateway_overlap, not added to
+    total_usd, when a provider it forwards to is also read.
 
     Shows total spend, breakdown by provider, breakdown by model, daily trend,
     and model-switching recommendations to reduce costs.

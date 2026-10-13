@@ -1,13 +1,15 @@
 """
 LLM cost aggregator — normalizes spend across all AI providers.
 
-Sources:
-  - OpenAI (GPT-4o, o3, embeddings, DALL-E, Whisper)
-  - Anthropic (Claude 3.x / 3.5 / 3.7)
+Sources get_all_llm_costs reads:
+  - OpenAI (organization costs and usage APIs)
+  - Anthropic (cost and usage reports)
   - AWS Bedrock (Claude, Llama, Titan, Mistral, Nova via Cost Explorer)
-  - Azure OpenAI (via Azure Cost Management)
   - Google Vertex AI (via Cloud Billing)
-  - Together AI, Cohere, Mistral AI (via API usage endpoints)
+  - OpenRouter, and a LiteLLM proxy's spend logs (a gateway: not added to
+    the total when a provider it forwards to is read too)
+
+Azure OpenAI, Together AI, Cohere and Mistral AI are not read here.
 
 All costs normalised to USD. Token counts normalised to per-1M-token rates
 for cross-model efficiency comparison.
@@ -391,6 +393,17 @@ def get_all_llm_costs(
             else:
                 failed[name] = reason
 
+    # A LiteLLM proxy logs, and prices, the calls it forwards with the user's
+    # own provider keys, and those providers bill the same calls. Adding both
+    # counted every proxied dollar twice: $40 of Claude calls read $80 in
+    # total_usd and in by_model. When a billing provider was read, the gateway
+    # is reported beside the total, not in it. Calls it routes to a provider
+    # not connected here are then missing from the total, and the note says so.
+    gateway_overlap: dict[str, dict] = {}
+    if set(results) & _GATEWAYS and set(results) - _GATEWAYS:
+        for g in sorted(set(results) & _GATEWAYS):
+            gateway_overlap[g] = results.pop(g)
+
     # Aggregate
     total = 0.0
     by_provider: dict[str, float] = {}
@@ -453,6 +466,14 @@ def get_all_llm_costs(
         # so MCP tool responses do not carry the duplicated per-provider payloads.
         "provider_results": results,
     }
+    if gateway_overlap:
+        _out["gateway_overlap"] = {g: round(d.get("total_usd", 0.0) or 0.0, 4)
+                                   for g, d in gateway_overlap.items()}
+        _out["gateway_overlap_note"] = (
+            f"{', '.join(gateway_overlap)} is a gateway: it logs calls that "
+            f"{', '.join(sorted(results))} bill, so its figure is listed here and not "
+            f"added to total_usd, which would count the same call twice. Calls it sends "
+            f"to a provider not connected here are not in total_usd.")
     if failed or unpriced:
         _out["partial"] = True
     if failed:
@@ -496,6 +517,9 @@ _LLM_FOCUS_NAMES = {
     "litellm": "LiteLLM",
 }
 
+
+# Sources that observe calls another provider bills (see get_all_llm_costs).
+_GATEWAYS = frozenset({"litellm"})
 
 # Bedrock and Vertex spend already appears in the AWS/GCP FOCUS exports (Cost
 # Explorer / BigQuery billing). Exclude them when merging into the unified FOCUS

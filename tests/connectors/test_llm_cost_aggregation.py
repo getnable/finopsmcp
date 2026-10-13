@@ -80,6 +80,33 @@ def test_a_fetcher_exception_is_listed_not_dropped(monkeypatch):
     assert out["partial"] is True
 
 
+def test_a_gateway_is_not_added_to_the_providers_it_proxies(monkeypatch, _providers):
+    """A LiteLLM proxy logs, and prices, the calls it forwards to Anthropic,
+    and Anthropic bills those same calls. With both connected, total_usd was
+    $80 for $40 of calls, and claude-sonnet-4-5 read $80 in by_model."""
+    _providers["openai"] = False
+    _providers["litellm"] = True
+    monkeypatch.setattr(litellm, "get_costs", lambda s, e: _ok(40.0, "claude-sonnet-4-5"))
+    out = llm_costs.get_all_llm_costs(START, END, exclude_cloud_native=True,
+                                      include_provider_results=True)
+    assert out["total_usd"] == 40.0
+    assert out["by_model"] == {"claude-sonnet-4-5": 40.0}
+    assert "litellm" not in out["by_provider"]
+    assert "litellm" not in out["provider_results"]
+    assert out["gateway_overlap"] == {"litellm": 40.0}
+    assert "twice" in out["gateway_overlap_note"]
+
+
+def test_a_gateway_alone_is_the_total(monkeypatch, _providers):
+    _providers["openai"] = _providers["anthropic"] = False
+    _providers["litellm"] = True
+    monkeypatch.setattr(litellm, "get_costs", lambda s, e: _ok(40.0, "claude-sonnet-4-5"))
+    out = _run()
+    assert out["total_usd"] == 40.0
+    assert out["by_provider"] == {"litellm": 40.0}
+    assert "gateway_overlap" not in out
+
+
 def test_every_provider_failing_is_an_error(monkeypatch, _providers):
     _providers["anthropic"] = False
     monkeypatch.setattr(openai_usage, "get_costs",
