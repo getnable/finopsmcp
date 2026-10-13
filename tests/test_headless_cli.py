@@ -51,6 +51,21 @@ def test_nable_doctor_json_is_one_document_on_stdout(tmp_path):
     assert r.returncode == (1 if any(c["ok"] is False for c in checks) else 0)
 
 
+# ── guard check ───────────────────────────────────────────────────────────────
+
+def test_guard_check_json_is_the_verdict(tmp_path):
+    """`guard check --json` printed the human verdict line: the flag was
+    accepted and ignored, so a pipeline vetting a command had to scrape text."""
+    r = nable(tmp_path, "guard", "check", "--json", "--command", "terraform destroy")
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    assert doc["command"] == "terraform destroy"
+    assert doc["decision"] == "ask" and doc["reason"]
+    r = nable(tmp_path, "guard", "check", "--json", "--command", "ls -la")
+    doc = json.loads(r.stdout)
+    assert doc["decision"] == "allow" and doc["infra"] is False
+
+
 # ── brief --deliver (the report a cron job sends) ─────────────────────────────
 
 def _brief(tmp_path, channels: str | None):

@@ -2662,6 +2662,18 @@ def _run_guard(parsed) -> None:
                   file=sys.stderr)
             raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
+        if getattr(parsed, "guard_json", False):
+            # The verdict as data, for a pipeline vetting a command. "allow" is
+            # the guard having no opinion; infra says whether it classified it.
+            hit = guard.classify_command(cmd) if verdict is None else None
+            doc = ({"command": cmd, **verdict} if verdict is not None else
+                   {"command": cmd, "decision": "allow", "infra": hit is not None,
+                    "action_type": hit[1] if hit else None,
+                    "reason": ("reversible and in policy: the guard stays silent" if hit
+                               else "not an infra-mutating command: the guard stays silent")})
+            doc.setdefault("infra", True)
+            print(json.dumps(doc, indent=2, default=str))
+            return
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
@@ -3853,8 +3865,8 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
-                              "print JSON")
+                         help="With 'check', 'report', 'verify-log', 'doctor' or "
+                              "'reconcile': print JSON")
     guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
                          help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
     guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
