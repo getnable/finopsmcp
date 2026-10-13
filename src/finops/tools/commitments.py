@@ -578,8 +578,10 @@ def recommend_spot_adoption(
 async def recommend_database_savings_plans() -> dict:
     """
     Recommends AWS Database Savings Plans for RDS and Aurora spend. Database
-    SPs (re:Invent 2025) offer up to 45% savings, separate from Compute SPs.
-    Sizes a 1-year no-upfront plan to uncovered baseline spend.
+    SPs (re:Invent 2025), separate from Compute SPs, take 20% off provisioned
+    instance hours on the newer families (m7, m8, r7, r8 and similar) and come
+    only as 1-year no-upfront. Sizes one to the uncovered spend on those
+    families; older families are reported, not sized.
 
     Examples:
         - "Should we buy Database Savings Plans?"

@@ -209,3 +209,80 @@ def test_the_commitment_gap_ticket_uses_the_same_rate():
     # 10,000 a month uncovered, all of it covered at 27.1%: 2,710 a month.
     assert "saves $32,520/yr" in title
     assert "no break-even period" not in body
+
+
+# ── a Database Savings Plan covers what AWS sells it for ────────────────────
+#
+# AWS Price List, AWSDatabaseSavingsPlans us-east-1 version 20261007173435,
+# matched to the AmazonRDS us-east-1 on-demand offer by usage type and
+# operation: every RDS rate is 1 year No Upfront (no other term or payment is
+# offered), and every provisioned-instance rate is exactly 20.0% below
+# on-demand (570 MySQL, PostgreSQL and MariaDB rows; 35% appears only on
+# Aurora serverless capacity). The instance families with a rate at all are
+# m7g, m7i, m8a, m8g, m8gd, m8i, m9g, r7g, r7i, r8a, r8g, r8gd, r8i and x2m;
+# eu-west-1 and ap-southeast-2 list the same families or fewer. db.t3, db.t4g,
+# db.m5, db.m6g, db.m6i, db.r5, db.r6g and db.r6i have no rate: a plan bought
+# for them goes unused.
+
+def _dbsp(monkeypatch, groups: dict[str, float], coverage_pct: float) -> dict:
+    from unittest.mock import MagicMock
+
+    from finops.recommendations import database_savings_plans as dbsp
+
+    ce = MagicMock()
+    ce.get_cost_and_usage.return_value = {"ResultsByTime": [{"Groups": [
+        {"Keys": [k], "Metrics": {"UnblendedCost": {"Amount": str(v)}}}
+        for k, v in groups.items()]}]}
+    covered = 10_000.0 * coverage_pct / 100
+    ce.get_savings_plans_coverage.return_value = {"SavingsPlansCoverages": [{
+        "Coverage": {"SpendCoveredBySavingsPlans": str(covered), "TotalCost": "10000.0"}}]}
+    boto = MagicMock()
+    boto.client.return_value = ce
+    monkeypatch.setattr(dbsp, "boto3", boto)
+    return dbsp.recommend_database_savings_plans()
+
+
+def test_the_database_savings_plan_rate_is_20_percent():
+    from finops.recommendations.database_savings_plans import (
+        DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT,
+    )
+
+    assert DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.20
+
+
+def test_a_database_savings_plan_is_not_sized_on_families_it_cannot_cover(monkeypatch):
+    """6,000 a month on db.r5 and 4,000 on db.r7g, nothing covered. The plan
+    can only apply to the 4,000: it used to be sized to all 10,000 at 30%,
+    a 9.59/hr commitment promising 3,000 a month, of which 6,000 of on-demand
+    a month has no Database SP rate to land on."""
+    out = _dbsp(monkeypatch, {
+        "InstanceUsage:db.r5.large": 4000.0,
+        "Multi-AZUsage:db.r5.xlarge": 2000.0,
+        "InstanceUsage:db.r7g.large": 3000.0,
+        "Multi-AZUsage:db.r7g.large": 1000.0,
+        "RDS:GP3-Storage": 900.0,
+    }, coverage_pct=0.0)
+    assert out["current_monthly_rds_spend"] == 10000.0
+    assert out["ineligible_monthly_spend"] == 6000.0
+    assert out["uncovered_monthly_spend"] == 4000.0
+    assert out["estimated_monthly_savings"] == 800.0
+    assert out["recommended_sp_hourly_commitment"] == round(4000.0 * 0.8 / 730, 4)
+
+
+def test_an_all_older_generation_fleet_gets_no_database_savings_plan(monkeypatch):
+    out = _dbsp(monkeypatch, {"InstanceUsage:db.m5.large": 5000.0,
+                              "InstanceUsage:db.t3.medium": 500.0}, coverage_pct=0.0)
+    assert out["estimated_monthly_savings"] == 0.0
+    assert out["recommended_sp_hourly_commitment"] == 0.0
+    assert out["finding"] is None
+
+
+def test_database_savings_plan_text_claims_only_what_is_offered():
+    import finops.server as server
+    from finops.recommendations import database_savings_plans as dbsp
+    from finops.recommendations.sweep import normalise
+
+    assert "45%" not in (dbsp.__doc__ or "")
+    assert "45%" not in (server.recommend_database_savings_plans.__doc__ or "")
+    [f] = normalise("db_sp", {"estimated_monthly_savings": 800.0})
+    assert "35%" not in f["detail"]

@@ -212,7 +212,7 @@ def normalise(name, data) -> list[dict]:
         elif name == "db_sp":
             s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
             if s > 0:
-                out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments", "detail": f"Up to 35% off, ${s:.2f}/mo saving"})
+                out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments", "detail": f"20% off eligible instance hours, ${s:.2f}/mo saving"})
         elif name == "textract":
             waste = data.get("estimated_monthly_waste", 0) if isinstance(data, dict) else 0
             callers = data.get("non_prod_callers", []) if isinstance(data, dict) else []
