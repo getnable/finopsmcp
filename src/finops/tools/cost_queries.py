@@ -247,6 +247,7 @@ async def get_costs_by_service(
 
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
+    read_status: dict[str, dict] = {}
 
     async def _one_svc(name: str, connector: _srv.Any):
         try:
@@ -255,6 +256,7 @@ async def get_costs_by_service(
             return name, None, str(exc)
 
     for name, summary, err in await _srv.asyncio.gather(*[_one_svc(n, c) for n, c in targets.items()]):
+        read_status[name] = _read_status(summary, err)
         if err is not None:
             errors[name] = err
             continue
@@ -280,10 +282,13 @@ async def get_costs_by_service(
 
     # Same rule as get_cost_summary: an errored provider adds 0, so "every
     # provider failed" used to come back as total_usd 0 with the reason under
-    # "errors", which reads as "spent nothing on this".
+    # "errors", which reads as "spent nothing on this". A provider that was read
+    # and sent back no rows is the same story, and get_cost_summary refuses it
+    # too: two tools must not give two answers about one bill.
     ok = [n for n in targets if n not in errors]
-    if errors and not ok:
-        return _no_cost_data(errors)
+    refusal = _unread_costs(targets, read_status)
+    if refusal is not None:
+        return refusal
 
     total_usd = round(sum(s["total_usd"] for s in ranked), 4)
     kept, omitted = _srv.fit_to_budget(ranked)
@@ -298,6 +303,7 @@ async def get_costs_by_service(
     if omitted:
         result["services_truncated"] = True
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
+    result.update(_no_rows_flags(read_status))
     if errors:
         result["errors"] = errors
         result.update(_partial(ok, errors))
@@ -329,6 +335,9 @@ async def get_top_cost_drivers(
         - "Top 5 most expensive things in AWS"
         - "Top cost drivers in the staging account"
     """
+    if limit < 1:
+        return {"error": f"limit must be 1 or more (got {limit}).",
+                "hint": "Pass the number of services to return, e.g. limit=10."}
     result = await _srv.get_costs_by_service(
         service_filter=None,
         provider=provider,
@@ -345,12 +354,20 @@ async def get_top_cost_drivers(
     for svc in top:
         svc["pct_of_total"] = round(svc["total_usd"] / grand * 100, 1) if grand else 0
 
-    return {
+    out = {
         "period": result["period"],
         "top_services": top,
         "grand_total_usd": grand,
         "grand_total_formatted": _srv._fmt_usd(grand),
     }
+    # The labels get_costs_by_service put on this total travel with it. Dropping
+    # them turned a partial read into a total with nothing saying a provider was
+    # missing from it.
+    for key in ("account", "partial", "failed_providers", "partial_warning", "errors",
+                "providers_with_no_rows", "no_rows_note", "services_truncated", "hint"):
+        if key in result:
+            out[key] = result[key]
+    return out
 
 
 @_srv.mcp.tool()
@@ -561,6 +578,14 @@ async def get_total_spend_all_sources(
         return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     grand_total, by_provider, grand_by_service = await _srv._gather_costs(targets, sd, ed)
+    # A total is only a total if something was read: the same refusal and the
+    # same partial label as get_cost_summary, so the two never disagree.
+    refusal = _unread_costs(targets, by_provider)
+    if refusal is not None:
+        return refusal
+    failed = {n: p.get("error") for n, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [n for n in by_provider if n not in failed]
     # Cross-provider tool: top_services already carries the ranked drivers, so cap the
     # per-provider service detail to keep the payload flat as providers scale.
     by_provider = _srv._cap_provider_service_detail(by_provider)
@@ -576,7 +601,7 @@ async def get_total_spend_all_sources(
         if p in by_provider and "total_usd" in by_provider[p]
     )
 
-    return {
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
@@ -592,6 +617,10 @@ async def get_total_spend_all_sources(
             for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])[:10]
         ],
     }
+    result.update(_no_rows_flags(by_provider))
+    if failed:
+        result.update(_partial(ok, failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -2433,6 +2462,19 @@ def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
             out["failed_providers"] = failed
         return out
     return None
+
+
+def _read_status(summary, err: str | None) -> dict:
+    """One provider's read in the by_provider shape _unread_costs and
+    _no_rows_flags take: its error, or that it came back with no cost rows.
+    For tools that hold CostSummary objects rather than the dicts
+    _gather_costs builds."""
+    if err is not None:
+        return {"error": err}
+    from ..connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        return {"no_rows": True, "no_rows_note": no_rows_message(summary.provider)}
+    return {}
 
 
 def _no_rows_flags(by_provider: dict) -> dict:

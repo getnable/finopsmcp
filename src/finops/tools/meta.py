@@ -410,8 +410,11 @@ async def compare_providers(
     if not targets:
         return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
+    from .cost_queries import _no_rows_flags, _partial, _read_status, _unread_costs
+
     provider_totals: list[dict] = []
     grand_total = 0.0
+    read_status: dict[str, dict] = {}
 
     async def _one_total(name: str, connector: _srv.Any):
         try:
@@ -420,6 +423,7 @@ async def compare_providers(
             return name, None, str(exc)
 
     for name, summary, err in await _srv.asyncio.gather(*[_one_total(n, c) for n, c in targets.items()]):
+        read_status[name] = _read_status(summary, err)
         if err is not None:
             provider_totals.append({"provider": name, "error": err})
             continue
@@ -441,12 +445,23 @@ async def compare_providers(
 
     provider_totals.sort(key=lambda x: -x.get("total_usd", 0))
 
-    return {
+    # The comparison is only as good as what was read: no total when nothing
+    # was, a partial label when some provider failed. Same rule and wording as
+    # get_cost_summary.
+    refusal = _unread_costs(targets, read_status)
+    if refusal is not None:
+        return refusal
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "providers": provider_totals,
     }
+    result.update(_no_rows_flags(read_status))
+    failed = {n: s["error"] for n, s in read_status.items() if s.get("error")}
+    if failed:
+        result.update(_partial([n for n in read_status if n not in failed], failed))
+    return result
 
 
 @_srv.mcp.tool()
