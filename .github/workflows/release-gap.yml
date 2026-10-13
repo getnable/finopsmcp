@@ -1,0 +1,49 @@
+name: Release gap (main vs PyPI)
+
+# Reports when the version main carries is not on PyPI.
+#
+# Claude Code installs the nable plugin from this repository's default branch,
+# so the plugin's finops-mcp==X pin reaches users when a bump is merged, not
+# when it is tagged. If X is not on PyPI the plugin's MCP server cannot start
+# and its guard hook checks nothing (it ends in `; exit 0`, so it fails open).
+# Measured 2026-10-13: main pinned 0.10.0 while PyPI's newest was 0.8.216.
+#
+# Deliberately NOT on push or pull_request: a merge is ahead of its tag for a
+# few minutes on every release, and this must not turn main red for that. It
+# fails only when a bump has gone untagged for longer than the grace period.
+# It never publishes or tags anything; docs/RELEASING.md is the process.
+on:
+  schedule:
+    - cron: "41 7 * * *"   # daily, 07:41 UTC
+  workflow_dispatch:
+    inputs:
+      grace_days:
+        description: "Days an unreleased bump may sit before this fails"
+        required: false
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: main's version is on PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # The bump's age comes from `git log -S` and the tag from `git tag`:
+          # both need the full history and the tags.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Compare main's version with PyPI
+        # The input goes through env, never ${{ }} inside the script.
+        env:
+          GRACE_DAYS: ${{ inputs.grace_days || '2' }}
+        run: python scripts/check_release.py --grace-days "$GRACE_DAYS"
