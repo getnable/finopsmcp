@@ -535,6 +535,12 @@ def _value_moment_body(demo: bool = False) -> bool:
     _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
+    if summary.get("partial"):
+        # The first number nable shows must not pass for the whole bill when a
+        # provider could not be read: get_cost_summary says so, and so does this.
+        missing = ", ".join(sorted(summary.get("failed_providers") or {})) or "a provider"
+        _line(dim(f"                   partial: {missing} could not be read, so real "
+                  "spend is higher"))
     _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
     if ai_share >= 5:
         _line(f"  {dim('AI / ML share')}    {bold(str(ai_share) + '%')}  {dim('of your cloud bill')}")
@@ -566,7 +572,10 @@ def _value_moment_body(demo: bool = False) -> bool:
         if isinstance(idle, dict):
             waste = idle.get("total_monthly_waste_usd") or 0
             if waste and waste >= 1:
-                _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
+                not_read = sorted(idle.get("regions_not_read") or {})
+                note = (f"doing nothing; partial, {', '.join(not_read)} not read"
+                        if idle.get("partial") else "doing nothing")
+                _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim(note)}")
         # Realizable AI savings (e.g. prompt caching). Only the addressable figure,
         # never the labeled routing ceiling, so onboarding never overpromises.
         if isinstance(ai_plan, dict) and not ai_plan.get("error"):
@@ -594,7 +603,9 @@ def _suggest_questions(by_svc: dict, total: float, ai_share: int) -> list[str]:
     top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
     if top:
         name, val = top[0]
-        qs.append(f"Why is {name} ${val:,.0f} this month, and what would cut it?")
+        # The figure is the last 30 days (get_cost_summary's default window), so
+        # the question names that window; "this month" asks about another number.
+        qs.append(f"Why is {name} ${val:,.0f} over the last 30 days, and what would cut it?")
     if ai_share >= 20:
         qs.append("Could cheaper models handle part of our AI workload?")
     elif any("textract" in k.lower() or "bedrock" in k.lower() for k in by_svc):
