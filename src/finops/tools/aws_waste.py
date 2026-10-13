@@ -956,9 +956,12 @@ async def list_idle_resources(
         - "List any unattached EBS volumes older than 90 days"
         - "What stopped EC2 instances are we still paying for?"
     Args:
-        resource_types: Subset to scan, e.g. ["ebs", "eip", "nat"]. All types when omitted.
+        resource_types: Subset to scan, e.g. ["ebs", "eip", "snapshot", "stopped", "lb"].
+            All types when omitted. NAT gateways and RDS are not in this scan.
         regions: AWS regions to scan. Defaults to all enabled regions.
-        min_idle_days: Only report resources idle at least this many days.
+        min_idle_days: Only report resources idle at least this many days. For a
+            stopped instance that is time since it stopped; for the rest it is the
+            resource's age, since AWS does not report when it went idle.
 
     """
     try:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -23,10 +24,59 @@ log = logging.getLogger(__name__)
 # Monthly cost estimates (us-east-1 on-demand), single-sourced in aws_prices.
 # _ALB_PER_MONTH is re-exported so analyzers/waste.py and this module cannot
 # hold two different prices for one load balancer, which they did.
-from ..aws_prices import ALB_PER_MONTH as _ALB_PER_MONTH
+from ..aws_prices import ALB_PER_MONTH as _ALB_PER_MONTH  # noqa: F401  (re-exported)
 from ..aws_prices import EBS_SNAPSHOT_PER_GB_MONTH as _SNAPSHOT_PER_GB_MONTH
+from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH as _EIP_PER_MONTH
-from ..aws_prices import ebs_volume_monthly
+from ..aws_prices import ebs_volume_monthly, lb_hourly
+
+RESOURCE_TYPES = ("ebs_volume", "elastic_ip", "snapshot", "stopped_ec2", "load_balancer")
+
+# The names list_idle_resources documents ("ebs", "eip") and the obvious
+# plurals. They used to be intersected with RESOURCE_TYPES, matched nothing,
+# and the scan ran no detector and reported $0 of waste.
+_TYPE_ALIASES = {
+    "ebs": "ebs_volume", "volume": "ebs_volume", "volumes": "ebs_volume",
+    "ebs_volumes": "ebs_volume",
+    "eip": "elastic_ip", "eips": "elastic_ip", "elastic_ips": "elastic_ip",
+    "snapshots": "snapshot", "ebs_snapshot": "snapshot", "ebs_snapshots": "snapshot",
+    "stopped": "stopped_ec2", "ec2": "stopped_ec2", "stopped_instances": "stopped_ec2",
+    "lb": "load_balancer", "elb": "load_balancer", "alb": "load_balancer",
+    "nlb": "load_balancer", "load_balancers": "load_balancer",
+}
+
+
+def normalize_resource_types(resource_types: list[str] | None) -> set[str]:
+    """The detector names for what a caller asked for. A name this scanner has
+    no detector for (NAT gateways, RDS) raises, so it is never an empty scan
+    reported as no waste."""
+    if not resource_types:
+        return set(RESOURCE_TYPES)
+    out: set[str] = set()
+    unknown: list[str] = []
+    for raw in resource_types:
+        key = str(raw).strip().lower().replace("-", "_").replace(" ", "_")
+        name = key if key in RESOURCE_TYPES else _TYPE_ALIASES.get(key)
+        if name is None:
+            unknown.append(str(raw))
+        else:
+            out.add(name)
+    if unknown:
+        raise ValueError(
+            f"No idle detector for {', '.join(unknown)}. This scan covers "
+            f"{', '.join(RESOURCE_TYPES)}.")
+    return out
+
+
+# What idle_days measures, per resource. Only a stopped instance's stop time is
+# reported by AWS; for the rest it is the age of the resource, and how long it
+# has been unattached or without targets is not known.
+_IDLE_TEXT = {
+    "stopped": "stopped {d}d ago",
+    "launched": "last launched {d}d ago (stop time not reported)",
+    "created": "created {d}d ago",
+    "unknown": "idle since unknown",
+}
 
 
 @dataclass
@@ -42,10 +92,19 @@ class IdleResource:
     reason: str               # human-readable explanation
     protected: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    # What idle_days counts from: "stopped" (the stop time EC2 reports),
+    # "launched" (the last start, an upper bound on time stopped), "created"
+    # (the resource's age; how long it has been idle is not reported) or
+    # "unknown".
+    idle_basis: str = "created"
 
     @property
     def annual_cost_usd(self) -> float:
         return round(self.monthly_cost_usd * 12, 2)
+
+    @property
+    def idle_text(self) -> str:
+        return _IDLE_TEXT.get(self.idle_basis, "{d}d").format(d=self.idle_days)
 
 
 def _protected_tag_pairs() -> set[tuple[str, str]]:
@@ -94,6 +153,22 @@ def _days_since(dt: datetime) -> int:
     return max(0, (now - dt).days)
 
 
+# "User initiated (2024-01-02 03:04:05 GMT)", the form EC2 gives a stopped
+# instance's StateTransitionReason.
+_STOP_TIME = re.compile(r"\((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) GMT\)")
+
+
+def _stopped_at(reason: Any) -> datetime | None:
+    """When a stopped instance was stopped, from StateTransitionReason, or None."""
+    m = _STOP_TIME.search(reason) if isinstance(reason, str) else None
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 # ─── detectors ────────────────────────────────────────────────────────────────
 
 def _scan_ebs_volumes(
@@ -128,7 +203,9 @@ def _scan_ebs_volumes(
                 idle_since=create_time.date().isoformat(),
                 idle_days=idle_days,
                 monthly_cost_usd=monthly,
-                reason=f"Unattached {vol_type} volume, {size_gb} GB, created {create_time.date()}",
+                reason=(f"Unattached {vol_type} volume, {size_gb} GB, created "
+                        f"{create_time.date()}; unattached when scanned (EC2 does not "
+                        f"report when it was detached)"),
                 protected=_is_protected(tags),
                 metadata={"volume_type": vol_type, "size_gb": size_gb},
             ))
@@ -161,6 +238,7 @@ def _scan_elastic_ips(
             reason=f"Elastic IP {public_ip} not associated with any instance",
             protected=_is_protected(tags),
             metadata={"public_ip": public_ip},
+            idle_basis="unknown",
         ))
     return results
 
@@ -182,7 +260,13 @@ def _scan_old_snapshots(
                 if snap_id:
                     ami_snapshot_ids.add(snap_id)
     except Exception as e:
-        log.warning("Could not list AMIs: %s", e)
+        # This used to log and carry on with an empty AMI set, which flagged
+        # every snapshot behind a registered AMI as idle and drafted a
+        # delete-snapshot for it. Any snapshot can back an AMI, so without the
+        # list none of them can be called idle. analyzers/waste.py made the
+        # same fix in check_ebs_snapshots.
+        log.warning("Could not list AMIs in %s, so no snapshot is assessed: %s", region, e)
+        return []
 
     old: list[dict] = []
     paginator = ec2_client.get_paginator("describe_snapshots")
@@ -260,17 +344,21 @@ def _scan_stopped_ec2(
         for reservation in page["Reservations"]:
             for inst in reservation["Instances"]:
                 tags = inst.get("Tags", [])
-                # Use launch time as proxy — stopped time not directly available
-                launch_time = inst.get("LaunchTime", datetime.now(timezone.utc))
-                idle_days = _days_since(launch_time)
+                # EC2 reports the stop time in StateTransitionReason. LaunchTime
+                # is the last START, so a box started 300 days ago and stopped
+                # yesterday used to read as idle for 300 days.
+                stopped_at = _stopped_at(inst.get("StateTransitionReason"))
+                since = stopped_at or inst.get("LaunchTime", datetime.now(timezone.utc))
+                idle_days = _days_since(since)
                 if idle_days < min_idle_days:
                     continue
                 vol_ids = [m["Ebs"]["VolumeId"] for m in inst.get("BlockDeviceMappings", [])
                            if m.get("Ebs", {}).get("VolumeId")]
-                candidates.append((inst, tags, launch_time, idle_days, vol_ids))
+                basis = "stopped" if stopped_at else "launched"
+                candidates.append((inst, tags, since, idle_days, vol_ids, basis))
 
     vol_monthly: dict[str, float] = {}
-    all_vol_ids = [v for _, _, _, _, vids in candidates for v in vids]
+    all_vol_ids = [v for _, _, _, _, vids, _ in candidates for v in vids]
     for i in range(0, len(all_vol_ids), 500):
         try:
             vol_resp = ec2_client.describe_volumes(VolumeIds=all_vol_ids[i:i + 500])
@@ -279,27 +367,36 @@ def _scan_stopped_ec2(
                 sg = vol.get("Size", 0)
                 vol_monthly[vol["VolumeId"]] = ebs_volume_monthly(
                     vt, sg, vol.get("Iops"), vol.get("Throughput"))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("describe_volumes failed in %s; those volumes are unpriced: %s", region, e)
 
-    for inst, tags, launch_time, idle_days, vol_ids in candidates:
+    for inst, tags, since, idle_days, vol_ids, basis in candidates:
         ebs_monthly = sum(vol_monthly.get(v, 0.0) for v in vol_ids)
+        unpriced = [v for v in vol_ids if v not in vol_monthly]
         itype = inst.get("InstanceType", "")
+        when = (f"stopped {since.date()}" if basis == "stopped"
+                else f"last launched {since.date()}; EC2 did not report the stop time")
+        cost_txt = f"Paying ~${ebs_monthly:.2f}/mo for storage while stopped."
+        if unpriced:
+            cost_txt += (f" {len(unpriced)} volume(s) could not be read, so that figure "
+                         f"leaves them out.")
         results.append(IdleResource(
             resource_type="stopped_ec2",
             resource_id=inst["InstanceId"],
             region=region,
             account_id=account_id,
             name=_tag_name(tags),
-            idle_since=launch_time.date().isoformat(),
+            idle_since=since.date().isoformat(),
             idle_days=idle_days,
             monthly_cost_usd=round(ebs_monthly, 2),
             reason=(
-                f"Stopped {itype} instance with {len(vol_ids)} attached EBS volume(s). "
-                f"Paying ~${ebs_monthly:.2f}/mo for storage while stopped."
+                f"Stopped {itype} instance ({when}) with {len(vol_ids)} attached EBS "
+                f"volume(s). {cost_txt}"
             ),
             protected=_is_protected(tags),
-            metadata={"instance_type": itype, "volume_ids": vol_ids},
+            metadata={"instance_type": itype, "volume_ids": vol_ids,
+                      **({"unpriced_volume_ids": unpriced} if unpriced else {})},
+            idle_basis=basis,
         ))
     return results
 
@@ -339,12 +436,26 @@ def _scan_idle_load_balancers(
             try:
                 tg_resp = elbv2_client.describe_target_groups(
                     LoadBalancerArn=lb["LoadBalancerArn"])
-                for tg in tg_resp.get("TargetGroups", []):
+                groups = tg_resp.get("TargetGroups", [])
+                for tg in groups:
                     health_resp = elbv2_client.describe_target_health(
                         TargetGroupArn=tg["TargetGroupArn"])
+                    # "unavailable" is a target whose health check is off (the
+                    # default for a Lambda target group) and "initial" one still
+                    # registering: neither is unhealthy, so neither makes the
+                    # load balancer idle. Counting only "healthy" flagged every
+                    # ALB in front of a Lambda.
                     healthy += sum(
                         1 for t in health_resp.get("TargetHealthDescriptions", [])
-                        if t.get("TargetHealth", {}).get("State") == "healthy")
+                        if t.get("TargetHealth", {}).get("State")
+                        in ("healthy", "unavailable", "initial"))
+                if not groups:
+                    # No target group: the listeners may still redirect or
+                    # return a fixed response, which is traffic served. Only a
+                    # load balancer with no listener at all cannot serve any.
+                    listeners = elbv2_client.describe_listeners(
+                        LoadBalancerArn=lb["LoadBalancerArn"]).get("Listeners", [])
+                    healthy = 1 if listeners else 0
             except Exception:
                 healthy = 1  # unknown health must never be flagged as idle
             return lb, healthy
@@ -368,8 +479,11 @@ def _scan_idle_load_balancers(
                 name=lb.get("LoadBalancerName", ""),
                 idle_since=created.date().isoformat() if hasattr(created, "date") else str(created),
                 idle_days=_days_since(created),
-                monthly_cost_usd=_ALB_PER_MONTH,
-                reason=f"{lb_type.upper()} load balancer with no healthy targets",
+                # Its own type's hourly base charge: a Gateway Load Balancer is
+                # $0.0125/hr, and used to be priced as an ALB at $0.0225.
+                monthly_cost_usd=round(lb_hourly(lb_type) * _HOURS_PER_MONTH, 2),
+                reason=(f"{lb_type.upper()} load balancer with no healthy targets when "
+                        f"scanned (a point-in-time read, not a traffic window)"),
                 protected=_is_protected(tags),
                 metadata={"lb_type": lb_type, "lb_arn": lb_arn},
             ))
@@ -388,7 +502,8 @@ def scan_idle_resources(
     """
     Scan for idle/wasted resources across AWS.
 
-    resource_types: subset of ["ebs_volume","elastic_ip","snapshot","stopped_ec2","load_balancer"]
+    resource_types: subset of ["ebs_volume","elastic_ip","snapshot","stopped_ec2","load_balancer"],
+        or a short name for one ("ebs", "eip", "lb"); a type with no detector raises ValueError
     regions: list of AWS regions to scan (default: all opted-in regions)
     min_idle_days: minimum days idle before flagging (default: 7)
     """
@@ -398,8 +513,7 @@ def scan_idle_resources(
         log.error("boto3 not installed")
         return []
 
-    all_types = {"ebs_volume", "elastic_ip", "snapshot", "stopped_ec2", "load_balancer"}
-    types = set(resource_types or all_types) & all_types
+    types = normalize_resource_types(resource_types)
 
     if regions is None:
         ec2_global = boto3.client("ec2", region_name="us-east-1")
@@ -474,6 +588,7 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
             "name": r.name,
             "region": r.region,
             "idle_days": r.idle_days,
+            "idle_basis": r.idle_basis,
             "monthly_cost_usd": r.monthly_cost_usd,
             "reason": r.reason,
             "protected": r.protected,

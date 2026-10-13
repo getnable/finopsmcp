@@ -236,7 +236,7 @@ def normalise(name, data) -> list[dict]:
                 # savings == the resource's own cost by construction (delete
                 # it, stop paying it); carrying the cost makes that invariant
                 # checkable by the critique instead of assumed.
-                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, idle {r.idle_days}d, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
+                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
         elif name == "idle_rds" and isinstance(data, list):
             for r in data:
                 s = r.get("estimated_monthly_savings", 0) or 0
