@@ -115,6 +115,19 @@ def run(args) -> int:
 
     brief = result["brief"]
     delivered = result.get("delivered") or {}
+    # --deliver is a request to push, so a push that did not land is a failed
+    # run: a channel that failed, or no valid channel to push to at all. A cron
+    # job sending the morning brief has only the exit code to notice that by.
+    asked = bool(getattr(args, "deliver", False))
+    undelivered = asked and (not delivered or not all(delivered.values()))
+    code = EXIT_ERROR if undelivered else EXIT_OK
+    if undelivered:
+        from .briefing.run import DELIVER_ENV
+        failed = [k for k, v in delivered.items() if not v]
+        why = (f"delivery failed: {', '.join(failed)}" if failed else
+               f"nothing was delivered: {DELIVER_ENV} names no channel "
+               "(slack, teams or email)")
+        print(f"nable brief --deliver: {why}", file=sys.stderr)
 
     if getattr(args, "html", False):
         from .briefing.render import to_html
@@ -126,10 +139,13 @@ def run(args) -> int:
             webbrowser.open(out.as_uri())
         except Exception:
             pass
-        return EXIT_OK
+        return code
 
     if as_json:
-        print(json.dumps(result["summary"], indent=2))
+        summary = dict(result["summary"])
+        if asked:
+            summary["delivered"] = delivered
+        print(json.dumps(summary, indent=2))
     else:
         from .briefing.render import to_markdown
         print(to_markdown(brief))
@@ -138,4 +154,4 @@ def run(args) -> int:
             print(f"\nDelivered to: {landed}")
         if result.get("path"):
             print(f"Saved: {result['path']}")
-    return EXIT_OK
+    return code

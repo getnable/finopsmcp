@@ -49,3 +49,28 @@ def test_nable_doctor_json_is_one_document_on_stdout(tmp_path):
     assert isinstance(checks, list) and checks
     assert all({"name", "ok", "detail"} <= set(c) for c in checks)
     assert r.returncode == (1 if any(c["ok"] is False for c in checks) else 0)
+
+
+# ── brief --deliver (the report a cron job sends) ─────────────────────────────
+
+def _brief(tmp_path, channels: str | None):
+    env = {"NABLE_BRIEF_DELIVER": channels} if channels is not None else {}
+    r = nable(tmp_path, "brief", "--json", "--deliver", "--no-save", env=env)
+    return r, json.loads(r.stdout)
+
+
+def test_brief_deliver_says_a_push_failed_and_exits_1(tmp_path):
+    """NABLE_BRIEF_DELIVER=slack with no Slack webhook: the push failed, and
+    the run exited 0 with no word of delivery anywhere in its JSON."""
+    r, doc = _brief(tmp_path, "slack")
+    assert doc["delivered"] == {"slack": False}
+    assert r.returncode == 1
+
+
+def test_brief_deliver_with_no_valid_channel_exits_1(tmp_path):
+    """--deliver asked for a push; a misspelled or empty channel list sent
+    nothing, and that is not a success."""
+    for channels in ("slakc", None):
+        r, doc = _brief(tmp_path, channels)
+        assert doc["delivered"] == {}
+        assert r.returncode == 1, channels
