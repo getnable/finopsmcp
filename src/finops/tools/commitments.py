@@ -51,17 +51,28 @@ def get_commitment_analysis() -> dict:
 
         # "If you bought $X more in commitments" projection
         if monthly_uncovered > 100:
-            # Compute SP covers eligible spend at ~34% discount (1yr no-upfront)
-            _COMPUTE_SP_DISCOUNT_RATE = 0.34
-            # Covering the full gap would require this hourly commitment
-            additional_commitment = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
-            projected_savings = additional_commitment * _COMPUTE_SP_DISCOUNT_RATE
+            # One rate for every Compute SP figure, the one recommendations.
+            # commitments documents against the AWS price list. This used a
+            # local 34%, and applied it to the commitment, while describing the
+            # commitment as covering half the on-demand spend. A commitment C
+            # covers C / rate of on-demand, so those three could not all hold.
+            # Now: cover half the uncovered on-demand, commit rate x that, and
+            # save the rest of it.
+            from ..recommendations.commitments import (
+                COMPUTE_SP_DISCOUNT_RANGE, _COMPUTE_SP_DISCOUNT,
+            )
+            covered_on_demand = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
+            additional_commitment = covered_on_demand * _COMPUTE_SP_DISCOUNT
+            projected_savings = covered_on_demand - additional_commitment
             actionable["if_you_bought_more"] = {
                 "description": (
                     f"Buying a 1-year no-upfront Compute Savings Plan at "
                     f"${additional_commitment:,.0f}/mo hourly commitment would cover "
-                    f"~50% of your uncovered on-demand spend and save "
-                    f"~${projected_savings:,.0f}/mo (${projected_savings * 12:,.0f}/yr)."
+                    f"${covered_on_demand:,.0f}/mo, about 50% of your average uncovered "
+                    f"on-demand spend, and save ~${projected_savings:,.0f}/mo "
+                    f"(${projected_savings * 12:,.0f}/yr) at the median "
+                    f"{1 - _COMPUTE_SP_DISCOUNT:.0%} rate-card discount "
+                    f"({COMPUTE_SP_DISCOUNT_RANGE})."
                 ),
                 "additional_monthly_commitment_usd": round(additional_commitment, 2),
                 "projected_monthly_savings_usd": round(projected_savings, 2),

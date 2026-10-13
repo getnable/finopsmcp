@@ -23,9 +23,17 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_COMPUTE_SP_DISCOUNT = 0.66   # ~34% off on-demand (1yr no-upfront compute SP)
-_EC2_SP_DISCOUNT = 0.72       # ~28% off on-demand (1yr no-upfront EC2 SP)
-_RI_DISCOUNT = 0.60           # ~40% off on-demand (1yr no-upfront RI)
+# A 1-year no-upfront Compute Savings Plan rate as a fraction of Linux
+# on-demand, so the discount is 1 minus this. AWS Price List,
+# AWSComputeSavingsPlan us-east-1 version 20261013035015, matched to the
+# AmazonEC2 us-east-1 offer (20261012193925): over the 168 instance types
+# aws_prices.EC2_HOURLY holds, the discount runs 18.6% to 29.1%, median 27.1%.
+# Fargate is 20.0%. This read 0.66 (34% off), above every type in the table.
+# Two more constants here (28% for an EC2 Instance SP, 40% for an RI) were used
+# nowhere and matched nothing in the same price list (37.0% and 37.0% medians),
+# so they are gone rather than corrected.
+_COMPUTE_SP_DISCOUNT = 0.729
+COMPUTE_SP_DISCOUNT_RANGE = "19-29% by EC2 instance type, 20% on Fargate"
 
 
 @dataclass
@@ -460,7 +468,9 @@ def _build_recommendations(
         desc = (
             f"Your SP coverage is {sp_coverage:.0f}%. A 1-year no-upfront Compute SP at "
             f"${commitment_to_add:,.0f}/mo hourly commitment covers {basis} "
-            f"(${baseline:,.0f}/mo of on-demand)."
+            f"(${baseline:,.0f}/mo of on-demand). The saving assumes the median "
+            f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount of the AWS rate card "
+            f"({COMPUTE_SP_DISCOUNT_RANGE}); your instance mix sets the real one."
         )
         if spiky:
             desc += (f" Sized to the floor, not your ${peak:,.0f}/mo peak, so a slow month "
@@ -480,6 +490,7 @@ def _build_recommendations(
             # What the commitment bounds a pack declares read the rec against
             # (commitment_bounds.apply_compute): coverage before the purchase.
             "coverage_pct_now": round(sp_coverage, 1),
+            "assumed_discount_pct": round((1 - _COMPUTE_SP_DISCOUNT) * 100, 1),
             "confidence": "high" if baseline > 5000 else "medium",
         })
 

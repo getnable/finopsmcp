@@ -7,6 +7,9 @@ was read from are named next to it.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
+
 
 # ── the sweep reports a percentage once, not times a hundred ─────────────────
 #
@@ -136,3 +139,73 @@ def test_the_graviton_tool_does_not_advertise_a_saving_its_table_cannot_reach():
 
     doc = server.scan_graviton_migration_opportunities.__doc__ or ""
     assert "20-40%" not in doc
+
+
+# ── a Compute Savings Plan saves what AWS's rate card says it does ──────────
+#
+# AWS Price List, AWSComputeSavingsPlan us-east-1, version 20261013035015,
+# 1 year No Upfront, matched to the AmazonEC2 us-east-1 Linux on-demand rates
+# (version 20261012193925): across the 168 instance types aws_prices holds the
+# discount is 18.6% to 29.1%, median 27.1% (m5.large 0.096 -> 0.071, 26.0%;
+# c5.xlarge 0.17 -> 0.123, 27.6%). Fargate (AmazonECS offer, same dates) is
+# 0.04048 -> 0.032384 a vCPU-hour, 20.0%. The engine assumed 34%, above the
+# highest rate of any type in the table.
+
+def test_the_compute_savings_plan_rate_is_the_price_list_median():
+    from finops.recommendations.commitments import _COMPUTE_SP_DISCOUNT
+
+    assert round(1 - _COMPUTE_SP_DISCOUNT, 3) == 0.271
+
+
+def test_a_compute_savings_plan_recommendation_saves_27_percent_of_its_baseline():
+    from finops.recommendations.commitments import _build_recommendations
+
+    recs = _build_recommendations(20.0, 33000.0, 0.0, 0.0,
+                                  monthly_uncovered_series=[12000.0, 10000.0, 11000.0])
+    [sp] = [r for r in recs if r["type"] == "savings_plan"]
+    assert sp["baseline_monthly_uncovered_usd"] == 10000.0
+    # Was 3,400 saved on a 6,600 commitment: a 6,600 commitment at the real
+    # rate covers 9,053 of on-demand and saves 2,453, not 3,400.
+    assert sp["monthly_savings"] == 2710.0
+    assert sp["commitment_per_month"] == 7290.0
+    assert sp["commitment_per_month"] + sp["monthly_savings"] == 10000.0
+
+
+def _commitment_tool(monkeypatch, uncovered_3mo: float):
+    from finops.recommendations import commitments as c
+    import finops.server as server
+
+    analysis = c.CommitmentAnalysis(
+        savings_plan_coverage_pct=10.0, savings_plan_utilization_pct=99.0,
+        savings_plan_unused_usd=0.0, ri_coverage_pct=10.0, ri_utilization_pct=99.0,
+        ri_unused_usd=0.0, uncovered_on_demand_usd=uncovered_3mo)
+    monkeypatch.setattr(c, "analyze_commitments", lambda *a, **k: analysis)
+    out = server.get_commitment_analysis()
+    if inspect.isawaitable(out):
+        out = asyncio.run(out)
+    return out
+
+
+def test_the_if_you_bought_more_projection_adds_up(monkeypatch):
+    """It said a commitment of half the uncovered on-demand spend "would cover
+    ~50%" of it, then took 34% of the commitment as the saving. A commitment C
+    covers C / (1 - d) of on-demand spend, so the three figures could not all
+    be true. Covering half of 10,000 a month at 27.1% is a 3,645 commitment
+    saving 1,355."""
+    out = _commitment_tool(monkeypatch, 30000.0)
+    proj = out["actionable_analysis"]["if_you_bought_more"]
+    assert proj["additional_monthly_commitment_usd"] == 3645.0
+    assert proj["projected_monthly_savings_usd"] == 1355.0
+    assert proj["projected_annual_savings_usd"] == 16260.0
+    covered = proj["additional_monthly_commitment_usd"] + proj["projected_monthly_savings_usd"]
+    assert covered == 5000.0
+
+
+def test_the_commitment_gap_ticket_uses_the_same_rate():
+    from finops.integrations.ticketing import _commitment_gap_ticket
+
+    title, body, _, _ = _commitment_gap_ticket(
+        {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0})
+    # 10,000 a month uncovered, all of it covered at 27.1%: 2,710 a month.
+    assert "saves $32,520/yr" in title
+    assert "no break-even period" not in body
