@@ -2006,7 +2006,7 @@ async def audit_cloudwatch_orphaned_alarms(
 ) -> str:
     """
     Finds CloudWatch alarms on deleted resources. Standard alarms cost
-    $0.10/month, composite $0.30/month. Terminated instances and deleted
+    $0.10/month, composite $0.50/month. Terminated instances and deleted
     queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.
 
     Args:
