@@ -155,11 +155,13 @@ class _S3:
         return {"Buckets": [{"Name": "hot-bucket"}]}
 
 
-def _s3_cw(gets: list[float] | None) -> _CW:
+def _s3_cw(gets: list[float] | None, objects: int | None = 100_000,
+           size_gb: float = 500) -> _CW:
     size = (("BucketName", "hot-bucket"), ("StorageType", "StandardStorage"))
     count = (("BucketName", "hot-bucket"), ("StorageType", "AllStorageTypes"))
-    data = {("AWS/S3", "BucketSizeBytes", size): [500 * 1024 ** 3] * 30,
-            ("AWS/S3", "NumberOfObjects", count): [10_000_000] * 30}
+    data = {("AWS/S3", "BucketSizeBytes", size): [size_gb * 1024 ** 3] * 30}
+    if objects is not None:
+        data[("AWS/S3", "NumberOfObjects", count)] = [objects] * 30
     if gets is not None:
         data[("AWS/S3", "GetRequests",
               (("BucketName", "hot-bucket"), ("FilterId", "AllRequests")))] = gets
@@ -171,6 +173,45 @@ def test_a_bucket_without_request_metrics_is_not_called_low_access():
 
 
 def test_a_bucket_with_measured_low_access_is_still_flagged():
+    # 500 GB in 100,000 objects, about 5 MiB each.
     [f] = waste.check_s3_storage_class(_S3(), _s3_cw([5.0] * 30), "us-east-1")
     assert f["recommendation"] == "STANDARD_IA"
     assert f["avg_daily_gets"] == 5.0
+    # $11.50 in STANDARD against $6.25 in STANDARD_IA.
+    assert f["estimated_monthly_savings"] == 5.25
+    # One lifecycle transition per object, $0.01 per 1,000 (AWS Price List,
+    # AmazonS3 us-east-1, Requests-Tier4), paid once.
+    assert f["one_time_transition_cost"] == 1.0
+    assert "aws s3 cp" not in f["detail"]
+
+
+def test_small_objects_are_not_sent_to_standard_ia():
+    """500 GB in 10M objects averages 52 KiB. Standard-IA bills an object
+    under 128 KB as 128 KB (the price list's TimedStorage-SIA-SmObjects line),
+    and a lifecycle rule does not move objects under 128 KB by default. This
+    bucket used to get STANDARD_IA with a "$5.25/mo" net saving; copied in, its
+    10M objects bill as 1,220.7 GiB at $0.0125 = $15.26/mo against $11.50 in
+    STANDARD, $3.76/mo more."""
+    cw = _s3_cw([5.0] * 30, objects=10_000_000)
+    assert waste.check_s3_storage_class(_S3(), cw, "us-east-1") == []
+
+
+def test_a_bucket_whose_object_count_was_not_read_is_skipped():
+    """The docstring says a bucket with no object count is skipped. It was
+    recommended STANDARD_IA anyway, '(object count unknown)'."""
+    cw = _s3_cw([5.0] * 30, objects=None)
+    assert waste.check_s3_storage_class(_S3(), cw, "us-east-1") == []
+
+
+def test_intelligent_tiering_advice_does_not_opt_into_the_archive_tier():
+    """The command shipped was put-bucket-intelligent-tiering-configuration with
+    ARCHIVE_ACCESS. That configuration does not move a STANDARD object into
+    Intelligent-Tiering, and it opts objects already there into a tier that
+    must be restored before it can be read."""
+    cw = _s3_cw([50.0] * 30, objects=1_000, size_gb=1000)
+    [f] = waste.check_s3_storage_class(_S3(), cw, "us-east-1")
+    assert f["recommendation"] == "INTELLIGENT_TIERING"
+    assert "ARCHIVE_ACCESS" not in f["detail"]
+    assert "put-bucket-intelligent-tiering-configuration" not in f["detail"]
+    assert "lifecycle" in f["detail"].lower()
+    assert f["one_time_transition_cost"] == 0.01

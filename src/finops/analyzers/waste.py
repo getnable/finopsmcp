@@ -54,7 +54,14 @@ _EBS_GP3_PER_GB_MONTH = EBS_PER_GB_MONTH["gp3"]
 _EBS_GP2_TO_GP3_SAVINGS_PCT = 0.20    # 20% cheaper
 _CW_LOGS_STORAGE_PER_GB_MONTH = 0.03  # archived log storage
 _S3_STANDARD_PER_GB_MONTH = 0.023
-_S3_INT_TIER_PER_GB_MONTH = 0.0125    # Intelligent-Tiering (frequent-access tier)
+_S3_INT_TIER_PER_GB_MONTH = 0.0125    # Intelligent-Tiering, Infrequent Access tier
+# A lifecycle transition into Standard-IA or Intelligent-Tiering, per object:
+# $0.01 per 1,000 (AWS Price List, AmazonS3 us-east-1, Requests-Tier4).
+_S3_TRANSITION_PER_1000 = 0.01
+# Standard-IA bills an object under 128 KB as 128 KB, Intelligent-Tiering does
+# not monitor or tier one, and a lifecycle rule does not transition one by
+# default (S3 API reference, TransitionDefaultMinimumObjectSize).
+_S3_SMALL_OBJECT_KB = 128.0
 _RDS_BACKUP_EXTRA_PER_GB_MONTH = 0.095 # RDS backup storage beyond 1x DB size
 
 # Sentinel for "savings unknown" — will be treated as 0 in sorting but surfaced
@@ -871,6 +878,10 @@ def check_s3_storage_class(
     5. Access frequency comes from GetRequests, which S3 publishes only for a
        bucket with request metrics enabled under the filter id "AllRequests".
        A bucket with no GetRequests datapoints is skipped, never read as idle.
+    6. A bucket whose average object is under 128 KB is skipped: Standard-IA
+       bills such an object as 128 KB and Intelligent-Tiering never tiers it.
+    7. The one-time lifecycle transition cost ($0.01 per 1,000 objects) is
+       reported next to the monthly saving, not netted out of it.
 
     STANDARD:           $0.023/GB-mo
     STANDARD-IA:        $0.0125/GB-mo + $0.01/GB retrieval
@@ -968,6 +979,20 @@ def check_s3_storage_class(
         size_gb = size_gb_by_bucket[bucket_name]
         avg_daily_gets = daily_gets_by_bucket[bucket_name]
         object_count = max(objects.get(bucket_name) or [], default=0)
+        if object_count <= 0:
+            # Docstring item 4. The STANDARD_IA branch below used to run on an
+            # unknown count and print "(object count unknown)".
+            continue
+        # Bucket metrics give a count and a size, not a distribution, so this
+        # takes objects to be the average size. Under 128 KB, Standard-IA bills
+        # each as 128 KB and Intelligent-Tiering never tiers them: neither
+        # class saves anything, and Standard-IA costs more. 500 GB in 10M
+        # objects used to read "$5.25/mo net saving" in Standard-IA and would
+        # bill $15.26 there against $11.50 in STANDARD.
+        avg_object_kb = size_gb * 1024 ** 2 / object_count
+        if avg_object_kb < _S3_SMALL_OBJECT_KB:
+            continue
+        transition_cost = round(object_count / 1000 * _S3_TRANSITION_PER_1000, 2)
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
 
@@ -982,7 +1007,19 @@ def check_s3_storage_class(
         ia_net_savings = monthly_standard_cost - monthly_ia_cost
 
         # Only flag if there's meaningful ROI (>$5/mo net) and we can be specific
-        if object_count > 0 and it_net_savings > 5:
+        # Moving existing objects is a lifecycle transition rule. The bucket
+        # Intelligent-Tiering configuration this used to print (ARCHIVE_ACCESS)
+        # does not move a STANDARD object, and opts objects already in the
+        # class into a tier that must be restored before it can be read. The
+        # Standard-IA command was an in-place `aws s3 cp`, which on a versioned
+        # bucket leaves every STANDARD copy behind as a billed noncurrent version.
+        lifecycle_note = (
+            f"Move objects with a lifecycle transition rule, which costs "
+            f"${transition_cost:,.2f} once ({int(object_count):,} transitions at "
+            f"$0.01/1,000). put-bucket-lifecycle-configuration replaces the bucket's "
+            f"whole lifecycle configuration, so merge the rule into any existing ones."
+        )
+        if it_net_savings > 5:
             # IT makes sense: savings outweigh monitoring cost
             recommendation = "INTELLIGENT_TIERING"
             net_savings = it_net_savings
@@ -990,24 +1027,23 @@ def check_s3_storage_class(
                 f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
                 f"(${monthly_standard_cost:.2f}/mo). {int(object_count):,} objects. "
                 f"IT monitoring cost: ${it_monitoring_cost:.2f}/mo. "
-                f"Net saving with Intelligent-Tiering: ${it_net_savings:.2f}/mo. "
-                f"Command: aws s3api put-bucket-intelligent-tiering-configuration "
-                f"--bucket {bucket_name} --id default --intelligent-tiering-configuration "
-                f"'{{\"Id\":\"default\",\"Status\":\"Enabled\",\"Tierings\":[{{\"Days\":90,\"AccessTier\":\"ARCHIVE_ACCESS\"}}]}}'"
+                f"Net saving with Intelligent-Tiering: up to ${it_net_savings:.2f}/mo, "
+                f"if every byte reaches the Infrequent Access tier (an upper bound). "
+                f"{lifecycle_note}"
             )
         elif ia_net_savings > 5 and avg_daily_gets < 10:
-            # Very low access: STANDARD-IA is better — no monitoring fee, retrieval is cheap
+            # Very low access: STANDARD-IA is better: no monitoring fee, retrieval is cheap
             recommendation = "STANDARD_IA"
             net_savings = ia_net_savings
             detail = (
                 f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
                 f"(${monthly_standard_cost:.2f}/mo), avg {avg_daily_gets:.0f} GETs/day. "
                 f"STANDARD-IA costs ${monthly_ia_cost:.2f}/mo with no monitoring fee. "
-                f"Net saving: ${ia_net_savings:.2f}/mo. "
+                f"Net saving: ${ia_net_savings:.2f}/mo, before retrieval at $0.01/GB and "
+                f"assuming objects are near the {avg_object_kb:,.0f} KB average (one under "
+                f"128 KB bills as 128 KB) and stay at least the 30-day minimum. "
                 f"Note: Intelligent-Tiering monitoring would cost ${it_monitoring_cost:.2f}/mo "
-                f"{'(not worth it for this object count)' if object_count > 0 else '(object count unknown)'}. "
-                f"Command: aws s3 cp s3://{bucket_name} s3://{bucket_name} "
-                f"--recursive --storage-class STANDARD_IA"
+                f"(not worth it for this object count). {lifecycle_note}"
             )
         else:
             # Either monitoring cost eats the savings or bucket is too small to matter
@@ -1027,6 +1063,8 @@ def check_s3_storage_class(
             "object_count": int(object_count) if object_count else None,
             "avg_daily_gets": round(avg_daily_gets, 1),
             "it_monitoring_cost_mo": round(it_monitoring_cost, 2) if object_count else None,
+            "one_time_transition_cost": transition_cost,
+            "avg_object_kb": round(avg_object_kb, 1),
         })
 
     return findings
