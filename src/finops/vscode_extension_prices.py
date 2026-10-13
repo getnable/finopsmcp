@@ -23,8 +23,8 @@ from .aws_prices import (
 )
 from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
-    _ELASTICACHE_HOURLY,
-    _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
+    _MSK_BROKER_HOURLY, _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, elasticache_hourly,
+    elasticache_node_count,
 )
 
 
@@ -79,8 +79,11 @@ def price_resource_py(
 
     if t in ("aws_elasticache_cluster", "aws_elasticache_replication_group"):
         node  = attrs.get("node_type", "")
-        count = _i(attrs.get("num_cache_nodes") or attrs.get("number_cache_clusters"), 1)
-        h     = _ELASTICACHE_HOURLY.get(node, 0.0)
+        engine = attrs.get("engine") or "redis"
+        count = elasticache_node_count(t, attrs)
+        h     = elasticache_hourly(node, engine)
+        if h is None:
+            return {"monthly": 0.0, "detail": f"{count}× {node}: not priced"}
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {node}"}
 
     if t == "aws_ebs_volume":
@@ -115,24 +118,30 @@ def price_resource_py(
     if t in ("aws_opensearch_domain", "aws_elasticsearch_domain"):
         inst  = attrs.get("instance_type", "m5.large.search")
         count = _i(attrs.get("instance_count"), 1)
-        h     = _OPENSEARCH_HOURLY.get(inst, 0.142)
+        h     = _OPENSEARCH_HOURLY.get(inst)
+        if h is None:
+            return {"monthly": 0.0, "detail": f"{count}× {inst}: not priced"}
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {inst}"}
 
     if t == "aws_redshift_cluster":
         node  = attrs.get("node_type", "dc2.large")
         count = _i(attrs.get("number_of_nodes"), 1)
-        h     = _REDSHIFT_HOURLY.get(node, 0.25)
+        h     = _REDSHIFT_HOURLY.get(node)
+        if h is None:
+            return {"monthly": 0.0, "detail": f"{count}× {node}: not priced"}
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {node}"}
 
     if t == "aws_msk_cluster":
         broker = attrs.get("instance_type", "kafka.m5.large")
         count  = _i(attrs.get("number_of_broker_nodes"), 3)
-        h      = _MSK_BROKER_HOURLY.get(broker, 0.142)
+        h      = _MSK_BROKER_HOURLY.get(broker)
+        if h is None:
+            return {"monthly": 0.0, "detail": f"{count}× {broker}: not priced"}
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {broker}"}
 
     if t == "aws_kinesis_stream":
         shards = _i(attrs.get("shard_count"), 1)
-        m = shards * 0.015 * 24 * 30
+        m = shards * 0.015 * HOURS_PER_MONTH
         return {"monthly": round(m, 2), "detail": f"{shards} shard(s) @ $0.015/shard-hr"}
 
     if t == "aws_cloudwatch_metric_alarm":

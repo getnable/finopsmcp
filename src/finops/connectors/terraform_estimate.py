@@ -16,8 +16,12 @@ What it prices:
     ALB/NLB, ECS Fargate, Lambda, S3, EBS volumes,
     OpenSearch domains, MSK clusters, Redshift nodes.
 
-Prices: AWS on-demand, us-east-1, as of May 2026.
-For accurate multi-region pricing, use INFRACOST_API_KEY (optional).
+Prices: AWS on-demand list, us-east-1. EC2, RDS, EBS, load balancers and NAT
+come from finops.aws_prices; the ElastiCache, OpenSearch, MSK and Redshift
+tables below were compared with the AWS Price List on 2026-10-13 (PRICE_SOURCES
+names each offer file and SKU). Other regions often list higher, so a figure
+here is a us-east-1 floor. For multi-region pricing, use INFRACOST_API_KEY
+(optional).
 """
 from __future__ import annotations
 
@@ -34,27 +38,52 @@ from typing import Any
 
 from ..aws_prices import (
     CLB_HOURLY, EBS_PER_GB_MONTH, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY,
-    NAT_GATEWAY_PER_GB, RDS_HOURLY, ebs_volume_monthly, lb_hourly, rds_hourly,
+    NAT_GATEWAY_PER_GB, RDS_HOURLY, as_number, ebs_volume_monthly, lb_hourly, rds_hourly,
 )
 
 log = logging.getLogger(__name__)
 
 # ── Pricing tables (USD/hour unless noted) ───────────────────────────────────
-# All prices on-demand us-east-1, May 2026
+# On-demand list, us-east-1. Every row below was compared with the AWS Price
+# List on 2026-10-13; PRICE_SOURCES names the offer and the SKUs.
 
 # EC2 and RDS are shared with half a dozen other modules and live in aws_prices.
 # The underscored names stay for anything that still imports them from here.
 _EC2_HOURLY = EC2_HOURLY
 _RDS_HOURLY = RDS_HOURLY
 
+# ElastiCache node hours, Redis OSS and Memcached (the offer prices the two
+# engines the same). The m5, m6g, r5 and r6g rows used to sit 4% to 16% under
+# list (cache.r6g.large $0.186 against $0.206, cache.m5.large $0.139 against
+# $0.156); the t3 and t4g rows were right.
 _ELASTICACHE_HOURLY: dict[str, float] = {
     "cache.t3.micro": 0.017, "cache.t3.small": 0.034, "cache.t3.medium": 0.068,
     "cache.t4g.micro": 0.016, "cache.t4g.small": 0.032, "cache.t4g.medium": 0.065,
-    "cache.m5.large": 0.139, "cache.m5.xlarge": 0.278, "cache.m5.2xlarge": 0.556,
-    "cache.m6g.large": 0.128, "cache.m6g.xlarge": 0.256, "cache.m6g.2xlarge": 0.512,
-    "cache.r5.large": 0.207, "cache.r5.xlarge": 0.414, "cache.r5.2xlarge": 0.828,
-    "cache.r6g.large": 0.186, "cache.r6g.xlarge": 0.372, "cache.r6g.2xlarge": 0.744,
+    "cache.m5.large": 0.156, "cache.m5.xlarge": 0.311, "cache.m5.2xlarge": 0.623,
+    "cache.m6g.large": 0.149, "cache.m6g.xlarge": 0.297, "cache.m6g.2xlarge": 0.593,
+    "cache.r5.large": 0.216, "cache.r5.xlarge": 0.431, "cache.r5.2xlarge": 0.862,
+    "cache.r6g.large": 0.206, "cache.r6g.xlarge": 0.411, "cache.r6g.2xlarge": 0.821,
 }
+
+# ElastiCache for Valkey lists 20% under Redis OSS on every node type. Pricing
+# a Valkey cluster from the Redis table overstated it by a quarter.
+_ELASTICACHE_VALKEY_HOURLY: dict[str, float] = {
+    "cache.t3.micro": 0.0136, "cache.t3.small": 0.0272, "cache.t3.medium": 0.0544,
+    "cache.t4g.micro": 0.0128, "cache.t4g.small": 0.0256, "cache.t4g.medium": 0.052,
+    "cache.m5.large": 0.1248, "cache.m5.xlarge": 0.2488, "cache.m5.2xlarge": 0.4984,
+    "cache.m6g.large": 0.1192, "cache.m6g.xlarge": 0.2376, "cache.m6g.2xlarge": 0.4744,
+    "cache.r5.large": 0.1728, "cache.r5.xlarge": 0.3448, "cache.r5.2xlarge": 0.6896,
+    "cache.r6g.large": 0.1648, "cache.r6g.xlarge": 0.3288, "cache.r6g.2xlarge": 0.6568,
+}
+
+
+def elasticache_hourly(node_type: str, engine: str | None = None) -> float | None:
+    """The node-hour rate for an ElastiCache node type on an engine (redis,
+    memcached or valkey; redis when unset, the Terraform default), or None."""
+    table = (_ELASTICACHE_VALKEY_HOURLY if str(engine or "").strip().lower() == "valkey"
+             else _ELASTICACHE_HOURLY)
+    return table.get(node_type)
+
 
 # EBS: $/GB/month
 _EBS_PER_GB_MONTH: dict[str, float] = EBS_PER_GB_MONTH
@@ -73,28 +102,68 @@ _FLAT_RATES: dict[str, float] = {
     "aws_cloudfront_distribution": 0.0,          # $/request + transfer
 }
 
-# OpenSearch / Elasticsearch node pricing ($/hour)
+# OpenSearch / Elasticsearch node pricing ($/hour). c5 was 23% under list
+# ($0.096 against $0.125) and m5.xlarge, r5.large and r5.xlarge a cent or two
+# over it.
 _OPENSEARCH_HOURLY: dict[str, float] = {
     "t3.small.search": 0.036, "t3.medium.search": 0.073,
-    "m5.large.search": 0.142, "m5.xlarge.search": 0.285,
+    "m5.large.search": 0.142, "m5.xlarge.search": 0.283,
     "m6g.large.search": 0.128, "m6g.xlarge.search": 0.256,
-    "r5.large.search": 0.187, "r5.xlarge.search": 0.374,
+    "r5.large.search": 0.186, "r5.xlarge.search": 0.372,
     "r6g.large.search": 0.167, "r6g.xlarge.search": 0.335,
-    "c5.large.search": 0.096, "c5.xlarge.search": 0.192,
+    "c5.large.search": 0.125, "c5.xlarge.search": 0.251,
 }
 
-# MSK broker pricing ($/hour per broker)
+# MSK broker pricing ($/hour per broker). Every row used to be 32% to 54% under
+# list: kafka.m5.large was $0.142 against $0.21, kafka.t3.small $0.021 against
+# $0.0456.
 _MSK_BROKER_HOURLY: dict[str, float] = {
-    "kafka.t3.small": 0.021, "kafka.m5.large": 0.142,
-    "kafka.m5.xlarge": 0.284, "kafka.m5.2xlarge": 0.568,
-    "kafka.m5.4xlarge": 1.136, "kafka.m5.8xlarge": 2.272,
-    "kafka.m7g.large": 0.128, "kafka.m7g.xlarge": 0.256,
+    "kafka.t3.small": 0.0456, "kafka.m5.large": 0.21,
+    "kafka.m5.xlarge": 0.42, "kafka.m5.2xlarge": 0.84,
+    "kafka.m5.4xlarge": 1.68, "kafka.m5.8xlarge": 3.36,
+    "kafka.m7g.large": 0.204, "kafka.m7g.xlarge": 0.408,
 }
 
-# Redshift node pricing ($/hour)
+# Redshift node pricing ($/hour). The table used to carry "ra3.4xlplus", a node
+# type that does not exist, so an ra3.4xlarge cluster got the dc2.large
+# fallback of $0.25 a node instead of $3.26.
 _REDSHIFT_HOURLY: dict[str, float] = {
     "dc2.large": 0.25, "dc2.8xlarge": 4.80,
-    "ra3.xlplus": 1.086, "ra3.4xlplus": 3.26, "ra3.16xlarge": 13.04,
+    "ra3.large": 0.543, "ra3.xlplus": 1.086, "ra3.4xlarge": 3.26, "ra3.16xlarge": 13.04,
+}
+
+_ELASTICACHE_OFFER = "AWS Price List, AmazonElastiCache us-east-1 offer, version 20260914063714"
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_ELASTICACHE_HOURLY": {
+        "source": f"{_ELASTICACHE_OFFER}, OnDemand NodeUsage:<type>, Cache Engine Redis (the "
+                  "Memcached rows are equal); e.g. cache.m5.large D3Y7CNKGUTH3CE59, "
+                  "cache.m6g.large BCWUFWUMAS4WVJ4Q, cache.r5.large 63VV29ZM5Q5TPWMH, "
+                  "cache.r6g.large XRYU5DPB7QK6S94A, cache.r6g.2xlarge SW4HDKMXGK2KPX5T",
+        "as_of": "2026-10-13"},
+    "_ELASTICACHE_VALKEY_HOURLY": {
+        "source": f"{_ELASTICACHE_OFFER}, OnDemand NodeUsage:<type>, Cache Engine Valkey; "
+                  "e.g. cache.t3.micro JHR5QZMA4EQSF37S, cache.r6g.large RV2VBCDBY8RZE2WZ",
+        "as_of": "2026-10-13"},
+    "_OPENSEARCH_HOURLY": {
+        "source": "AWS Price List, AmazonES us-east-1 offer, version 20260927122424, "
+                  "OnDemand ESInstance:<type>; m5.xlarge Z3HZ7P7Q4GNGBQFG, r5.large "
+                  "GSTK76R4P7QA5DPG, r5.xlarge WSC5QMCRTPHYWTDJ, c5.large CUV96RRT7ZXEQGCP, "
+                  "c5.xlarge JED863GNYTGS3V3D",
+        "as_of": "2026-10-13"},
+    "_MSK_BROKER_HOURLY": {
+        "source": "AWS Price List, AmazonMSK us-east-1 offer, version 20260911124456, "
+                  "USE1-Kafka.<type> broker hours; kafka.t3.small EAENBG6PQA5U8JTN, "
+                  "kafka.m5.large CBMW8TY4JC6XHKHM, kafka.m5.xlarge 4TWECYAMUUGT7JBZ, "
+                  "kafka.m5.2xlarge UB9WVPBDV4Y3WA3Y, kafka.m5.4xlarge 63SP8EF29DGKVSG2, "
+                  "kafka.m5.8xlarge 59HBRTXVJJUW6ATD, kafka.m7g.large NR4E2TGDUNJZTB8H, "
+                  "kafka.m7g.xlarge BGQVYV74MDANC2T5",
+        "as_of": "2026-10-13"},
+    "_REDSHIFT_HOURLY": {
+        "source": "AWS Price List, AmazonRedshift us-east-1 offer, version 20260911124505, "
+                  "Compute Instance Node:<type>; ra3.4xlarge ZYZ6HF4BA4HB6RED, ra3.large "
+                  "YQV5REMUWQM38HB9, ra3.xlplus YVF6CSKM7D9MR6YP, ra3.16xlarge "
+                  "V3SQDWYU5P43BXJU, dc2.large HG8UH9XWXYJ697H2, dc2.8xlarge 5GZR5W5AKZUHNFAE",
+        "as_of": "2026-10-13"},
 }
 
 DAYS_PER_MONTH = 30.0
@@ -311,15 +380,43 @@ def _estimate_aurora(rc: ResourceChange) -> CostLine | None:
     return _estimate_rds(rc, default_engine="aurora")
 
 
+def _count(value: Any, default: int) -> int:
+    """A node or broker count from a plan, or `default` when the plan has none
+    (null until apply, or a value that is not a number)."""
+    n = as_number(value, None)
+    return int(n) if n is not None and n >= 0 else default
+
+
+def elasticache_node_count(resource_type: str, cfg: dict) -> int:
+    """Nodes an ElastiCache resource runs. A cluster has num_cache_nodes. A
+    replication group has num_cache_clusters (primary plus replicas), or in
+    cluster mode num_node_groups shards of 1 + replicas_per_node_group nodes;
+    reading num_cache_nodes there priced every replication group as one node."""
+    if resource_type == "aws_elasticache_replication_group":
+        groups = _count(cfg.get("num_node_groups"), 0)
+        if groups:
+            return groups * (1 + _count(cfg.get("replicas_per_node_group"), 0))
+        return max(1, _count(cfg.get("num_cache_clusters")
+                             or cfg.get("number_cache_clusters"), 1))
+    return max(1, _count(cfg.get("num_cache_nodes"), 1))
+
+
+def _unpriced(rc: ResourceChange, what: str) -> CostLine:
+    return CostLine(rc.address, rc.type, _action_label(rc), 0.0,
+                    f"{what}: not in nable's price table, not priced", "low")
+
+
 def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:
     cfg = rc.net_config
-    node_type = cfg.get("node_type", "")
-    num_nodes = int(cfg.get("num_cache_nodes", 1))
-    hourly = _ELASTICACHE_HOURLY.get(node_type, 0.0)
+    node_type = cfg.get("node_type") or ""
+    engine = str(cfg.get("engine") or "redis").lower()
+    num_nodes = elasticache_node_count(rc.type, cfg)
+    hourly = elasticache_hourly(node_type, engine)
+    if hourly is None:
+        return _unpriced(rc, f"{num_nodes}× {node_type or 'no node_type'} ({engine})")
     monthly = hourly * num_nodes * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{num_nodes}× {node_type} @ ${hourly:.4f}/hr each",
-                    "high" if hourly else "low")
+                    f"{num_nodes}× {node_type} ({engine}) @ ${hourly:.4f}/hr each", "high")
 
 
 def _estimate_ebs(rc: ResourceChange) -> CostLine | None:
@@ -405,15 +502,20 @@ def _estimate_opensearch(rc: ResourceChange) -> CostLine | None:
     dedicated_masters = int(cluster_cfg.get("dedicated_master_count", 0))
     master_type = cluster_cfg.get("dedicated_master_type", node_type)
 
-    hourly = _OPENSEARCH_HOURLY.get(node_type, 0.142)
-    master_hourly = _OPENSEARCH_HOURLY.get(master_type, hourly)
-    total_hourly = hourly * node_count + master_hourly * dedicated_masters
-    monthly = total_hourly * HOURS_PER_MONTH * _sign(rc)
+    # An unknown type used to be priced as m5.large.search ($0.142): a guess
+    # that put an r6g.4xlarge.search domain at a twentieth of its rate.
+    hourly = _OPENSEARCH_HOURLY.get(node_type)
+    master_hourly = _OPENSEARCH_HOURLY.get(master_type) if dedicated_masters else 0.0
     note = f"{node_count}× {node_type}"
     if dedicated_masters:
         note += f" + {dedicated_masters}× {master_type} (master)"
+    if hourly is None or master_hourly is None:
+        return _unpriced(rc, note)
+    total_hourly = hourly * node_count + master_hourly * dedicated_masters
+    monthly = total_hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{note} @ ${total_hourly:.4f}/hr total", "medium")
+                    f"{note} @ ${total_hourly:.4f}/hr total, instance hours only "
+                    "(EBS storage not included)", "medium")
 
 
 def _estimate_msk(rc: ResourceChange) -> CostLine | None:
@@ -422,19 +524,27 @@ def _estimate_msk(rc: ResourceChange) -> CostLine | None:
     if isinstance(broker_info, list):
         broker_info = broker_info[0] if broker_info else {}
     broker_type  = broker_info.get("instance_type", "kafka.m5.large")
-    az_count     = len(broker_info.get("client_subnets", ["a", "b", "c"]))
-    hourly = _MSK_BROKER_HOURLY.get(broker_type, 0.142)
-    total_hourly = hourly * az_count
+    # number_of_broker_nodes is required and is a multiple of the subnets: 6
+    # brokers over 3 AZs is 6, not the 3 the subnet count alone gave.
+    az_count     = len(broker_info.get("client_subnets") or ["a", "b", "c"])
+    brokers = _count(cfg.get("number_of_broker_nodes"), 0) or az_count
+    hourly = _MSK_BROKER_HOURLY.get(broker_type)
+    if hourly is None:
+        return _unpriced(rc, f"{brokers}× {broker_type}")
+    total_hourly = hourly * brokers
     monthly = total_hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{az_count}× {broker_type} @ ${hourly:.4f}/hr/broker", "medium")
+                    f"{brokers}× {broker_type} @ ${hourly:.4f}/hr/broker, broker hours only "
+                    "(storage not included)", "medium")
 
 
 def _estimate_redshift(rc: ResourceChange) -> CostLine | None:
     cfg = rc.net_config
     node_type  = cfg.get("node_type",     "dc2.large")
     node_count = int(cfg.get("number_of_nodes", 1))
-    hourly = _REDSHIFT_HOURLY.get(node_type, 0.25)
+    hourly = _REDSHIFT_HOURLY.get(node_type)
+    if hourly is None:
+        return _unpriced(rc, f"{node_count}× {node_type}")
     monthly = hourly * node_count * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
                     f"{node_count}× {node_type} @ ${hourly}/hr", "high")

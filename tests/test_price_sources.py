@@ -64,6 +64,11 @@ def test_derived_constants_are_not_also_sourced():
 
 # Tables outside aws_prices, each with its module's PRICE_SOURCES entry.
 _OTHER_TABLES: list[tuple[str, str]] = [
+    ("finops.connectors.terraform_estimate", "_ELASTICACHE_HOURLY"),
+    ("finops.connectors.terraform_estimate", "_ELASTICACHE_VALKEY_HOURLY"),
+    ("finops.connectors.terraform_estimate", "_OPENSEARCH_HOURLY"),
+    ("finops.connectors.terraform_estimate", "_MSK_BROKER_HOURLY"),
+    ("finops.connectors.terraform_estimate", "_REDSHIFT_HOURLY"),
 ]
 
 
