@@ -2052,9 +2052,12 @@ def check_data_transfer_costs(
     """
     findings: list[dict] = []
 
+    # "natgateway", not "nat": the bare substring matched any usage type with
+    # "nat" in a word (International, Destination, Alternate) and filed it as
+    # data transfer.
     data_transfer_keywords = [
         "DataTransfer", "Transfer", "data transfer",
-        "inter-region", "NAT",
+        "inter-region", "NatGateway-Bytes",
     ]
 
     try:
@@ -2068,51 +2071,64 @@ def check_data_transfer_costs(
         log.warning("Data transfer CE query failed: %s", exc)
         return findings
 
+    # One line per usage type over the whole window. MONTHLY granularity splits
+    # a window that crosses a month boundary into partial months, which used
+    # to become two findings per usage type, each called a monthly cost and
+    # each held to the threshold alone ($40 + $40 of an $80 line: no finding).
+    totals: dict[str, float] = {}
     for period in resp.get("ResultsByTime", []):
         for group in period.get("Groups", []):
             usage_type = group.get("Keys", [""])[0]
             amount = float(group.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0))
+            totals[usage_type] = totals.get(usage_type, 0.0) + amount
 
-            if amount < threshold_usd:
-                continue
+    for usage_type, amount in totals.items():
+        if amount < threshold_usd:
+            continue
 
-            is_transfer = any(kw.lower() in usage_type.lower() for kw in data_transfer_keywords)
-            if not is_transfer:
-                continue
+        is_transfer = any(kw.lower() in usage_type.lower() for kw in data_transfer_keywords)
+        if not is_transfer:
+            continue
 
-            if "NAT" in usage_type:
-                rec = (
-                    "Replace NAT Gateway with VPC endpoints for S3 and DynamoDB traffic "
-                    "(free for gateway endpoints). Use Interface endpoints for other services."
-                )
-            elif "inter-region" in usage_type.lower() or "Region to Region" in usage_type:
-                rec = (
-                    "Consolidate workloads to a single region where possible. "
-                    "Use S3 replication only for DR, not hot data access."
-                )
-            elif "Internet" in usage_type:
-                rec = (
-                    "Use CloudFront to cache and reduce egress costs. "
-                    "Ensure API clients are in the same region as your endpoints."
-                )
-            else:
-                rec = "Review usage type. Consider VPC endpoints, CloudFront, or regional consolidation."
+        if "natgateway" in usage_type.lower():
+            rec = (
+                "Replace NAT Gateway with VPC endpoints for S3 and DynamoDB traffic "
+                "(free for gateway endpoints). Use Interface endpoints for other services."
+            )
+        elif "inter-region" in usage_type.lower() or "Region to Region" in usage_type:
+            rec = (
+                "Consolidate workloads to a single region where possible. "
+                "Use S3 replication only for DR, not hot data access."
+            )
+        elif "Internet" in usage_type:
+            rec = (
+                "Use CloudFront to cache and reduce egress costs. "
+                "Ensure API clients are in the same region as your endpoints."
+            )
+        else:
+            rec = "Review usage type. Consider VPC endpoints, CloudFront, or regional consolidation."
 
-            findings.append({
-                "resource_id": usage_type,
-                "resource_type": "Data Transfer",
-                "waste_type": "data_transfer_cost",
-                "estimated_monthly_savings": round(amount * 0.3, 2),
-                "detail": (
-                    f"Usage type '{usage_type}' cost ${amount:,.2f} in the period. "
-                    f"Recommendation: {rec}"
-                ),
-                "severity": "high" if amount >= 200 else "medium",
-                "region": "global",
-                "account_id": None,
-                "usage_type": usage_type,
-                "monthly_cost": round(amount, 2),
-            })
+        findings.append({
+            "resource_id": usage_type,
+            "resource_type": "Data Transfer",
+            "waste_type": "data_transfer_cost",
+            # Spend, not a saving. This used to be 30% of the spend, a figure
+            # with no source; what an architecture change removes is not
+            # measured here, so the finding carries no savings number.
+            "estimated_monthly_savings": None,
+            "unpriced": True,
+            "detail": (
+                f"Usage type '{usage_type}' cost ${amount:,.2f} from {start} to {end}. "
+                f"How much of it a change would remove is not estimated. "
+                f"Recommendation: {rec}"
+            ),
+            "severity": "high" if amount >= 200 else "medium",
+            "region": "global",
+            "account_id": None,
+            "usage_type": usage_type,
+            "period_cost": round(amount, 2),
+            "period": {"start": start, "end": end},
+        })
 
     return findings
 
