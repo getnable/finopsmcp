@@ -71,3 +71,30 @@ def test_concurrent_first_runs_all_get_a_working_database(tmp_path):
         failures += [[ln for ln in d.stderr.splitlines() if "Error" in ln][-1:]
                      for d in done if d.returncode != 0]
     assert not failures, failures
+
+
+def test_concurrent_first_runs_agree_on_one_vault_key(tmp_path):
+    """Before the fix each racer generated its own master key and the last
+    writer's file won, so a credential stored by any other racer could never
+    be decrypted again ("Failed to decrypt credential - check vault key")."""
+    code = ("from finops.security.vault import Vault\n" + _BARRIER +
+            "v = Vault.default()\n"
+            "v.store('K' + sys.argv[2], 'value-' + sys.argv[2])\n"
+            "print('ok')\n")
+    reader = ("from finops.security.vault import Vault, VaultError\n"
+              "v = Vault.default()\n"
+              "bad = []\n"
+              "for k in v.list_keys():\n"
+              "    try:\n"
+              "        v.get(k)\n"
+              "    except VaultError:\n"
+              "        bad.append(k)\n"
+              "print(len(v.list_keys()), ','.join(bad))\n")
+    for r in range(ROUNDS):
+        env, done = _together(tmp_path, r, code)
+        assert all(d.returncode == 0 for d in done), [d.stderr[-400:] for d in done]
+        out = subprocess.run([sys.executable, "-c", reader], env=env, capture_output=True,
+                             text=True, timeout=60, stdin=subprocess.DEVNULL)
+        stored, _, unreadable = out.stdout.strip().partition(" ")
+        assert stored == str(PROCS), out.stdout + out.stderr
+        assert unreadable == "", f"round {r}: undecryptable after a concurrent first run: {unreadable}"
