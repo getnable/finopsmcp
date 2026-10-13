@@ -151,12 +151,12 @@ Change freezes and approval chains are org facts too: during a freeze every pric
 Packs extend nable with an org's own rules: policies, guard rules that can only tighten, remediation playbooks, price books, report templates, coding-agent skills, and (sandboxed) connectors, org adapters and ticket or Slack sinks. Each declares what it may read, which secrets it gets and which hosts it may reach in `nable-pack.toml`; you see that at install, and an update that asks for more waits for your approval again.
 
 ```bash
-nable pack install ./my-pack          # a folder, a .tar.gz, git+https://...@<commit>, or ns/name from the registry
+nable pack install ./my-pack          # a folder, a .tar.gz, git+https://...@<commit>, or ns/name from a registry
 nable pack audit                      # what is installed, what each may do, and whether any file changed
 nable pack validate ./my-pack         # for authors
 ```
 
-Your org policy file can limit where packs come from, cap what they may ask for, and require signatures (`packs:` in `nable.policy.yaml`). Details, the capability list and the honest limits of sandboxing on a laptop are in [docs/PACKS.md](docs/PACKS.md).
+An `ns/name` install reads a registry index named by `packs.registry` in your org policy, `--registry` or `NABLE_PACK_REGISTRY`; the default index (`getnable/registry` on GitHub) is not published yet and answers 404, so name one of your own. Your org policy file can limit where packs come from, cap what they may ask for, and require signatures (`packs:` in `nable.policy.yaml`). Details, the capability list and the honest limits of sandboxing on a laptop are in [docs/PACKS.md](docs/PACKS.md).
 
 
 ## Setup
