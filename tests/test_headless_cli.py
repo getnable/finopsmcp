@@ -66,6 +66,29 @@ def test_guard_check_json_is_the_verdict(tmp_path):
     assert doc["decision"] == "allow" and doc["infra"] is False
 
 
+# ── setup and serve: the commands with nothing to do here ─────────────────────
+
+def test_provider_setup_that_stores_nothing_exits_1(tmp_path):
+    """`nable setup openai < /dev/null` read no key, stored nothing, said so,
+    and exited 0, so a provisioning script took it for a success."""
+    r = nable(tmp_path, "setup", "openai")
+    assert "Nothing stored" in r.stdout
+    assert r.returncode == 1
+
+
+def test_serve_without_the_dashboard_fails_on_stderr(tmp_path):
+    """The container's default command. In the open package the dashboard is
+    not there: `serve` said so on stdout and exited 0, so `docker run` and any
+    supervisor read "finished successfully" from a server that never started."""
+    import importlib.util
+    if importlib.util.find_spec("finops.server_web") is not None:
+        import pytest
+        pytest.skip("the hosted dashboard is installed here; serve would start it")
+    r = nable(tmp_path, "serve", "--host", "0.0.0.0", "--port", "8080", timeout=60)
+    assert r.returncode == 1
+    assert "hosted" in r.stderr and r.stdout.strip() == ""
+
+
 # ── license ───────────────────────────────────────────────────────────────────
 
 def test_license_status_fails_on_an_invalid_key_and_prints_no_escapes(tmp_path):

@@ -4170,13 +4170,17 @@ def main(args: list[str] | None = None) -> None:
         try:
             from .server_web import run_server, set_connectors
         except ImportError:
+            # stderr and exit 1: nothing was served. This is the container
+            # image's default command, and exit 0 read as "finished cleanly" to
+            # `docker run`, to a supervisor and to any script that started it.
             print(
                 "The local web dashboard has been removed from the open-source nable package.\n"
                 "It's now a hosted/enterprise feature. The local product is the MCP server that\n"
                 "runs inside your editor (Claude, Cursor, etc.). For a hosted dashboard, see\n"
-                "https://getnable.com."
+                "https://getnable.com.",
+                file=sys.stderr,
             )
-            return
+            raise SystemExit(1) from None
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
         # canonical connector set. Without this the serve process ran with an empty
@@ -4278,7 +4282,8 @@ def main(args: list[str] | None = None) -> None:
             from .welcome import _cli
             print(f"\n  Nothing was connected, so there is nothing to restart. Run "
                   f"{_cli('setup ' + parsed.cmd)} again when you have the key.\n")
-            return
+            # Not a success: a script piping a key in (or none) reads this.
+            raise SystemExit(1)
     else:
         # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
         # the editor, ambient-credential scan, value moment, never dead-ends), so
