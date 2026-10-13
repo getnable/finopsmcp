@@ -78,7 +78,27 @@ def check_budget_status(budget_name: str = "") -> dict:
         from ..budget.enforcer import check_all_budgets, list_budgets, check_budget
         results = check_all_budgets()
         if budget_name:
+            names = [str(r["name"]) for r in results]
             results = [r for r in results if budget_name.lower() in r["name"].lower()]
+            if not results:
+                # A filter that matched nothing checked nothing. It used to fall
+                # through to "All budgets on track" about a budget that does
+                # not exist.
+                return {
+                    "error": f"No budget matches '{budget_name}', so nothing was checked.",
+                    "budgets_available": names,
+                    "hint": ("Call check_budget_status() with no name for every budget, "
+                             "or set_budget to create this one."),
+                }
+        if not results:
+            return {
+                "summary": {"total_budgets": 0, "exceeded": 0, "warnings": 0,
+                            "on_track": 0, "cannot_check": 0},
+                "budgets": [],
+                "no_budgets": True,
+                "alert": ("No budgets are set, so there is nothing to check. Create one "
+                          "with set_budget (or sync_budgets_from_yaml)."),
+            }
 
         exceeded = [r for r in results if r["status"] == "exceeded"]
         warnings  = [r for r in results if r["status"] == "warning"]
