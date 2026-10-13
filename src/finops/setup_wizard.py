@@ -4151,7 +4151,9 @@ def main(args: list[str] | None = None) -> None:
                                         getattr(parsed, "yes", False),
                                         getattr(parsed, "dry_run", False)))
     elif parsed.cmd in ("license-status", "whoami", "plan"):
-        _run_license_status()
+        _code = _run_license_status()
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "serve":
         if getattr(parsed, "demo", False):
@@ -4497,16 +4499,19 @@ def _run_license_setup(key: str = "") -> int:
     return 0
 
 
-def _run_license_status() -> None:
+def _run_license_status() -> int:
     """
     Print current license status without restarting anything.
     Called by: finops setup license-status
                finops license-status
+    Returns the exit code: 1 when the configured key is invalid (a pipeline
+    checking its FINOPS_LICENSE_KEY secret has only that to go on), else 0.
     """
     from .license import (
         _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
         trial_last_day, trial_line,
     )
+    from .welcome import _c
 
     status = check_license()
 
@@ -4515,7 +4520,8 @@ def _run_license_status() -> None:
     color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
              "free": "90", "invalid": "31"}.get(status.mode)
     label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
-    mode_display = f"\033[{color}m{label}\033[0m" if color else label
+    # Colour only on a terminal: in a CI log the escapes are noise.
+    mode_display = _c(color, label) if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
@@ -4542,6 +4548,7 @@ def _run_license_status() -> None:
         print("  Then run:   finops login\n")
     else:
         print()
+    return 1 if status.mode == "invalid" else 0
 
 
 def _run_login(email: str = "") -> int:

@@ -66,6 +66,19 @@ def test_guard_check_json_is_the_verdict(tmp_path):
     assert doc["decision"] == "allow" and doc["infra"] is False
 
 
+# ── license ───────────────────────────────────────────────────────────────────
+
+def test_license_status_fails_on_an_invalid_key_and_prints_no_escapes(tmp_path):
+    """A pipeline checking its FINOPS_LICENSE_KEY secret got exit 0 and
+    "Plan:    \\x1b[31mInvalid\\x1b[0m" in its log."""
+    r = nable(tmp_path, "license-status", env={"FINOPS_LICENSE_KEY": "FINOPS-2-bogus"})
+    assert "Invalid" in r.stdout
+    assert "\x1b[" not in r.stdout
+    assert r.returncode == 1
+    ok = nable(tmp_path, "license-status")
+    assert ok.returncode == 0 and "\x1b[" not in ok.stdout
+
+
 # ── brief --deliver (the report a cron job sends) ─────────────────────────────
 
 def _brief(tmp_path, channels: str | None):
