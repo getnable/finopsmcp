@@ -424,3 +424,83 @@ def test_each_scheduler_row_says_whether_its_idle_hours_were_measured(monkeypatc
     # reader of the row alone could not tell it from a measured 118.
     assert rows["i-blank"]["idle_basis"] == "assumed"
     assert rows["i-blank"]["idle_hours_per_week"] == 118.0
+
+
+# ── a Fargate downsize is a task size Fargate will run ───────────────────────
+#
+# Fargate takes only set CPU and memory pairs (AWS ECS API reference,
+# RegisterTaskDefinition `memory`, as shipped in botocore's ecs service
+# model): 256 CPU units with 512-2048 MiB, 512 with 1024-4096, 1024 with
+# 2048-8192, 2048 with 4096-16384, 4096 with 8192-30720. The check halved CPU
+# and kept memory, so a 1024 / 8192 task was told to run at 512 / 8192, a
+# task definition Fargate rejects, with its saving counted in the total.
+#
+# Its price was also the x86 one for every task. AmazonECS us-east-1 offer:
+# USE1-Fargate-vCPU-Hours:perCPU 0.04048, USE1-Fargate-ARM-vCPU-Hours:perCPU
+# 0.03238, so an ARM64 task's saving read 25% high.
+
+class _FargateECS:
+    def __init__(self, tasks: dict[str, dict]):
+        self._tasks = tasks
+
+    def get_paginator(self, name):
+        tasks = self._tasks
+
+        class _P:
+            def paginate(self, **_kw):
+                if name == "list_clusters":
+                    return [{"clusterArns": ["arn:aws:ecs:us-east-1:1:cluster/dev"]}]
+                return [{"serviceArns": [f"arn:aws:ecs:us-east-1:1:service/dev/{n}"
+                                         for n in tasks]}]
+        return _P()
+
+    def describe_services(self, cluster, services):
+        return {"services": [{"serviceName": a.rsplit("/", 1)[-1], "serviceArn": a,
+                              "launchType": "FARGATE", "desiredCount": 1,
+                              "taskDefinition": a.rsplit("/", 1)[-1]} for a in services]}
+
+    def describe_task_definition(self, taskDefinition):
+        return {"taskDefinition": self._tasks[taskDefinition]}
+
+
+def _fargate(tasks: dict[str, dict]) -> dict[str, dict]:
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock
+
+    from finops.analyzers import waste
+
+    now = datetime.now(timezone.utc)
+    cw = MagicMock()
+    # 40 CPU units used on average, under 20% of any task here.
+    cw.get_metric_statistics.return_value = {"Datapoints": [
+        {"Timestamp": now - timedelta(hours=h), "Average": 40.0} for h in range(48)]}
+    return {f["service"]: f for f in waste.check_ecs_task_rightsizing(
+        _FargateECS(tasks), cw, region="us-east-1")}
+
+
+def test_a_fargate_cpu_cut_must_fit_the_task_memory(monkeypatch):
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    out = _fargate({
+        "fits": {"cpu": "1024", "memory": "2048"},
+        "memory-bound": {"cpu": "1024", "memory": "8192"},
+        "big": {"cpu": "2048", "memory": "16384"},
+    })
+    assert out["fits"]["recommended_cpu_units"] == 512
+    # 512 CPU units carry at most 4096 MiB, 1024 at most 8192.
+    assert "memory-bound" not in out and "big" not in out
+
+
+def test_an_arm64_fargate_task_is_priced_at_the_arm_rate(monkeypatch):
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    out = _fargate({
+        "x86": {"cpu": "1024", "memory": "2048"},
+        "arm": {"cpu": "1024", "memory": "2048",
+                "runtimePlatform": {"cpuArchitecture": "ARM64"}},
+    })
+    # 0.5 vCPU saved, one task, 730 hours.
+    assert out["x86"]["estimated_monthly_savings"] == round(0.5 * 0.04048 * 730, 2) == 14.78
+    assert out["arm"]["estimated_monthly_savings"] == round(0.5 * 0.03238 * 730, 2) == 11.82
