@@ -504,3 +504,66 @@ def test_an_arm64_fargate_task_is_priced_at_the_arm_rate(monkeypatch):
     # 0.5 vCPU saved, one task, 730 hours.
     assert out["x86"]["estimated_monthly_savings"] == round(0.5 * 0.04048 * 730, 2) == 14.78
     assert out["arm"]["estimated_monthly_savings"] == round(0.5 * 0.03238 * 730, 2) == 11.82
+
+
+# ── Compute Optimizer evidence is read as AWS documents it ───────────────────
+#
+# botocore's compute-optimizer service model: the Finding enum is
+# Underprovisioned | Overprovisioned | Optimized | NotOptimized, and
+# UtilizationMetric.statistic reads "The Compute Optimizer API, Command Line
+# Interface (CLI), and SDKs return utilization metrics using only the Maximum
+# statistic". InstanceRecommendation carries lookBackPeriodInDays.
+
+def _co_rec(**kw):
+    from finops.recommendations.rightsizing import RightsizingRecommendation
+
+    base = dict(instance_id="i-1", instance_type="m5.2xlarge", name="web-1",
+                region="us-east-1", account_id="1", resource_type="ec2",
+                source="compute_optimizer", monthly_savings=300.0)
+    base.update(kw)
+    return RightsizingRecommendation(**base)
+
+
+def test_the_real_overprovisioned_finding_counts_as_one():
+    """genuine_savings credited only "OVER_PROVISIONED" and
+    "VERY_OVER_PROVISIONED", strings the API never returns, so no Compute
+    Optimizer recommendation could score above 60 and genuine_monthly_savings
+    was 0 for every account whose findings came from it."""
+    from finops.recommendations.genuine_savings import assess
+
+    a = assess(_co_rec(finding="Overprovisioned", avg_cpu_pct=6.0))
+    assert a.score == 75 and a.verdict == "genuine_savings"
+    assert a.score == assess(_co_rec(finding="OVER_PROVISIONED", avg_cpu_pct=6.0)).score
+
+
+def test_compute_optimizer_maxima_are_not_reported_as_averages():
+    from finops.recommendations.rightsizing import _fetch_ec2_from_co, rightsizing_summary
+
+    class _CO:
+        def get_ec2_instance_recommendations(self, **_kw):
+            return {"instanceRecommendations": [{
+                "instanceArn": "arn:aws:ec2:us-east-1:1:instance/i-1",
+                "currentInstanceType": "m5.2xlarge", "finding": "Overprovisioned",
+                "lookBackPeriodInDays": 32.0,
+                "utilizationMetrics": [
+                    {"name": "Cpu", "statistic": "Maximum", "value": 38.0},
+                    {"name": "Memory", "statistic": "Maximum", "value": 41.0}],
+                "recommendationOptions": [{
+                    "instanceType": "m5.xlarge", "rank": 1, "performanceRisk": 1.0,
+                    "savingsOpportunity": {"estimatedMonthlySavings": {
+                        "value": 140.16, "currency": "USD"}}}]}]}
+
+    [rec] = _fetch_ec2_from_co(_CO(), "1")
+    assert "Peak CPU 38.0%" in rec.description and "Avg CPU" not in rec.description
+    assert "over 32d" in rec.description
+    [row] = rightsizing_summary([rec])["recommendations"]
+    assert row["avg_cpu_pct"] is None and row["max_cpu_pct"] == 38.0
+    assert row["avg_mem_pct"] is None and row["max_mem_pct"] == 41.0
+    assert row["lookback_days"] == 32
+
+    # The emailed and exported report renders that row as a peak.
+    from finops.reporting.exporter import build_html_report
+
+    html = build_html_report("r", "2026-09-01", "2026-09-30",
+                             rightsizing={"recommendations": [row]})
+    assert "peak 38%" in html

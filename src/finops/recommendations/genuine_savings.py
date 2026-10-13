@@ -169,15 +169,22 @@ def assess(rec: Any, ctx: Any = None) -> Assessment:
     source = getattr(rec, "source", "")
     finding = getattr(rec, "finding", "") or ""
     rtype = getattr(rec, "resource_type", "")
+    # Compute Optimizer figures are period maxima held in the avg_* fields.
+    peak = getattr(rec, "utilization_statistic", "average") == "maximum"
+    cpu_label, at = ("peak CPU", "peaks at") if peak else ("avg CPU", "at")
 
     score = 50
     reasons: list[str] = []
 
-    # 1. Strength of the underutilization signal.
+    # 1. Strength of the underutilization signal. "Overprovisioned" is the
+    # value Compute Optimizer actually returns (its Finding enum is
+    # Underprovisioned | Overprovisioned | Optimized | NotOptimized). Only the
+    # two invented spellings were credited before, so no live Compute Optimizer
+    # finding could score above 60 or ever be called genuine savings.
     if finding == "VERY_OVER_PROVISIONED":
         score += 30
         reasons.append("sustained over-provisioning (CPU+mem+net+disk)")
-    elif finding == "OVER_PROVISIONED":
+    elif finding in ("OVER_PROVISIONED", "Overprovisioned"):
         score += 15
         reasons.append("over-provisioned")
     if source == "cloudwatch_fallback":
@@ -198,10 +205,10 @@ def assess(rec: Any, ctx: Any = None) -> Assessment:
     if mem is not None:
         if mem >= 75:
             score -= 25
-            reasons.append(f"memory at {mem:.0f}%, likely memory-bound")
+            reasons.append(f"memory {at} {mem:.0f}%, likely memory-bound")
         elif mem >= 60:
             score -= 10
-            reasons.append(f"memory at {mem:.0f}%")
+            reasons.append(f"memory {at} {mem:.0f}%")
 
     # 4. Price the saving on the customer's real environment and discounts. The
     #    shared layer prefers the measured effective rate (already blends in
@@ -234,7 +241,7 @@ def assess(rec: Any, ctx: Any = None) -> Assessment:
     else:
         verdict = "likely_false_positive"
 
-    why = "; ".join(reasons[:3]) if reasons else f"avg CPU {avg_cpu:.0f}%"
+    why = "; ".join(reasons[:3]) if reasons else f"{cpu_label} {avg_cpu:.0f}%"
     # Keep it one tight line.
     why = (why[:157] + "...") if len(why) > 160 else why
 

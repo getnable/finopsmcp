@@ -104,6 +104,16 @@ def anomalies_csv(data: dict) -> str:
     ])
 
 
+def _cpu_cell(r: dict) -> str:
+    """A row's CPU as the report shows it. A Compute Optimizer row carries only
+    the period's peak (avg_cpu_pct None, max_cpu_pct set), and says so."""
+    avg = r.get("avg_cpu_pct")
+    if avg is not None:
+        return f"{avg:.0f}%"
+    peak = r.get("max_cpu_pct")
+    return f"peak {peak:.0f}%" if peak is not None else "n/a"
+
+
 def rightsizing_csv(data: dict) -> str:
     rows = []
     for r in data.get("recommendations", []):
@@ -368,7 +378,7 @@ def build_html_report(
                 r.get("name", r.get("instance_id", "")),
                 r.get("instance_type", ""),
                 r.get("recommended_type", ""),
-                f"{r.get('avg_cpu_pct', 0):.0f}%",
+                _cpu_cell(r),
                 f"${r.get('monthly_savings', r.get('monthly_savings_usd', 0)):,.0f}/mo",
             ]
             for r in sorted(recs, key=lambda x: -(x.get("monthly_savings", x.get("monthly_savings_usd", 0))))[:20]
