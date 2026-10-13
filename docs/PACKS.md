@@ -406,5 +406,6 @@ limits a pack to the files it needs.
 
 A pack that reads files itself (change-control reads the CODEOWNERS file of
 the directory it is pointed at) does not go through this scope, and the
-laptop sandbox does not stop it (see below): that is part of what signing
+laptop sandbox does not stop it (see "What the laptop sandbox does not do",
+above): that is part of what signing
 vouches for.
