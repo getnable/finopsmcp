@@ -30,7 +30,7 @@ Every Bash command and MCP tool call Claude is about to make goes through the gu
 - priced launches: `aws ec2 run-instances --instance-type p4d.24xlarge --count 8` shows the monthly cost at list price, and asks when it is over your threshold or your budget.
 - the same changes made through a Terraform, AWS or Kubernetes MCP server.
 
-It never runs anything itself, and if it fails for any reason (no network for uvx, a bug) the command goes through as if the guard were not there.
+It never runs anything itself, and if it fails for any reason (no network for uvx, a bug) the command goes through as if the guard were not there. Claude Code shows nothing when that happens, so `nable guard status`, `nable guard doctor` and `nable doctor` check that uvx can start the finops-mcp release the hook pins, and say so, with the fix, when it cannot.
 
 Check on it from Claude Code:
 

@@ -5252,6 +5252,23 @@ _ADAPTER_SURFACES = {"cursor": ("Cursor", "shell commands"),
 _ADAPTER_MCP = ("cursor", "codex")      # adapters whose hook can also see MCP calls
 
 
+def _release_problem(cmd: str) -> tuple[str, str] | None:
+    """guard_release.hook_problem, or None in a build without guard_adapters."""
+    try:
+        from .guard_release import hook_problem
+        return hook_problem(cmd)
+    except ImportError:
+        return None
+
+
+def _settings_hook_fix(release: str, flag: str) -> str:
+    try:
+        from .guard_adapters import settings_hook_fix
+        return settings_hook_fix(release, flag)
+    except ImportError:
+        return f"nable guard install{flag}"
+
+
 def _adapter_rows() -> list[dict[str, Any]]:
     """Hook state for every other harness from guard_adapters, [] when this
     build has no adapters or they cannot answer. Read-only."""
@@ -5272,6 +5289,10 @@ def _adapter_rows() -> list[dict[str, Any]]:
                     row["mcp"] = bool(sees_mcp(name, is_global))
                 if pin_state is not None and st == "installed":
                     row["pin"] = pin_state(name, is_global)
+                stuck = (ga.release_problem(name, is_global)
+                         if st == "installed" and hasattr(ga, "release_problem") else None)
+                if stuck:
+                    row.update(runs=False, release=stuck[0], problem=stuck[1])
                 rows.append(row)
         return rows
     except Exception:
@@ -5300,6 +5321,11 @@ def doctor() -> dict[str, Any]:
             row.update(command=cmd, runs=_command_runs(cmd), pin=hook_pin(cmd) or "binary",
                        bash=surf["bash"], mcp=surf["mcp"], editor=surf["editor"],
                        fail_safe=is_fail_safe(cmd))
+            # uvx on PATH is not enough: the hook pins one release, and when
+            # uvx cannot install it the hook exits 0 and checks nothing.
+            stuck = _release_problem(cmd) if row["runs"] else None
+            if stuck:
+                row.update(runs=False, release=stuck[0], problem=stuck[1])
         rows.append(row)
     adapter_rows = _adapter_rows()
     rows += adapter_rows
@@ -5333,6 +5359,12 @@ def doctor() -> dict[str, Any]:
         flag = " --global" if r["scope"] == "global" else ""
         if r["harness"] != "claude-code" or not r["installed"]:
             continue
+        if r.get("problem"):
+            gaps.append(f"Claude Code ({r['scope']}): the hook runs finops-mcp "
+                        f"{r['release']}, which uvx cannot install here, so it checks "
+                        f"nothing ({r['problem']})")
+            fix(_settings_hook_fix(r["release"], flag), "a hook this machine can start")
+            continue
         if not r["runs"]:
             gaps.append(f"Claude Code ({r['scope']}): the hooked command no longer exists")
             fix(f"nable guard install{flag}", "repairs the dead hook in place")
@@ -5362,7 +5394,13 @@ def doctor() -> dict[str, Any]:
         mine = [r for r in adapter_rows if r["harness"] == name]
         for r in mine:
             flag = " --global" if r["scope"] == "global" else ""
-            if r["installed"] and not r["runs"]:
+            if r.get("problem"):
+                gaps.append(f"{label} ({r['scope']}): the hook runs finops-mcp "
+                            f"{r['release']}, which uvx cannot install here, so it checks "
+                            f"nothing ({r['problem']})")
+                fix(_settings_hook_fix(r["release"], f" --harness {name}{flag}"),
+                    "a hook this machine can start")
+            elif r["installed"] and not r["runs"]:
                 # The repair names the broken scope: a bare install would add a
                 # project hook and leave the dead global one where it is.
                 gaps.append(f"{label} ({r['scope']}): the hooked command no longer exists")

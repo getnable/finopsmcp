@@ -1809,6 +1809,27 @@ def _our_commands(harness: str, global_scope: bool) -> list[str]:
     return [c for c in _ADAPTERS[harness][2](doc) if _is_ours(c)]
 
 
+def release_problem(harness: str, global_scope: bool,
+                    note: Any = None) -> tuple[str, str] | None:
+    """(release, why) when this harness's installed guard hook is a uvx hook
+    pinned to a release uvx cannot install here (guard_release): installed,
+    and checking nothing. Read-only, never raises."""
+    from . import guard_release
+    try:
+        if harness == "claude":
+            ours = guard._read_our_hooks(hooks_path(harness, global_scope))
+            cmds = [ours[0][1]["command"]] if ours else []
+        else:
+            cmds = _our_commands(harness, global_scope)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError):
+        return None
+    for cmd in cmds:
+        stuck = guard_release.hook_problem(cmd, note)
+        if stuck:
+            return stuck
+    return None
+
+
 def pin_state(harness: str, global_scope: bool) -> str | None:
     """How our installed hook pins nable: "pinned", "other", "unpinned", or
     "binary" (not the uvx form); None when it is not installed. The worst of
@@ -1852,6 +1873,26 @@ PLUGIN_OFF_HELP = ("Claude Code has no switch for one plugin's hooks. To stop th
                    f"uninstall {guard_plugin.PLUGIN_KEY}, in Claude Code.")
 
 
+def settings_hook_fix(release: str, flag: str = "") -> str:
+    """The step that puts a working settings hook in place of one (the
+    plugin's, or a settings hook) pinned to a release uvx cannot install.
+    `nable guard install` writes the installed `finops` binary when one stays
+    on PATH; otherwise it pins this release through uvx, which helps only
+    when this release is not the one that cannot be installed."""
+    if guard.hook_form() == "binary" or guard.__version__ != release:
+        return f"nable guard install{flag}"
+    return ("pipx install finops-mcp (or uv tool install finops-mcp), so a `finops` "
+            f"stays on PATH, then nable guard install{flag}")
+
+
+def plugin_release_fix(release: str) -> str:
+    """The recommendation when the plugin's hook pins a release uvx cannot
+    install."""
+    return (f"{settings_hook_fix(release, ' --global --force')}  (a settings hook judges "
+            "in the plugin's place, in every project; /plugin marketplace update nable in "
+            "Claude Code picks up a plugin release that pins an installable finops-mcp)")
+
+
 def plugin_status(global_scope: bool = False) -> dict[str, Any]:
     """Where the Claude Code plugin's guard stands here. Read-only, never raises.
 
@@ -1880,25 +1921,59 @@ def plugin_sees_editor() -> bool | None:
         root = guard_plugin.claude_user_dir() / "plugins"
     except (OSError, ValueError, RuntimeError):
         return None
+    for _path, doc in _plugin_hook_docs(root):
+        try:
+            for group in ((doc.get("hooks") or {}).get("PreToolUse") or []):
+                if _plugin_commands(group):
+                    found.add(all(guard_plugin.matcher_covers(group.get("matcher"), t)
+                                  for t in guard_plugin.EDITOR_TOOLS))
+        except (AttributeError, TypeError):
+            continue                    # this file is broken; the others still count
+    return found.pop() if len(found) == 1 else None
+
+
+def _plugin_commands(group: Any) -> list[str]:
+    """The nable plugin's guard hook commands in one hooks.json group."""
+    cmds = [h.get("command") for h in group.get("hooks") or [] if isinstance(h, dict)]
+    return [c for c in cmds if isinstance(c, str) and guard_plugin._VIA_PLUGIN_RE.search(c)
+            and "finops" in c]
+
+
+def _plugin_hook_docs(root: Path):
+    """(path, parsed doc) for each hooks.json under Claude Code's plugins
+    directory `root`. Bounded; os.walk skips what it cannot read, and a file
+    that does not parse is skipped."""
     seen = 0
-    for dirpath, dirnames, filenames in os.walk(root):     # os.walk skips what it cannot read
+    for dirpath, dirnames, filenames in os.walk(root):
         seen += 1
         if seen > 2000:
             break
         dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
         if "hooks.json" not in filenames or Path(dirpath).name != "hooks":
             continue
+        path = Path(dirpath) / "hooks.json"
         try:
-            doc = json.loads((Path(dirpath) / "hooks.json").read_text(encoding="utf-8"))
-            for group in ((doc.get("hooks") or {}).get("PreToolUse") or []):
-                cmds = [h.get("command") for h in group.get("hooks") or [] if isinstance(h, dict)]
-                if any(isinstance(c, str) and guard_plugin._VIA_PLUGIN_RE.search(c)
-                       and "finops" in c for c in cmds):
-                    found.add(all(guard_plugin.matcher_covers(group.get("matcher"), t)
-                                  for t in guard_plugin.EDITOR_TOOLS))
-        except (OSError, ValueError, AttributeError, TypeError):
-            continue                    # this file is broken; the others still count
-    return found.pop() if len(found) == 1 else None
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict):
+            yield path, doc
+
+
+def plugin_hook_files(root: Path) -> list[tuple[Path, list[str]]]:
+    """(hooks.json path, its nable guard hook commands) for each installed
+    copy of the nable plugin under `root`. Read-only, never raises."""
+    out: list[tuple[Path, list[str]]] = []
+    for path, doc in _plugin_hook_docs(root):
+        try:
+            cmds = [c for event in ("PreToolUse", "PostToolUse")
+                    for group in ((doc.get("hooks") or {}).get(event) or [])
+                    for c in _plugin_commands(group)]
+        except (AttributeError, TypeError):
+            continue
+        if cmds:
+            out.append((path, cmds))
+    return out
 
 
 def _drop(items: list[str], unwanted: Any) -> list[str]:
@@ -1909,18 +1984,35 @@ def with_plugin(report: dict[str, Any]) -> dict[str, Any]:
     """guard.doctor()'s report, with the Claude Code plugin and the off switch
     in it: the plugin's hook is a Claude Code surface that no settings file
     shows, and a guard that is switched off covers nothing."""
+    from . import guard_release
     ps = plugin_status()
     enabled = ps["enabled"]
     report["plugin"] = {"enabled": bool(enabled), "path": str(enabled) if enabled else None,
                         "runs": ps["runs"], "off": ps["off"]}
     if enabled:
+        # uvx on PATH is not enough: the hook pins one release, and when uvx
+        # cannot install it the hook exits 0 and checks nothing (guard_release).
+        stuck = guard_release.plugin_problem() if ps["runs"] else None
+        if stuck:
+            report["plugin"].update(runs=False, release=stuck[0], problem=stuck[1])
         rows = report["surfaces"]
         at = sum(1 for r in rows if r.get("harness") == "claude-code")
         editor = plugin_sees_editor()
         rows.insert(at, {"harness": "claude-code", "scope": "plugin", "path": str(enabled),
-                         "installed": True, "runs": ps["runs"], "via": "plugin",
-                         "bash": True, "mcp": True, "editor": editor})
-        if ps["runs"]:
+                         "installed": True, "runs": ps["runs"] and not stuck, "via": "plugin",
+                         "bash": True, "mcp": True, "editor": editor,
+                         **({"release": stuck[0], "problem": stuck[1]} if stuck else {})})
+        if stuck:
+            report["not_covered"].insert(0, f"Claude Code (plugin): its hook runs finops-mcp "
+                                            f"{stuck[0]}, which uvx cannot install here, so "
+                                            f"it checks nothing ({stuck[1]})")
+            # A plain install stands aside for an enabled plugin; the fix above
+            # is the one that writes a hook.
+            report["recommendations"] = _drop(
+                report["recommendations"],
+                lambda f: f.startswith("nable guard install  (this project; add --global"))
+            report["recommendations"].insert(0, plugin_release_fix(stuck[0]))
+        elif ps["runs"]:
             # The plugin sees Bash and MCP calls whether or not a settings hook
             # does, so neither gap the settings rows reported is one now.
             settings_editor = [c for c in report["covered"]
@@ -2088,10 +2180,11 @@ def cli(action: str, *, harness: str | None, everything: bool, global_scope: boo
     return 1 if failed else 0
 
 
-def status_lines() -> list[str]:
+def status_lines(note: Any = None) -> list[str]:
     """One line per non-Claude scope that is installed or whose agent is here,
     and under any that needs it, the command that fixes it (naming its scope:
-    a bare install only ever touches this project)."""
+    a bare install only ever touches this project). `note` hears a line
+    before a slow release check (guard_release)."""
     from .welcome import amber, cyan, dim, green
 
     here = set(detected())
@@ -2104,7 +2197,11 @@ def status_lines() -> list[str]:
             if st == "absent" and name not in here:
                 continue
             pin = pin_state(name, is_global) if st == "installed" else None
-            if st == "installed" and pin == "unpinned":
+            stuck = release_problem(name, is_global, note) if st == "installed" else None
+            if stuck:
+                shown = amber(f"installed, but uvx cannot install finops-mcp {stuck[0]}, "
+                              "so the hook cannot start")
+            elif st == "installed" and pin == "unpinned":
                 shown = amber("installed, unpinned")
             elif st == "installed" and pin == "other":
                 shown = amber("installed, pinned to another release")
@@ -2113,7 +2210,12 @@ def status_lines() -> list[str]:
                          "absent": dim("not installed")}[st]
             lines.append(f"  {LABELS[name]:<{_LABEL_WIDTH}} {scope:<8} {shown}   "
                          f"{dim(str(hooks_path(name, is_global)))}")
-            if st == "broken" or pin in ("unpinned", "other"):
+            if stuck:
+                flag = f" --harness {name}" + (" --global" if is_global else "")
+                lines.append(f"  {'':<{_LABEL_WIDTH}} {'':<8} {dim('uvx: ' + stuck[1])}")
+                lines.append(f"  {'':<{_LABEL_WIDTH}} {'':<8} {dim('fix:')} "
+                             f"{cyan(settings_hook_fix(stuck[0], flag))}")
+            elif st == "broken" or pin in ("unpinned", "other"):
                 fix = f"nable guard install --harness {name}" + (" --global" if is_global else "")
                 lines.append(f"  {'':<{_LABEL_WIDTH}} {'':<8} {dim('fix:')} {cyan(fix)}")
     return lines

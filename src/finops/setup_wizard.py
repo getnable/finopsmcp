@@ -2691,6 +2691,12 @@ def _run_guard(parsed) -> None:
     blocking: list[bool] = []
     narrow: list[bool] = []
     no_edits: list[bool] = []
+    unfetchable: list[tuple[bool, str, str]] = []
+    from .guard_adapters import release_problem
+
+    def _checking(line: str) -> None:
+        # The one slow case: uvx installing a release it has not cached yet.
+        print(dim(f"  ({line} ...)"), file=sys.stderr, flush=True)
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2699,9 +2705,16 @@ def _run_guard(parsed) -> None:
             # Claude Code, so reporting a plain "installed" here would tell
             # someone they are guarded at the moment they stopped being.
             broken = guard.broken_hook_command(p)
+            stuck = None if broken else release_problem("claude", is_global, _checking)
             if broken:
                 stale.append(is_global)
                 state = amber("installed, but broken")
+            elif stuck:
+                # The same silence with uvx present: the release it pins cannot
+                # be installed, so the hook exits 0 and checks nothing.
+                unfetchable.append((is_global, stuck[0], stuck[1]))
+                state = amber(f"installed, but uvx cannot install finops-mcp {stuck[0]}, "
+                              "so the hook cannot start")
             elif guard.unpinned_hook_command(p):
                 unpinned.append(is_global)
                 state = amber("installed, unpinned")
@@ -2723,12 +2736,18 @@ def _run_guard(parsed) -> None:
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
+    plugin_stuck = None
     if plugin["enabled"]:
         # The plugin's hook is in no settings file; enabledPlugins is where
         # Claude Code records it.
+        from .guard_release import plugin_problem
+        plugin_stuck = plugin_problem(_checking) if plugin["runs"] else None
         if not plugin["runs"]:
             state = amber("on (via the Claude Code plugin), but uvx is not on PATH, "
                           "so it cannot start")
+        elif plugin_stuck:
+            state = amber(f"on (via the Claude Code plugin), but its hook cannot start "
+                          f"finops-mcp {plugin_stuck[0]}")
         elif any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
             state = green("on (via the Claude Code plugin)") + dim(
                 ", standing aside wherever the settings hook above judges")
@@ -2736,7 +2755,7 @@ def _run_guard(parsed) -> None:
             state = green("on (via the Claude Code plugin)")
         print(f"  {'plugin':<8} {state}   {dim(str(plugin['enabled']))}")
     from .guard_adapters import status_lines
-    other_agents = status_lines()
+    other_agents = status_lines(_checking)
     if other_agents:
         print()
         for line in other_agents:
@@ -2750,6 +2769,33 @@ def _run_guard(parsed) -> None:
             print(f"  {cyan('nable guard install' + (' --global' if is_global else ''))}")
         print()
 
+    if plugin_stuck:
+        print("  " + amber(f"The plugin's guard hook runs finops-mcp {plugin_stuck[0]}, which "
+                           "uvx cannot install here,"))
+        print("  " + amber("so it checks nothing. uvx says:"))
+        for line in textwrap.wrap(plugin_stuck[1], 72):
+            print(dim(f"    {line}"))
+        print(dim("  The hook exits 0 when it cannot start, so Claude Code never blocks on it"))
+        print(dim("  and shows nothing; the plugin's MCP server pins the same release, so"))
+        print(dim("  /mcp lists nable as failed. Until the plugin pins a release uvx can"))
+        print(dim("  install (/plugin marketplace update nable), a settings hook judges in"))
+        print(dim("  its place:"))
+        from .guard_adapters import settings_hook_fix
+        print(f"  {cyan(settings_hook_fix(plugin_stuck[0], ' --global --force'))}")
+        print()
+    if unfetchable:
+        from .guard_adapters import settings_hook_fix
+        for is_global, release, why in unfetchable:
+            where = "global" if is_global else "project"
+            print("  " + amber(f"The Claude Code {where} hook runs finops-mcp {release}, which "
+                               "uvx cannot install here,"))
+            print("  " + amber("so the guard is not running there. uvx says:"))
+            for line in textwrap.wrap(why, 72):
+                print(dim(f"    {line}"))
+            print(dim("  Claude Code lets each call through when a hook cannot start, "
+                      "silently. Fix:"))
+            print(f"  {cyan(settings_hook_fix(release, ' --global' if is_global else ''))}")
+            print()
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))
@@ -2908,10 +2954,16 @@ def _guard_doctor(parsed) -> None:
         name = f"{labels.get(r['harness'], r['harness']):<{width}} {r['scope']:<8}"
         if not r["installed"]:
             state = dim("not installed")
+        elif r.get("via") == "plugin" and r.get("problem"):
+            state = amber(f"on (via the Claude Code plugin), but its hook cannot start "
+                          f"finops-mcp {r['release']}: uvx cannot install it")
         elif r.get("via") == "plugin":
             state = (green("on (via the Claude Code plugin)") + ", sees Bash + MCP"
                      + (" + file edits" if r.get("editor") else "") if r["runs"]
                      else amber("on (via the Claude Code plugin), but uvx is not on PATH"))
+        elif r.get("problem"):
+            state = amber(f"installed, but uvx cannot install finops-mcp {r['release']}, "
+                          "so the hook cannot start")
         elif not r.get("runs"):
             state = amber("installed, but the hooked command no longer exists")
         elif r["harness"] == "claude-code":
@@ -3512,7 +3564,7 @@ def _user_name(uid: int) -> str:
         return f"uid {uid}"
 
 
-def _owner_of(path: Path) -> "tuple[int, str] | None":
+def _owner_of(path: Path) -> tuple[int, str] | None:
     """(uid, name) of the nearest existing path at or above `path`, or None
     where the platform has no uids."""
     if not hasattr(os, "getuid"):
@@ -3526,7 +3578,7 @@ def _owner_of(path: Path) -> "tuple[int, str] | None":
     return None
 
 
-def _as_refusal(e: BaseException) -> "OSError | None":
+def _as_refusal(e: BaseException) -> OSError | None:
     """The file system refusal behind `e`, or None when it is something else.
 
     A data directory this user cannot write surfaces two ways: as the

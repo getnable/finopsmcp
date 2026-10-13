@@ -490,6 +490,82 @@ def _check_network() -> dict:
     }
 
 
+def _check_guard_hook() -> dict | None:
+    """Can the guard hook Claude Code runs here actually start?
+
+    The plugin's hook, and a settings hook installed without a `finops` on
+    PATH, start nable through uvx at one pinned release. When uvx cannot
+    install that release the hook exits 0, on purpose, and Claude Code shows
+    nothing: every command goes through unchecked. This doctor used to say
+    nothing about the guard at all. None (no row) when no Claude Code guard
+    hook is installed here."""
+    try:
+        from . import guard
+        from .guard_adapters import (
+            plugin_release_fix,
+            plugin_status,
+            release_problem,
+            settings_hook_fix,
+        )
+        from .guard_release import plugin_problem
+    except ImportError:
+        return None
+    name = "Agent guard (Claude Code)"
+    try:
+        plugin = plugin_status()
+        scopes = [g for g in (False, True) if guard.is_installed(guard._settings_path(g))]
+        if not plugin["enabled"] and not scopes:
+            return None
+        if plugin["off"]:
+            how = "FINOPS_GUARD=off" if plugin["off"] == "env" else "nable guard off"
+            return {"name": name, "ok": None, "warnings": [],
+                    "detail": f"off ({how}): every hook lets each call through unchecked",
+                    "recommendation": "nable guard on" if plugin["off"] == "flag"
+                    else "unset FINOPS_GUARD"}
+        problems: list[dict] = []
+        if plugin["enabled"]:
+            stuck = plugin_problem() if plugin["runs"] else None
+            if not plugin["runs"]:
+                problems.append({"detail": "the Claude Code plugin's hook needs uvx, which is "
+                                           "not on PATH, so it checks nothing",
+                                 "recommendation": "install uv (https://docs.astral.sh/uv/), "
+                                                   "then restart Claude Code"})
+            elif stuck:
+                problems.append({"detail": f"the Claude Code plugin's hook runs finops-mcp "
+                                           f"{stuck[0]}, which uvx cannot install here, so "
+                                           "it checks nothing",
+                                 "warning": f"uvx: {stuck[1]}",
+                                 "recommendation": plugin_release_fix(stuck[0])})
+        for is_global in scopes:
+            path = guard._settings_path(is_global)
+            flag = " --global" if is_global else ""
+            broken = guard.broken_hook_command(path)
+            stuck = None if broken else release_problem("claude", is_global)
+            if broken:
+                problems.append({"detail": f"the hook in {path} names a program that does "
+                                           "not exist, so it checks nothing",
+                                 "recommendation": f"nable guard install{flag}"})
+            elif stuck:
+                problems.append({"detail": f"the hook in {path} runs finops-mcp {stuck[0]}, "
+                                           "which uvx cannot install here, so it checks "
+                                           "nothing",
+                                 "warning": f"uvx: {stuck[1]}",
+                                 "recommendation": settings_hook_fix(stuck[0], flag)})
+        if problems:
+            first = problems[0]
+            return {"name": name, "ok": False, "detail": first["detail"],
+                    "warnings": [p["warning"] for p in problems if p.get("warning")]
+                    + [p["detail"] for p in problems[1:]],
+                    "recommendation": first["recommendation"]}
+        where = ", ".join((["the Claude Code plugin"] if plugin["enabled"] else [])
+                          + [str(guard._settings_path(g)) for g in scopes])
+        return {"name": name, "ok": True, "detail": f"on: {where}", "warnings": []}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
+        # A diagnostic never fails the doctor.
+        return {"name": name, "ok": None, "warnings": [],
+                "detail": f"could not read the guard's state ({type(e).__name__})"}
+
+
 def _check_audit_log(last_n: int = 5) -> dict:
     """Return recent audit log entries from the vault."""
     try:
@@ -649,7 +725,9 @@ def run_doctor(as_json: bool = False) -> int:
         _check_telemetry(),
         _check_network(),
         _check_audit_log(),
+        _check_guard_hook(),
     ]
+    checks = [c for c in checks if c is not None]
 
     if as_json:
         print(json.dumps(checks, indent=2, default=str))
