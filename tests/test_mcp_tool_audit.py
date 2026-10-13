@@ -7,29 +7,9 @@ are all on the path, exactly as for Claude or any other MCP client.
 """
 from __future__ import annotations
 
-import asyncio
-import json
-
 import pytest
 
-
-def _call(name: str, args: dict | None = None):
-    """One tool call through the in-memory MCP client. JSON answers come back
-    decoded, text answers as text."""
-    from mcp.shared.memory import create_connected_server_and_client_session
-
-    from finops import server
-
-    async def run():
-        async with create_connected_server_and_client_session(server.mcp._mcp_server) as c:
-            res = await c.call_tool(name, args or {})
-            text = "".join(getattr(b, "text", "") for b in res.content)
-            assert not res.isError, text
-            try:
-                return json.loads(text)
-            except ValueError:
-                return text
-    return asyncio.run(run())
+from tests.mcp_support import call as _call
 
 
 @pytest.fixture

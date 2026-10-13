@@ -399,18 +399,26 @@ async def compare_providers(
         return _demo_compare({"category": category, "start_date": start_date,
                               "end_date": end_date})
 
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    from .cost_queries import (
+        _NOTHING_CONNECTED,
+        _bad_category,
+        _cost_window,
+        _no_rows_flags,
+        _partial,
+        _read_status,
+        _unread_costs,
+    )
+
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is not None:
+        return bad
 
     pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
     targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
-
-    from .cost_queries import _no_rows_flags, _partial, _read_status, _unread_costs
+        return {"error": _NOTHING_CONNECTED}
 
     provider_totals: list[dict] = []
     grand_total = 0.0
@@ -456,6 +464,7 @@ async def compare_providers(
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "providers": provider_totals,
+        **window_notes,
     }
     result.update(_no_rows_flags(read_status))
     failed = {n: s["error"] for n, s in read_status.items() if s.get("error")}
