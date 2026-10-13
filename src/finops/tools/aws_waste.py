@@ -1787,8 +1787,9 @@ async def audit_s3_intelligent_tiering(
 ) -> dict:
     """
     Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds
-    savings. IT costs $0.0025/1,000 objects, making it more expensive than
-    S3 Standard for objects smaller than 128KB.
+    savings. IT costs $0.0025/1,000 monitored objects. Objects under 128 KB are
+    not monitored and pay no fee; monitored objects up to about 250 KB pay more
+    in fees than moving to Infrequent Access saves.
 
     Args:
         regions: Unused (S3 is global). Present for API consistency.
@@ -1819,8 +1820,9 @@ async def audit_s3_intelligent_tiering(
         shown = findings[:max_results]
         omitted = len(findings) - len(shown)
         note = (
-            "Objects below 128KB cost more in IT monitoring fees than they save "
-            "in storage tiering. Enable S3 bucket metrics for accurate object size data."
+            "Objects under 128 KB are not monitored and pay no IT fee. Monitored objects "
+            "up to about 250 KB pay more in fees than tiering saves. Sizes are bucket "
+            "averages from S3 bucket metrics, so a bucket that mixes sizes is approximate."
         )
         if omitted > 0:
             note += f" Showing top {max_results} by impact. {omitted} more findings omitted."

@@ -1,12 +1,18 @@
 """
 S3 Intelligent-Tiering small object warning.
 
-S3 Intelligent-Tiering charges $0.0025 per 1,000 monitored objects regardless
-of access patterns. For objects smaller than 128KB the monitoring fee exceeds
-any possible tiering savings, making IT more expensive than S3 Standard.
+S3 Intelligent-Tiering charges $0.0025 per 1,000 monitored objects a month,
+regardless of access patterns. Objects smaller than 128 KB are not monitored
+and pay no fee; they stay at the Frequent Access rate, which is S3 Standard's,
+so for them IT neither saves nor costs (AWS S3 API reference: "If the size of
+an object is less than 128 KB, it is not monitored and not eligible for
+auto-tiering"). This module used to say the opposite, that objects under
+128 KB make IT more expensive than Standard, and flagged them as waste.
 
-This scanner identifies IT-enabled buckets where the average object size is
-below the break-even threshold and calculates the net monthly cost of IT.
+The real small-object case is just above that line: a monitored object of
+128 KB to about 250 KB pays more in monitoring than moving it to the
+Infrequent Access tier can save ($0.0105/GB). This scanner identifies
+IT-enabled buckets where that is likely and calculates the net monthly cost.
 """
 from __future__ import annotations
 
@@ -24,6 +30,7 @@ from .envelope import INFERRED, Finding
 log = logging.getLogger(__name__)
 
 IT_MONITORING_COST_PER_1K_OBJECTS: float = 0.0025
+# The size below which AWS neither monitors an object nor charges the fee.
 IT_BREAKEVEN_SIZE_KB: float = 128.0
 # Intelligent-Tiering is worth its monitoring fee when that fee is a small slice
 # of the storage savings it unlocks. If monitoring costs <8% of the savings, keep
@@ -159,12 +166,29 @@ def _calculate_avg_object_size_kb(object_count: int | None, total_size_bytes: fl
     return (total_size_bytes / object_count) / 1024.0
 
 
+def _objects_monitored(object_count: int | None, total_size_bytes: float | None) -> int | None:
+    """How many objects pay the monitoring fee, or None when unknown.
+
+    Bucket metrics give a count and a total size, not a size distribution, so
+    this takes every object to be the average size: all monitored when the
+    average is 128 KB or more, none when it is under. A bucket that mixes
+    sizes is monitored only for its objects of 128 KB and up.
+    """
+    avg_kb = _calculate_avg_object_size_kb(object_count, total_size_bytes)
+    if avg_kb is None:
+        return None
+    return object_count if avg_kb >= IT_BREAKEVEN_SIZE_KB else 0
+
+
 def _estimate_storage_savings(object_count: int | None, total_size_bytes: float | None) -> float:
     """
     Estimate monthly storage savings from tiering (upper bound).
-    Assumes all objects eventually move to the Infrequent Access tier.
+    Assumes all monitored objects eventually move to the Infrequent Access
+    tier. Objects under 128 KB never tier, so they save nothing.
     """
     if object_count is None or total_size_bytes is None or object_count == 0:
+        return 0.0
+    if not _objects_monitored(object_count, total_size_bytes):
         return 0.0
     total_gb = total_size_bytes / (1024 ** 3)
     return total_gb * _IA_SAVINGS_PER_GB
@@ -177,8 +201,9 @@ async def audit_s3_intelligent_tiering(
     """
     Audit S3 buckets using Intelligent-Tiering to find small-object waste.
 
-    IT charges $0.0025 per 1,000 monitored objects. For buckets with average
-    object size below 128KB the monitoring fee exceeds the tiering savings.
+    IT charges $0.0025 per 1,000 monitored objects. Objects under 128 KB are
+    not monitored and pay no fee; for monitored objects up to about 250 KB the
+    fee exceeds what moving them to Infrequent Access can save.
 
     Args:
         aws_client: AWSConnector instance (provides boto3 session).
@@ -229,9 +254,13 @@ async def audit_s3_intelligent_tiering(
 
         avg_size_kb = _calculate_avg_object_size_kb(object_count, total_size_bytes)
 
+        # Only objects of 128 KB and up are monitored and pay the fee. Charging
+        # it on every object put a fee on a small-object bucket that AWS does
+        # not bill, and called the bucket waste because of it.
+        monitored = _objects_monitored(object_count, total_size_bytes)
         monthly_monitoring_cost = (
-            (object_count / 1000.0) * IT_MONITORING_COST_PER_1K_OBJECTS
-            if object_count is not None
+            (monitored / 1000.0) * IT_MONITORING_COST_PER_1K_OBJECTS
+            if monitored is not None
             else None
         )
         estimated_storage_savings = _estimate_storage_savings(object_count, total_size_bytes)
@@ -254,6 +283,13 @@ async def audit_s3_intelligent_tiering(
         elif monthly_monitoring_cost is None:
             recommendation = "UNKNOWN_enable_bucket_metrics_for_analysis"
             roi_summary = "Enable S3 bucket-level metrics to assess Intelligent-Tiering ROI."
+        elif monitored == 0:
+            recommendation = "NO_EFFECT_objects_under_128kb_not_monitored"
+            roi_summary = (
+                f"The average object is {avg_size_kb:.1f} KB. Objects under 128 KB are not "
+                "monitored, pay no monitoring fee and stay at the Frequent Access rate, the "
+                "same as S3 Standard, so Intelligent-Tiering neither saves nor costs on them. "
+                "Assumes objects are near the average size.")
         elif estimated_storage_savings <= 0:
             recommendation = "LIKELY_WASTE_no_tiering_savings_to_justify_monitoring"
             roi_summary = (
@@ -321,9 +357,10 @@ async def audit_s3_intelligent_tiering(
         finding = Finding(
             source="s3_intelligent_tiering",
             title="Let's check whether Intelligent-Tiering is paying off on this bucket",
-            why=("Intelligent-Tiering bills $0.0025 per 1,000 objects every month just to "
-                 "monitor them. On a bucket full of small objects that monitoring fee can "
-                 f"outweigh the tiering savings. '{worst['bucket_name']}' pays "
+            why=("Intelligent-Tiering bills $0.0025 per 1,000 monitored objects every month. "
+                 "Objects under 128 KB are not monitored, but an object a little over that "
+                 "line pays more to monitor than moving it to Infrequent Access can save. "
+                 f"'{worst['bucket_name']}' pays about "
                  f"${worst['monthly_monitoring_cost']:.2f}/mo in monitoring and the tiering "
                  "savings look thin."),
             evidence=INFERRED,
@@ -336,6 +373,10 @@ async def audit_s3_intelligent_tiering(
             assumptions=[
                 "All bytes settle in the Infrequent Access tier (an upper bound on savings).",
                 "Bucket-level CloudWatch metrics reflect the steady-state object count and size.",
+                "Every object is near the average size, so all are monitored (the fee is "
+                "charged only on objects of 128 KB and up).",
+                "Every object counted is in the Intelligent-Tiering class; NumberOfObjects "
+                "counts all classes.",
             ],
             rough_monthly=worst["monthly_monitoring_cost"],
             confirm_steps=[
@@ -352,9 +393,11 @@ async def audit_s3_intelligent_tiering(
             remediation=[
                 "Confirm the tier split first (see steps above). Do not assume waste from the "
                 "monitoring fee alone.",
-                "If confirmed unhelpful, remove the Intelligent-Tiering configuration and set a "
-                "plain lifecycle policy. Existing objects keep their data, only the tiering "
-                "behavior changes.",
+                "If confirmed unhelpful, note that removing the bucket's Intelligent-Tiering "
+                "configuration only turns off the opt-in archive tiers: objects stay in the "
+                "Intelligent-Tiering class and keep paying the fee until they are copied to "
+                "another class (one request per object). Stop new writes or lifecycle "
+                "transitions into Intelligent-Tiering as well.",
             ],
             resource_id=worst["bucket_name"],
             metadata={

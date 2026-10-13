@@ -962,7 +962,7 @@ class _S3WithTiering(_S3):
         return {"IntelligentTieringConfigurationList": [{"Id": "default"}]}
 
 
-def _it_series(names, objects=1_000_000.0, size=10 * 1024 ** 3) -> dict:
+def _it_series(names, objects=1_000_000.0, size=1_000_000 * 150 * 1024) -> dict:
     out = {}
     for n in names:
         out[("NumberOfObjects", n, "AllStorageTypes")] = [objects]
@@ -994,7 +994,9 @@ def _it_run():
     results = asyncio.run(audit_s3_intelligent_tiering(_Connector()))
 
     assert len(results) == 140
-    # 1M objects of 10 KB each: monitoring outweighs tiering, in both regions.
+    # 1M objects of 150 KiB each: monitored (128 KB and up), and the fee
+    # outweighs tiering, in both regions. Objects under 128 KB, which this
+    # fixture used, are not monitored and pay no fee.
     assert {r["recommendation"] for r in results} == {
         "LIKELY_WASTE_monitoring_exceeds_savings"}
     return cws
