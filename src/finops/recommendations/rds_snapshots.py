@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .envelope import MEASURED, Finding
+from .envelope import INFERRED, Finding
 
 log = logging.getLogger(__name__)
 
@@ -30,8 +30,14 @@ def _snapshot_monthly_cost(size_gb: float) -> float:
     return round(size_gb * _SNAPSHOT_COST_PER_GB, 4)
 
 
-def _get_active_db_identifiers(rds_client: Any) -> set[str]:
-    """Return a set of all DB instance identifiers currently active in the account."""
+def _get_active_db_identifiers(rds_client: Any) -> set[str] | None:
+    """Return a set of all DB instance identifiers currently active in the
+    account, or None when the instance list could not be read.
+
+    None, not an empty set: an empty set reads as "no database exists", which
+    made every manual snapshot in the region orphaned and the finding a
+    measured, high-confidence delete on the strength of an AccessDenied.
+    """
     identifiers: set[str] = set()
     try:
         pag = rds_client.get_paginator("describe_db_instances")
@@ -40,6 +46,7 @@ def _get_active_db_identifiers(rds_client: Any) -> set[str]:
                 identifiers.add(db["DBInstanceIdentifier"])
     except Exception as e:
         log.warning("Could not list DB instances: %s", e)
+        return None
     # Also check DB clusters (Aurora)
     try:
         pag = rds_client.get_paginator("describe_db_clusters")
@@ -55,7 +62,7 @@ def _build_snapshot_record(
     snap: dict,
     region: str,
     now: datetime,
-    active_dbs: set[str],
+    active_dbs: set[str] | None,
     age_threshold_days: int,
 ) -> dict:
     """Convert a raw describe_db_snapshots entry into a normalised record dict."""
@@ -74,7 +81,8 @@ def _build_snapshot_record(
         age_days = (now - created_at_raw).days
         created_at_str = created_at_raw.isoformat()
 
-    is_orphaned = db_id not in active_dbs
+    # None when the DB list was not read: whether the source exists is unknown.
+    is_orphaned = None if active_dbs is None else db_id not in active_dbs
     monthly_cost = _snapshot_monthly_cost(size_gb)
 
     return {
@@ -83,6 +91,9 @@ def _build_snapshot_record(
         "size_gb": size_gb,
         "age_days": age_days,
         "monthly_cost": monthly_cost,
+        # AllocatedStorage is the provisioned size, not the bytes a snapshot
+        # holds, and backup storage up to the free allocation is not billed.
+        "price_basis": "upper_bound_allocated_storage",
         "status": status,
         "is_orphaned": is_orphaned,
         "region": region,
@@ -153,26 +164,32 @@ async def audit_rds_manual_snapshots(
     region_lists = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
     all_records: list[dict] = [rec for sub in region_lists for rec in sub]
     # orphaned takes precedence over old (was an if/elif in the serial loop).
-    orphaned: list[dict] = [r for r in all_records if r["is_orphaned"]]
-    old: list[dict] = [r for r in all_records if r["is_old"] and not r["is_orphaned"]]
+    # A snapshot whose region's DB list was not read is neither: it is counted
+    # as unassessed, never priced as waste.
+    orphaned: list[dict] = [r for r in all_records if r["is_orphaned"] is True]
+    old: list[dict] = [r for r in all_records if r["is_old"] and r["is_orphaned"] is False]
+    unassessed = sum(1 for r in all_records if r["is_orphaned"] is None)
 
     # Sort by cost descending so the most expensive appear first
     orphaned.sort(key=lambda x: x["monthly_cost"], reverse=True)
     old.sort(key=lambda x: x["monthly_cost"], reverse=True)
 
     total_monthly_cost = round(sum(r["monthly_cost"] for r in all_records), 2)
-    saveable = [r for r in all_records if r["is_orphaned"] or r["is_old"]]
+    saveable = orphaned + old
     potential_savings = round(sum(r["monthly_cost"] for r in saveable), 2)
     total_size_gb = round(sum(r["size_gb"] for r in all_records), 1)
 
     # Classify by strength of evidence. Each snapshot is one we read from
-    # describe_db_snapshots: it exists, with a known AllocatedStorage and AWS's
-    # published $0.095/GB-month rate. Orphaned status is directly verified (the
+    # describe_db_snapshots, and orphaned status is directly verified (the
     # source DB identifier is not in the live instance/cluster set we listed).
-    # That is measured, so this is a recommendation. We lead with orphaned
-    # snapshots because deleting them is unambiguously safe; old snapshots of a
-    # live DB may still be a deliberate retention copy, so the action there is
-    # "review then delete", not a blind delete.
+    # The dollars are not: AllocatedStorage is the provisioned size, not the
+    # bytes the snapshot holds, and RDS bills backup storage only past the free
+    # allocation (AWS Price List, AmazonRDS: "$0.095 per additional GB-month of
+    # backup storage exceeding free allocation"). This used to ship as a
+    # measured recommendation with that upper bound as the precise saving. We
+    # lead with orphaned snapshots because their source is gone; old snapshots
+    # of a live DB may still be a deliberate retention copy, so the action there
+    # is "review then delete", not a blind delete.
     finding = None
     n_orphaned = len(orphaned)
     n_old = len(old)
@@ -208,11 +225,25 @@ async def audit_rds_manual_snapshots(
             source="rds_snapshots",
             title="Manual RDS snapshots are accumulating storage cost",
             why=("Manual RDS snapshots never auto-expire and bill at $0.095/GB-month "
-                 f"until you delete them. You have {what}, which together cost about "
-                 f"${potential_savings:,.2f}/mo to keep."),
-            evidence=MEASURED,
-            confidence="high" if n_orphaned and not n_old else "medium",
-            est_monthly_savings=potential_savings,
+                 f"past the free backup allocation until you delete them. You have "
+                 f"{what}."),
+            evidence=INFERRED,
+            confidence="medium",
+            why_unsure=(
+                "The snapshots and their age are read from RDS, but the dollars are an "
+                "upper bound: each is priced at its database's full allocated storage, "
+                "while a snapshot holds only the blocks written, and backup storage up to "
+                "the free allocation (the size of your live databases in the region) is "
+                "not billed."),
+            assumptions=[
+                "Every snapshot is billed at AllocatedStorage x $0.095/GB-month "
+                "(us-east-1 list).",
+            ],
+            confirm_steps=[
+                "Read the RDS ChargedBackupUsage line in Cost Explorer for the billed "
+                "backup storage in each region.",
+            ],
+            rough_monthly=potential_savings,
             remediation=remediation,
             resource_id=single_id,
             metadata={
@@ -230,5 +261,8 @@ async def audit_rds_manual_snapshots(
         "potential_monthly_savings": potential_savings,
         "total_snapshots": len(all_records),
         "total_size_gb": total_size_gb,
+        # Snapshots in a region whose DB instance list could not be read:
+        # their source may or may not exist, so they are in neither list.
+        "unassessed_snapshots": unassessed,
         "finding": finding.to_dict() if finding else None,
     }

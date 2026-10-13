@@ -1523,8 +1523,17 @@ async def audit_rds_manual_snapshots(
             f"(${total_monthly:,.2f}/mo)."
         )
         lines.append(
-            f"Potential saving if flagged snapshots are deleted: ${potential_savings:,.2f}/mo."
+            f"Potential saving if flagged snapshots are deleted: up to "
+            f"${potential_savings:,.2f}/mo. An upper bound: each snapshot is priced at its "
+            f"database's allocated storage, and backup storage within the free allocation "
+            f"is not billed."
         )
+        unassessed = result.get("unassessed_snapshots", 0)
+        if unassessed:
+            lines.append(
+                f"{unassessed} snapshot(s) not assessed: the DB instance list in their region "
+                f"could not be read, so whether their source exists is unknown."
+            )
         lines.append("")
 
         _SNAP_TABLE_CAP = 30
@@ -1577,7 +1586,7 @@ async def audit_rds_manual_snapshots(
                 )
             lines.append("")
 
-        if not orphaned and not old:
+        if not orphaned and not old and not unassessed:
             lines.append(
                 f"All {total_snapshots} snapshots are recent (under {age_threshold_days} days) "
                 f"and their source DBs still exist. No immediate action needed."
