@@ -128,13 +128,28 @@ class _SurfacedFastMCP(FastMCP):
         single-tenant box no identity is attached at all.
         """
         try:
-            if isinstance(arguments, dict) and arguments:
-                scoped = dict(arguments)
+            if isinstance(arguments, dict) or arguments is None:
+                # The scope applies whether or not the caller passed the
+                # filter. It used to be applied only to an argument that was
+                # present, so a key scoped to one provider read every
+                # provider's spend by calling get_cost_summary({}).
+                try:
+                    tool = self._tool_manager.get_tool(name)
+                    accepted = set((tool.parameters or {}).get("properties", {})) if tool else set()
+                except Exception:  # noqa: BLE001 - an unknown tool fails below, not here
+                    accepted = set()
+                scoped = dict(arguments or {})
                 if "team" in scoped:
                     scoped["team"] = enforce_team_scope(scoped.get("team"))
+                elif "team" in accepted and (forced := enforce_team_scope(None)) is not None:
+                    scoped["team"] = forced
                 if "provider" in scoped:
                     scoped["provider"] = enforce_provider_scope(scoped.get("provider"))
-                arguments = scoped
+                elif ("provider" in accepted
+                      and (forced := enforce_provider_scope(None)) is not None):
+                    scoped["provider"] = forced
+                if scoped or arguments is not None:
+                    arguments = scoped
         except Exception:
             # A scoping failure must not silently WIDEN access, so this re-raises
             # rather than falling through to the unscoped arguments.
