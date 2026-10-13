@@ -316,20 +316,34 @@ def verify_savings() -> dict:
         }
 
     total_verified = sum(r["verified_monthly_savings_usd"] for r in newly_verified)
-    banked_monthly = summary["verified_monthly_usd"]
-    banked_annual = summary["verified_annual_usd"]
+    new_bill = sum(r["verified_monthly_savings_usd"] for r in newly_verified
+                   if r.get("verified_basis") == "bill_measured")
+    verified_monthly = summary["verified_monthly_usd"]
+    verified_annual = summary["verified_annual_usd"]
+    # Banked is money measured leaving the bill (CUR before and after). A change
+    # the verifier confirmed but measure.py priced at the effective rate or list
+    # price is verified, with an estimated value. Every verified dollar used to be
+    # reported here as "confirmed off your bill".
+    banked_monthly = summary["verified_bill_measured_monthly_usd"]
+    n = len(newly_verified)
     return {
-        "verified_count": len(newly_verified),
+        "verified_count": n,
         "newly_verified": newly_verified,
         "total_new_monthly_savings_usd": round(total_verified, 2),
         "total_new_annual_savings_usd": round(total_verified * 12, 2),
-        "message": f"Verified {len(newly_verified)} change{'s' if len(newly_verified) != 1 else ''}: ${total_verified:,.0f}/mo (${total_verified * 12:,.0f}/yr) newly banked. "
-                   f"Total verified banked savings: ${banked_monthly:,.0f}/mo (${banked_annual:,.0f}/yr) confirmed off your bill.",
-        "cumulative_verified_monthly_usd": banked_monthly,
-        "cumulative_verified_annual_usd": banked_annual,
-        # Explicit banked figures, distinct from predicted/found savings.
+        "message": f"Verified {n} change{'s' if n != 1 else ''}: ${total_verified:,.0f}/mo (${total_verified * 12:,.0f}/yr), "
+                   f"${new_bill:,.0f}/mo of it measured on your bill and banked. "
+                   f"Total verified: ${verified_monthly:,.0f}/mo (${verified_annual:,.0f}/yr), "
+                   f"of which ${banked_monthly:,.0f}/mo is measured on your bill; the rest is "
+                   "priced from your rates or list price until a bill before and after confirms it.",
+        "cumulative_verified_monthly_usd": verified_monthly,
+        "cumulative_verified_annual_usd": verified_annual,
+        # Explicit banked figures, distinct from predicted/found savings and from
+        # verified changes priced at a rate.
         "verified_banked_monthly_usd": banked_monthly,
-        "verified_banked_annual_usd": banked_annual,
+        "verified_banked_annual_usd": round(banked_monthly * 12, 2),
+        "verified_bill_measured_monthly_usd": banked_monthly,
+        "verified_estimated_monthly_usd": summary["verified_estimated_monthly_usd"],
     }
 
 
@@ -381,12 +395,16 @@ def get_savings_ledger(
     verified_rows = [r for r in rows if r.status == "verified"]
     open_rows = [r for r in rows if r.status == "open"]
 
-    found_total = sum(r.estimated_monthly_savings_usd or 0 for r in found_rows)
-    acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in acted_rows)
-    verified_total = sum(
-        r.verified_monthly_savings_usd or r.estimated_monthly_savings_usd or 0
-        for r in verified_rows
-    )
+    # The same figures get_savings_summary and get_nable_roi report: legacy
+    # duplicates fold and one resource counts once (headline_totals). A verified
+    # row counts its measured value only. This read `verified or estimated`, so a
+    # change measured on the bill at $0 (`0.0 or 500.0`) counted as $500 realized.
+    from ..recommendations.savings_tracker import headline_totals, row_dict
+    totals = headline_totals([row_dict(r) for r in rows])
+    found_total = totals["found"]
+    acted_total = totals["acted_all"]
+    verified_total = totals["verified"]
+    bill_total = totals["verified_bill_measured"]
 
     period_label = f"Last {days} day{'s' if days != 1 else ''}"
     lines = [
@@ -394,7 +412,9 @@ def get_savings_ledger(
         "",
         f"FOUND:    ${found_total:,.0f}/mo across {len(found_rows)} opportunit{'ies' if len(found_rows) != 1 else 'y'}",
         f"ACTED ON: ${acted_total:,.0f}/mo across {len(acted_rows)} opportunit{'ies' if len(acted_rows) != 1 else 'y'}",
-        f"VERIFIED: ${verified_total:,.0f}/mo in realized savings ({len(verified_rows)} confirmed)",
+        f"VERIFIED: ${verified_total:,.0f}/mo across {len(verified_rows)} confirmed change"
+        f"{'s' if len(verified_rows) != 1 else ''}, ${bill_total:,.0f}/mo of it measured on the bill"
+        + (" (the rest priced from your rates or list price)" if verified_total > bill_total else ""),
     ]
 
     if acted_rows:

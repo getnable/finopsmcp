@@ -2264,32 +2264,53 @@ def get_nable_roi(
         with engine.connect() as conn:
             rows = conn.execute(select(sr).where(sr.c.generated_at >= cutoff)).fetchall()
 
-        found_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status not in ("dismissed", "expired"))
-        acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status in ("acted_on", "verified"))
-        # Verified banked savings = money that actually left the bill. Use ONLY the
-        # measured verified amount, never the predicted estimate. A verified row is
-        # money nable confirmed against live cloud state; conflating it with the
-        # estimate would overstate what was actually banked.
-        verified_total = sum(
-            r.verified_monthly_savings_usd or 0
-            for r in rows if r.status == "verified"
-        )
-        verified_count = sum(1 for r in rows if r.status == "verified")
+        # One computation for every surface (savings_tracker.headline_totals):
+        # legacy duplicate rows fold, and one resource counts once, so this
+        # report, get_savings_summary and the ledger read the same figures. Summed
+        # raw, two fixes on one instance and a row written twice by an older
+        # release both counted in full here.
+        from ..recommendations.savings_tracker import headline_totals, row_dict
+        totals = headline_totals([row_dict(r) for r in rows])
+        found_total = totals["found"]
+        acted_total = totals["acted_pending"]
+        # Verified = changes confirmed against live cloud state, priced on the best
+        # basis available: the bill itself (CUR before and after), else the
+        # customer's effective rate, else list price. Only the bill-measured part
+        # is money seen leaving the bill; the rest is a confirmed change with an
+        # estimated value, and is labelled so. Never the predicted estimate.
+        verified_total = totals["verified"]
+        verified_bill = totals["verified_bill_measured"]
+        verified_est = totals["verified_estimated"]
+        verified_count = totals["verified_count"]
 
         found_annualized = found_total * 12
-        acted_annualized = acted_total * 12
         verified_annualized = verified_total * 12
         annual_tool_cost = monthly_cost * 12
 
         roi_on_verified = ((verified_total - monthly_cost) / monthly_cost * 100) if monthly_cost > 0 else None
-        payback_months = (monthly_cost / verified_total) if verified_total > 0 else None
+        # A monthly fee against monthly savings pays back only when the savings
+        # are at least the fee; then it is the fraction of a month the first fee
+        # takes to earn back. Below the fee it never pays back, and 25 / 10 =
+        # "2.5 months" was printed as if it would.
+        payback_months = (monthly_cost / verified_total
+                          if monthly_cost > 0 and verified_total >= monthly_cost else None)
 
-        # Hero line: lead with verified banked savings, the number that actually
-        # left the bill, kept clearly distinct from predicted/found opportunity.
+        def _split() -> str:
+            if not verified_est:
+                return "measured on your bill"
+            if not verified_bill:
+                return ("priced from your rates or list price after nable confirmed "
+                        "the change, not yet measured on your bill")
+            return (f"${verified_bill:,.0f}/mo measured on your bill, ${verified_est:,.0f}/mo "
+                    f"priced from your rates or list price after nable confirmed the change")
+
+        # Hero line: lead with verified savings, kept clearly distinct from
+        # predicted/found opportunity, and say how much of it the bill itself shows.
         if verified_total > 0:
-            hero = (f"**Verified banked savings: ${verified_total:,.0f}/mo "
-                    f"(${verified_annualized:,.0f}/yr), confirmed against live cloud state "
-                    f"across {verified_count} change{'s' if verified_count != 1 else ''}.**")
+            hero = (f"**Verified savings: ${verified_total:,.0f}/mo "
+                    f"(${verified_annualized:,.0f}/yr) across {verified_count} confirmed "
+                    f"change{'s' if verified_count != 1 else ''}, {_split()}.** "
+                    f"Verified banked savings, measured on the bill: ${verified_bill:,.0f}/mo.")
         else:
             hero = ("**Verified banked savings: $0/mo so far.** This tracks money that "
                     "actually left your bill. Mark recommendations acted on, then run "
@@ -2306,7 +2327,8 @@ def get_nable_roi(
             "### Savings pipeline",
             f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
             f"- Acted on (predicted, pending verification): ${acted_total:,.0f}/mo",
-            f"- Verified (banked, actually left the bill): ${verified_total:,.0f}/mo",
+            f"- Verified (change confirmed): ${verified_total:,.0f}/mo, of which "
+            f"${verified_bill:,.0f}/mo measured on the bill",
             "",
         ]
 
@@ -2318,6 +2340,21 @@ def get_nable_roi(
                 f"verified ${verified_total:,.0f}/mo above against it.",
             ]
         elif monthly_cost == 0:
+            # Payback of Pro against what has been verified, said only when true.
+            # This printed "less than 1 week" for any verified amount above zero.
+            pro_price = float(PLANS.get("pro", {}).get("monthly_usd") or 0.0)
+            if verified_total <= 0 or not pro_price:
+                payback_line = ("Once savings are verified, compare them with the Pro "
+                                f"price (${pro_price:,.0f}/mo).")
+            elif verified_total < pro_price:
+                payback_line = (f"At ${verified_total:,.0f}/mo verified savings, Pro "
+                                f"(${pro_price:,.0f}/mo) would cost more than it has "
+                                "verifiably saved so far.")
+            else:
+                weeks = pro_price / verified_total * (30.4 / 7)
+                when = "less than 1 week" if weeks < 1 else f"about {weeks:.0f} weeks"
+                payback_line = (f"At ${verified_total:,.0f}/mo verified savings, Pro "
+                                f"(${pro_price:,.0f}/mo) pays back in {when}.")
             lines += [
                 "### ROI",
                 f"**The {plan_name(plan)} plan costs nothing.** You're getting "
@@ -2325,12 +2362,13 @@ def get_nable_roi(
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
                 pro_pitch(),
-                f"At ${verified_total:,.0f}/mo verified savings, payback is "
-                f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
+                payback_line,
             ]
         else:
             roi_str = f"{roi_on_verified:.0f}%" if roi_on_verified is not None else "N/A"
-            payback_str = f"{payback_months:.1f} months" if payback_months and payback_months > 0 else "immediate"
+            payback_str = (f"{payback_months:.1f} months" if payback_months is not None
+                           else ("not reached: verified savings are below the tool cost"
+                                 if verified_total > 0 else "no verified savings yet"))
             lines += [
                 "### ROI",
                 f"- Monthly net savings (after tool cost): ${max(0, verified_total - monthly_cost):,.0f}",
@@ -2341,19 +2379,27 @@ def get_nable_roi(
             ]
             if verified_total > monthly_cost * 5:
                 lines.append(f"\n**nable is paying for itself {verified_total / monthly_cost:.0f}x over.**")
-            elif verified_total > 0:
+            elif verified_total >= monthly_cost:
                 lines.append("\n**Verified savings cover tool cost.** Act on remaining recommendations to grow ROI.")
+            elif verified_total > 0:
+                lines.append(f"\n**Verified savings do not yet cover tool cost** "
+                             f"(${verified_total:,.0f}/mo against ${monthly_cost:,.0f}/mo). "
+                             "Act on remaining recommendations to close the gap.")
             else:
                 lines.append("\n**No verified savings yet.** Run verify_savings() after acting on recommendations.")
 
+        # How the others price, not what they would cost here: they charge on
+        # managed cloud spend, which this report does not read. The cells used to
+        # be those percentages of nable's verified savings, labelled as a share
+        # of spend.
         lines += [
             "",
             "### Competitor comparison",
-            "| Tool | Cost at your savings level | What you get |",
-            "|------|---------------------------|-------------|",
+            "| Tool | How it is priced | What you get |",
+            "|------|------------------|-------------|",
             f"| nable (this) | ${annual_tool_cost:,.0f}/yr | Multi-cloud + SaaS + AI, local-first |",
-            f"| CloudHealth | ~${int(verified_annualized * 0.025):,}/yr (2.5% of managed spend) | Dashboard, enterprise only |",
-            f"| Cloudability | ~${int(verified_annualized * 0.015):,}/yr (1.5% of spend) | Dashboard, no AI |",
+            "| CloudHealth | ~2.5% of managed cloud spend | Dashboard, enterprise only |",
+            "| Cloudability | ~1.5% of cloud spend | Dashboard, no AI |",
             "| ProsperOps | 30-35% of RI savings | RI management only |",
         ]
 
@@ -2365,17 +2411,19 @@ def get_nable_roi(
             "found_monthly_usd": round(found_total, 2),
             "acted_monthly_usd": round(acted_total, 2),
             "verified_monthly_usd": round(verified_total, 2),
-            # Explicit banked figure: money confirmed to have left the bill. Same
-            # value as verified_monthly_usd, named so a caller can't confuse it
-            # with predicted/found savings.
-            "verified_banked_monthly_usd": round(verified_total, 2),
-            "verified_banked_annual_usd": round(verified_annualized, 2),
+            # Banked: money measured leaving the bill, and only that. A change
+            # confirmed in the cloud but priced at a rate is verified, not banked:
+            # it is verified_estimated_monthly_usd.
+            "verified_banked_monthly_usd": round(verified_bill, 2),
+            "verified_banked_annual_usd": round(verified_bill * 12, 2),
+            "verified_bill_measured_monthly_usd": round(verified_bill, 2),
+            "verified_estimated_monthly_usd": round(verified_est, 2),
             "verified_count": verified_count,
             "found_annualized_usd": round(found_annualized, 2),
             "verified_annualized_usd": round(verified_annualized, 2),
             "annual_tool_cost_usd": round(annual_tool_cost, 2),
             "roi_pct": round(roi_on_verified, 1) if roi_on_verified is not None else None,
-            "payback_months": round(payback_months, 1) if payback_months else None,
+            "payback_months": round(payback_months, 1) if payback_months is not None else None,
         }
     except Exception as exc:
         _srv.log.error("get_nable_roi failed: %s", exc)
