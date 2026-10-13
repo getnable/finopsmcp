@@ -40,9 +40,11 @@ def test_spot_interruption_freq_has_default() -> None:
 
 
 def test_spot_discount_known_types() -> None:
-    assert SPOT_DISCOUNT["m5.large"] == 0.72
-    assert SPOT_DISCOUNT["c5.large"] == 0.75
-    assert SPOT_DISCOUNT["r5.large"] == 0.65
+    # Spot Instance Advisor us-east-1 Linux savings (snapshot 2026-03-20). This
+    # pinned 0.72, 0.75 and 0.65, which the source the table cites does not say.
+    assert SPOT_DISCOUNT["m5.large"] == 0.59
+    assert SPOT_DISCOUNT["c5.large"] == 0.61
+    assert SPOT_DISCOUNT["r5.large"] == 0.62
 
 
 def test_get_spot_discount_fallback() -> None:
@@ -420,8 +422,11 @@ def test_an_instance_whose_cpu_read_failed_is_skipped_and_counted() -> None:
     and the result and the finding say how many were not assessed."""
     from datetime import datetime, timezone
 
-    readable = _make_instance("i-read", "m5.large", env_tag="staging")
-    denied = _make_instance("i-denied", "m5.large", env_tag="staging")
+    # c5.large, not m5.large: Spot Advisor puts m5.large in us-east-1 in the
+    # >20% interruption band, which is never a candidate, and this test needs
+    # one candidate to carry the finding.
+    readable = _make_instance("i-read", "c5.large", env_tag="staging")
+    denied = _make_instance("i-denied", "c5.large", env_tag="staging")
 
     def cpu(**kw):
         if kw["Dimensions"][0]["Value"] == "i-denied":

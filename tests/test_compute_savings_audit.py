@@ -286,3 +286,85 @@ def test_database_savings_plan_text_claims_only_what_is_offered():
     assert "45%" not in (server.recommend_database_savings_plans.__doc__ or "")
     [f] = normalise("db_sp", {"estimated_monthly_savings": 800.0})
     assert "35%" not in f["detail"]
+
+
+# ── spot figures come from the Spot Instance Advisor they cite ───────────────
+#
+# AWS Spot Instance Advisor public data (spot-bid-advisor.s3.amazonaws.com/
+# spot-advisor-data.json, object Last-Modified 2026-03-20), us-east-1 Linux:
+#
+#   type        savings  interruption band      table said
+#   m5.large      59%     >20%                   72%, 2%
+#   m5.xlarge     68%     >20%                   71%, 3%
+#   m5.2xlarge    64%     >20%                   70%, (default 10%)
+#   m6i.large     61%     >20%                   68%, 1%
+#   m6i.xlarge    59%     >20%                   69%, 2%
+#   c5.large      61%     10-15%                 75%, 5%
+#   c5.xlarge     58%     10-15%                 74%, 4%
+#   r5.large      62%     >20%                   65%, (default 10%)
+#   r5.xlarge     70%     >20%                   64%, (default 10%)
+#
+# The interruption figures were labelled RECOMMENDED-grade (under 5%) for
+# types the source puts in its worst band. The same file shows the bands vary
+# by region far more than by type (c5.large is <5% in eu-west-1 and >20% in
+# us-east-2), so a us-east-1 figure is no evidence about another region.
+
+_ADVISOR_US_EAST_1 = {
+    "m5.large": (0.59, ">20%"), "m5.xlarge": (0.68, ">20%"), "m5.2xlarge": (0.64, ">20%"),
+    "m6i.large": (0.61, ">20%"), "m6i.xlarge": (0.59, ">20%"),
+    "c5.large": (0.61, "10-15%"), "c5.xlarge": (0.58, "10-15%"),
+    "r5.large": (0.62, ">20%"), "r5.xlarge": (0.70, ">20%"),
+}
+
+
+def test_the_spot_tables_are_the_spot_advisor_figures():
+    from finops.recommendations import spot_adoption as sa
+
+    for itype, (saving, band) in _ADVISOR_US_EAST_1.items():
+        assert sa.SPOT_DISCOUNT[itype] == saving, itype
+        assert sa.SPOT_INTERRUPTION_BAND[itype] == band, itype
+
+
+def _spot_rows(itype: str, region: str):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+
+    from finops.recommendations.spot_adoption import _analyze_region
+
+    ec2, cw = MagicMock(), MagicMock()
+    ec2.get_paginator.return_value.paginate.return_value = [{"Reservations": [{"Instances": [{
+        "InstanceId": "i-1", "InstanceType": itype,
+        "Tags": [{"Key": "Name", "Value": "web"}, {"Key": "env", "Value": "staging"}]}]}]}]
+    now = datetime.now(timezone.utc)
+    cw.get_metric_statistics.return_value = {"Datapoints": [
+        {"Timestamp": now, "Average": 5.0}, {"Timestamp": now, "Average": 6.0}]}
+    return _analyze_region(ec2, cw, {"i-1"}, region, [])
+
+
+def test_an_m5_large_in_us_east_1_is_not_a_spot_recommendation():
+    """Staging-tagged, in an ASG, steady CPU: every signal but the interruption
+    rate says go. The table put m5.large at 2% and RECOMMENDED it; Spot Advisor
+    puts it in the >20% band, which the classifier's own threshold rejects."""
+    [row] = _spot_rows("m5.large", "us-east-1")
+    assert row["interruption_band"] == ">20%"
+    assert row["recommendation"] == "NOT_RECOMMENDED"
+    # 70.08 a month on demand at 59% off.
+    assert row["monthly_savings"] == 41.35 and row["savings_pct"] == 59.0
+
+
+def test_a_spot_figure_from_one_region_is_not_applied_to_another():
+    [row] = _spot_rows("m5.large", "eu-west-1")
+    assert row["interruption_band"] == "unknown"
+    assert row["recommendation"] == "POSSIBLE"
+    assert row["savings_basis"] == "assumed"
+    [row] = _spot_rows("c5.large", "us-east-1")
+    assert row["interruption_band"] == "10-15%" and row["recommendation"] == "POSSIBLE"
+    assert row["savings_basis"] == "spot_advisor"
+
+
+def test_the_spot_tool_does_not_promise_60_to_80_percent():
+    import finops.server as server
+    from finops.recommendations import spot_adoption as sa
+
+    assert "60-80%" not in (server.recommend_spot_adoption.__doc__ or "")
+    assert "60-80%" not in (sa.__doc__ or "")

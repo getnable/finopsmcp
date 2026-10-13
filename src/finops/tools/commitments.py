@@ -482,8 +482,10 @@ def recommend_spot_adoption(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds on-demand EC2 instances to migrate to spot for 60-80% savings. Uses
-    env tags, ASG membership, CPU variance, and Spot Advisor interruption data.
+    Finds on-demand EC2 instances that could move to spot. Uses env tags, ASG
+    membership, CPU variance, and a dated us-east-1 snapshot of Spot Instance
+    Advisor savings and interruption bands; outside that snapshot the band is
+    unknown and the saving an assumed 65%, and each row says which.
     Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.
 
     Args:
@@ -527,7 +529,7 @@ def recommend_spot_adoption(
             f"Potential spot savings: ${total_savings:,.2f}/mo "
             f"({len(recommended)} RECOMMENDED, {len(possible)} POSSIBLE)**",
             "",
-            "| Instance | Name | Type | Region | Env | In ASG | Interruption % | Recommendation | Monthly Saving | Saving % |",
+            "| Instance | Name | Type | Region | Env | In ASG | Interruption (Spot Advisor) | Recommendation | Monthly Saving | Saving % |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
 
@@ -540,16 +542,22 @@ def recommend_spot_adoption(
                 f"| {c['region']} "
                 f"| {c['environment'] or '-'} "
                 f"| {'yes' if c['in_asg'] else 'no'} "
-                f"| {c['interruption_freq_pct']:.1f}% "
+                f"| {c.get('interruption_band', 'unknown')} "
                 f"| {c['recommendation']} "
                 f"| ${c['monthly_savings']:,.2f} "
-                f"| {c['savings_pct']:.1f}% |"
+                f"| {c['savings_pct']:.1f}%"
+                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (assumed)'} |"
             )
 
         if unread_note:
             lines += ["", unread_note]
 
         lines += [
+            "",
+            "**Basis:** on-demand cost is the us-east-1 Linux list rate. Interruption bands "
+            "and savings are the Spot Instance Advisor's us-east-1 figures as of "
+            "2026-03-20 where nable has them; \"unknown\" and \"(assumed)\" mark the rest. "
+            "Check the Spot Advisor for your region before sizing the saving.",
             "",
             "**How to migrate:** Use a Launch Template with a mixed instances policy. "
             "Set OnDemandPercentageAboveBaseCapacity=0 to run fully on spot. "
