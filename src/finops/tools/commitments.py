@@ -356,8 +356,9 @@ async def scan_graviton_migration_opportunities(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds EC2 instances that can migrate to Graviton (arm64) for 20-40% savings.
-    Returns ranked candidates with estimated monthly savings per instance.
+    Finds x86 EC2 instances with a same-size Graviton (arm64) equivalent.
+    Returns ranked candidates with the monthly on-demand list-price gap per
+    instance (5-19% for the mapped types, us-east-1 Linux rates).
 
     Args:
         regions: AWS regions to scan. Defaults to us-east-1.
@@ -438,10 +439,14 @@ async def scan_graviton_migration_opportunities(
 
         lines += [
             "",
-            "**How to migrate:** Most workloads (web servers, APIs, background workers) "
-            "require only an instance type change and a reboot. Verify your AMI supports "
-            "arm64 (Amazon Linux 2/2023 and Ubuntu 20.04+ are multi-arch). "
-            "Test in staging before switching production.",
+            "**Basis:** savings are the us-east-1 Linux on-demand list price gap between "
+            "the two types. An RI or Savings Plan already covering the x86 instance makes "
+            "the real saving smaller.",
+            "",
+            "**How to migrate:** an x86_64 AMI does not boot on an arm64 instance type, so "
+            "this is a relaunch from an arm64 image, not an in-place type change. Confirm "
+            "the OS, container images, agents and any licensed software have arm64 builds, "
+            "then validate in staging before switching production.",
             "",
             _srv.cost_note("\n".join(lines), savings_found_usd=total_savings),
         ]

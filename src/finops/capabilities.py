@@ -81,7 +81,7 @@ CATALOG: list[dict[str, Any]] = [
             ("What are our biggest savings opportunities?", "runs every scanner, ranked by $/mo"),
             ("Show me rightsizing recommendations", "EC2, RDS, Lambda, ECS, EKS"),
             ("Any idle resources to clean up?", "idle load balancers, RDS, volumes, IPs"),
-            ("What Graviton or spot can we move to?", "20-40% on compute, up to 90% on spot"),
+            ("What Graviton or spot can we move to?", "Graviton 5-19% under x86 list, up to 90% on spot"),
         ],
         "tools": ["scan_waste_patterns", "run_full_cost_audit", "get_rightsizing_recommendations",
                   "list_idle_resources", "scan_graviton_migration_opportunities",

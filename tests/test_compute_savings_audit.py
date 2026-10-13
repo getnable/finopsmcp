@@ -7,8 +7,6 @@ was read from are named next to it.
 """
 from __future__ import annotations
 
-import pytest
-
 
 # ── the sweep reports a percentage once, not times a hundred ─────────────────
 #
@@ -40,3 +38,101 @@ def test_the_sweep_prints_a_spot_saving_as_the_percentage_it_is():
         "instance_id": "i-2", "instance_type": "m5.large", "monthly_savings": 41.35,
         "savings_pct": 59.0, "recommendation": "RECOMMENDED"}])
     assert f["detail"] == "59% saving"
+
+
+# ── a Graviton migration is like for like, never a hidden downsize ───────────
+#
+# AWS Price List, AmazonEC2 us-east-1 offer, version 20261012193925 (vCPU and
+# Memory columns, Linux on-demand rates):
+#
+#   m5.24xlarge   96 vCPU, 384 GiB, 4.608   ->  m7g.16xlarge  64 vCPU, 256 GiB, 2.6112
+#   c5.9xlarge    36 vCPU,  72 GiB, 1.53    ->  c7g.8xlarge   32 vCPU,  64 GiB, 1.16
+#   c5.18xlarge   72 vCPU, 144 GiB, 3.06    ->  c7g.16xlarge  64 vCPU, 128 GiB, 2.32
+#
+# Each of those maps a box onto a smaller one, so the "Graviton saving" was
+# 43.3%, 24.2% and 24.2% where the like-for-like per-vCPU gap is 15.0% and
+# 14.7%. m7g and c7g stop at 16xlarge (64 vCPU) and have no 9xlarge, so
+# these three have no same-size Graviton equivalent in the table at all.
+# Every other entry keeps its size, and keeping the size suffix is exactly
+# keeping vCPU and memory in these families.
+
+_DOWNSIZES_DRESSED_AS_GRAVITON = {
+    "m5.24xlarge": "m7g.16xlarge",
+    "c5.9xlarge": "c7g.8xlarge",
+    "c5.18xlarge": "c7g.16xlarge",
+}
+
+
+def test_no_graviton_mapping_changes_the_instance_size():
+    from finops.recommendations.graviton import GRAVITON_MAP
+
+    for src, dst in _DOWNSIZES_DRESSED_AS_GRAVITON.items():
+        assert GRAVITON_MAP.get(src) != dst, f"{src} -> {dst} is a downsize"
+    for src, dst in GRAVITON_MAP.items():
+        assert src.split(".")[1] == dst.split(".")[1], (src, dst)
+
+
+def test_an_unpriced_graviton_target_gets_no_invented_saving():
+    """The fallback quoted a flat 20% when the Graviton type had no price.
+    The same price list puts the mapped pairs between 5.1% (m5a, c6a to
+    m7g, c7g) and 19.2% (t3 to t4g), never 20%, so the flat figure is above
+    every pair it could stand in for. Unknown is reported as unknown."""
+    from finops.recommendations.graviton import _compute_savings
+
+    current, saving, pct = _compute_savings("m5.large", "m99g.huge")
+    assert current == 70.08
+    assert (saving, pct) == (0.0, 0.0)
+
+
+def test_the_mapped_graviton_savings_are_the_list_price_gap():
+    from finops.recommendations.graviton import GRAVITON_MAP, _compute_savings
+
+    pcts = {src: _compute_savings(src, dst)[2] for src, dst in GRAVITON_MAP.items()}
+    assert min(pcts.values()) == 5.1 and max(pcts.values()) == 19.2
+    assert pcts["m5.xlarge"] == 15.0 and pcts["t3.medium"] == 19.2
+
+
+def _graviton_tool_text(monkeypatch, candidates):
+    import asyncio
+
+    import finops.server as server
+    from finops.recommendations import graviton
+
+    aws = server.CLOUD_CONNECTORS.get("aws")
+
+    async def _configured():
+        return True
+
+    async def _scan(*_a, **_kw):
+        return candidates
+
+    monkeypatch.setattr(aws, "is_configured", _configured)
+    monkeypatch.setattr(graviton, "scan_graviton_opportunities", _scan)
+    return asyncio.run(server.scan_graviton_migration_opportunities(regions=["us-east-1"]))
+
+
+def test_the_graviton_tool_does_not_promise_an_in_place_type_change(monkeypatch):
+    """An x86_64 AMI does not boot on an arm64 instance type, so moving to
+    Graviton is a relaunch from an arm64 image, which is what the finding's own
+    remediation says. The tool's table told the reader most workloads need
+    "only an instance type change and a reboot"."""
+    from finops.recommendations.graviton import _compute_savings
+
+    current, saving, pct = _compute_savings("m5.xlarge", "m7g.xlarge")
+    text = _graviton_tool_text(monkeypatch, [{
+        "instance_id": "i-1", "instance_type": "m5.xlarge", "graviton_equivalent": "m7g.xlarge",
+        "current_monthly_cost_estimate": current, "savings_estimate": saving,
+        "savings_pct": pct, "region": "us-east-1", "name_tag": "web", "account_id": "1",
+        "finding": None}])
+    assert "only an instance type change and a reboot" not in text
+    assert "arm64 image" in text
+    # The basis of the figure is stated: on-demand list, before any RI or
+    # Savings Plan the instance may already have.
+    assert "list price" in text
+
+
+def test_the_graviton_tool_does_not_advertise_a_saving_its_table_cannot_reach():
+    import finops.server as server
+
+    doc = server.scan_graviton_migration_opportunities.__doc__ or ""
+    assert "20-40%" not in doc
