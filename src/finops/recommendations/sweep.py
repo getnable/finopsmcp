@@ -131,7 +131,7 @@ def normalise(name, data) -> list[dict]:
                 if s > 0:
                     # current cost rides along so the critique can hold the
                     # claim against it (a saving cannot exceed the resource).
-                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0)*100:.0f}% saving, {r.get('region','')}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate")})
+                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0):.0f}% saving, {r.get('region','')}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate")})
         elif name == "ipv4":
             waste = data.get("total_monthly_waste", 0) or 0
             if waste > 0:
@@ -169,7 +169,7 @@ def normalise(name, data) -> list[dict]:
             for r in data:
                 s = r.get("monthly_savings", 0) or 0
                 if s > 0 and r.get("recommendation") == "RECOMMENDED":
-                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"{r.get('savings_pct',0)*100:.0f}% saving"})
+                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"{r.get('savings_pct',0):.0f}% saving"})
         elif name == "cw_cardinality" and isinstance(data, list):
             for r in data:
                 s = r.get("estimated_monthly_cost", 0) or 0
