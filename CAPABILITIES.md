@@ -9,8 +9,8 @@ nowhere. In an editor, the answers you ask for reach the model you chat with,
 as every MCP tool result does; the CLI involves no model.
 
 At a glance: **203 MCP tools, 59 CLI commands, 20 sources of spend.** Read-only
-toward your cloud. Credentials stay in your OS keyring, never routed through any
-model.
+toward your cloud. Credentials stay in nable's encrypted local vault, never
+routed through any model.
 
 ---
 
@@ -96,8 +96,8 @@ economics, not a cost source) and **Helm** (release visibility).
 it is applied.
 
 Connect AWS or GCP by SSO login or a CLI profile and nable stores no secret at
-all, it just references your existing login. Only keys you paste directly are
-encrypted in your OS keyring.
+all, it just references your existing login. Keys you paste are encrypted in
+nable's local vault, whose key is a 0600 file with a copy in your OS keyring.
 
 ---
 
