@@ -634,6 +634,60 @@ def _check_license() -> dict:
             "warnings": []}
 
 
+def _check_environment() -> dict:
+    """The configuration nable reads from the environment, by name.
+
+    Headless use (CI, cron, a container) is configured by environment alone,
+    where a misspelled name is silent. This lists the FINOPS_*/NABLE_* names
+    in effect (names only, never values: several are secrets), names any it
+    does not read with the closest one it does, and flags a name exported in
+    the environment that a credential stored in the vault outranks
+    (security/env.get_env reads the vault first)."""
+    from . import env_vars
+    from .config import is_airgap
+    from .storage.db import data_dir
+    from .update_check import _disabled as _update_check_off
+
+    in_effect = sorted(n for n in os.environ if n in env_vars.KNOWN)
+    unknown = env_vars.unknown(os.environ)
+    warnings: list[str] = []
+    for u in unknown:
+        why = (f"did you mean {u['did_you_mean']}?" if u["did_you_mean"]
+               else u["note"] or "nable does not read it")
+        warnings.append(f"{u['name']} is set but nable does not read it ({why})")
+
+    vault_wins: list[str] = []
+    try:
+        from .security.vault import Vault
+        stored = {k for k in Vault.default().list_keys() if not k.startswith("pack:")}
+        vault_wins = sorted(n for n in stored if os.environ.get(n))
+    except Exception:  # noqa: BLE001 - the credential check reports a broken vault
+        pass
+    for n in vault_wins:
+        warnings.append(f"{n} is exported and also stored in the vault; the stored value is "
+                        f"used (`nable vault delete {n}` makes the environment's count)")
+
+    try:
+        where = str(data_dir())
+    except OSError as e:
+        where = f"unusable ({e})"
+        warnings.append(f"The data directory cannot be used: {e}")
+    detail =(f"{len(in_effect)} nable setting(s) from the environment: {', '.join(in_effect)}"
+              if in_effect else "No FINOPS_*/NABLE_* settings in the environment; defaults apply")
+    return {
+        "name": "Environment",
+        "ok": True,
+        "detail": f"{detail}. Data dir: {where}",
+        "warnings": warnings,
+        "set": in_effect,
+        "unknown": unknown,
+        "vault_wins": vault_wins,
+        "data_dir": where,
+        "airgap": is_airgap(),
+        "update_check": not _update_check_off(),
+    }
+
+
 def run_doctor(as_json: bool = False) -> int:
     """
     Run all health checks and print a report.
@@ -643,6 +697,7 @@ def run_doctor(as_json: bool = False) -> int:
         _check_python_version(),
         _check_path_and_install(),
         _check_license(),
+        _check_environment(),
         _check_keyring_storage(),
         _check_aws_scope(),
         _check_azure_permissions(),

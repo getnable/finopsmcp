@@ -51,6 +51,50 @@ def test_nable_doctor_json_is_one_document_on_stdout(tmp_path):
     assert r.returncode == (1 if any(c["ok"] is False for c in checks) else 0)
 
 
+def _env_check(r) -> dict:
+    return next(c for c in json.loads(r.stdout) if c["name"] == "Environment")
+
+
+def test_doctor_names_a_misspelled_setting_and_what_is_in_effect(tmp_path):
+    """A pipeline configured by environment only had no way to see which
+    settings nable read: FINOPS_AIRGAPP=1 turned nothing on, and the doctor
+    said nothing about the environment at all."""
+    data = tmp_path / "data"
+    r = nable(tmp_path, "doctor", "--json",
+              env={"FINOPS_AIRGAPP": "1", "FINOPS_DATA_DIR": str(data),
+                   "FINOPS_ENABLE_SCHEDULER": "1",
+                   "FINOPS_SMTP_PASSWORD": "not-a-real-password-7c1e"})
+    env = _env_check(r)
+    assert {"name": "FINOPS_AIRGAPP", "did_you_mean": "FINOPS_AIRGAP", "note": None} in env["unknown"]
+    hosted = next(u for u in env["unknown"] if u["name"] == "FINOPS_ENABLE_SCHEDULER")
+    assert hosted["note"] and "does not read" in hosted["note"]
+    assert {"FINOPS_DATA_DIR", "FINOPS_SMTP_PASSWORD"} <= set(env["set"])
+    assert env["data_dir"] == str(data)
+    assert any("FINOPS_AIRGAPP" in w and "FINOPS_AIRGAP" in w for w in env["warnings"])
+    # Names only: a value set in the environment never reaches the output.
+    assert "not-a-real-password-7c1e" not in r.stdout + r.stderr
+
+
+def test_doctor_says_when_a_stored_credential_outranks_the_environment(tmp_path):
+    """A credential stored with `nable setup` wins over the same name exported
+    in the environment (security/env.get_env reads the vault first), so a
+    rotated key set in CI was silently ignored on a box that had one stored."""
+    data = tmp_path / "data"
+    store = ("from finops.security.vault import Vault; "
+             "Vault.default().store('DATADOG_SITE', 'stored.example')")
+    env = {k: v for k, v in os.environ.items() if k not in _DROP}
+    env.update(HOME=str(tmp_path), PYTHONPATH=SRC, FINOPS_DATA_DIR=str(data),
+               FINOPS_NO_KEYRING="1")
+    subprocess.run([sys.executable, "-c", store], env=env, check=True, timeout=60,
+                   stdin=subprocess.DEVNULL, capture_output=True)
+    r = nable(tmp_path, "doctor", "--json",
+              env={"FINOPS_DATA_DIR": str(data), "DATADOG_SITE": "exported.example"})
+    check = _env_check(r)
+    assert check["vault_wins"] == ["DATADOG_SITE"]
+    assert any("DATADOG_SITE" in w for w in check["warnings"])
+    assert "stored.example" not in r.stdout and "exported.example" not in r.stdout
+
+
 # ── guard check ───────────────────────────────────────────────────────────────
 
 def test_guard_check_json_is_the_verdict(tmp_path):
