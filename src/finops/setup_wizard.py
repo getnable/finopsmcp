@@ -3811,7 +3811,17 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
-    sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p = sub.add_parser("doctor", help="Check all connectors and credentials (alias for finops-doctor)")
+    # The same flags finops-doctor takes: `nable doctor --json` was refused as
+    # an unrecognized argument while every other read command accepts --json.
+    doctor_p.add_argument("--json", dest="doctor_json", action="store_true",
+                          help="Output results as JSON")
+    doctor_p.add_argument("--audit", dest="doctor_audit", action="store_true",
+                          help="Print audit log entries instead of running health checks")
+    doctor_p.add_argument("--hours", dest="doctor_hours", type=int, default=None,
+                          help="With --audit: hours of audit log to show (default: 24)")
+    doctor_p.add_argument("--limit", dest="doctor_limit", type=int, default=None,
+                          help="With --audit: max audit log entries to show (default: 50)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
@@ -4225,10 +4235,17 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
-        # Pass empty args: doctor.main() defaults to parsing sys.argv, which still
-        # contains the consumed "doctor" token and would error. For flags
-        # (--json/--audit), use the standalone `finops-doctor` command.
-        _doctor_main([])
+        # Pass the flags explicitly: doctor.main() defaults to parsing sys.argv,
+        # which still contains the consumed "doctor" token and would error.
+        _doc_args: list[str] = []
+        if getattr(parsed, "doctor_json", False):
+            _doc_args.append("--json")
+        if getattr(parsed, "doctor_audit", False):
+            _doc_args.append("--audit")
+        for _flag, _dest in (("--hours", "doctor_hours"), ("--limit", "doctor_limit")):
+            if getattr(parsed, _dest, None) is not None:
+                _doc_args += [_flag, str(getattr(parsed, _dest))]
+        _doctor_main(_doc_args)
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
