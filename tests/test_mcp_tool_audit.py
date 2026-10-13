@@ -109,3 +109,26 @@ def test_slice_total_shown_is_the_sum_of_the_rows_shown(monkeypatch, args, shown
     assert out["total"] == pytest.approx(1280.0)
     assert out["total_shown"] == pytest.approx(shown)
     assert out["total_shown"] == pytest.approx(sum(r["metric"] for r in out["rows"]))
+
+
+# ── forecast_costs: the horizon is bounded ────────────────────────────────────
+
+@pytest.mark.parametrize("args", [
+    {"horizon_days": 100000},   # answered with 100,000 daily points, 10.6 MB of JSON
+    {"horizon_days": 0},        # answered monthly_projection 0.0 and no points
+    {"horizon_days": -10},      # same, a $0 projection from a negative horizon
+    {"history_days": 3},        # below the 14 days the docstring says it needs
+])
+def test_forecast_rejects_a_horizon_or_history_it_cannot_honour(monkeypatch, args):
+    from finops.ml import forecasting
+
+    def _never(*a, **k):
+        raise AssertionError("forecast_costs fitted a model for an invalid request")
+
+    monkeypatch.setattr(forecasting.Forecaster, "for_account", _never)
+    out = _call("forecast_costs", {"account_id": "111122223333", **args})
+
+    assert "error" in out, f"{args} was answered: {str(out)[:200]}"
+    assert "monthly_projection" not in out
+    key = next(iter(args))
+    assert key in out["error"]
