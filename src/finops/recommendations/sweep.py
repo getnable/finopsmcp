@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH
+from .envelope import INVESTIGATION, magnitude_band
 
 log = logging.getLogger(__name__)
 
@@ -206,9 +207,17 @@ def normalise(name, data) -> list[dict]:
                 out.append({"title": f"Disable S3 Transfer Acceleration on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo surcharge"})
         elif name == "ebs_rep":
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
-            n = len(data.get("excess_copies", [])) if isinstance(data, dict) else 0
+            sets = [f for f in (data.get("cross_region_findings") or [])
+                    if f.get("orphaned") or f.get("excess_copies") or f.get("has_old_copies")
+                    ] if isinstance(data, dict) else []
             if total > 0:
-                out.append({"title": f"Clean up {n} excess EBS cross-region snapshot copies", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo"})
+                # Never a figure in a total. The scanner bills incremental snapshots
+                # at the full volume size and files the result as an INFERRED upper
+                # bound, and the copies it counts (orphaned ones above all) are the
+                # same snapshots idle_resources prices one by one: a 100 GB volume's
+                # two orphaned copies were $10 here on top of the $10 already there.
+                # It stays listed, with a size band, as the investigation it is.
+                out.append({"title": f"Review {len(sets)} cross-region EBS snapshot set(s) for stale copies", "monthly_savings": None, "kind": INVESTIGATION, "magnitude": magnitude_band(total), "rough_monthly": total, "category": "Storage", "detail": "Upper bound at full volume size; the same snapshots may already be listed as idle snapshots"})
         elif name == "db_sp":
             s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
             if s > 0:
@@ -354,8 +363,9 @@ async def sweep(
             f["source"] = SOURCE_MAP.get(name, name)
             out.findings.append(f)
 
-    # Sort by monthly savings descending first (the stable base order).
-    out.findings.sort(key=lambda x: x.get("monthly_savings", 0), reverse=True)
+    # Sort by monthly savings descending first (the stable base order). `or 0`:
+    # an investigation carries None, which a bare comparison cannot order.
+    out.findings.sort(key=lambda x: x.get("monthly_savings") or 0, reverse=True)
 
     # Critique first, then rank. A finding whose claim was just retracted must not
     # be ranked on the dollar figure it lost, so this has to run BEFORE rescore.

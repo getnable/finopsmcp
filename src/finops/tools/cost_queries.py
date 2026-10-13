@@ -1883,6 +1883,13 @@ async def run_full_cost_audit(
     top = findings[:top_n]
 
     if not top:
+        if errors:
+            # Nothing found is only a verdict on what was read. With every scanner
+            # failed this used to say the infrastructure "looks well-optimized".
+            return (f"No savings opportunities found in what could be read, but "
+                    f"{len(errors)} scanner(s) could not run: {', '.join(errors)}. "
+                    "That is not a finding of no waste: their checks were not made. "
+                    "Check the AWS permissions for those services and run the audit again.")
         return "No savings opportunities found. Your infrastructure looks well-optimized, or no AWS account is connected."
 
     # A finding the critique retracted carries None, not a number, and it must not

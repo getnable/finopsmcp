@@ -161,8 +161,15 @@ class NotionConnector:
 
         # Data rows
         for f in findings:
-            monthly_s = f.get("monthly_savings", 0.0)
-            annual_s = monthly_s * 12
+            monthly_s = f.get("monthly_savings")
+            if monthly_s is None:
+                # An investigation, or a claim the critique retracted: no figure to
+                # print, and None * 12 used to fail the whole publish.
+                monthly_txt = f"{f.get('magnitude') or 'unconfirmed'} (needs confirming)"
+                annual_txt = ""
+            else:
+                monthly_txt = f"${monthly_s:,.2f}"
+                annual_txt = f"${monthly_s * 12:,.2f}"
             table_rows.append({
                 "object": "block",
                 "type": "table_row",
@@ -170,8 +177,8 @@ class NotionConnector:
                     "cells": [
                         [{"type": "text", "text": {"content": f.get("title", "")}}],
                         [{"type": "text", "text": {"content": f.get("category", "")}}],
-                        [{"type": "text", "text": {"content": f"${monthly_s:,.2f}"}}],
-                        [{"type": "text", "text": {"content": f"${annual_s:,.2f}"}}],
+                        [{"type": "text", "text": {"content": monthly_txt}}],
+                        [{"type": "text", "text": {"content": annual_txt}}],
                     ]
                 },
             })
