@@ -1898,9 +1898,23 @@ settings:
 """
 
 
-def setup_slack_bot() -> None:
+def setup_slack_bot() -> bool | None:
     """Configure the conversational Slack bot (Socket Mode, two-way)."""
     _section("Slack: Conversational Bot (questions, RCA, draft PRs and tickets)")
+
+    # The bot left this package for nable-enterprise (9c08084): no slack_bot
+    # module, no finops-slack console script, no [slack] extra. This used to
+    # collect three tokens anyway and end with "Start it: finops-slack", a
+    # command that does not exist here.
+    import importlib.util
+    if importlib.util.find_spec("finops.slack_bot") is None:
+        print("  The two-way @nable bot runs in hosted nable and in the self-hosted")
+        print("  deployment (https://getnable.com/docs, docs/DEPLOY.md), not in this")
+        print("  open-source package, so nothing is set up here.")
+        print("  From this install, choose 1 or 2 for the cost alerts and reports you")
+        print("  send from nable:  nable setup slack")
+        print()
+        return False
 
     # Surface the tier up front so the user learns it BEFORE the 2-minute OAuth
     # setup, not on the first @mention. Cost queries, anomalies and one-way
@@ -2024,7 +2038,7 @@ def _print_delivery_note() -> None:
     print(f"  {DELIVERY_NOTE}\n")
 
 
-def setup_slack() -> None:
+def setup_slack() -> bool | None:
     _section("Slack: cost alerts and reports, sent when you ask")
     _print_delivery_note()
     print("  Choose method:")
@@ -2035,8 +2049,7 @@ def setup_slack() -> None:
     from .security.vault import Vault
     vault = Vault.default()
     if choice == "3":
-        setup_slack_bot()
-        return
+        return setup_slack_bot()
     import httpx
     text = "nable test message: this channel will get the cost alerts and reports you send from nable."
     if choice == "1":

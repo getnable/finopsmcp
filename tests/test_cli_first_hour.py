@@ -197,6 +197,18 @@ def test_the_status_footer_says_what_each_hook_sees(guard_home, capsys):
     assert "every supported agent found" in out
 
 
+def test_setup_slack_bot_does_not_send_people_to_a_command_that_is_not_here(
+        tmp_path, monkeypatch, capsys):
+    """Choice 3 of `nable setup slack` collected three tokens and ended with
+    "Start it: finops-slack", a console script this package no longer has."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    answers = iter(["3"])
+    monkeypatch.setattr(setup_wizard, "_prompt", lambda *a, **k: next(answers))
+    assert setup_wizard.setup_slack() is False
+    out = capsys.readouterr().out
+    assert "finops-slack" not in out and "self-hosted" in out
+
+
 # ── nable brief with no usable AWS credentials ────────────────────────────────
 
 def _unreadable_audit(code: str, seen: dict):
