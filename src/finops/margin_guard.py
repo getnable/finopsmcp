@@ -128,7 +128,9 @@ class Range:
 COSTS: dict = {
     # Compute: pooled serverless workers, 1 vCPU and 2 GiB, scale to zero.
     # GCP Cloud Run tier-1 list rate, $0.000018 per vCPU-second plus
-    # $0.000002 per GiB-second, no free tier credited.
+    # $0.000002 per GiB-second, no free tier credited. These are the jobs and
+    # instance-based billing rates (cloud.google.com/run/pricing, Iowa, read
+    # 2026-10-13); a request-billed service lists $0.000024 and $0.0000025.
     "worker_second_usd": 0.000018 + 2 * 0.000002,
     # One job is one run on one connected account: the nightly scan, anomaly
     # check and brief inputs, or an on-demand deep scan. Mostly API wait.
@@ -151,7 +153,10 @@ COSTS: dict = {
     "db_gb_per_million_line_items": 0.30,
     # Daily aggregates per connected account per year of retention. Assumption.
     "db_gb_per_account_year": 0.05,
-    # GCS or S3 standard list, $0.02 per GB-month.
+    # GCS Standard, us-central1 list: $0.000027397 per GiB-hour, $0.02 a
+    # GB-month (cloud.google.com/storage/pricing, read 2026-10-13), beside the
+    # Cloud Run workers above. S3 Standard is not the same: $0.023 in us-east-1
+    # (AmazonS3 offer 20261012231102, SKU WP9ANXZGBYYSGJEA), 15% more.
     "object_gb_month_usd": 0.02,
     # Parquet snapshots of ingested line items for the detail window. Assumption.
     "object_gb_per_million_line_items": 0.10,
