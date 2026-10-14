@@ -62,6 +62,20 @@ def _guard_switch_sandbox(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _guard_release_sandbox(monkeypatch):
+    """Status and doctor ask uvx whether the release a guard hook pins can
+    start (guard_release), which installs it from the package index. The
+    suite must never run uvx or reach an index, and the developer's uv cache
+    must not change what it sees, so every release reads as "cannot tell",
+    here and in the CLI subprocesses tests start. Tests of that check set
+    their own answer."""
+    from finops import guard_release
+    monkeypatch.setenv(guard_release.CHECK_ENV, "0")
+    monkeypatch.setattr(guard_release, "_probe_override", lambda release, python: None)
+    monkeypatch.setattr(guard_release, "_answers", {})
+
+
+@pytest.fixture(autouse=True)
 def _org_model_sandbox(monkeypatch, tmp_path_factory):
     """The guard, tickets, findings, attribution and the workload classifier
     read the org model (finops.org), which lives in the developer's data dir

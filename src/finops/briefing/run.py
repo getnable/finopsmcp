@@ -95,6 +95,8 @@ def _gather_aws(gaps: list[str], scanned: dict,
         codes = sorted({str(f.get("error_code", "")) for f in checks_failed})
         gaps.append("The AWS audit could not read anything: every check failed "
                     f"({', '.join(codes)}). Zero findings here is not a clean account.")
+        # For `nable brief`, which turns credential failures into the fix.
+        scanned["aws_unreadable"] = codes
     for err in report.get("errors") or []:
         gaps.append(str(err))
     timed_out = report.get("regions_timed_out") or []

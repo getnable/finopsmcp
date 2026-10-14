@@ -7,11 +7,11 @@ There are two Slack surfaces, and only one of them is in this package.
 | Alerts and reports | Posts cost digests, the weekly insight and anomaly alerts to a channel, when you ask | This package (free) |
 | The `@nable` bot | Two-way: answers cost questions in channels and DMs, runs root cause investigations, drafts tickets and pull requests behind an approval gate | Hosted nable, on the Team plan ($1,000/mo flat, unlimited seats); not in this repository |
 
-The bot, its scheduler and the `finops-slack` command moved out of the
+The bot, its scheduler and its own console command moved out of the
 open-source package in 0.8.211 (see CHANGELOG.md): its 5-minute report
 scheduler could reach a billed Cost Explorer call nobody asked for, and
 nothing in this package runs on a timer. This package has no `[slack]`
-extra and installs no `finops-slack` command. Plans:
+extra and installs no command that starts the bot. Plans:
 [getnable.com/#pricing](https://getnable.com/#pricing).
 
 ## Alerts and reports (this package)

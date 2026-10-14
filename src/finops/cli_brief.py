@@ -91,6 +91,14 @@ def run(args) -> int:
               file=sys.stdout if as_json else sys.stderr)
         return EXIT_ERROR
 
+    # The audit logs one warning per check that fails; on an account it cannot
+    # read that is a screen of the same line, which the brief's own "could
+    # not check" section already says once. FINOPS_DEBUG=1 keeps them.
+    import logging
+    analyzers = logging.getLogger("finops.analyzers")
+    was = analyzers.level
+    if os.getenv("FINOPS_DEBUG") != "1":
+        analyzers.setLevel(logging.ERROR)
     try:
         result = run_overnight(
             deliver_to=None if getattr(args, "deliver", False) else (),
@@ -102,6 +110,11 @@ def run(args) -> int:
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
         return EXIT_ERROR
+    except PermissionError:
+        # A data directory this user cannot write: the CLI says which one and
+        # how to fix it (setup_wizard.main), which "failed (PermissionError)"
+        # did not. A local path, never an account id.
+        raise
     except Exception as exc:
         # The type, never the message: it can carry account ids and ARNs.
         if as_json:
@@ -112,6 +125,8 @@ def run(args) -> int:
         if os.getenv("FINOPS_DEBUG") == "1":
             raise
         return EXIT_ERROR
+    finally:
+        analyzers.setLevel(was)
 
     brief = result["brief"]
     delivered = result.get("delivered") or {}
@@ -154,4 +169,44 @@ def run(args) -> int:
             print(f"\nDelivered to: {landed}")
         if result.get("path"):
             print(f"Saved: {result['path']}")
+    # An account the credentials could not read prints the fix either way. A
+    # --deliver that did not land exits 1, the code a cron job sending the
+    # brief checks; otherwise the unreadable account exits with `nable scan`'s
+    # code for it (3 expired, 6 none).
+    unreadable = _unreadable_account(brief)
+    return code if code != EXIT_OK else unreadable
+
+
+# AWS error codes that mean the credentials, not the account, are the problem,
+# and the exit code `nable scan` gives each (cli_scan's pinned contract).
+_EXPIRED_CODES = frozenset({"TokenRetrievalError", "UnauthorizedSSOTokenError",
+                            "SSOTokenLoadError", "ExpiredToken", "ExpiredTokenException",
+                            "RequestExpired"})
+_NO_CREDS_CODES = frozenset({"NoCredentialsError", "PartialCredentialsError",
+                             "InvalidClientTokenId", "UnrecognizedClientException",
+                             "SignatureDoesNotMatch", "AuthFailure"})
+
+
+def _unreadable_account(brief) -> int:
+    """EXIT_OK, or, when the AWS audit could not read anything because of
+    the credentials, the fix and the exit code `nable scan` gives the same
+    failure (3 expired, 6 none or rejected). The brief above it already
+    lists every check that failed; this says what to do about it."""
+    from .cli_scan import EXIT_EXPIRED, EXIT_NO_CREDS
+    codes = set((getattr(brief, "scanned", None) or {}).get("aws_unreadable") or [])
+    if not codes or not codes <= (_EXPIRED_CODES | _NO_CREDS_CODES):
+        return EXIT_OK
+    profile = os.environ.get("AWS_PROFILE") or "default"
+    if codes <= _EXPIRED_CODES:
+        lines = ["nable brief: your AWS session has expired, so nothing was read.",
+                 (f"  fix: `aws sso login --profile {profile}`  (or refresh your temporary "
+                  "credentials), then run `nable brief` again")]
+        code = EXIT_EXPIRED
+    else:
+        lines = ["nable brief: no usable AWS credentials, so nothing was read.",
+                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                 "  then: `nable connect` waits and connects the moment they appear",
+                 "  no account at hand? `nable scan --demo` shows nable on sample data"]
+        code = EXIT_NO_CREDS
+    print("\n".join(lines), file=sys.stderr)
     return code
