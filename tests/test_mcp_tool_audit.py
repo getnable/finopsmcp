@@ -94,6 +94,38 @@ def test_export_cost_report_names_the_argument_it_cannot_use(db, args, word):
     assert "files" not in out
 
 
+# ── AI spend tools: no provider read is not $0 of AI spend ────────────────────
+
+_NO_AI = {"total_usd": 0.0, "by_provider": {}, "by_model": {}, "by_model_tokens": {},
+          "daily": [], "sources": {},
+          "error": "No AI provider is connected, so there is no AI spend to report."}
+
+
+@pytest.mark.parametrize("tool", ["get_ai_spend_monitor", "get_llm_commitment_analysis",
+                                  "get_ai_kpis", "optimize_ai_spend"])
+def test_ai_spend_tools_with_nothing_read_say_so(db, monkeypatch, tool):
+    """With no AI provider connected: get_ai_spend_monitor answered total_usd
+    0.0, get_ai_kpis total_ai_usd 0.0, and get_llm_commitment_analysis "Token
+    spend is small. Stay on pay-as-you-go", from spend nobody read."""
+    from finops.connectors import llm_costs
+
+    monkeypatch.setattr(llm_costs, "get_all_llm_costs", lambda *a, **k: dict(_NO_AI))
+    out = _call(tool)
+
+    assert "No AI provider is connected" in out.get("error", ""), out
+    assert "Token spend is small" not in str(out)
+
+
+def test_scan_waste_patterns_with_no_cost_history_is_not_clean(db):
+    """With no daily snapshots it answered total_monthly_waste 0 and no
+    findings: thirteen fingerprints run over no data."""
+    out = _call("scan_waste_patterns", {"account_id": "111122223333"})
+
+    assert out.get("status") == "not_evaluated", out
+    assert "take_snapshot_now" in out["message"]
+    assert "total_monthly_waste" not in out
+
+
 # ── slice_costs: total_shown is what the shown rows add up to ─────────────────
 
 def _focus(service: str, cost: float):
