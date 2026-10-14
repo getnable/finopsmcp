@@ -45,6 +45,10 @@ log = logging.getLogger(__name__)
 # RI figures; they stay, corrected and sourced, as the listed rates the price
 # audit tests pin (and the ordering they show against the Compute SP).
 _COMPUTE_SP_DISCOUNT = 0.74   # 26% off on-demand (1yr no-upfront Compute SP)
+# The same plan on Fargate: 20% off x86 vCPU and memory, which is what a
+# Fargate dollar saves, not the EC2 rate above. (Graviton Fargate lists 21.3%,
+# so 20% is not above any Fargate rate.)
+_COMPUTE_SP_FARGATE_DISCOUNT = 0.80   # 20% off on-demand (1yr no-upfront Compute SP)
 COMPUTE_SP_DISCOUNT_RANGE = "19-29% by EC2 instance type, 20% on Fargate"
 _EC2_SP_DISCOUNT = 0.662      # 33.8% off on-demand (1yr no-upfront EC2 Instance SP)
 _RI_DISCOUNT = 0.662          # 33.8% off on-demand (1yr no-upfront Standard RI)
@@ -55,6 +59,13 @@ PRICE_SOURCES: dict[str, dict[str, str]] = {
                   "ComputeSavingsPlans 1yr No Upfront: m5.large $0.071 vs $0.096 "
                   "(BB7BKBSC6NZW7P5B), m6i.large $0.07053 vs $0.096",
         "as_of": "2026-10-13"},
+    "_COMPUTE_SP_FARGATE_DISCOUNT": {
+        "source": "AWS Price List, AWSComputeSavingsPlan us-east-1 20261013035015, "
+                  "ComputeSavingsPlans 1yr No Upfront (BB7BKBSC6NZW7P5B): "
+                  "USE1-Fargate-vCPU-Hours:perCPU $0.032384 and USE1-Fargate-GB-Hours "
+                  "$0.003556, against AmazonECS us-east-1 20260911124425 on demand "
+                  "$0.04048 and $0.004445",
+        "as_of": "2026-10-14"},
     "_EC2_SP_DISCOUNT": {
         "source": "AWSComputeSavingsPlan us-east-1 20261013035015, EC2InstanceSavingsPlans "
                   "1yr No Upfront: m6i.large $0.0635 vs $0.096 (DC4GCSR3H4S43EMU), "

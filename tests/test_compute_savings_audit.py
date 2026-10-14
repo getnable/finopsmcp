@@ -253,6 +253,43 @@ def test_the_waste_pattern_prices_a_savings_plan_at_the_same_rate():
     assert half.monthly_waste == pytest.approx(390.0)
 
 
+def test_the_waste_pattern_prices_fargate_at_the_fargate_rate():
+    """The pattern priced all uncovered compute at the EC2 rate, 26%, Fargate
+    included. Fargate's 1-year no-upfront Compute Savings Plan rate is 20%:
+    AWSComputeSavingsPlan us-east-1 20261013035015 lists 0.032384 a vCPU-hour
+    and 0.003556 a GB-hour (plan BB7BKBSC6NZW7P5B) against the AmazonECS
+    us-east-1 20260911124425 on-demand 0.04048 and 0.004445, both 20.0% off.
+    $100 a day of EC2 and $50 a day of Fargate, nothing covered: 3,000 x 0.26
+    + 1,500 x 0.20 = 780 + 300 = 1,080 a month, not 4,500 x 0.26 = 1,170.
+    Half covered: 390 + 150 = 540."""
+    import pytest
+
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+    from finops.recommendations.commitments import (
+        _COMPUTE_SP_DISCOUNT,
+        _COMPUTE_SP_FARGATE_DISCOUNT,
+    )
+
+    assert round(1 - _COMPUTE_SP_FARGATE_DISCOUNT, 3) == 0.20
+    assert round(0.04048 * _COMPUTE_SP_FARGATE_DISCOUNT, 6) == 0.032384
+    assert round(0.004445 * _COMPUTE_SP_FARGATE_DISCOUNT, 6) == 0.003556
+
+    costs = {"Amazon Elastic Compute Cloud - Compute": [100.0] * 30,
+             "AWS Fargate": [50.0] * 30}
+    m = _check_savings_plans_coverage(PatternContext(daily_costs=costs, by_resource=[],
+                                                     snapshots=[]))
+    assert m.monthly_waste == pytest.approx(
+        3000.0 * (1 - _COMPUTE_SP_DISCOUNT) + 1500.0 * (1 - _COMPUTE_SP_FARGATE_DISCOUNT))
+    assert m.monthly_waste == pytest.approx(1080.0)
+    assert m.annual_waste == 12960.0
+    said = " ".join(m.evidence)
+    assert "26%" in said and "20%" in said
+
+    half = _check_savings_plans_coverage(PatternContext(
+        daily_costs=costs, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 50.0}]))
+    assert half.monthly_waste == pytest.approx(540.0)
+
+
 def test_the_commitment_gap_ticket_uses_the_same_rate():
     from finops.integrations.ticketing import _commitment_gap_ticket
 
