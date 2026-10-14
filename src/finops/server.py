@@ -1828,7 +1828,8 @@ def main() -> None:
 _VIEWS: dict[str, dict] = {
     "mom": {
         "name": "Month over month",
-        "description": "Compare total spend across all providers for the last two full months.",
+        "description": ("Month to date against all of last month, by provider, with the "
+                        "daily pace of each (on the 1st, the two months just closed)."),
     },
     "wow": {
         "name": "Week over week",
