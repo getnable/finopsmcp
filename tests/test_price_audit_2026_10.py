@@ -352,6 +352,44 @@ def test_gcp_disk_and_snapshot_rates():
     assert gcp_waste.VM_VCPU_MONTHLY == 18.0
 
 
+# ── LLM token prices ─────────────────────────────────────────────────────────
+
+def test_claude_sonnet_5_5_is_priced_at_the_published_rates():
+    from finops import llm_prices
+
+    # https://platform.claude.com/docs/en/about-claude/pricing, read 2026-10-13:
+    # $2 in, $10 out, $2.50 5m write, $4 1h write, $0.10 cache read (0.05x). The
+    # same rates are the Bedrock global-endpoint rates (AmazonBedrockFoundationModels
+    # us-east-1 20261012084008: PXMCKMF8EGSRB3GB, HP32J6RXJZ3XYFUM, CES7A5M9YH89UF9G,
+    # SW4A7584KK4SK2MK, 487WBAJQRFHYFE5M). It used to read as unpriced.
+    p = llm_prices.price_for("claude-sonnet-5-5")
+    assert (p.input, p.output, p.cache_write_5m, p.cache_write_1h, p.cache_read) == \
+        (2.00, 10.00, 2.50, 4.00, 0.10)
+    assert llm_prices.price_for("us.anthropic.claude-sonnet-5-5-v1:0") is p
+
+
+def test_claude_haiku_5_5_stays_unpriced_because_its_price_depends_on_prompt_length():
+    from finops import llm_prices
+
+    # $0.10/$0.50 per million up to 100,000 prompt tokens, $0.50/$2.50 above:
+    # no single row is right for a daily total, so it must not borrow one.
+    assert llm_prices.price_for("claude-haiku-5-5") is None
+
+
+def test_llm_prices_date_each_provider_and_claim_the_oldest():
+    from finops import llm_prices
+
+    assert llm_prices.AS_OF_BY_PROVIDER == {"anthropic": "2026-10-13", "openai": "2026-09-24"}
+    assert llm_prices.AS_OF == "2026-09-24"
+
+
+def test_the_stale_vertex_rate_table_is_gone():
+    from finops.connectors.saas import vertex_costs
+
+    # Unused, and Gemini 2.0 Flash at half its listed $0.15/$0.60 per million.
+    assert not hasattr(vertex_costs, "_VERTEX_PRICING")
+
+
 _PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / "prices.ts"
 
 

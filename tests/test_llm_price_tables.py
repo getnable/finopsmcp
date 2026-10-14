@@ -57,8 +57,11 @@ def test_anthropic_cache_writes_follow_the_published_multipliers():
         assert p.cache_write_1h == pytest.approx(p.input * 2), m
 
 
-def test_cache_reads_are_a_tenth_of_input_except_the_three_published_exceptions():
-    exceptions = {"claude-fable-5-1": 0.025, "claude-mythos-5-1": 0.025, "claude-opus-5-5": 0.05}
+def test_cache_reads_are_a_tenth_of_input_except_the_published_exceptions():
+    # The pricing page, read 2026-10-13: 0.025x on Fable 5.1 and Mythos 5.1,
+    # 0.05x on Opus 5.5 and Sonnet 5.5, 0.1x on every other model.
+    exceptions = {"claude-fable-5-1": 0.025, "claude-mythos-5-1": 0.025, "claude-opus-5-5": 0.05,
+                  "claude-sonnet-5-5": 0.05}
     for m, p in MODEL_PRICES.items():
         if p.provider != "anthropic":
             continue
@@ -229,9 +232,6 @@ _ALLOWED = {
     ("llm_prices.py", "_ANTHROPIC"): "the source of truth",
     ("llm_prices.py", "_OPENAI"): "the source of truth",
     ("llm_prices.py", "FAST_MODE"): "the source of truth",
-    ("connectors/saas/vertex_costs.py", "_VERTEX_PRICING"):
-        "Gemini and PaLM on Vertex: a provider llm_prices does not cover yet, "
-        "and the only copy of those rates",
     ("analytics/ai_kpis.py", "_CONTEXT_WINDOWS"): "context window sizes in tokens, not prices",
 }
 
