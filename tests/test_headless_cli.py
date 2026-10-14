@@ -180,3 +180,15 @@ def test_check_scope_without_credentials_gives_the_next_step_and_exits_1(tmp_pat
     assert r.returncode == 1
     assert "Could not get caller identity" in r.stderr
     assert "Nothing was checked" in r.stderr and "nable setup aws" in r.stderr
+
+
+def test_aws_cur_and_infra_print_no_escape_codes_into_a_pipe(tmp_path):
+    """Both printed raw ANSI codes into every pipe and CI log, and aws-cur
+    exited 0 with no credentials, having deployed and stored nothing."""
+    cur = nable(tmp_path, "aws-cur")
+    assert cur.returncode == 1
+    assert "credentials not found" in cur.stdout
+    infra = nable(tmp_path, "infra")
+    assert infra.returncode == 0 and "connector overview" in infra.stdout
+    for r in (cur, infra):
+        assert "\x1b[" not in r.stdout + r.stderr

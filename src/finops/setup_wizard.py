@@ -4361,7 +4361,9 @@ def main(args: list[str] | None = None) -> None:
             raise SystemExit(_code)
         return
     elif parsed.cmd == "aws-cur":
-        _run_aws_cur_setup()
+        _code = _run_aws_cur_setup()
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "license":
         raise SystemExit(_run_license_setup(getattr(parsed, "key", "")))
@@ -5259,17 +5261,21 @@ def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str
         print("  Credentials are saved in the vault and will load at MCP server startup.")
 
 
-def _run_aws_cur_setup() -> None:
+def _run_aws_cur_setup() -> int:
     """
     Interactive AWS CUR CloudFormation deployment.
     Called by: finops setup aws-cur
+
+    Returns the exit code: 1 when no pipeline outputs came back (no or bad
+    credentials, a failed or declined deploy), so a script that runs this
+    never reads "nothing deployed" as a success; 0 otherwise.
     """
     from .setup.cloud_infra import setup_aws_cur
     from .security.vault import Vault
 
     env_vars = setup_aws_cur()
     if not env_vars:
-        return
+        return 1
 
     # Offer to store the outputs in the nable vault
     store = _prompt(
@@ -5293,6 +5299,7 @@ def _run_aws_cur_setup() -> None:
             pass
     else:
         print("\n  Add the env vars above to your Claude Desktop config or .env manually.\n")
+    return 0
 
 
 def _run_infra_overview(provider: str = "") -> None:

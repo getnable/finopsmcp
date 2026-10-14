@@ -70,20 +70,28 @@ def _print(msg: str, indent: int = 0) -> None:
     print("  " * indent + msg)
 
 
+# The CLI's colour helpers (finops.welcome): colour only on a terminal, and
+# never under NO_COLOR or TERM=dumb. These printed raw escape codes into every
+# pipe, CI log and file `nable aws-cur` and `nable infra` were sent to.
+
 def _ok(msg: str) -> None:
-    print(f"  \033[32m✓\033[0m  {msg}")
+    from ..welcome import green
+    print(f"  {green('✓')}  {msg}")
 
 
 def _warn(msg: str) -> None:
-    print(f"  \033[33m!\033[0m  {msg}")
+    from ..welcome import amber
+    print(f"  {amber('!')}  {msg}")
 
 
 def _err(msg: str) -> None:
-    print(f"  \033[31m✗\033[0m  {msg}")
+    from ..welcome import red
+    print(f"  {red('✗')}  {msg}")
 
 
 def _header(msg: str) -> None:
-    print(f"\n  \033[1m{msg}\033[0m")
+    from ..welcome import bold
+    print(f"\n  {bold(msg)}")
 
 
 def _prompt(msg: str, default: str = "") -> str:
