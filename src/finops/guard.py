@@ -1216,6 +1216,54 @@ def _book_field(book: dict[str, Any], judged: bool = True,
     return out
 
 
+# A size the tables do not list, in a family they do: `c6i.32xlarge`,
+# `m7i.48xlarge`, `db.r6g.8xlarge`. Each priced nothing, so a $16k/mo launch
+# passed in silence while its smaller sizes asked. AWS prices the sizes of
+# one family by vCPU (a 4xlarge is four times an xlarge), so the missing size
+# is the family's per-size rate times its size, and the basis says it was
+# scaled. Checked against the AWS Price List (us-east-1, 2026-10-12): exact
+# for 59 EC2 sizes, at most 0.24% high (i4i); RDS classes within -0.05% to
+# +0.78%. The family's highest per-size rate is used, so a scaled figure
+# leans high. Accelerated families (p, g, trn, inf, dl, f, vt) price by
+# accelerator, not vCPU, and are never scaled; nor is `metal`.
+_ACCELERATED_RE = re.compile(r"(?:db\.)?(?:p|g|trn|inf|dl|f|vt)\d")
+_SIZE_RE = re.compile(r"(\d*)xlarge")
+_SMALL_SIZES = {"nano": 0.0625, "micro": 0.125, "small": 0.25, "medium": 0.5, "large": 1.0}
+_PER_SIZE: dict[int, dict[str, float]] = {}
+
+
+def _size_units(size: str) -> float | None:
+    if size in _SMALL_SIZES:
+        return _SMALL_SIZES[size]
+    m = _SIZE_RE.fullmatch(size)
+    return 2.0 * int(m.group(1) or 1) if m else None
+
+
+def _scaled(table: dict[str, float], itype: str) -> tuple[float | None, str]:
+    """(the rate `itype` scales to from its family's listed sizes, the
+    family), or (None, "") when its family or size cannot be scaled."""
+    family, _, size = itype.rpartition(".")
+    units = _size_units(size)
+    if not family or units is None or _ACCELERATED_RE.match(family):
+        return None, ""
+    per = _PER_SIZE.get(id(table))
+    if per is None:
+        per = {}
+        for t, hourly in table.items():
+            fam, _, sz = t.rpartition(".")
+            u = _size_units(sz)
+            if u:
+                per[fam] = max(per.get(fam, 0.0), hourly / u)
+        _PER_SIZE[id(table)] = per
+    rate = per.get(family)
+    return (round(rate * units, 6), family) if rate else (None, "")
+
+
+def _scaled_basis(basis: str, family: str) -> str:
+    return (f"{basis}, scaled from the {family} sizes nable lists (AWS prices a family's "
+            "sizes by vCPU)")
+
+
 def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
                lead: str = "") -> dict[str, Any] | None:
     """`count` instances of `itype` at the EC2 table's rate (or the org's
@@ -1223,11 +1271,16 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     if not itype:
         return None
     from .aws_prices import EC2_HOURLY
-    hourly, book, judged = _gated("aws", itype, EC2_HOURLY.get(itype))
+    listed, family = EC2_HOURLY.get(itype), ""
+    if listed is None:
+        listed, family = _scaled(EC2_HOURLY, itype)
+    hourly, book, judged = _gated("aws", itype, listed)
     if hourly is None:
         return None
     if book and judged:
         basis = _book_basis(basis, book)
+    elif family:
+        basis = _scaled_basis(basis, family)
     count = max(count, 1)
     hours = count * _hours_per_month()
     monthly = hourly * hours
@@ -1317,6 +1370,17 @@ def _price_nodegroup(cmd: str, **_: Any) -> dict[str, Any] | None:
                       lead="a node group of ")
 
 
+def _rds_list_rate(cls: str, engine: str) -> tuple[float | None, str]:
+    """(single-AZ hourly list rate, the family it was scaled from or "")."""
+    from .aws_prices import RDS_HOURLY, RDS_HOURLY_POSTGRES, rds_hourly
+    listed = rds_hourly(cls, engine)
+    if listed is not None:
+        return listed, ""
+    table = {"mysql": RDS_HOURLY, "mariadb": RDS_HOURLY,
+             "postgres": RDS_HOURLY_POSTGRES}.get(engine.lower())
+    return _scaled(table, cls) if table else (None, "")
+
+
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     cls = _flag(cmd, "db-instance-class")
     engine = (_flag(cmd, "engine") or "").lower()
@@ -1324,8 +1388,7 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
         return None
     # A price book's rate for the class stands for whatever engine the org
     # priced it on, so it also prices an engine the list tables do not hold.
-    from .aws_prices import rds_hourly
-    listed = rds_hourly(cls, engine) if engine in _RDS_TABLE_ENGINES else None
+    listed, family = _rds_list_rate(cls, engine) if engine in _RDS_TABLE_ENGINES else (None, "")
     hourly, book, judged = _gated("aws", cls, listed)
     if hourly is None:
         return None
@@ -1337,6 +1400,8 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     basis = f"{_ON_DEMAND_BASIS}, instance hours only; storage and I/O not included"
     if book and judged:
         basis = _book_basis(basis, book)
+    elif family:
+        basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
     return {
         "monthly_usd": round(monthly, 2),
@@ -1363,10 +1428,11 @@ def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     if not cls:
         return None
     multi_az = _has_flag(cmd, "multi-az")
-    from .aws_prices import rds_hourly
-    rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
-             "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
+    found = {"PostgreSQL": _rds_list_rate(cls, "postgres"),
+             "MySQL/MariaDB": _rds_list_rate(cls, "mysql")}
+    rates = {k: v[0] or 0.0 for k, v in found.items()}
     engine, listed = max(rates.items(), key=lambda kv: kv[1])
+    family = found[engine][1]
     if len(set(rates.values())) == 1:
         engine = "MySQL, MariaDB and PostgreSQL alike"
     hourly, book, judged = _gated("aws", cls, listed or None)
@@ -1378,6 +1444,8 @@ def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     else:
         basis = (f"{_ON_DEMAND_BASIS}, the {engine} rate (the engine is not in the command), "
                  "instance hours only, before subtracting the current class")
+        if family:
+            basis = _scaled_basis(basis, family)
     hours = (2 if multi_az else 1) * _hours_per_month()
     monthly = hourly * hours
     at = "at your price book rate of " if judged else "at "
