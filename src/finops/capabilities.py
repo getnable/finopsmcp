@@ -18,14 +18,19 @@ from __future__ import annotations
 
 from typing import Any
 
-# Total tools nable ships (matches the plugin marketplace description).
-TOTAL_TOOLS = 160
+from .tool_surface import _FAMILY_OF, INTERNAL_TOOLS
+
+# Total tools a customer can call, counted from the tool map (which a test
+# keeps equal to the registry) rather than written down. It was a literal 160
+# while 203 were registered, and the answer to "what can nable do" read "128 of
+# nable's 160+ tools".
+TOTAL_TOOLS = len(set(_FAMILY_OF) - INTERNAL_TOOLS)
 
 # Most tools only read. A handful send something (Slack, email, tickets, pull
 # requests); those are gated and act only on request. "160+ read-only tools"
 # was not true of them, so the claim says both halves.
 TOOLS_CLAIM = (
-    f"{TOTAL_TOOLS}+ tools. Most only read your cost data; the few that send "
+    f"{TOTAL_TOOLS} tools. Most only read your cost data; the few that send "
     "something (Slack, email, tickets, pull requests) are gated and act only when you ask"
 )
 

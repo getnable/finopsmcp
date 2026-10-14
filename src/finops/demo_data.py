@@ -1460,8 +1460,8 @@ def capabilities_text(detailed: bool = False) -> str:
         "connect_gcp (they detect credentials already on this machine) or connect_azure. "
         "Answers switch from sample data to your account as soon as one is connected.",
         "",
-        f"nable ships {TOTAL_TOOLS}+ read-only tools. The ones the sample cannot answer "
-        "light up once a real account is connected.",
+        f"nable ships {TOTAL_TOOLS} tools, most of them read-only. The ones the sample "
+        "cannot answer light up once a real account is connected.",
     ]
     if detailed:
         lines += ["", "### Tools that answer from the sample",

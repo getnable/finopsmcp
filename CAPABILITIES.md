@@ -5,7 +5,7 @@ local-first cost engine that runs on your machine and exposes the same
 intelligence three ways: a terminal CLI, an MCP server for Claude/Cursor, and a
 local web dashboard. Your bill never leaves your machine.
 
-At a glance: **194 MCP tools, ~40 connectors, ~48 CLI commands.** Read-only by
+At a glance: **203 MCP tools, ~40 connectors, ~48 CLI commands.** Read-only by
 default. Credentials stay in your OS keyring, never routed through any model.
 
 ---
@@ -38,7 +38,7 @@ with no account at all.
 
 ---
 
-## MCP tools (194)
+## MCP tools (203)
 
 The same engine that answers in your terminal answers in Claude, Cursor,
 Windsurf, and VS Code. Ask in plain terms; nable picks the tool.
@@ -47,18 +47,20 @@ Windsurf, and VS Code. Ask in plain terms; nable picks the tool.
 |------|-------|--------------|
 | AWS waste + scans | 34 | idle NAT gateways, unattached EBS, oversized RDS/EC2, old snapshots, EIPs, Graviton and spot migration, CloudWatch/S3/Lambda/ECS/ECR waste |
 | Cost queries | 27 | spend by service, team, account, region; trends; forecasts; cross-source totals; FOCUS; top drivers; "why did the bill move" |
-| Meta / RBAC / connectors | 19 | connected providers, connector health, API keys, capabilities, identity |
+| Meta / RBAC / connectors | 27 | connected providers, connector health, API keys, capabilities, identity, saved views, the agent action policy, the AI budget |
 | Attribution | 13 | tag rules, team and label allocation, showback, commitment coverage by tag |
-| LLM / AI cost | 12 | spend by model, unit economics, token forecasting, AI spend monitor, billing blind spots, model routing |
-| Notifications | 13 | Slack, Teams, Notion, n8n, weekly digests and insights |
+| LLM / AI cost | 13 | spend by model, unit economics, token forecasting, AI spend monitor, billing blind spots, model routing |
+| Notifications | 12 | Slack, Teams, Notion, n8n, weekly digests and insights |
 | Kubernetes | 11 | namespace, workload, and cluster cost; efficiency scorecards; waste tickets |
 | Rightsizing + recommendations | 10 | EC2/RDS/ECS rightsizing, idle cleanup, remediation PRs, a learning loop |
 | Commitments | 8 | Savings Plan and Reservation analysis, coverage, RI waste |
 | Tickets | 8 | auto-create issues in Jira, Linear, GitHub from anomalies and waste |
-| Azure | 8 | Cost Management, Advisor, VM rightsizing, reservations, budgets |
+| Azure | 9 | Cost Management, Advisor, VM rightsizing, reservations, budgets |
 | AWS core | 7 | connect, accounts, org rollup, CUR pipeline |
 | Budgets | 5 | set, sync from YAML, two-tier enforcement (warn / block) |
-| Anomalies / GCP / Databricks / Forecast | 3-3-3-1 | anomaly detection and alerting, GCP waste, DBU consumption, spend forecasting |
+| Org model | 4 | who owns what: the model, its coverage, open questions, proposed facts |
+| Setup + savings | 3 | setup status, the savings summary, Pro activation |
+| Anomalies / GCP / Databricks / Forecast | 3-5-3-1 | anomaly detection and alerting, GCP waste and recommendations, DBU consumption, spend forecasting |
 
 ---
 

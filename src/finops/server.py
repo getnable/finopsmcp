@@ -228,6 +228,8 @@ def _tool_surface_changed() -> None:
         pass
 
 
+from .capabilities import TOTAL_TOOLS as _TOOL_COUNT
+
 mcp = _SurfacedFastMCP("nable", instructions=f"""nable: cloud cost intelligence MCP server.
 
 Connects to AWS, Azure, GCP, and 10+ SaaS providers to answer cost questions,
@@ -249,7 +251,7 @@ ANSWER SHAPE for cost answers, always in this order:
 Every claim carries a dollar figure. Never bury the number under prose.
 
 TOOL SURFACE: the tools listed here are the front door, not the whole product.
-nable registers roughly 190 tools and advertises only the entry points, because
+nable registers {_TOOL_COUNT} tools and advertises only the entry points, because
 shipping all of them on every message costs the user thousands of tokens and
 makes the choice harder, not easier. The rest are fully callable by name the
 moment you know one:
