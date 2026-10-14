@@ -114,7 +114,10 @@ class BriefItem:
 
         amount = self.monthly_usd
         if amount is not None:
-            bits.append(f"It costs ${amount:,.0f} a month")
+            # The finding's figure is its saving. It equals the resource's cost
+            # only for a delete; for a resize or a gp3 move it is a fraction, so
+            # "It costs $X" told the reader a $50 volume cost $10.
+            bits.append(f"Fixing it saves about ${amount:,.0f} a month")
         else:
             band = self.finding.get("magnitude") or magnitude_band(
                 self.finding.get("rough_monthly"))
@@ -367,12 +370,13 @@ def _verification(finding: dict, rmap: ResourceMap) -> str:
     with the thing that would falsify it."""
     amount = _savings(finding)
     rid = rmap.resource_id or "the resource"
+    # Only a recommendation in the savings ledger, marked acted on, is verified
+    # (verify_savings). Brief items are not written there, so the step is the
+    # reader's own check; it used to promise a re-check nable never ran.
     if amount:
         return (f"Check next month's bill for {rid}: the line should drop by about "
-                f"${amount:,.0f}. nable re-checks this against the bill and records "
-                f"the measured result, not the estimate.")
-    return (f"Confirm {rid}'s own billed cost before and after. nable records the "
-            f"measured difference rather than repeating this estimate.")
+                f"${amount:,.0f}. That figure is an estimate; the bill is the measurement.")
+    return f"Compare {rid}'s own billed cost before and after the change."
 
 
 def _rank(finding: dict, rmap: ResourceMap) -> tuple[float, str]:

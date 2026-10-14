@@ -917,12 +917,24 @@ def build_scorecard(
         "not_comparable": "no trend (last week measured different dimensions)",
     }[trend]
 
+    # The recoverable figure is built from waste and commitments only. Say which
+    # of them were not measured: "$0/month recoverable" with neither read is a
+    # finding nobody made.
+    unmeasured = [d.display_name.lower() for d in (waste, commits) if not d.data_available]
+    if len(unmeasured) == 2:
+        recoverable = "Recoverable not estimated: waste and commitments were not measured."
+    elif unmeasured:
+        recoverable = (f"Estimated ${potential:,.0f}/month recoverable "
+                       f"({unmeasured[0]} not measured, so not included).")
+    else:
+        recoverable = f"Estimated ${potential:,.0f}/month recoverable."
+
     if graded:
         gap = min(available, key=lambda d: d.raw_score)
         summary = (
             f"{label}: {grade} ({total:.0f}/100)  {trend_str}. "
             f"Biggest gap: {gap.display_name} ({gap.raw_score:.0f}/100). "
-            f"Estimated ${potential:,.0f}/month recoverable."
+            f"{recoverable}"
         )
     else:
         measured = ", ".join(d.display_name for d in available) or "nothing yet"
@@ -930,7 +942,7 @@ def build_scorecard(
             f"{label}: not enough measured to grade yet "
             f"({avail_weight} of 100 weight: {measured}). "
             f"Connect Cost Explorer or run the scans to complete the scorecard. "
-            f"Estimated ${potential:,.0f}/month recoverable so far."
+            f"{recoverable}"
         )
 
     scorecard = Scorecard(

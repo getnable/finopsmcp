@@ -771,6 +771,10 @@ async def export_cost_report_csv(
         writer.writerow(["Total monthly saving", f"${total_monthly:,.2f}"])
         writer.writerow(["Total annual saving", f"${total_annual:,.2f}"])
         writer.writerow(["Opportunities found", len(top)])
+        if result.errors:
+            # The total above is missing whatever these would have found.
+            writer.writerow(["Scanners that could not run or read everything",
+                             "; ".join(result.errors)])
         writer.writerow([])
 
         # Column headers
@@ -799,6 +803,9 @@ async def export_cost_report_csv(
     if collapsed:
         note = (f" {collapsed} alternative fix(es) on the same resources are excluded from "
                 f"the total: you can bank one fix per resource, not all of them.")
+    if result.errors:
+        note += (f" Partial: {', '.join(result.errors)} could not run or read everything, "
+                 "so the total is missing whatever they would have found.")
     return (
         f"Exported {len(top)} opportunities to {dest}. "
         f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note}"
@@ -980,12 +987,16 @@ async def publish_cost_report_to_notion(
     except Exception:
         pass
 
+    partial_note = (f"Partial: {', '.join(result.errors)} could not run or read everything, "
+                    "so the total is missing whatever they would have found."
+                    if result.errors else "")
     report = {
         "findings": top_findings,
         "total_monthly_savings": total_monthly,
         "total_annual_savings": total_annual,
         "scan_timestamp": _dt.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "account": account_name,
+        "partial_note": partial_note,
     }
 
     try:
@@ -999,6 +1010,8 @@ async def publish_cost_report_to_notion(
         collapsed_note = (
             f"\n\n{collapsed} alternative fix(es) on the same resources are excluded "
             f"from the total: you can bank one fix per resource, not all of them.")
+    if partial_note:
+        collapsed_note += f"\n\n{partial_note}"
     return (
         f"Cost report published to Notion.\n\n"
         f"URL: {page_url}\n\n"

@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH
+from .envelope import INVESTIGATION, magnitude_band
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ class SweepResult:
     """What every caller gets: findings, and an honest account of what failed."""
 
     findings: list[dict] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)      # scanners that returned nothing
+    # Scanners that raised, and scanners that returned but left a region unread.
+    errors: list[str] = field(default_factory=list)
     learned_note: str | None = None
     timed_out: bool = False
 
@@ -206,9 +208,17 @@ def normalise(name, data) -> list[dict]:
                 out.append({"title": f"Disable S3 Transfer Acceleration on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo surcharge"})
         elif name == "ebs_rep":
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
-            n = len(data.get("excess_copies", [])) if isinstance(data, dict) else 0
+            sets = [f for f in (data.get("cross_region_findings") or [])
+                    if f.get("orphaned") or f.get("excess_copies") or f.get("has_old_copies")
+                    ] if isinstance(data, dict) else []
             if total > 0:
-                out.append({"title": f"Clean up {n} excess EBS cross-region snapshot copies", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo"})
+                # Never a figure in a total. The scanner bills incremental snapshots
+                # at the full volume size and files the result as an INFERRED upper
+                # bound, and the copies it counts (orphaned ones above all) are the
+                # same snapshots idle_resources prices one by one: a 100 GB volume's
+                # two orphaned copies were $10 here on top of the $10 already there.
+                # It stays listed, with a size band, as the investigation it is.
+                out.append({"title": f"Review {len(sets)} cross-region EBS snapshot set(s) for stale copies", "monthly_savings": None, "kind": INVESTIGATION, "magnitude": magnitude_band(total), "rough_monthly": total, "category": "Storage", "detail": "Upper bound at full volume size; the same snapshots may already be listed as idle snapshots"})
         elif name == "db_sp":
             s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
             if s > 0:
@@ -312,6 +322,48 @@ def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
     return kept, collapsed
 
 
+def _net_database_plan_of_idle_rds(findings: list[dict], db_sp: Any,
+                                   idle_rows: Any = None) -> None:
+    """Take the idle-RDS overlap out of the Database Savings Plan saving, in place.
+
+    The plan's saving is its discount on the uncovered RDS spend Cost Explorer
+    reported on the families a plan covers, and that spend includes the
+    instances idle_rds says to stop. Both cannot be banked in full: 20% off
+    $10,000/mo is $2,000, stopping a $2,000/mo idle instance is $2,000, and done
+    together the plan covers $8,000 for $1,600, $3,600 in all, not $4,000. The
+    plan is reduced by its discount on the idle spend's uncovered share; the
+    idle findings, which are per resource and certain, keep their full figure.
+
+    The plan is sized only on DATABASE_SP_ELIGIBLE_FAMILIES, so an idle
+    instance on another family (db.r5, db.t3) was never in it and stopping it
+    takes nothing from it. An instance whose class cannot be read counts, so
+    the plan is never left above what it can save.
+    """
+    from .database_savings_plans import DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT as discount
+    from .database_savings_plans import DATABASE_SP_ELIGIBLE_FAMILIES, _family
+
+    classes = {(r.get("resource_id"), r.get("region")): r.get("current_class") or ""
+               for r in (idle_rows if isinstance(idle_rows, list) else [])
+               if isinstance(r, dict)}
+
+    def _in_plan(f: dict) -> bool:
+        family = _family(classes.get((f.get("resource_id"), f.get("region")), ""))
+        return not family or family in DATABASE_SP_ELIGIBLE_FAMILIES
+
+    plan = next((f for f in findings if f.get("_scanner") == "db_sp"), None)
+    idle = sum(f.get("monthly_savings") or 0 for f in findings
+               if f.get("_scanner") == "idle_rds" and _in_plan(f))
+    if not plan or not idle or not isinstance(db_sp, dict):
+        return
+    uncovered_share = max(0.0, 1.0 - float(db_sp.get("current_sp_coverage_pct") or 0.0) / 100)
+    overlap = min(plan.get("monthly_savings") or 0, discount * idle * uncovered_share)
+    if overlap <= 0:
+        return
+    plan["monthly_savings"] = round((plan.get("monthly_savings") or 0) - overlap, 2)
+    plan["detail"] = (f"{plan.get('detail', '')}; less ${overlap:,.2f}/mo for idle RDS "
+                      "instances listed separately, which the plan would otherwise cover")
+
+
 async def sweep(
     aws: Any,
     regions: list[str] | None = None,
@@ -346,16 +398,34 @@ async def sweep(
         return SweepResult(timed_out=True)
 
     out = SweepResult()
+    raw: dict[str, Any] = {}
     for name, data in results:
         if data is None:
             out.errors.append(name)
             continue
+        # A scanner that returned but could not read every region (the idle scan
+        # drops a region that raised) is partial; say which, beside the total.
+        not_read = getattr(data, "regions_not_read", None)
+        if not_read:
+            out.errors.append(f"{name} (could not read {', '.join(sorted(not_read))})")
+        # A scanner that answered with an error dict (Cost Explorer throttled,
+        # a permission missing) normalises to nothing, which read as "found
+        # nothing". It could not look, and the total is missing it.
+        if isinstance(data, dict) and (data.get("error") or data.get("data_incomplete")):
+            out.errors.append(f"{name} (could not read its data)")
+        raw[name] = data
         for f in normalise(name, data):
             f["source"] = SOURCE_MAP.get(name, name)
+            f["_scanner"] = name
             out.findings.append(f)
 
-    # Sort by monthly savings descending first (the stable base order).
-    out.findings.sort(key=lambda x: x.get("monthly_savings", 0), reverse=True)
+    _net_database_plan_of_idle_rds(out.findings, raw.get("db_sp"), raw.get("idle_rds"))
+    for f in out.findings:
+        f.pop("_scanner", None)
+
+    # Sort by monthly savings descending first (the stable base order). `or 0`:
+    # an investigation carries None, which a bare comparison cannot order.
+    out.findings.sort(key=lambda x: x.get("monthly_savings") or 0, reverse=True)
 
     # Critique first, then rank. A finding whose claim was just retracted must not
     # be ranked on the dollar figure it lost, so this has to run BEFORE rescore.

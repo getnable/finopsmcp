@@ -1138,10 +1138,6 @@ def dashboard_data(
     this_month = month_forecast(provs)
     projected = this_month["projected_month_total"]
 
-    recent_opportunities = [o for p in provs for o in _PROVIDER_OPPS.get(p, [])]
-    recent_opportunities.sort(key=lambda o: -o["monthly_saving"])
-    opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
-
     recent_savings = [
         {"description": "Moved off-peak VOD encodes to a scheduled g5 pool.",
          "monthly_saving": 8400.00, "resource": "vod-encoder-schedule", "provider": "aws"},
@@ -1161,6 +1157,16 @@ def dashboard_data(
          "proof": "142 encoders now g5.2xlarge off-hours; next-day EC2 line fell $280/day"},
     ] if "aws" in provs else []
     verified_monthly = round(sum(v["verified_monthly"] for v in verified_ledger), 2)
+
+    # Open opportunities are what is still on the table, so a change the ledger
+    # above shows as landed is not one of them. The CloudFront commit ($62,000)
+    # and the encoder fleet ($8,400) were counted as verified savings and again
+    # in the open potential, $70,400/mo claimed twice.
+    landed = {v["resource"] for v in verified_ledger}
+    recent_opportunities = [o for p in provs for o in _PROVIDER_OPPS.get(p, [])
+                            if o.get("resource") not in landed]
+    recent_opportunities.sort(key=lambda o: -o["monthly_saving"])
+    opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
 
     # Score nudges a little by footprint so switching providers visibly moves it.
     score = 66.0 if "aws" in provs else (81.0 if provs == ["azure"] else 69.0)
@@ -1269,7 +1275,9 @@ def dashboard_data(
             {"label": "GPU encoder utilization", "value": "39%", "delta_pct": 2.0, "good_down": False, "warn": True},
             {"label": "Cache hit rate", "value": "6%", "delta_pct": 0.0, "good_down": False, "warn": True},
         ],
-        "callout": "GPU encoders sit at 39% utilization and prompt caching is nearly off. About $44,000/mo is recoverable by scheduling the encoder fleet and caching the catalog context.",
+        # The encoder schedule is already in the verified ledger ($8,400/mo); only
+        # the caching opportunity ($36,000/mo) is still recoverable.
+        "callout": "GPU encoders sit at 39% utilization and prompt caching is nearly off. About $36,000/mo is recoverable by caching the catalog context.",
     }
 
     # "What changed since you last looked": the always-on loop as a glance.

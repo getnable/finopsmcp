@@ -30,6 +30,18 @@ def _subject(total_spend: float, period_label: str, has_data: bool = True) -> st
     return f"FinOps Weekly: ${total_spend:,.0f} tracked spend, {period_label}"
 
 
+def default_period_label(today: date | None = None) -> str:
+    """The seven days the weekly digest sums: the week ending yesterday.
+
+    Snapshots are whole days and the job reads [today - 7, today), so the
+    last day in the sum is yesterday. The label used to end on today, which
+    named a day that was not in the figure and dropped one that was.
+    """
+    end = (today or date.today()) - timedelta(days=1)
+    start = end - timedelta(days=6)
+    return f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+
+
 def _build_html(
     period_label: str,
     total_spend: float,
@@ -38,14 +50,22 @@ def _build_html(
     anomalies: list[dict],
     recommendations: list[dict],
     has_data: bool = True,
+    delta_current: float | None = None,
+    coverage_note: str = "",
 ) -> str:
+    # delta_current/prev_total are the like-for-like pair when the two weeks do
+    # not cover the same providers (job_weekly_email_digest); the headline total
+    # stays the whole of what was tracked this week.
+    current = total_spend if delta_current is None else delta_current
     if prev_total:
-        pct_change = (total_spend - prev_total) / prev_total * 100
+        pct_change = (current - prev_total) / prev_total * 100
         change_color = "#dc2626" if pct_change > 5 else "#16a34a" if pct_change < -5 else "#64748b"
         change_label = (f"+{pct_change:.1f}%" if pct_change >= 0 else f"{pct_change:.1f}%") + " vs prior week"
     else:
         change_color = "#64748b"
         change_label = "no prior week to compare"
+    coverage_html = (f'<p style="font-size:12px;color:#b45309;margin:8px 0 0">{_esc(coverage_note)}</p>'
+                     if coverage_note else "")
     # With nothing read, "$0 tracked spend" and "No anomalies detected" were
     # findings about data nobody fetched.
     total_label = f"${total_spend:,.0f}" if has_data else "No cost data yet"
@@ -98,6 +118,7 @@ def _build_html(
     <p style="color:#64748b;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 8px">Total tracked spend</p>
     <p style="font-size:40px;font-weight:800;color:#0f172a;margin:0">{total_label}</p>
     <p style="font-size:14px;color:{change_color};font-weight:600;margin:4px 0 0">{change_label if has_data else "Take a cost snapshot and the next digest has numbers."}</p>
+    {coverage_html}
   </div>
 
   <!-- Provider breakdown -->
@@ -168,12 +189,14 @@ def send_weekly_digest(
     recommendations: list[dict],
     period_label: str | None = None,
     has_data: bool = True,
+    delta_current: float | None = None,
+    coverage_note: str = "",
 ) -> bool:
     """Send the weekly digest via SMTP. Returns True on success. Callers that
     report to a user want send_weekly_digest_result, which says why not."""
     return bool(send_weekly_digest_result(
         total_spend, prev_total, top_providers, anomalies, recommendations, period_label,
-        has_data=has_data,
+        has_data=has_data, delta_current=delta_current, coverage_note=coverage_note,
     )["sent"])
 
 
@@ -185,6 +208,8 @@ def send_weekly_digest_result(
     recommendations: list[dict],
     period_label: str | None = None,
     has_data: bool = True,
+    delta_current: float | None = None,
+    coverage_note: str = "",
 ) -> dict:
     """
     Send the weekly digest via SMTP and say what happened:
@@ -210,12 +235,11 @@ def send_weekly_digest_result(
     from_addr = _env("FINOPS_SMTP_FROM", user)
 
     if period_label is None:
-        end = date.today()
-        start = end - timedelta(days=6)
-        period_label = f"{start.strftime('%b %d')} – {end.strftime('%b %d, %Y')}"
+        period_label = default_period_label()
 
     html = _build_html(period_label, total_spend, prev_total, top_providers, anomalies,
-                       recommendations, has_data=has_data)
+                       recommendations, has_data=has_data, delta_current=delta_current,
+                       coverage_note=coverage_note)
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = _subject(total_spend, period_label, has_data)

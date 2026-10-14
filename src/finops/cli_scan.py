@@ -346,6 +346,36 @@ def _spend_window(today) -> tuple[str, str, str]:
     return first_of_month.isoformat(), today.isoformat(), "month-to-date"
 
 
+def _monthly_spend_base(spend: dict | None) -> tuple[float | None, str | None]:
+    """The spend a per-month figure can be compared with, and what it is.
+
+    Recoverable is a monthly figure; the spend snapshot is month to date. On the
+    13th that is twelve days, and dividing a month of savings by twelve days of
+    spend printed "% of spend" 2.6 times too high (about 30 times on the 2nd).
+    Month to date is scaled to the whole month at its own daily rate; a closed
+    month is already whole. Returns (None, None) when the window cannot be read,
+    so the caller shows no percentage rather than a wrong one.
+    """
+    import calendar
+    from datetime import date
+
+    if not spend or not spend.get("total"):
+        return None, None
+    try:
+        start_s, end_s = str(spend.get("period", "")).split(" to ")
+        start, end = date.fromisoformat(start_s.strip()), date.fromisoformat(end_s.strip())
+    except ValueError:
+        return None, None
+    days = (end - start).days  # Cost Explorer end dates are exclusive
+    if days <= 0:
+        return None, None
+    total = float(spend["total"])
+    if spend.get("covers") == "last month":
+        return total, "last_month"
+    days_in_month = calendar.monthrange(start.year, start.month)[1]
+    return total / days * days_in_month, "month_to_date_run_rate"
+
+
 def _region_catalog(session) -> dict[str, str]:
     """Every region AWS knows, with its opt-in status for this account, from
     ec2:DescribeRegions (AllRegions=True). Raises when the call fails; the
@@ -456,12 +486,19 @@ def _demo_payload() -> tuple[dict, dict]:
         "services": services[:3],
         "regions": {},
     }
+    # Priced the way the engine prices the same findings (aws_prices), so the
+    # sample cannot claim more than a real scan would. It used to: 4 idle NAT
+    # gateways at $12,960/mo ($3,240 each, where the engine's fixed charge is
+    # $32.85) and 3 idle db.r5.xlarge at $2,840/mo (the engine: $1,051.20 single-AZ).
+    from .aws_prices import HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH, rds_hourly
+
+    rds_monthly = round(3 * (rds_hourly("db.r5.xlarge", "mysql") or 0.0) * HOURS_PER_MONTH, 2)
     findings = [
         {
             "waste_type": "idle_nat_gateway",
-            "description": "4 NAT gateways with no traffic in 30 days",
+            "description": "4 NAT gateways with no traffic in 7 days",
             "region": "us-east-1",
-            "estimated_monthly_savings": 12960.0,
+            "estimated_monthly_savings": round(4 * NAT_GATEWAY_PER_MONTH, 2),
         },
         {
             "waste_type": "unattached_ebs",
@@ -477,9 +514,9 @@ def _demo_payload() -> tuple[dict, dict]:
         },
         {
             "waste_type": "idle_rds",
-            "description": "3 idle RDS instances (db.r5.xlarge, <2% CPU)",
+            "description": "3 idle RDS instances (db.r5.xlarge MySQL, no connections in 14 days)",
             "region": "eu-west-1",
-            "estimated_monthly_savings": 2840.0,
+            "estimated_monthly_savings": rds_monthly,
         },
         {
             "waste_type": "oversized_ec2",
@@ -655,6 +692,7 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
     total_recoverable = 0.0
     providers_ok = 0
     _has_aws = report is not None
+    aws_scaled = False
 
     if _has_aws:
         providers_ok += 1
@@ -662,7 +700,12 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         total_recoverable += recoverable
 
         if spend and spend["total"] > 0:
-            total_spend += spend["total"]
+            # Every other figure on this screen is per month, so AWS joins the
+            # cross-provider total as a month too, not as however many days of
+            # this month have passed.
+            monthly_base, basis = _monthly_spend_base(spend)
+            total_spend += monthly_base if monthly_base is not None else spend["total"]
+            aws_scaled = basis == "month_to_date_run_rate"
             top = " · ".join(f"{name} {_short_usd(v)}" for name, v in spend["services"])
             # "this month" is a lie on the 1st, when the snapshot falls back to the
             # month that just closed. Say which window the number covers.
@@ -672,7 +715,11 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                 file=out,
             )
             if recoverable >= _FINDING_FLOOR_USD:
-                pct = f" ({recoverable / spend['total'] * 100:.1f}% of spend)" if spend["total"] else ""
+                pct = ""
+                if monthly_base:
+                    against = ("last month's spend" if basis == "last_month"
+                               else "monthly spend at this month's rate")
+                    pct = f" ({recoverable / monthly_base * 100:.1f}% of {against})"
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable{pct}")) + demo_tag, file=out)
         else:
             if ce_denied:
@@ -773,7 +820,9 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         parts.append(_green(f"{_usd(total_recoverable)}/mo recoverable"))
         print(
             _bold(" · ".join(parts))
-            + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"),
+            + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"
+                   + ("; AWS at this month's daily rate" if aws_scaled and total_spend > 0
+                      else "")),
             file=out,
         )
 
@@ -800,6 +849,8 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
     recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
     findings = report.get("findings") or []
     spend_has_data = bool(spend) and spend.get("has_data", True)
+    # The same monthly base the text output divides by (see _monthly_spend_base).
+    monthly_base, pct_basis = _monthly_spend_base(spend) if spend_has_data else (None, None)
     return {
         "schema_version": 1,
         "command": "scan",
@@ -828,11 +879,13 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
         "recoverable": {
             "monthly_usd": round(recoverable, 2),
             "annual_usd": round(recoverable * 12, 2),
+            # Against a month of spend, never against month to date: recoverable
+            # is per month. pct_of_spend_basis says which month: the closed one,
+            # or this one at its daily rate so far.
             "pct_of_spend": (
-                round(recoverable / spend["total"] * 100, 2)
-                if spend and spend["total"]
-                else None
+                round(recoverable / monthly_base * 100, 2) if monthly_base else None
             ),
+            "pct_of_spend_basis": pct_basis if monthly_base else None,
         },
         # Every finding. This was capped at 20 while the text output promised
         # `nable scan --json` "lists every one", and the listed ones then did

@@ -232,20 +232,11 @@ async def get_efficiency_scorecard(
         except Exception:
             pass
 
-        # Try idle resources from DB
-        try:
-            from ..storage.db import get_engine, resource_inventory
-            from sqlalchemy import select
-            with get_engine().connect() as db:
-                rows = db.execute(
-                    select(resource_inventory).where(
-                        resource_inventory.c.is_active == True,
-                        resource_inventory.c.monthly_cost_usd == 0.0,
-                    ).limit(100)
-                ).fetchall()
-                idle_res = [dict(r._mapping) for r in rows] if rows else None
-        except Exception:
-            pass
+        # Idle resources: none from the inventory. This used to pass every active
+        # inventory row costing $0.00 as an "idle resource"; they add $0 of waste
+        # and still made the waste dimension measured, which then scored 100
+        # ("Minimal detected waste") off rows that carry no waste signal. Without
+        # a waste scan the dimension abstains, as it should.
 
         # Try commitment data, scoped by tag when filtering by team/env
         tag_filter: dict | None = None
@@ -302,13 +293,22 @@ async def get_efficiency_scorecard(
             from sqlalchemy import select, func
             cutoff = (_srv.date.today() - _srv.timedelta(days=30)).isoformat()
             with get_engine().connect() as db:
+                # Attribution has to have run in the window before untagged
+                # spend means anything. With no rows at all, spend minus nothing
+                # read as 100% untagged and graded tags F on an install that had
+                # simply never attributed.
+                ran = db.execute(
+                    select(func.count()).select_from(attributed_costs).where(
+                        attributed_costs.c.snapshot_date >= cutoff)
+                ).scalar() or 0
                 attributed = db.execute(
                     select(func.sum(attributed_costs.c.amount_usd)).where(
                         attributed_costs.c.snapshot_date >= cutoff,
                         attributed_costs.c.team != "unattributed",
                     )
                 ).scalar() or 0
-                untagged_spend = max(0.0, total_spend - float(attributed))
+                if ran:
+                    untagged_spend = max(0.0, total_spend - float(attributed))
         except Exception:
             pass
 
