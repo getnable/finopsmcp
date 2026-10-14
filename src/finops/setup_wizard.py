@@ -3950,7 +3950,33 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
     sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
-    up_p = sub.add_parser("upgrade", help="Upgrade nable: the finops CLI, plus the editor/Claude Desktop MCP pin")
+    up_p = sub.add_parser(
+        "upgrade",
+        help="Upgrade nable: the CLI, the finops-mcp pin in your editors' MCP configs, "
+             "and the guard hooks",
+        description=(
+            "Upgrade nable to the latest finops-mcp on PyPI (or VERSION), in three places:\n"
+            "\n"
+            "  1. the finops/nable CLI in this Python environment (pip install -U). A uv\n"
+            "     tool, pipx or editable install is left alone and gets the command to run.\n"
+            "  2. the finops-mcp==<version> pin in the MCP configs nable setup writes:\n"
+            "     Claude Desktop (claude_desktop_config.json), Cursor (~/.cursor/mcp.json)\n"
+            "     and Claude Code (~/.claude.json, user and per-project entries). The new\n"
+            "     release is cached with uvx first, so no editor waits on a download.\n"
+            "  3. the guard hooks `nable guard install` wrote with a finops-mcp==<version>\n"
+            "     pin: Claude Code, Cursor, Codex CLI, GitHub Copilot CLI, Gemini CLI and\n"
+            "     Cline, user-level and this project's. The new release's own\n"
+            "     `guard install` re-pins each one in place.\n"
+            "\n"
+            "An entry or hook with no finops-mcp==<version> pin (one you wrote by hand,\n"
+            "an unpinned uvx line, a binary path) is left as it is. The Claude Code\n"
+            "plugin's hook belongs to the plugin: /plugin marketplace update nable.\n"
+            "\n"
+            "Exit status: 0 upgraded or nothing to do; 1 PyPI did not answer, the new\n"
+            "release could not be cached (nothing was re-pinned), or a pin did not move."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
     cr_p = sub.add_parser("credits", help="Managed-AI credit balance for this instance (show / grant / budget)")
     cr_p.add_argument("action", nargs="?", default="show", choices=["show", "grant", "budget"],
@@ -4318,7 +4344,9 @@ def main(args: list[str] | None = None) -> None:
         _configure_claude_desktop()
         return
     elif parsed.cmd == "upgrade":
-        _run_upgrade(getattr(parsed, "version", ""))
+        _code = _run_upgrade(getattr(parsed, "version", ""))
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "aws-cur":
         _run_aws_cur_setup()
@@ -5372,19 +5400,6 @@ def _pinned_package(target: str = "") -> str:
     return f"{base}=={v}" if v else base
 
 
-def _claude_config_file() -> "Path | None":
-    """Return the existing claude_desktop_config.json, or None."""
-    candidates = [
-        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
-        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
-        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
-
-
 def _upgrade_running_cli(current: str, target: str) -> bool:
     """Upgrade the `finops` command in the environment running right now.
 
@@ -5458,16 +5473,22 @@ def _version_tuple(v: str) -> tuple:
         return ()
 
 
-def _run_upgrade(target: str = "") -> None:
-    """Upgrade nable, deliberately, in two places.
+def _run_upgrade(target: str = "") -> int:
+    """Upgrade nable, deliberately, everywhere it was pinned. Returns the exit code.
 
     (1) The `finops` CLI in the current environment, the command you type.
-    (2) The MCP server that editors/Claude Desktop launch via uvx: wizard-written
-        configs pin finops-mcp==X so a PyPI release never slows a working client, so
-        this warms the new version into the uvx cache now (outside any startup
-        window) and moves the pin. One Claude Desktop restart picks it up.
+    (2) The MCP server editors launch via uvx: wizard-written configs pin
+        finops-mcp==X so a PyPI release never slows a working client. The new
+        release is warmed into the uvx cache first (outside any startup window),
+        then the pin moves in every config `nable setup` writes: Claude Desktop,
+        Cursor and Claude Code (_repin_editor_configs).
+    (3) The guard hooks `nable guard install` wrote with a uvx pin, in every
+        agent it supports, re-pinned by the guard's own install
+        (_repin_guard_hooks).
+
+    0: upgraded, or nothing to do. 1: PyPI did not answer, the new release could
+    not be cached (nothing was re-pinned), or a pin could not be moved.
     """
-    import json
     import shutil
     import subprocess
 
@@ -5481,7 +5502,7 @@ def _run_upgrade(target: str = "") -> None:
             _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
             print(f"  You are on {current}. When you are online, run this again, or pass a")
             print("  version newer than that explicitly:  finops upgrade <version>")
-            return
+            return 1
 
     print(f"  Installed: {current}")
     print(f"  {'Target' if explicit else 'Latest'}:    {target}\n")
@@ -5491,18 +5512,18 @@ def _run_upgrade(target: str = "") -> None:
         # A source or pre-release install can be ahead of PyPI. "Upgrading" to
         # latest would be a downgrade, and this command never does one unasked.
         _ok(f"You are on {current}, newer than PyPI's latest ({target}). Nothing to do.")
-        return
+        return 0
     if explicit and cur_t and tgt_t and tgt_t < cur_t:
         _warn(f"{target} is older than the installed {current}: this is a downgrade, as asked.")
 
     # 1. The CLI you are typing right now.
     _upgrade_running_cli(current, target)
 
-    # 2. The MCP server editors launch via uvx.
+    # 2. The MCP server editors launch via uvx, and the guard hooks that use it.
     uvx_bin = shutil.which("uvx")
     if not uvx_bin:
-        print("\n  No uvx found, so there is no editor/Claude Desktop cache to warm.")
-        return
+        print("\n  No uvx found, so there is no editor or guard hook pin to warm and move.")
+        return 0
 
     print("\n  Caching the new version for editors (so Claude never waits on it)...")
     try:
@@ -5513,48 +5534,166 @@ def _run_upgrade(target: str = "") -> None:
         if res.returncode != 0:
             _err(f"Could not cache finops-mcp {target}: {(res.stderr or res.stdout).strip()[:300]}")
             _warn("Your config was NOT changed. You are still on the working version.")
-            return
+            return 1
     except Exception as e:
         _err(f"Could not cache finops-mcp {target}: {e}")
         _warn("Your config was NOT changed. You are still on the working version.")
-        return
+        return 1
     _ok(f"finops-mcp {target} cached")
 
-    # Move the pin in the Claude Desktop config (nable key, legacy finops key too).
-    config_path = _claude_config_file()
-    if not config_path:
-        _warn("Claude Desktop config not found. Nothing to repin.")
-        print("  If you use another MCP client, update its nable entry to:")
-        print(f"    {uvx_bin} {_pinned_package(target)}")
-        return
-    try:
-        config = json.loads(config_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        _err(f"Could not parse {config_path}: {e}")
-        return
+    print()
+    configs_ok = _repin_editor_configs(target)
+    print()
+    hooks_ok = _repin_guard_hooks(target, uvx_bin)
+    return 0 if configs_ok and hooks_ok else 1
 
-    moved = False
-    for server_key in ("nable", "finops"):
-        entry = config.get("mcpServers", {}).get(server_key)
-        if not entry:
+
+# A finops-mcp pin as nable writes it into an MCP config's args: the package,
+# any extras, and one exact version. Anything else is not a pin of ours.
+_PIN_ARG_RE = re.compile(r"^(finops-mcp(?:\[[A-Za-z0-9_,.-]*\])?)==([A-Za-z0-9.+!_-]+)$")
+
+
+def _repin_editor_configs(target: str) -> bool:
+    """Move the finops-mcp==X pin to `target` in every MCP config nable setup
+    writes (_editor_config_paths: Claude Desktop, Cursor, Claude Code).
+
+    Only an argument that already pins finops-mcp to a version moves, keeping
+    its extras; every other entry, and every other argument, stays as written.
+    An entry with no pin (the README's manual config, Cursor's one-click link,
+    a binary path) is the user's choice and is named, not changed. A file is
+    rewritten only when a pin in it moved. False when one could not be written."""
+    import json
+
+    moved: list[tuple[str, Path, str]] = []
+    unpinned: list[tuple[str, Path]] = []
+
+    def _edit_for(client: str, path: Path):
+        def edit(servers: dict) -> bool:
+            hit = False
+            for name, entry in servers.items():
+                if not isinstance(entry, dict) or not isinstance(entry.get("args"), list):
+                    if _is_nable_entry(name, entry):
+                        unpinned.append((client, path))
+                    continue
+                pinned = False
+                new_args = []
+                for a in entry["args"]:
+                    m = _PIN_ARG_RE.match(a) if isinstance(a, str) else None
+                    if m:
+                        pinned = True
+                        if m.group(2) != target:
+                            moved.append((client, path, m.group(2)))
+                            a = f"{m.group(1)}=={target}"
+                            hit = True
+                    new_args.append(a)
+                if pinned:
+                    entry["args"] = new_args
+                elif _is_nable_entry(name, entry):
+                    unpinned.append((client, path))
+            return hit
+        return edit
+
+    ok = True
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            if path.exists():
+                _warn(f"{client}: could not read {path} as JSON, so its pin was not checked.")
             continue
-        args = entry.get("args") or []
-        new_args = [
-            _pinned_package(target) if isinstance(a, str) and a.split("==")[0] == "finops-mcp" else a
-            for a in args
-        ]
-        if new_args != args:
-            entry["args"] = new_args
-            moved = True
+        if not isinstance(doc, dict):
+            continue
+        before = len(moved)
+        edit = _edit_for(client, path)
+        hit = False
+        for servers in _server_maps(doc):
+            hit = edit(servers) or hit
+        if not hit:
+            continue
+        try:
+            _atomic_write_json(path, doc)
+        except OSError as e:
+            del moved[before:]
+            _err(f"{client}: could not write {path}: {e.strerror or e}")
+            ok = False
+
+    for client, path, old in moved:
+        _ok(f"{client}: finops-mcp {old} -> {target}  ({path})")
+    for client, path in dict.fromkeys(unpinned):
+        print(f"  {client}: {path} runs nable with no finops-mcp==<version> pin; left as it is.")
     if moved:
-        config_path.write_text(json.dumps(config, indent=2) + "\n")
-        config_path.chmod(0o600)
-        _ok(f"Claude Desktop pinned to finops-mcp=={target}")
-        print("\n  Restart Claude Desktop once to pick it up. The new version is already")
-        print("  cached, so the restart is instant.")
-    else:
-        _warn("No finops-mcp pin found in the Claude Desktop config (nothing changed).")
-        print("  Re-run 'finops setup claude' to write a pinned entry.")
+        clients = sorted({c for c, _p, _o in moved})
+        print(f"\n  Restart {', '.join(clients)} once to pick it up. The new version is")
+        print("  already cached, so the restart is instant.")
+    elif not unpinned:
+        print("  No MCP config pins finops-mcp to another release; nothing to repin there.")
+    return ok
+
+
+def _repin_guard_hooks(target: str, uvx_bin: str) -> bool:
+    """Re-pin the guard hooks `nable guard install` wrote with a uvx pin, by
+    running the guard's own install, which re-pins a hook in place
+    (guard.install for Claude Code, guard_adapters.install for the rest).
+
+    At the running release that install runs in this process. At any other
+    release this process would pin its own version, so the target release's
+    `finops guard install`, from the uvx cache just warmed, runs instead.
+    A hook with no pin (a binary path, an unpinned uvx) is left as found, and
+    so is every hook that is not nable's. False when a hook did not move."""
+    import subprocess
+
+    from . import guard
+    from . import guard_adapters as ga
+
+    names = [h for h in ga.HARNESSES if not (h == "cline" and sys.platform == "win32")]
+    stale: list[tuple[str, bool, str]] = []
+    for h in names:
+        for global_scope in (True, False):
+            pins = {r for r in ga.hook_releases(h, global_scope) if r}
+            if pins and pins != {target}:
+                stale.append((h, global_scope, ", ".join(sorted(pins))))
+    if not stale:
+        print("  No guard hook pins finops-mcp to another release; nothing to repin there.")
+        return True
+
+    ok = True
+    for h, global_scope, old in stale:
+        label = ga.LABELS.get(h, h)
+        path = ga.hooks_path(h, global_scope)
+        where = "global" if global_scope else "this project"
+        try:
+            if target == guard.__version__:
+                ga.install(h, global_scope)
+            else:
+                cmd = [uvx_bin, "--from", f"finops-mcp=={target}", "finops", "guard",
+                       "install", "--harness", h]
+                cmd += ["--global"] if global_scope else []
+                # The settings hook exists already: re-pin it even where the
+                # nable plugin also runs the guard (install skips that case).
+                cmd += ["--force"] if h == "claude" else []
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                                     check=False)
+                if res.returncode != 0:
+                    raise RuntimeError((res.stderr or res.stdout).strip()[:300] or
+                                       f"exit {res.returncode}")
+        except (SystemExit, RuntimeError, OSError, subprocess.SubprocessError) as e:
+            _err(f"Guard hook, {label} ({where}): could not repin {path}: {e}")
+            ok = False
+            continue
+        now = ga.hook_releases(h, global_scope)
+        if {r for r in now if r} - {target}:
+            _warn(f"Guard hook, {label} ({where}): still pins finops-mcp {old} after the "
+                  f"install ({path}). Run: nable guard install --harness {h}"
+                  + (" --global" if global_scope else ""))
+            ok = False
+        else:
+            _ok(f"Guard hook, {label} ({where}): finops-mcp {old} -> {target}  ({path})")
+    if ok:
+        print(f"\n  Restart {', '.join(sorted({ga.LABELS.get(h, h) for h, _g, _o in stale}))} "
+              "to load the re-pinned hooks.")
+    return ok
 
 
 def _build_mcp_server_entry() -> "tuple[dict, str]":
