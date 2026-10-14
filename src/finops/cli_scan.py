@@ -16,12 +16,13 @@ Output contract (the design doc is the source of truth):
     nable scan · profile default                       <- first print, <2s, no network
     account 352112345678 · this account only           <- after STS returns
     scanning 4 regions ...
-      us-east-1 ......... 3 findings
+      us-east-1 ......... 17 findings
       eu-west-1 ......... 1 finding
     ────────────────────────────────────────────
-    $2,140/mo recoverable
-      $1,200/mo  3 idle RDS instances (db.r5.xlarge), us-east-1
-      ...
+    $659/mo recoverable
+           $350/mo  1 idle RDS instance, eu-west-1
+           $210/mo  14 unattached EBS volumes, us-east-1
+         $98.55/mo  3 idle NAT gateways, us-east-1
 
     (with --spend, a headline is added above the recoverable line:)
     $48,210 on AWS this month. Top: Bedrock $19.2k · EC2 $11.4k · S3 $4.1k

@@ -52,13 +52,13 @@ uvx nable scan
 nable scan · profile prod
 account 3521… · this account only
 scanning 17 regions …
-  us-east-1 ......... 3 findings
+  us-east-1 ......... 17 findings
   eu-west-1 ......... 1 finding
 ────────────────────────────────────────────
-$2,140/mo recoverable
-    $1,200/mo  3 idle NAT gateways, us-east-1
-      $610/mo  14 unattached EBS volumes (2.1 TB), us-east-1
-      $330/mo  idle RDS instance (db.r5.xlarge, <2% CPU), eu-west-1
+$659/mo recoverable
+       $350/mo  1 idle RDS instance (db.r5.xlarge MySQL, no connections in 14 days), eu-west-1
+       $210/mo  14 unattached EBS volumes (2.1 TB, gp2), us-east-1
+     $98.55/mo  3 idle NAT gateways, us-east-1
 run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)
 ```
 
