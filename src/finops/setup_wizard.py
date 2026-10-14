@@ -2851,10 +2851,10 @@ def _run_guard(parsed) -> None:
     print(dim("  Pause:    nable guard off / nable guard on (every hook, the plugin's too)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
-    print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
-    print(dim("  In Claude Code the hook sees Bash and MCP tool calls; in Cursor and Codex, shell"))
-    print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
-    print(dim("  check_action_policy before acting."))
+    print(dim("            nable guard install --all       (every supported agent found here)"))
+    print(dim("  In Claude Code, Cursor and Codex CLI the hook sees shell commands and MCP tool"))
+    print(dim("  calls; in Copilot, Gemini CLI and Cline, shell commands. Other MCP agents get"))
+    print(dim("  the same gate as a tool: the agent calls check_action_policy before acting."))
     print()
 
 

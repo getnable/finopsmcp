@@ -185,6 +185,18 @@ def test_status_and_doctor_name_uv_not_a_reinstall_that_writes_the_same(
     assert any("https://docs.astral.sh/uv/" in r for r in d["recommendations"])
 
 
+def test_the_status_footer_says_what_each_hook_sees(guard_home, capsys):
+    """The footer said Cursor and Codex hooks see shell commands only and that
+    --all covers Claude Code, Cursor and Codex. Both install MCP hooks too
+    (beforeMCPExecution, mcp__.*), and --all covers all six agents."""
+    out = _out(["guard", "status"], capsys)
+    assert "in Cursor and Codex, shell commands" not in out
+    assert "(Claude Code, Cursor, Codex: each one found)" not in out
+    assert ("In Claude Code, Cursor and Codex CLI the hook sees shell commands and MCP tool "
+            "calls") in out
+    assert "every supported agent found" in out
+
+
 # ── nable brief with no usable AWS credentials ────────────────────────────────
 
 def _unreadable_audit(code: str, seen: dict):
