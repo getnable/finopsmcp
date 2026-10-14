@@ -234,7 +234,8 @@ def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
                     "waste_type": "unattached_ebs_volume",
                     "estimated_monthly_savings": round(monthly_cost, 2),
                     "detail": (
-                        f"{size_gb} GB {vol_type} volume is unattached (state=available). "
+                        f"{size_gb} GB {vol_type} volume was unattached at scan time "
+                        f"(state=available); EC2 does not report when it was detached. "
                         f"Name: {name_tag or 'untagged'}. "
                         f"Delete it or snapshot+delete if needed as a backup."
                     ),
@@ -482,8 +483,9 @@ def check_elastic_ips(ec2_client: Any, region: str = "unknown") -> list[dict]:
                 "waste_type": "unassociated_elastic_ip",
                 "estimated_monthly_savings": _EIP_MONTHLY,
                 "detail": (
-                    f"Elastic IP {public_ip} is not associated with any instance "
-                    f"or network interface. AWS charges ${_EIP_MONTHLY:.2f}/mo for idle EIPs. "
+                    f"Elastic IP {public_ip} was not associated with any instance "
+                    f"or network interface at scan time; EC2 does not report when it was "
+                    f"detached. AWS charges ${_EIP_MONTHLY:.2f}/mo for idle EIPs. "
                     f"Release it if no longer needed."
                 ),
                 "severity": "low",
