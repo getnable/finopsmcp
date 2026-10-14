@@ -3050,6 +3050,8 @@ def _guard_doctor(parsed) -> None:
             state = green("installed")
             if "mcp" in r:
                 state += ", sees shell" + (" + MCP" if r["mcp"] else "")
+            elif r["harness"] in ("copilot", "gemini", "cline"):
+                state += ", sees shell only, " + amber("not MCP tool calls")
             pin = {"pinned": "pinned to this release", "other": "pinned to another release",
                    "unpinned": amber("unpinned"), "binary": "installed binary"}.get(r.get("pin"))
             if pin:

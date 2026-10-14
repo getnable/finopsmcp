@@ -6013,6 +6013,16 @@ def doctor() -> dict[str, Any]:
             if any(r.get("mcp") for r in mine):
                 what = what.replace("shell commands", "shell commands and MCP tool calls", 1)
             covered.append(f"{label}: {what}")
+            if name not in _ADAPTER_MCP:
+                # No hook event of this harness that nable handles carries an
+                # MCP tool call, so its covered line says "shell commands" and
+                # a change made through a Terraform, AWS or Kubernetes MCP
+                # server goes through unchecked. That has to be said, not
+                # left for the reader to infer from what the line omits.
+                gaps.append(f"{label}: MCP tool calls are not guarded (its hook sees shell "
+                            "commands only; a change made through an MCP server goes "
+                            "through unchecked unless the agent calls "
+                            "check_action_policy first)")
             stale = [r for r in mine if r["runs"] and r.get("mcp") is False]
             if stale and not any(r.get("mcp") for r in mine):
                 gaps.append(f"{label}: MCP tool calls (the hook only sees shell commands)")
