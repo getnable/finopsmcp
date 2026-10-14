@@ -1276,6 +1276,64 @@ def _scaled_basis(basis: str, family: str) -> str:
             "sizes by vCPU)")
 
 
+# The region a command names (`--region`, or an AWS_REGION=/AWS_DEFAULT_REGION=
+# prefix). Every EC2 rate nable holds is us-east-1's, and `aws --region
+# sa-east-1 ec2 run-instances --instance-type c5.4xlarge` was judged at
+# $496/mo, a warn under the $500 threshold, for an instance AWS lists at
+# $765/mo there. For each region, the least and the most it charges over
+# us-east-1 for any EC2 type nable lists (Linux on-demand, AWS Price List
+# regional offer files, October 2026): the guard judges at the least, which
+# is a floor for every listed type, and says the range. A region that is
+# cheaper than us-east-1 for some types keeps the us-east-1 figure (a
+# guess may raise a figure, never lower it), and an unknown one is named.
+_EC2_REGION_RANGE: dict[str, tuple[float, float]] = {
+    "af-south-1": (1.286, 1.428), "ap-east-1": (1.253, 1.595), "ap-east-2": (1.052, 1.178),
+    "ap-northeast-1": (1.169, 1.5), "ap-northeast-2": (1.124, 1.45),
+    "ap-northeast-3": (1.169, 1.45), "ap-south-1": (0.611, 1.3), "ap-south-2": (0.611, 1.201),
+    "ap-southeast-1": (1.149, 1.45), "ap-southeast-2": (1.198, 1.45),
+    "ap-southeast-3": (1.149, 1.45), "ap-southeast-4": (1.198, 1.45),
+    "ap-southeast-5": (0.975, 1.305), "ap-southeast-7": (0.975, 1.305),
+    "ca-central-1": (1.088, 1.15), "ca-west-1": (1.088, 1.115), "eu-central-1": (1.135, 1.5),
+    "eu-central-2": (1.251, 1.54), "eu-north-1": (1.024, 1.14), "eu-south-1": (1.143, 1.26),
+    "eu-south-2": (1.054, 1.2), "eu-west-1": (1.069, 1.25), "eu-west-2": (1.119, 1.5),
+    "eu-west-3": (1.119, 1.4), "il-central-1": (1.121, 1.296), "me-central-1": (1.18, 1.247),
+    "me-south-1": (1.19, 1.375), "mx-central-1": (1.047, 1.058), "sa-east-1": (1.529, 1.95),
+    "us-east-2": (0.994, 1.0), "us-gov-east-1": (1.167, 1.267),
+    "us-gov-west-1": (1.167, 1.267), "us-west-1": (1.099, 1.3), "us-west-2": (1.0, 1.0),
+}
+_REGION_RE = re.compile(r"(?:(?<!\S)--region(?:=|\s+)|\bAWS_(?:DEFAULT_)?REGION=)"
+                        r"[\"']?([a-z]{2}(?:-gov)?-[a-z]+-\d)(?![\w-])")
+_PRICING_REGION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "pricing_region", default=None)
+
+
+def _named_region(command: str) -> str | None:
+    """The one AWS region the command names, or None (none, or several)."""
+    found = set(_REGION_RE.findall(command))
+    return found.pop() if len(found) == 1 else None
+
+
+def _regional(listed: float | None, basis: str) -> tuple[float | None, str, str]:
+    """(the rate judged in the command's region, its basis, " in REGION" for
+    the line) for a us-east-1 EC2 list rate."""
+    region = _PRICING_REGION.get()
+    if listed is None or region is None or region == "us-east-1":
+        return listed, basis, ""
+    span = _EC2_REGION_RANGE.get(region)
+    if span is None:
+        return listed, (f"{basis}; the command targets {region}, whose rates nable does not "
+                        "hold, so this is the us-east-1 figure"), f" in {region}"
+    low, high = span
+    if high <= 1.0:
+        return listed, basis, ""        # priced as us-east-1 (us-west-2, us-east-2)
+    if low <= 1.0:
+        return listed, (f"{basis}; {region} lists EC2 at {low:g}x to {high:g}x us-east-1, "
+                        "so this is the us-east-1 figure"), f" in {region}"
+    return listed * low, (f"{basis} x{low:g}, the least {region} charges over us-east-1 for "
+                          f"the EC2 types nable lists; its rates run {low:g}x to {high:g}x"
+                          ), f" in {region}"
+
+
 def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
                lead: str = "") -> dict[str, Any] | None:
     """`count` instances of `itype` at the EC2 table's rate (or the org's
@@ -1286,13 +1344,13 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     listed, family = EC2_HOURLY.get(itype), ""
     if listed is None:
         listed, family = _scaled(EC2_HOURLY, itype)
+    if family:
+        basis = _scaled_basis(basis, family)
+    listed, regional_basis, where = _regional(listed, basis)
     hourly, book, judged = _gated("aws", itype, listed)
     if hourly is None:
         return None
-    if book and judged:
-        basis = _book_basis(basis, book)
-    elif family:
-        basis = _scaled_basis(basis, family)
+    basis = _book_basis(basis, book) if book and judged else regional_basis
     count = max(count, 1)
     hours = count * _hours_per_month()
     monthly = hourly * hours
@@ -1304,7 +1362,8 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
         "count": count,
         "basis": basis,
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
-        "line": (f"{lead}{count}x {itype} {at}{_rate(hourly)}/hr ({basis}) "
+        **({"region": where[4:]} if where else {}),
+        "line": (f"{lead}{count}x {itype}{where} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
     }
@@ -1981,10 +2040,12 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
     Anything unpriceable returns None: an unknown type must degrade to the
     guard's existing behaviour, never to an invented figure.
     """
+    token = None
     try:
         r = _readings(command)
         if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
             return None
+        token = _PRICING_REGION.set(_named_region(command))
         for forms in _pricing_forms(command):
             best: dict[str, Any] | None = None
             for form in forms:
@@ -1996,6 +2057,9 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
         return None
     except Exception:
         return None                    # a pricing bug must not cost the verdict
+    finally:
+        if token is not None:
+            _PRICING_REGION.reset(token)
 
 
 def _cost_line(est: dict[str, Any]) -> str:
