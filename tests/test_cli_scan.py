@@ -301,17 +301,21 @@ def test_regions_override_skips_pick_and_validates():
 
 # ── failure states ────────────────────────────────────────────────────────────
 
-def test_no_creds_points_at_connecting_never_at_sample_data(capsys):
+def test_no_creds_points_at_connecting_first_and_the_demo_last(capsys):
     """Someone who just asked for their own bill does not want StreamCo's. The
-    no-creds exit used to advertise `nable scan --demo`; every observed user who hit
-    this wall abandoned. It now hands them the command that actually gets them
-    connected."""
+    no-creds exit used to lead with `nable scan --demo`; every observed user who
+    hit this wall abandoned. It leads with the command that actually gets them
+    connected. Someone with no account at hand (evaluating, or on a CI runner
+    with no credentials) still learns the demo exists, last, in the words
+    `nable brief` uses."""
     code, events, _ = _run(_args(), _session(creds=False))
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_NO_CREDS
-    assert "--demo" not in out                       # no fake-data consolation prize
     assert "aws configure" in out                    # the real fix
     assert "nable connect" in out                    # ...and the flow that waits for it
+    demo = out.index("no account at hand? `nable scan --demo`")
+    assert out.index("aws configure") < out.index("nable connect") < demo
+    assert demo < out.index(cli_scan.DOCS_LINE)
     assert cli_scan.DOCS_LINE in out
     assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["no-creds"]
 
