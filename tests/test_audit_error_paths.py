@@ -134,12 +134,13 @@ def test_a_throttled_nat_metric_read_is_not_evidence_the_gateway_is_idle():
     cw = _CloudWatch({
         "BytesOutToDestination": _client_error(
             _THROTTLED, "GetMetricStatistics", "Rate exceeded"),
+        "BytesInFromDestination": [],
     })
 
     findings = waste.check_nat_gateways(
         _PagedClient(_NAT_PAGES), cw, region="us-east-1")
 
-    assert cw.asked == ["BytesOutToDestination"], (
+    assert sorted(cw.asked) == ["BytesInFromDestination", "BytesOutToDestination"], (
         "test wiring: the detector never reached the metric call")
 
     # A fix may either skip the resource or emit it with an explicit
@@ -170,6 +171,7 @@ def test_an_unread_nat_gateway_never_reaches_the_measured_savings_headline():
     cw = _CloudWatch({
         "BytesOutToDestination": _client_error(
             _THROTTLED, "GetMetricStatistics", "Rate exceeded"),
+        "BytesInFromDestination": [],
     })
     findings = waste.check_nat_gateways(
         _PagedClient(_NAT_PAGES), cw, region="us-east-1")
@@ -190,7 +192,8 @@ def test_a_nat_gateway_that_really_reads_near_zero_is_still_flagged():
     flagging the genuinely idle gateway the detector exists to find. This goes
     red if the fix over-corrects into "never emit".
     """
-    cw = _CloudWatch({"BytesOutToDestination": [{"Sum": 1024.0}] * 7})
+    cw = _CloudWatch({"BytesOutToDestination": [{"Sum": 1024.0}] * 7,
+                      "BytesInFromDestination": [{"Sum": 1024.0}] * 7})
     findings = waste.check_nat_gateways(
         _PagedClient(_NAT_PAGES), cw, region="us-east-1")
 
@@ -202,7 +205,8 @@ def test_a_busy_nat_gateway_is_not_flagged():
     """PASSES TODAY: pin. 40 GB/day of measured egress is not idle, and a fix
     to the error branch must not disturb the measured branch."""
     forty_gb = 40 * 1024 ** 3
-    cw = _CloudWatch({"BytesOutToDestination": [{"Sum": forty_gb}] * 7})
+    cw = _CloudWatch({"BytesOutToDestination": [{"Sum": forty_gb}] * 7,
+                      "BytesInFromDestination": []})
     assert waste.check_nat_gateways(
         _PagedClient(_NAT_PAGES), cw, region="us-east-1") == []
 

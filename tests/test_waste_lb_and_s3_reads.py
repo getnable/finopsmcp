@@ -141,6 +141,31 @@ def test_a_nat_gateway_created_inside_the_lookback_is_skipped():
     assert {f["estimated_monthly_savings"] for f in findings} == {NAT_GATEWAY_PER_MONTH}
 
 
+def test_a_nat_gateway_that_downloads_is_not_idle():
+    """Private subnets pulling images and packages through a NAT gateway send
+    requests and ACKs out (here 0.5 GB/day) and receive the data back (30
+    GB/day). Reading BytesOutToDestination alone, this gateway averaged under
+    the 1 GB/day threshold and was flagged idle, measured at high confidence,
+    with a $32.85/mo saving for deleting it. It processes about
+    30.5 GB/day x $0.045 x 30.4 = $41.73/mo of data and is in use."""
+    gb = 1024 ** 3
+    dims = (("NatGatewayId", "nat-old"),)
+    cw = _CW({("AWS/NATGateway", "BytesOutToDestination", dims): [0.5 * gb] * 7,
+              ("AWS/NATGateway", "BytesInFromDestination", dims): [30 * gb] * 7})
+    ec2 = _Pages([{"NatGateways": [{"NatGatewayId": "nat-old", "CreateTime": _OLD}]}])
+    assert waste.check_nat_gateways(ec2, cw, "us-east-1") == []
+
+
+def test_a_nat_gateway_quiet_in_both_directions_is_still_idle():
+    gb = 1024 ** 3
+    dims = (("NatGatewayId", "nat-old"),)
+    cw = _CW({("AWS/NATGateway", "BytesOutToDestination", dims): [0.1 * gb] * 7,
+              ("AWS/NATGateway", "BytesInFromDestination", dims): [0.2 * gb] * 7})
+    ec2 = _Pages([{"NatGateways": [{"NatGatewayId": "nat-old", "CreateTime": _OLD}]}])
+    [f] = waste.check_nat_gateways(ec2, cw, "us-east-1")
+    assert f["avg_gb_per_day"] == 0.3
+
+
 def test_nat_rates_come_from_aws_prices():
     from finops.aws_prices import NAT_GATEWAY_PER_GB
 

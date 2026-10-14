@@ -503,6 +503,8 @@ def check_nat_gateways(
     """
     Detect NAT Gateways with low throughput — they still cost ~$32/mo in fixed
     charges even with zero traffic. If a NAT GW processes <1 GB/day it's likely idle.
+    Traffic is BytesOutToDestination plus BytesInFromDestination: requests out
+    and responses back.
     """
     findings = CheckFindings()
 
@@ -525,14 +527,24 @@ def check_nat_gateways(
     nats = [nat for page in pages for nat in page.get("NatGateways", [])
             if not _created_after(nat.get("CreateTime"), start)]
 
-    # BytesOutToDestination (egress through NAT GW), one batched read for all
+    # Traffic in both directions, one batched read for all. BytesOutToDestination
+    # alone is the request side: a gateway that private subnets pull images,
+    # packages and S3 objects through sends a few percent of what it receives
+    # (requests and ACKs), so 30 GB/day of downloads with 0.5 GB/day of requests
+    # was flagged idle, measured at high confidence, and its deletion drafted.
+    # BytesInFromDestination is the response side, and NAT data processing is
+    # billed on both.
     failed: dict = {}
     sums = fetch_metric_values(cw_client, [
-        MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
+        MetricQuery((nat["NatGatewayId"], metric), "AWS/NATGateway", metric,
                     (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
         for nat in nats
+        for metric in ("BytesOutToDestination", "BytesInFromDestination")
     ], start, now, failures=failed)
-    _note_unread(findings, failed, "NAT gateways", "traffic (BytesOutToDestination)")
+    # Counted per gateway, not per series: a gateway with either direction
+    # unread is one gateway not assessed.
+    _note_unread(findings, {key[0]: code for key, code in failed.items()}, "NAT gateways",
+                 "traffic (BytesOutToDestination, BytesInFromDestination)")
 
     for nat in nats:
         nat_id = nat["NatGatewayId"]
@@ -542,26 +554,27 @@ def check_nat_gateways(
             (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
         )
 
-        datapoints = sums.get(nat_id)
-        if datapoints is None:
+        out_points = sums.get((nat_id, "BytesOutToDestination"))
+        in_points = sums.get((nat_id, "BytesInFromDestination"))
+        if out_points is None or in_points is None:
             # A failed read is not zero traffic. Collapsing it to 0.0 flagged
             # every NAT gateway in the region as idle the moment CloudWatch
             # was unreachable or the IAM permission was missing, and the
             # trust envelope then stamped each one MEASURED/high. The sibling
             # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
-            # exact failure. BytesOutToDestination is the only evidence this
-            # detector has, so without it there is no finding to make.
+            # exact failure. Traffic is the only evidence this detector has,
+            # so without both directions there is no finding to make.
             log.debug("CW metrics failed for NAT GW %s", nat_id)
             continue
 
-        if not datapoints:
+        days_seen = max(len(out_points), len(in_points))
+        if not days_seen:
             # The read SUCCEEDED and returned nothing, which is different from
             # the read failing: the gateway is new, or genuinely carrying no
             # traffic. That is a real observation.
             avg_bytes_per_day = 0.0
         else:
-            total_bytes = sum(datapoints)
-            avg_bytes_per_day = total_bytes / len(datapoints)
+            avg_bytes_per_day = (sum(out_points) + sum(in_points)) / days_seen
 
         avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
 
@@ -575,7 +588,8 @@ def check_nat_gateways(
                 "estimated_monthly_savings": round(monthly_savings, 2),
                 "detail": (
                     f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
-                    f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
+                    f"{avg_gb_per_day:.3f} GB/day of traffic, both directions, over "
+                    f"{lookback_days} days "
                     f"(threshold: {low_throughput_gb_per_day} GB/day). "
                     f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
                     f"Name: {name_tag or 'untagged'}. "

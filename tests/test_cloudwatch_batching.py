@@ -486,14 +486,15 @@ def _nat_run():
     return cw
 
 
+# Two series per gateway: traffic out (requests) and in (responses).
 def test_nat_gateways_stay_on_the_free_api_by_default():
     cw = _nat_run()
-    assert (cw.data_calls, cw.statistics_calls) == (0, 600)
+    assert (cw.data_calls, cw.statistics_calls) == (0, 2 * 600)
 
 
 def test_nat_gateways_batch_when_opted_in(opted_in):
     cw = _nat_run()
-    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(600 / 500), 0)
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(2 * 600 / 500), 0)
 
 
 def _ec2_pages(n: int) -> list[dict]:
