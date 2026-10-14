@@ -9,9 +9,29 @@ a free tool would start charging the user's own cloud account.
 from __future__ import annotations
 
 import asyncio
+import threading
 from unittest.mock import patch
 
+import pytest
+
 import finops.scan_assembler as sa
+
+
+@pytest.fixture(autouse=True)
+def _no_worker_outlives_its_test():
+    """A provider abandoned on timeout keeps its pool worker, which is not a
+    daemon thread. `nable scan`'s Ctrl-C and crash paths hard-exit when such a
+    thread is alive (cli_scan._threads_lingering), so a worker left running
+    here made tests/test_cli_scan_says_what_happened.py's Ctrl-C test call
+    os._exit(130) and end the whole run when it came next. A test that hangs a
+    provider must release it before it ends."""
+    before = set(threading.enumerate())
+    yield
+    left = [t for t in threading.enumerate() if t not in before and not t.daemon]
+    for t in left:
+        t.join(timeout=1.0)
+    alive = [t.name for t in left if t.is_alive()]
+    assert not alive, f"worker thread(s) still running after the test: {alive}"
 
 
 def _llm_sample(**over):
@@ -170,14 +190,21 @@ def test_demo_blocks_mirror_free_spend_boundary():
 
 
 def test_timeout_marks_abandoned_and_notes():
+    release = threading.Event()
+
     async def _slow(client, *a, **k):
-        await asyncio.sleep(2.0)
+        # Hangs well past the timeout, until the test is done with it.
+        for _ in range(200):
+            if release.is_set():
+                break
+            await asyncio.sleep(0.01)
         return {"total_monthly_savings_usd": 1.0}
 
     with patch("finops.connectors.gcp.GCPConnector", lambda: _FakeGCP(True)), \
          patch("finops.recommendations.gcp_waste.audit_gcp_waste", side_effect=_slow):
         blocks, abandoned = sa.gather_extra_providers(
             frozenset({"gcp"}), spend=False, per_provider_timeout=0.4, overall_budget=1.0)
+        release.set()
     gcp = [b for b in blocks if b.family == "gcp"][0]
     assert gcp.status == "timeout"
     assert abandoned is True   # a lingering worker thread -> caller hard-exits
