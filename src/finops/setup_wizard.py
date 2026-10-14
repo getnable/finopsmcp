@@ -4321,8 +4321,16 @@ def main(args: list[str] | None = None) -> None:
         print("\n  Checking AWS credential scope...\n")
         result = check_credential_scope()
         if "error" in result:
+            # A check that could not run is not a pass: a script gating on
+            # this read exit 0 as "the key is read-only".
             _err(result["error"])
-            return
+            print("  Nothing was checked: this needs AWS credentials that resolve here.",
+                  file=sys.stderr)
+            print("  Next: `nable setup aws` to connect a key, or `aws configure sso` /",
+                  file=sys.stderr)
+            print("  `aws configure` (or set AWS_PROFILE), then run "
+                  "`nable setup aws --check-scope` again.", file=sys.stderr)
+            raise SystemExit(1)
         print(f"  Account:      {result['account_id']}")
         print(f"  Identity:     {result['identity_arn']}")
         print(f"  Correctly scoped: {'✓ Yes' if result['scoped_correctly'] else '✗ No'}")
@@ -4339,6 +4347,10 @@ def main(args: list[str] | None = None) -> None:
         elif not result.get("required_denied"):
             print("\n  ✓ Credentials are read-only and correctly scoped for nable.")
         print()
+        if not result.get("scoped_correctly"):
+            # Missing permissions or write access: the answer to "is this key
+            # read-only and enough?" is no, and a pipeline reads the exit code.
+            raise SystemExit(1)
         return
     elif parsed.cmd == "claude":
         _configure_claude_desktop()

@@ -169,3 +169,14 @@ def test_brief_deliver_with_no_valid_channel_exits_1(tmp_path):
         r, doc = _brief(tmp_path, channels)
         assert doc["delivered"] == {}
         assert r.returncode == 1, channels
+
+
+# ── setup aws --check-scope, aws-cur, infra ───────────────────────────────────
+
+def test_check_scope_without_credentials_gives_the_next_step_and_exits_1(tmp_path):
+    """"Could not get caller identity" and exit 0: a pipeline asking "is this
+    key read-only?" read a check that never ran as a yes."""
+    r = nable(tmp_path, "setup", "aws", "--check-scope")
+    assert r.returncode == 1
+    assert "Could not get caller identity" in r.stderr
+    assert "Nothing was checked" in r.stderr and "nable setup aws" in r.stderr
