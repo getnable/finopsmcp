@@ -112,6 +112,9 @@ class NotionConnector:
         if report.get("partial_note"):
             # Said where the total is, not only in the chat reply.
             callout_text += f"\n{report['partial_note']}"
+        if report.get("scope_note"):
+            # What the total leaves out on purpose, said where the total is.
+            callout_text += f"\n{report['scope_note']}"
 
         blocks: list[dict[str, Any]] = []
 

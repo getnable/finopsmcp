@@ -747,7 +747,7 @@ async def export_cost_report_csv(
     # call it ever received. The fork also predated the per-resource collapse, so
     # its total counted mutually exclusive fixes on one instance as if you could
     # bank all of them.
-    from ..recommendations.sweep import collapse_per_resource, sweep
+    from ..recommendations.sweep import COMMITMENTS_NOT_IN_TOTAL, collapse_per_resource, sweep
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -791,6 +791,7 @@ async def export_cost_report_csv(
         writer.writerow(["AWS account", account_id])
         writer.writerow(["Total monthly saving", f"${total_monthly:,.2f}"])
         writer.writerow(["Total annual saving", f"${total_annual:,.2f}"])
+        writer.writerow(["Not included", COMMITMENTS_NOT_IN_TOTAL])
         writer.writerow(["Opportunities found", len(top)])
         # The total above is missing whatever the checks that could not run, or
         # read only part of the account, would have found.
@@ -828,7 +829,8 @@ async def export_cost_report_csv(
         note += " Incomplete: " + " ".join(coverage)
     return (
         f"Exported {len(top)} opportunities to {dest}. "
-        f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note}"
+        f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note} "
+        f"{COMMITMENTS_NOT_IN_TOTAL}"
     )
 
 
@@ -982,7 +984,7 @@ async def publish_cost_report_to_notion(
     # bank all of them.
     from datetime import datetime as _dt
 
-    from ..recommendations.sweep import collapse_per_resource, sweep
+    from ..recommendations.sweep import COMMITMENTS_NOT_IN_TOTAL, collapse_per_resource, sweep
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -1020,6 +1022,7 @@ async def publish_cost_report_to_notion(
         "scan_timestamp": _dt.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "account": account_name,
         "partial_note": partial_note,
+        "scope_note": COMMITMENTS_NOT_IN_TOTAL,
     }
 
     try:
@@ -1041,6 +1044,7 @@ async def publish_cost_report_to_notion(
         f"Findings: {len(top_findings)} opportunities, "
         f"${total_monthly:,.2f}/mo estimated saving "
         f"(${total_annual:,.2f}/yr).{collapsed_note}\n\n"
+        f"{COMMITMENTS_NOT_IN_TOTAL}\n\n"
         f"Share the page with your team from Notion. "
         f"They don't need nable installed to view it."
     )

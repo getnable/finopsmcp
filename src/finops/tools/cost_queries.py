@@ -1919,7 +1919,7 @@ async def run_full_cost_audit(
     if aws is None or not await aws.is_configured():
         return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
-    from ..recommendations.sweep import sweep
+    from ..recommendations.sweep import COMMITMENTS_NOT_IN_TOTAL, sweep
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -1945,9 +1945,11 @@ async def run_full_cost_audit(
                 ("This is not a finding that the account is optimized: the checks above "
                  "did not look. Fix the access they name (the AWS permissions for those "
                  "services) and run the audit again."),
+                COMMITMENTS_NOT_IN_TOTAL,
             ])
         return ("No savings opportunities found by any of the "
-                f"{result.scanners_run} checks, and none of them reported a failed read.")
+                f"{result.scanners_run} checks, and none of them reported a failed read. "
+                + COMMITMENTS_NOT_IN_TOTAL)
 
     # A finding the critique retracted carries None, not a number, and it must not
     # be counted toward a total we are asking someone to believe. `or 0` keeps it
@@ -2001,7 +2003,8 @@ async def run_full_cost_audit(
         f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}** (the {len(top)} shown)"
         + (f"  \n*{rest_rows} more opportunit{'ies' if rest_rows != 1 else 'y'} worth ${rest_usd:,.2f}/mo "
            f"are not shown (raise top_n, or export to CSV).*" if rest_rows > 0 else "")
-        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else ""),
+        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else "")
+        + f"  \n*{COMMITMENTS_NOT_IN_TOTAL}*",
         "",
     ]
     if show_confidence:

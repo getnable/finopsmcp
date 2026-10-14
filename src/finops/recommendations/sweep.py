@@ -48,6 +48,20 @@ DEFAULT_DEADLINE_S = 90
 # ipv4 scanner reports the same unattached addresses as one aggregate.
 IDLE_RESOURCE_TYPES = ["ebs_volume", "snapshot", "stopped_ec2", "load_balancer"]
 
+# Compute Savings Plan and Reserved Instance savings are in no sweep total.
+# analyze_commitments runs in the sweep, so a coverage read that fails is named
+# beside the total, but it returns a CommitmentAnalysis, which normalise does
+# not read, and that is deliberate: a plan discounts the same instance hours
+# the per-resource rows already claim (a Graviton move, Spot, a stop, a
+# schedule), so adding it would count those dollars twice. Nothing said so,
+# and an account whose largest saving is a plan got a total with no word on
+# where that saving is reported. Every caller prints this beside its total.
+# (A Database Savings Plan is a row of its own, netted of idle RDS.)
+COMMITMENTS_NOT_IN_TOTAL = (
+    "Compute Savings Plan and Reserved Instance savings are not part of this total: "
+    "get_commitment_analysis reports them separately, because a plan discounts the "
+    "same instance hours these per-resource savings already count.")
+
 
 @dataclass
 class SweepResult:
