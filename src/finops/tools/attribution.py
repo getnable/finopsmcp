@@ -496,8 +496,10 @@ def list_org_accounts() -> dict:
         from ..connectors.aws_org import list_org_accounts
         accounts = list_org_accounts(sync_to_db=True)
         if not accounts:
+            # Read, and empty. A denied or failed read raises OrgReadError,
+            # reported below as an error rather than as an empty organization.
             return {
-                "message": "No accounts found. Ensure AWS credentials have organizations:ListAccounts permission.",
+                "message": "AWS Organizations answered with no active accounts.",
                 "accounts": [],
             }
         mgmt = [a for a in accounts if a.get("is_management_account")]
