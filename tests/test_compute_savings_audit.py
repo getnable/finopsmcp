@@ -626,3 +626,38 @@ def test_an_rds_instance_that_peaks_past_half_is_not_halved(monkeypatch):
     # (0.342 - 0.171) x 730, MySQL single-AZ.
     assert f["estimated_monthly_savings"] == 124.83
     assert "FreeableMemory" in f["detail"] and "FreeStorageSpace" not in f["detail"]
+
+
+# ── an idle instance's cost says what it was priced at ───────────────────────
+#
+# check_idle_ec2 prices every instance at aws_prices.EC2_MONTHLY, the
+# us-east-1 Linux on-demand rate, whatever its region or OS. AmazonEC2
+# us-east-1 offer: m5.xlarge is 0.192 an hour on Linux and 0.25 on RHEL, so
+# an idle RHEL box read 30% low with nothing in the finding saying why.
+
+def test_an_idle_instance_cost_names_its_price_basis():
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock
+
+    from finops.analyzers import waste
+
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    ec2, cw = MagicMock(), MagicMock()
+    ec2.get_paginator.return_value.paginate.return_value = [{"Reservations": [{"Instances": [
+        {"InstanceId": "i-lin", "InstanceType": "m5.xlarge", "LaunchTime": old,
+         "PlatformDetails": "Linux/UNIX"},
+        {"InstanceId": "i-rhel", "InstanceType": "m5.xlarge", "LaunchTime": old,
+         "PlatformDetails": "Red Hat Enterprise Linux"}]}]}]
+
+    def stats(**kw):
+        now = datetime.now(timezone.utc)
+        v = 1.0 if kw["MetricName"] == "CPUUtilization" else 0.0
+        return {"Datapoints": [{"Timestamp": now - timedelta(hours=h), kw["Statistics"][0]: v}
+                               for h in range(48)]}
+
+    cw.get_metric_statistics.side_effect = stats
+    got = {f["resource_id"]: f for f in waste.check_idle_ec2(ec2, cw, "eu-west-1")}
+    assert got["i-lin"]["estimated_monthly_savings"] == 140.16
+    assert "us-east-1 Linux on-demand list rate" in got["i-lin"]["detail"]
+    assert "Red Hat Enterprise Linux" in got["i-rhel"]["detail"]
+    assert "licence" in got["i-rhel"]["detail"]

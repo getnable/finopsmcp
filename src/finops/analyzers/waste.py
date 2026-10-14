@@ -1309,7 +1309,15 @@ def check_idle_ec2(
                         f"check the real rate in Cost Explorer). ")
             severity = "unknown"
         else:
-            cost_txt = f"Running cost: ~${monthly_savings:,.2f}/mo on demand. "
+            # EC2_MONTHLY is the us-east-1 Linux list rate. Say so, and say when
+            # the instance's OS carries a licence that rate leaves out.
+            platform = str(inst.get("PlatformDetails") or "")
+            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the us-east-1 Linux "
+                        f"on-demand list rate"
+                        + (f" (rates differ in {region})" if region != "us-east-1" else "")
+                        + (f"; this is {platform}, whose licence makes the real cost higher"
+                           if platform and platform != "Linux/UNIX" else "")
+                        + ". ")
             severity = _severity_from_savings(monthly_savings)
 
         findings.append({
