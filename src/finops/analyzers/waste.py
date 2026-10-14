@@ -840,19 +840,42 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
                     recommended_days = days
                     break
 
+            # A retention of N days deletes only what is older than N days.
+            # The whole stored cost used to be the saving, so a group created
+            # ten days ago and told to keep thirty "saved" all its storage. A
+            # group no older than the retention loses nothing yet; an older
+            # one saves at most its stored cost (the API does not say how much
+            # of the volume is older than N days).
+            created_ms = lg.get("creationTime")
+            age_days = (
+                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
+                if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
+            if age_days is not None and age_days <= recommended_days:
+                savings = 0.0
+                saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
+                              f"retention deletes nothing yet.")
+            else:
+                savings = monthly_cost
+                saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
+                              f"older than {recommended_days} days, which the API does not "
+                              f"break out.")
+
             findings.append({
                 "resource_id": group_name,
                 "resource_type": "CloudWatch Log Group",
                 "waste_type": "log_group_infinite_retention",
-                "estimated_monthly_savings": round(monthly_cost, 2),
+                "estimated_monthly_savings": round(savings, 2),
+                "price_basis": "upper_bound_all_stored_bytes",
+                "age_days": age_days,
                 "detail": (
                     f"Log group '{group_name}' has no retention policy (infinite). "
                     f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
+                    f"{saving_txt} "
                     f"Recommended retention: {recommended_days} days based on log type. "
                     f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
                     f"--retention-in-days {recommended_days}"
                 ),
-                "severity": _severity_from_savings(monthly_cost),
+                "severity": _severity_from_savings(savings),
                 "region": region,
                 "account_id": None,
                 "stored_gb": round(stored_gb, 3),
