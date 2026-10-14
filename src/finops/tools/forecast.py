@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from .. import server as _srv
 
+# A daily forecast past a year is noise, and every day is one row in the answer.
+_MAX_HORIZON_DAYS = 365
+_MIN_HISTORY_DAYS = 14
+
 
 @_srv.mcp.tool()
 async def forecast_costs(
@@ -26,16 +30,27 @@ async def forecast_costs(
     Args:
         account_id:   AWS account ID (auto-discovered from STS if not provided)
         service:      specific service to forecast (e.g. "EC2", "RDS"), omit for total
-        horizon_days: number of days to forecast (default 30)
-        history_days: days of history to fit the model (default 90, need ≥14)
+        horizon_days: number of days to forecast, 1 to 365 (default 30)
+        history_days: days of history to fit the model, 14 to 365 (default 90)
 
     Returns forecast including method used, MAPE accuracy %, monthly projection,
-    and day-by-day point/lower/upper estimates.
+    and day-by-day point/lower/upper estimates, all in USD.
     Examples:
         - "Forecast our AWS spend for next month"
         - "Where will EC2 costs be in 60 days?"
 
     """
+    # Bounds first, before any model is fitted. horizon_days=100000 returned one
+    # daily point per day, 10.6 MB of JSON into the model's context, and a
+    # horizon of 0 or less returned monthly_projection 0.0: a $0 figure made
+    # from a bad argument.
+    if not 1 <= horizon_days <= _MAX_HORIZON_DAYS:
+        return {"error": (f"horizon_days must be between 1 and {_MAX_HORIZON_DAYS} "
+                          f"(got {horizon_days}).")}
+    if not _MIN_HISTORY_DAYS <= history_days <= _MAX_HORIZON_DAYS:
+        return {"error": (f"history_days must be between {_MIN_HISTORY_DAYS} and "
+                          f"{_MAX_HORIZON_DAYS} (got {history_days}): a forecast needs "
+                          f"at least {_MIN_HISTORY_DAYS} days of daily spend to fit.")}
     if (err := _srv.require_pro("forecasting")):
         return err
     try:

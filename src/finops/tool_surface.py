@@ -547,10 +547,49 @@ WRITE_TOOLS: frozenset[str] = frozenset({
     # Writes a proposed fact to the org model files. Never a confirmed one.
     "propose_org_fact",
 })
-# The subset that removes/revokes something (destructiveHint = true). Additive
-# writes (create/set/send/pin/open-PR) are writes but NOT destructive.
+# The subset that removes, revokes or overwrites something (destructiveHint =
+# true). MCP defines destructive as any update that is not purely additive, so
+# unpinning, forgetting, cancelling and replacing a setting count, not only the
+# tools named delete. Additive writes (create/send/pin/open-PR) are writes but
+# not destructive.
 DESTRUCTIVE_TOOLS: frozenset[str] = frozenset({
     "delete_alert_policy", "delete_budget", "revoke_api_key",
+    # Remove what a person saved.
+    "unpin_view", "forget_cost_context", "cancel_report_subscription",
+    # Replace a setting in place: the old value is gone.
+    "set_alert_policy", "set_ai_budget", "sync_budgets_from_yaml",
+})
+
+# Writes that a repeat with the same arguments changes nothing further
+# (idempotentHint = true). Every other write is assumed not to be: a second
+# create_ticket is a second ticket.
+IDEMPOTENT_WRITE_TOOLS: frozenset[str] = frozenset({
+    "delete_alert_policy", "delete_budget", "revoke_api_key", "unpin_view",
+    "forget_cost_context", "cancel_report_subscription", "acknowledge_anomaly",
+    "dismiss_recommendation", "mark_recommendation_acted_on", "set_alert_policy",
+    "set_ai_budget", "sync_budgets_from_yaml",
+})
+
+# Tools whose whole effect is on this machine's own state: the local database,
+# nable's config files, the org model. Nothing outside is called, so
+# openWorldHint is false. Everything else may reach a cloud, a SaaS API, a
+# ticket tracker, a chat channel or a subprocess, and keeps the true default.
+LOCAL_ONLY_TOOLS: frozenset[str] = frozenset({
+    "acknowledge_anomaly", "activate_pro", "cancel_report_subscription",
+    "check_budget_status", "check_notification_config", "create_api_key",
+    "delete_alert_policy", "delete_budget", "dismiss_recommendation",
+    "estimate_helm_diff_cost", "forget_cost_context", "get_cost_history",
+    "get_kubernetes_cost_trends", "get_learned_cost_context", "get_nable_roi",
+    "get_org_coverage", "get_org_model", "get_recommendation_learning",
+    "get_recommendation_quality", "get_savings_ledger", "get_savings_summary",
+    "get_storage_info", "get_tableau_connection_info", "list_alert_policies",
+    "list_api_keys", "list_budgets", "list_installed_packs", "list_org_questions",
+    "list_pinned_views", "list_profiles", "list_report_subscriptions",
+    "list_savings_recommendations", "list_vault_credentials", "list_views",
+    "mark_recommendation_acted_on", "pin_view", "propose_org_fact",
+    "remember_cost_context", "revoke_api_key", "set_alert_policy", "set_budget",
+    "set_business_metrics", "subscribe_to_report", "suggest_cost_policies",
+    "sync_budgets_from_yaml", "unpin_view", "whoami",
 })
 
 # Acronyms to upper-case when humanizing a tool name into a display title.
@@ -602,6 +641,17 @@ def declare_write_tools(*names: str, destructive: bool = False) -> None:
     _PLUGIN_WRITE_TOOLS.update(names)
     if destructive:
         _PLUGIN_DESTRUCTIVE_TOOLS.update(names)
+
+
+def tool_hints(name: str) -> dict:
+    """The other two MCP hints. They were never set, so every tool took the
+    spec defaults: openWorldHint true (also for tools that only touch the local
+    database) and idempotentHint false (also for reads and for deletes)."""
+    write = name in WRITE_TOOLS or name in _PLUGIN_WRITE_TOOLS
+    return {
+        "idempotentHint": (name in IDEMPOTENT_WRITE_TOOLS) if write else True,
+        "openWorldHint": name not in LOCAL_ONLY_TOOLS,
+    }
 
 
 def tool_annotation(name: str) -> dict:

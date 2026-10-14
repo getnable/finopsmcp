@@ -399,19 +399,30 @@ async def compare_providers(
         return _demo_compare({"category": category, "start_date": start_date,
                               "end_date": end_date})
 
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    from .cost_queries import (
+        _NOTHING_CONNECTED,
+        _bad_category,
+        _cost_window,
+        _no_rows_flags,
+        _partial,
+        _read_status,
+        _unread_costs,
+    )
+
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is not None:
+        return bad
 
     pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
     targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return {"error": _NOTHING_CONNECTED}
 
     provider_totals: list[dict] = []
     grand_total = 0.0
+    read_status: dict[str, dict] = {}
 
     async def _one_total(name: str, connector: _srv.Any):
         try:
@@ -420,6 +431,7 @@ async def compare_providers(
             return name, None, str(exc)
 
     for name, summary, err in await _srv.asyncio.gather(*[_one_total(n, c) for n, c in targets.items()]):
+        read_status[name] = _read_status(summary, err)
         if err is not None:
             provider_totals.append({"provider": name, "error": err})
             continue
@@ -441,12 +453,24 @@ async def compare_providers(
 
     provider_totals.sort(key=lambda x: -x.get("total_usd", 0))
 
-    return {
+    # The comparison is only as good as what was read: no total when nothing
+    # was, a partial label when some provider failed. Same rule and wording as
+    # get_cost_summary.
+    refusal = _unread_costs(targets, read_status)
+    if refusal is not None:
+        return refusal
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "providers": provider_totals,
+        **window_notes,
     }
+    result.update(_no_rows_flags(read_status))
+    failed = {n: s["error"] for n, s in read_status.items() if s.get("error")}
+    if failed:
+        result.update(_partial([n for n in read_status if n not in failed], failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -1067,6 +1091,9 @@ def set_ai_budget(mode: str | None = None,
     The current session must be known, from session_id or the agent's own
     environment; a cap on a guessed session is refused and nothing is saved."""
     from ..ai_budget import resolve_session, set_budget
+    if mode is not None and mode not in ("flat", "metered"):
+        # Answered "Saved." and stored mode "" for any other word.
+        return {"error": f"mode must be 'flat' or 'metered' (got {mode!r}). Nothing was saved."}
     sid, source = (None, None)
     if session_cap is not None and not every_session:
         sid, source = resolve_session(session_id or None)
@@ -1271,24 +1298,32 @@ async def get_view(
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
-        this_total, this_by, _  = await _srv._gather_costs(active, first_this, this_end)
-        last_total, last_by, _  = await _srv._gather_costs(active, first_last, last_last)
+        _, this_by, _  = await _srv._gather_costs(active, first_this, this_end)
+        _, last_by, _  = await _srv._gather_costs(active, first_last, last_last)
+        if (refusal := _view_refusal(active, this_by)) is not None:
+            return refusal
 
         rows = []
         all_providers = sorted(set(list(this_by.keys()) + list(last_by.keys())))
+        # Totals over the providers read in BOTH months. A provider that failed
+        # in one of them used to add $0.00 there, so the change was a read
+        # failure presented as a collapse (or a jump).
+        both = [p for p in all_providers if _read_ok(this_by, p) and _read_ok(last_by, p)]
         for p in all_providers:
             t = this_by.get(p, {}).get("total_usd", 0.0)
             l = last_by.get(p, {}).get("total_usd", 0.0)
-            pct = ((t - l) / l * 100) if l else None
+            pct = ((t - l) / l * 100) if l and p in both else None
             rows.append({
                 "provider": p,
-                "this_month": _srv._fmt_usd(t),
-                "last_month": _srv._fmt_usd(l),
+                "this_month": _view_cell(this_by, p),
+                "last_month": _view_cell(last_by, p),
                 "change_pct": f"{pct:+.1f}%" if pct is not None else "n/a",
             })
 
+        this_total = sum(this_by[p]["total_usd"] for p in both)
+        last_total = sum(last_by[p]["total_usd"] for p in both)
         total_pct = ((this_total - last_total) / last_total * 100) if last_total else None
-        return {
+        out = {
             "view": meta["name"],
             "this_month": {"period": f"{first_this} to {this_end}", "total": _srv._fmt_usd(this_total)},
             "last_month": {"period": f"{first_last} to {last_last}", "total": _srv._fmt_usd(last_total)},
@@ -1300,22 +1335,46 @@ async def get_view(
                         "'this_month' is the month that just closed and 'last_month' "
                         "is the one before it."} if on_the_first else {}),
         }
+        if not on_the_first:
+            # Month to date against a whole month falls short by construction:
+            # a flat bill read as -58% on the 13th. Say so, and give the daily
+            # pace, which compares like with like.
+            n_this = max(1, (this_end - first_this).days)
+            n_last = max(1, (last_last - first_last).days + 1)
+            pace_this, pace_last = this_total / n_this, last_total / n_last
+            out["comparison"] = (
+                f"Month to date ({n_this} days) against all of last month ({n_last} days): "
+                "total_change is not a like-for-like change until the month ends. "
+                "daily_pace_change compares the average day in each.")
+            out["daily_pace_change"] = (
+                f"{(pace_this - pace_last) / pace_last * 100:+.1f}%" if pace_last else "n/a")
+        out.update(_view_partial(this_by, last_by))
+        return out
 
     # ── wow ──────────────────────────────────────────────────────────────────
     if view == "wow":
+        # Two windows of the same length, each ending where the next begins.
+        # last_end used to be today-8, so last week was a day shorter than this
+        # one and a flat bill read as +16.7%.
         this_start = today - _srv.timedelta(days=7)
         last_start = today - _srv.timedelta(days=14)
-        last_end   = today - _srv.timedelta(days=8)
+        last_end   = this_start
 
         active = await _srv._active()
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
-        this_total, this_by, _  = await _srv._gather_costs(active, this_start, today, granularity="DAILY")
-        last_total, last_by, _  = await _srv._gather_costs(active, last_start, last_end, granularity="DAILY")
+        _, this_by, _  = await _srv._gather_costs(active, this_start, today, granularity="DAILY")
+        _, last_by, _  = await _srv._gather_costs(active, last_start, last_end, granularity="DAILY")
+        if (refusal := _view_refusal(active, this_by)) is not None:
+            return refusal
+        all_providers = sorted(set(list(this_by.keys()) + list(last_by.keys())))
+        both = [p for p in all_providers if _read_ok(this_by, p) and _read_ok(last_by, p)]
+        this_total = sum(this_by[p]["total_usd"] for p in both)
+        last_total = sum(last_by[p]["total_usd"] for p in both)
 
         pct = ((this_total - last_total) / last_total * 100) if last_total else None
-        return {
+        out = {
             "view": meta["name"],
             "this_week": {"period": f"{this_start} to {today}", "total": _srv._fmt_usd(this_total)},
             "last_week": {"period": f"{last_start} to {last_end}", "total": _srv._fmt_usd(last_total)},
@@ -1323,47 +1382,71 @@ async def get_view(
             "by_provider": [
                 {
                     "provider": p,
-                    "this_week": _srv._fmt_usd(this_by.get(p, {}).get("total_usd", 0)),
-                    "last_week": _srv._fmt_usd(last_by.get(p, {}).get("total_usd", 0)),
+                    "this_week": _view_cell(this_by, p),
+                    "last_week": _view_cell(last_by, p),
                 }
-                for p in sorted(set(list(this_by.keys()) + list(last_by.keys())))
+                for p in all_providers
             ],
         }
+        out.update(_view_partial(this_by, last_by))
+        return out
 
     # ── dod / daily_trend ────────────────────────────────────────────────────
     if view in ("dod", "daily_trend"):
         n = days or (14 if view == "dod" else 30)
+        if not 1 <= n <= _srv.MAX_LOOKBACK_DAYS:
+            return {"error": f"days must be between 1 and {_srv.MAX_LOOKBACK_DAYS} (got {n})."}
         start = today - _srv.timedelta(days=n)
 
         active = await _srv._active()
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
-        _, _, grand_by_service = await _srv._gather_costs(active, start, today, granularity="DAILY")
-
-        # Aggregate per-connector daily data directly
+        # The day series comes from each connector's get_daily_totals. This view
+        # used to read a `daily_breakdown` attribute no connector sets, after a
+        # Cost Explorer summary call whose result it discarded, so it answered
+        # "Daily granularity not available" with AWS connected and billed for it.
         daily: dict[str, float] = {}
+        failed: dict[str, str] = {}
+        no_daily: list[str] = []
 
         async def _one_daily(name: str, connector: _srv.Any):
+            if not hasattr(connector, "get_daily_totals"):
+                return name, None, None
             try:
-                return await _srv._fetch_costs_cached(name, connector, start, today, granularity="DAILY")
-            except Exception:
-                return None
+                return name, await connector.get_daily_totals(start, today), None
+            except Exception as exc:  # noqa: BLE001 - reported per provider below
+                return name, None, str(exc)
 
-        for summary in await _srv.asyncio.gather(*[_one_daily(n, c) for n, c in active.items()]):
-            if summary is None:
-                continue
-            # daily_breakdown is a dict[str, float] keyed by date string if available
-            breakdown = getattr(summary, "daily_breakdown", None) or {}
-            for day_str, amt in breakdown.items():
-                daily[day_str] = daily.get(day_str, 0.0) + amt
+        for name, series, err in await _srv.asyncio.gather(
+                *[_one_daily(p, c) for p, c in active.items()]):
+            if err is not None:
+                failed[name] = err
+            elif series is None:
+                no_daily.append(name)
+            else:
+                for row in series:
+                    daily[row["date"]] = daily.get(row["date"], 0.0) + float(row["total"])
 
+        if failed and not daily:
+            from .cost_queries import _no_cost_data
+            return _no_cost_data(failed)
         rows = [{"date": d, "spend": _srv._fmt_usd(v)} for d, v in sorted(daily.items())]
-        return {
+        out = {
             "view": meta["name"],
             "period": f"{start} to {today}",
-            "daily_spend": rows if rows else {"note": "Daily granularity not available for configured connectors."},
+            "daily_spend": rows if rows else {"note": (
+                "No connected provider offers a daily series: "
+                f"{', '.join(sorted(no_daily)) or 'none connected'}.")},
         }
+        if failed or (rows and no_daily):
+            out["partial"] = True
+            out["partial_warning"] = (
+                "The days above cover only "
+                + ", ".join(sorted(set(active) - set(failed) - set(no_daily)))
+                + ". " + "; ".join([*(f"{p}: could not be read ({e})" for p, e in failed.items()),
+                                    *(f"{p}: no daily series" for p in no_daily)]))
+        return out
 
     # ── by_service ───────────────────────────────────────────────────────────
     if view == "by_service":
@@ -1373,8 +1456,10 @@ async def get_view(
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
-        _, _, this_svc = await _srv._gather_costs(active, first_this, this_end)
-        _, _, last_svc = await _srv._gather_costs(active, first_last, last_last)
+        _, this_by, this_svc = await _srv._gather_costs(active, first_this, this_end)
+        _, last_by, last_svc = await _srv._gather_costs(active, first_last, last_last)
+        if (refusal := _view_refusal(active, this_by)) is not None:
+            return refusal
 
         rows = []
         for svc, amt in sorted(this_svc.items(), key=lambda x: -x[1])[:20]:
@@ -1387,14 +1472,18 @@ async def get_view(
                 "change": f"{pct:+.1f}%" if pct is not None else "new",
             })
 
-        return {
+        out = {
             "view": meta["name"],
             "period": f"{first_this} to {this_end}",
             "services": rows,
             **({"note": "It is the 1st, so there is no month-to-date yet. "
                         "'this_month' is the month that just closed and 'last_month' "
-                        "is the one before it."} if on_the_first else {}),
+                        "is the one before it."} if on_the_first else {
+                "comparison": ("this_month is month to date; last_month is the whole "
+                               "month, so change is not like for like until it ends.")}),
         }
+        out.update(_view_partial(this_by, last_by))
+        return out
 
     # ── by_tag ───────────────────────────────────────────────────────────────
     if view == "by_tag":
@@ -1477,16 +1566,20 @@ async def get_view(
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
-        _, _, grand_svc = await _srv._gather_costs(active, start, end)
+        _, top_by, grand_svc = await _srv._gather_costs(active, start, end)
+        if (refusal := _view_refusal(active, top_by)) is not None:
+            return refusal
         rows = [
             {"service": svc, "spend": _srv._fmt_usd(amt)}
             for svc, amt in sorted(grand_svc.items(), key=lambda x: -x[1])[:10]
         ]
-        return {
+        out = {
             "view": meta["name"],
             "period": f"{start} to {end}",
             "top_10": rows,
         }
+        out.update(_view_partial(top_by))
+        return out
 
     # ── anomalies ────────────────────────────────────────────────────────────
     if view == "anomalies":
@@ -1514,16 +1607,55 @@ async def get_view(
             active = {k: v for k, v in active.items() if k == provider}
 
         grand_total, by_provider, _ = await _srv._gather_costs(active, start, end)
-        return {
+        if (refusal := _view_refusal(active, by_provider)) is not None:
+            return refusal
+        out = {
             "view": meta["name"],
             "period": f"{start} to {end}",
             "total": _srv._fmt_usd(grand_total),
-            "by_provider": {
-                k: _srv._fmt_usd(v.get("total_usd", 0)) for k, v in by_provider.items()
-            },
+            "by_provider": {k: _view_cell(by_provider, k) for k in by_provider},
         }
+        out.update(_view_partial(by_provider))
+        return out
 
     return {"error": f"View '{view}' is defined but not yet implemented."}
+
+
+def _read_ok(by_provider: dict, name: str) -> bool:
+    p = by_provider.get(name)
+    return isinstance(p, dict) and not p.get("error") and "total_usd" in p
+
+
+def _view_cell(by_provider: dict, name: str) -> str:
+    """One provider's figure in a view, or why there is none. A failed read was
+    printed as "$0.00"."""
+    p = by_provider.get(name) or {}
+    if p.get("error"):
+        return "could not be read"
+    if "total_usd" not in p:
+        return "not read"
+    return _srv._fmt_usd(p["total_usd"])
+
+
+def _view_refusal(active: dict, by_provider: dict) -> dict | None:
+    """The cost tools' refusal, for a view: nothing connected, every provider
+    failed, or every provider returned no rows."""
+    from .cost_queries import _unread_costs
+    return _unread_costs(active, by_provider)
+
+
+def _view_partial(*windows: dict) -> dict:
+    """The partial label for a view, from every window it read."""
+    from .cost_queries import _partial
+    failed: dict = {}
+    for by in windows:
+        for name, p in by.items():
+            if isinstance(p, dict) and p.get("error"):
+                failed.setdefault(name, p["error"])
+    if not failed:
+        return {}
+    ok = sorted({n for by in windows for n in by} - set(failed))
+    return _partial(ok, failed)
 
 
 @_srv.mcp.tool()

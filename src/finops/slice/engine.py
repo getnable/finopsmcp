@@ -111,7 +111,9 @@ def run_slice(spec: SliceSpec, records: list) -> SliceResult:
         # Both engines answer the same question, so both must report the same two
         # figures. `total` is already the grand total over the kept set here,
         # independent of grouping and limit; this is what the shown rows add to.
-        total_shown=round(sum(float(r.get(metric, 0.0) or 0.0) for r in rows), 4),
+        # Each row carries its sum under "metric" (step 2), not under the metric's
+        # name, so summing r[metric] made this 0.0 on every FOCUS slice.
+        total_shown=round(sum(float(r.get("metric", 0.0) or 0.0) for r in rows), 4),
     )
 
 

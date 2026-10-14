@@ -1181,6 +1181,19 @@ async def scan_waste_patterns(
                 ORDER BY service, snapshot_date
             """), {"aid": account_id, "cutoff": _cutoff}).fetchall()
 
+        if not rows:
+            # The fingerprints run over the daily cost history. With none, they
+            # ran over nothing and answered total_monthly_waste 0, no findings.
+            return {
+                "status": "not_evaluated",
+                "account_id": account_id,
+                "message": (
+                    f"No daily cost history for account {account_id} in the last 90 "
+                    "days, so no waste pattern was checked. This is not a finding of "
+                    "zero waste. Run take_snapshot_now to start recording history, or "
+                    "run_full_cost_audit to scan resources directly."),
+            }
+
         daily_costs: dict[str, list[float]] = {}
         for service, _date, total in rows:
             daily_costs.setdefault(service, []).append(float(total))

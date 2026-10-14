@@ -40,11 +40,15 @@ async def get_cost_summary(
             "provider": provider, "category": category,
             "start_date": start_date, "end_date": end_date}) or {}
 
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is None:
+        granularity, bad = _granularity(granularity)
+    if bad is None:
+        provider, bad = _provider_name(provider, llm_ok=True)
+    if bad is not None:
+        return bad
 
     # An LLM provider's spend lives on the LLM cost path, not in the cloud
     # connector registry. get_cost_summary(provider="anthropic") used to find no
@@ -90,7 +94,7 @@ async def get_cost_summary(
         pool = _srv._ALL_CONNECTORS
         targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     grand_total, by_provider, grand_by_service = await _srv._gather_costs(targets, sd, ed, granularity)
     # With several providers the per-provider service detail is the token-bloat driver.
@@ -128,6 +132,7 @@ async def get_cost_summary(
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
+        **window_notes,
     }
     if account:
         result["account"] = acct_cfg.name
@@ -217,11 +222,13 @@ async def get_costs_by_service(
         - "Show me all Datadog product costs"
         - "What did the staging account spend on EC2?"
     """
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is None:
+        provider, bad = _provider_name(provider)
+    if bad is not None:
+        return bad
 
     if account:
         from ..accounts import get_boto3_session, resolve_named_account
@@ -243,10 +250,11 @@ async def get_costs_by_service(
     else:
         targets = await _srv._active(_srv._ALL_CONNECTORS)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
+    read_status: dict[str, dict] = {}
 
     async def _one_svc(name: str, connector: _srv.Any):
         try:
@@ -255,6 +263,7 @@ async def get_costs_by_service(
             return name, None, str(exc)
 
     for name, summary, err in await _srv.asyncio.gather(*[_one_svc(n, c) for n, c in targets.items()]):
+        read_status[name] = _read_status(summary, err)
         if err is not None:
             errors[name] = err
             continue
@@ -280,10 +289,13 @@ async def get_costs_by_service(
 
     # Same rule as get_cost_summary: an errored provider adds 0, so "every
     # provider failed" used to come back as total_usd 0 with the reason under
-    # "errors", which reads as "spent nothing on this".
+    # "errors", which reads as "spent nothing on this". A provider that was read
+    # and sent back no rows is the same story, and get_cost_summary refuses it
+    # too: two tools must not give two answers about one bill.
     ok = [n for n in targets if n not in errors]
-    if errors and not ok:
-        return _no_cost_data(errors)
+    refusal = _unread_costs(targets, read_status)
+    if refusal is not None:
+        return refusal
 
     total_usd = round(sum(s["total_usd"] for s in ranked), 4)
     kept, omitted = _srv.fit_to_budget(ranked)
@@ -292,12 +304,14 @@ async def get_costs_by_service(
         "filter": service_filter,
         "services": kept,
         "total_usd": total_usd,
+        **window_notes,
     }
     if account:
         result["account"] = acct_cfg.name
     if omitted:
         result["services_truncated"] = True
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
+    result.update(_no_rows_flags(read_status))
     if errors:
         result["errors"] = errors
         result.update(_partial(ok, errors))
@@ -329,6 +343,9 @@ async def get_top_cost_drivers(
         - "Top 5 most expensive things in AWS"
         - "Top cost drivers in the staging account"
     """
+    if limit < 1:
+        return {"error": f"limit must be 1 or more (got {limit}).",
+                "hint": "Pass the number of services to return, e.g. limit=10."}
     result = await _srv.get_costs_by_service(
         service_filter=None,
         provider=provider,
@@ -345,12 +362,21 @@ async def get_top_cost_drivers(
     for svc in top:
         svc["pct_of_total"] = round(svc["total_usd"] / grand * 100, 1) if grand else 0
 
-    return {
+    out = {
         "period": result["period"],
         "top_services": top,
         "grand_total_usd": grand,
         "grand_total_formatted": _srv._fmt_usd(grand),
     }
+    # The labels get_costs_by_service put on this total travel with it. Dropping
+    # them turned a partial read into a total with nothing saying a provider was
+    # missing from it.
+    for key in ("account", "period_note", "partial", "failed_providers", "partial_warning",
+                "errors", "providers_with_no_rows", "no_rows_note", "services_truncated",
+                "hint"):
+        if key in result:
+            out[key] = result[key]
+    return out
 
 
 @_srv.mcp.tool()
@@ -374,16 +400,29 @@ async def get_cost_trends(
         - "Show daily cloud costs for the last 2 weeks"
         - "What did we spend each month this quarter?"
     """
+    if not 1 <= days <= _srv.MAX_LOOKBACK_DAYS:
+        return {"error": (f"days must be between 1 and {_srv.MAX_LOOKBACK_DAYS} (got {days}): "
+                          "the look-back window ending today.")}
+    bad = _bad_category(category)
+    if bad is None:
+        granularity, bad = _granularity(granularity)
+    if bad is None:
+        provider, bad = _provider_name(provider)
+    if bad is not None:
+        return bad
     end = _srv.date.today()
     start = end - _srv.timedelta(days=days)
 
-    pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
-    if provider and provider in pool:
-        pool = {provider: pool[provider]}
+    # A named provider is that provider only. An unrecognised name used to leave
+    # the pool at every provider, so the answer was everyone's spend.
+    if provider:
+        pool = {provider: _srv._ALL_CONNECTORS[provider]}
+    else:
+        pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
 
     targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     grand_total, by_provider, _ = await _srv._gather_costs(targets, start, end, granularity)
 
@@ -550,17 +589,23 @@ async def get_total_spend_all_sources(
         end_date: ISO date (YYYY-MM-DD). Defaults to today.
 
     """
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is not None:
+        return bad
 
     targets = await _srv._active(_srv._ALL_CONNECTORS)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return {"error": _NOTHING_CONNECTED}
 
     grand_total, by_provider, grand_by_service = await _srv._gather_costs(targets, sd, ed)
+    # A total is only a total if something was read: the same refusal and the
+    # same partial label as get_cost_summary, so the two never disagree.
+    refusal = _unread_costs(targets, by_provider)
+    if refusal is not None:
+        return refusal
+    failed = {n: p.get("error") for n, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [n for n in by_provider if n not in failed]
     # Cross-provider tool: top_services already carries the ranked drivers, so cap the
     # per-provider service detail to keep the payload flat as providers scale.
     by_provider = _srv._cap_provider_service_detail(by_provider)
@@ -576,7 +621,7 @@ async def get_total_spend_all_sources(
         if p in by_provider and "total_usd" in by_provider[p]
     )
 
-    return {
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
@@ -591,7 +636,12 @@ async def get_total_spend_all_sources(
             {"service": k, "amount_usd": round(v, 4), "formatted": _srv._fmt_usd(v)}
             for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])[:10]
         ],
+        **window_notes,
     }
+    result.update(_no_rows_flags(by_provider))
+    if failed:
+        result.update(_partial(ok, failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -1881,16 +1931,23 @@ async def run_full_cost_audit(
     learned_note = result.learned_note
 
     top = findings[:top_n]
+    coverage = result.coverage_lines()
 
     if not top:
-        if errors:
+        if errors or result.partial:
             # Nothing found is only a verdict on what was read. With every scanner
-            # failed this used to say the infrastructure "looks well-optimized".
-            return (f"No savings opportunities found in what could be read, but "
-                    f"{len(errors)} scanner(s) could not run: {', '.join(errors)}. "
-                    "That is not a finding of no waste: their checks were not made. "
-                    "Check the AWS permissions for those services and run the audit again.")
-        return "No savings opportunities found. Your infrastructure looks well-optimized, or no AWS account is connected."
+            # failed, or every AWS call denied, this said "Your infrastructure
+            # looks well-optimized". Name the checks that could not run or read
+            # everything, and why.
+            return "\n\n".join([
+                "## Cost Audit: incomplete, no findings from the checks that ran",
+                *coverage,
+                ("This is not a finding that the account is optimized: the checks above "
+                 "did not look. Fix the access they name (the AWS permissions for those "
+                 "services) and run the audit again."),
+            ])
+        return ("No savings opportunities found by any of the "
+                f"{result.scanners_run} checks, and none of them reported a failed read.")
 
     # A finding the critique retracted carries None, not a number, and it must not
     # be counted toward a total we are asking someone to believe. `or 0` keeps it
@@ -1972,11 +2029,12 @@ async def run_full_cost_audit(
     lines.append("- `push to n8n`, trigger your automation workflow")
     lines.append("- `tell me more about #1`, deep dive on the top opportunity")
 
-    if errors:
-        # These raised or left a region unread, so their findings are missing
-        # from the total above; "no data" read as if they had found nothing.
-        lines.append(f"\n*Scanners that could not run or read everything, so the total "
-                     f"above is missing whatever they would have found: {', '.join(errors)}*")
+    if errors or result.partial:
+        # These could not run, or ran with a region or a read missing, so the total
+        # above is missing whatever they would have found. This said "no data or
+        # not configured" whatever the reason, and only for scanners that raised.
+        lines.append("")
+        lines.extend(f"*{line}*" for line in coverage)
 
     body = "\n".join(lines)
     # Make the token cost visible against the savings found. Under our pricing,
@@ -2499,6 +2557,115 @@ def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
             out["failed_providers"] = failed
         return out
     return None
+
+
+# ── arguments the cost tools cannot honour ────────────────────────────────────
+# Shared so that every cost tool refuses the same bad argument the same way.
+# Before these, an unknown provider read as "No cloud accounts connected yet",
+# a provider named in capitals matched nothing, an unknown category or a
+# provider get_cost_trends did not recognise silently widened to every
+# provider, and a window past the lookback cap was labelled with the start the
+# caller asked for over a total that covered only the last 365 days.
+
+_CATEGORIES = ("cloud", "saas")
+_GRANULARITIES = ("DAILY", "MONTHLY")
+_NOTHING_CONNECTED = (
+    "No cloud accounts connected yet. Connect one right here in the chat: call "
+    "connect_aws or connect_gcp (they detect credentials already on this machine) or "
+    "connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run "
+    "'uvx nable' instead.")
+
+
+def _cost_window(start_date: str | None, end_date: str | None):
+    """(start, end, error, notes) for a cost query's date arguments.
+
+    The start is held to FINOPS_MAX_LOOKBACK_DAYS before the end, which is what
+    the AWS connector reads anyway; doing it here means every provider reads the
+    same window and the answer's period is the one that was read."""
+    sd, ed = _srv._default_dates()
+    try:
+        if start_date:
+            sd = _srv.date.fromisoformat(start_date)
+        if end_date:
+            ed = _srv.date.fromisoformat(end_date)
+    except (TypeError, ValueError):
+        return None, None, {"error": (
+            f"Invalid date (start_date={start_date!r}, end_date={end_date!r}). "
+            "Use YYYY-MM-DD.")}, {}
+    if sd > ed:
+        return None, None, {"error": (
+            f"start_date ({sd}) must be on or before end_date ({ed}).")}, {}
+    notes: dict = {}
+    earliest = ed - _srv.timedelta(days=_srv.MAX_LOOKBACK_DAYS)
+    if sd < earliest:
+        notes["period_note"] = (
+            f"Asked from {sd}, read from {earliest}: cost queries cover at most "
+            f"{_srv.MAX_LOOKBACK_DAYS} days before the end date "
+            "(FINOPS_MAX_LOOKBACK_DAYS). The total covers the period shown.")
+        sd = earliest
+    return sd, ed, None, notes
+
+
+def _bad_category(category: str | None) -> dict | None:
+    if category is None or category in _CATEGORIES:
+        return None
+    return {"error": f"Unknown category '{category}'. Use 'cloud', 'saas', or omit it."}
+
+
+def _granularity(granularity: str) -> tuple[str, dict | None]:
+    g = str(granularity or "").strip().upper()
+    if g in _GRANULARITIES:
+        return g, None
+    return g, {"error": (f"Unknown granularity '{granularity}'. Use "
+                         f"{' or '.join(_GRANULARITIES)}.")}
+
+
+def _provider_name(provider: str | None, *, llm_ok: bool = False):
+    """(normalized provider or None, error or None). Case and whitespace do not
+    matter; a name nable does not know is named as unknown."""
+    if provider is None or not str(provider).strip():
+        return None, None
+    p = str(provider).strip().lower()
+    if p in _srv._ALL_CONNECTORS or (llm_ok and p in _LLM_COST_PROVIDERS):
+        return p, None
+    if p in _LLM_COST_PROVIDERS:
+        return None, {
+            "error": (f"{p} spend is read on the LLM cost path, not by this tool."),
+            "next_tool": "get_llm_cost_by_model",
+            "next_tool_args": {"provider": p},
+        }
+    return None, {
+        "error": f"Unknown provider '{provider}'.",
+        "known_providers": sorted(set(_srv._ALL_CONNECTORS) | set(_LLM_COST_PROVIDERS)),
+        "hint": "list_connected_providers shows which of these are connected.",
+    }
+
+
+async def _not_connected(provider: str | None) -> dict:
+    """The answer when nothing matching the request is connected. Naming the
+    provider matters: "No cloud accounts connected" told a user with AWS
+    connected to go and connect AWS."""
+    if not provider:
+        return {"error": _NOTHING_CONNECTED}
+    connected = sorted(await _srv._active())
+    return {
+        "error": f"{provider} is not connected, so there is no {provider} spend to read.",
+        "connected_providers": connected,
+        "hint": "list_connected_providers shows how to connect it.",
+    }
+
+
+def _read_status(summary, err: str | None) -> dict:
+    """One provider's read in the by_provider shape _unread_costs and
+    _no_rows_flags take: its error, or that it came back with no cost rows.
+    For tools that hold CostSummary objects rather than the dicts
+    _gather_costs builds."""
+    if err is not None:
+        return {"error": err}
+    from ..connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        return {"no_rows": True, "no_rows_note": no_rows_message(summary.provider)}
+    return {}
 
 
 def _no_rows_flags(by_provider: dict) -> dict:

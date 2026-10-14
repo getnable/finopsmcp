@@ -35,22 +35,34 @@ def get_commitment_analysis() -> dict:
         ri_cov = analysis.ri_coverage_pct
         # combined_coverage_pct, not (sp + ri) / 2: either half is None when Cost
         # Explorer denied that coverage call, and the arithmetic raised.
-        combined_coverage = analysis.combined_coverage_pct or 0.0
+        # An unread coverage is unknown, not 0%. `or 0.0` here turned a denied
+        # ce:GetSavingsPlansCoverage into an 80-point gap and a Savings Plan
+        # purchase projection, the exact advice analyze_commitments refuses to
+        # give off a coverage it could not read.
+        combined_coverage = analysis.combined_coverage_pct
+        sp_unread = sp_cov is None
         coverage_target = 80.0
-        coverage_gap_pct = max(0.0, coverage_target - combined_coverage)
+        coverage_gap_pct = (None if combined_coverage is None or sp_unread
+                            else max(0.0, coverage_target - combined_coverage))
 
         # Monthly uncovered on-demand (3-month average)
         monthly_uncovered = analysis.uncovered_on_demand_usd / 3 if analysis.uncovered_on_demand_usd > 0 else 0.0
 
         actionable = {
-            "combined_coverage_pct": round(combined_coverage, 1),
+            "combined_coverage_pct": (None if combined_coverage is None
+                                      else round(combined_coverage, 1)),
             "coverage_target_pct": coverage_target,
-            "coverage_gap_pct": round(coverage_gap_pct, 1),
+            "coverage_gap_pct": None if coverage_gap_pct is None else round(coverage_gap_pct, 1),
             "monthly_uncovered_on_demand_usd": round(monthly_uncovered, 2),
         }
+        if sp_unread:
+            actionable["note"] = (
+                "Savings Plans coverage could not be read (grant "
+                "ce:GetSavingsPlansCoverage), so there is no coverage gap to size and "
+                "no purchase projection. This is not 0% coverage.")
 
         # "If you bought $X more in commitments" projection
-        if monthly_uncovered > 100:
+        if monthly_uncovered > 100 and not sp_unread:
             # One rate for every Compute SP figure: the 1-year no-upfront rate
             # recommendations.commitments documents against the AWS price list
             # (26% off, the m5.large rate). This used a local 34%, more than even

@@ -130,6 +130,16 @@ async def export_cost_report(
     all_sections = ["cost_summary", "services", "anomalies", "rightsizing", "savings", "budgets"]
     wanted = set(sections or all_sections)
     fmt_list = formats or ["html", "csv"]
+    # Checked before any data is fetched. An unknown format wrote no file and
+    # answered "Report generated"; an unknown section answered "Make sure at
+    # least one provider is configured".
+    bad_sections = sorted(wanted - set(all_sections))
+    bad_formats = sorted(set(fmt_list) - {"html", "csv"})
+    if bad_sections or bad_formats:
+        return {"error": " ".join(filter(None, [
+            f"Unknown sections {bad_sections}; use {all_sections}." if bad_sections else "",
+            f"Unknown formats {bad_formats}; use ['html', 'csv']." if bad_formats else "",
+        ])) + " Nothing was written."}
 
     collected: dict = {}
 
@@ -510,7 +520,11 @@ def subscribe_to_report(
     if err := _srv.require_role("analyst"):
         return err
     try:
-        from ..notifications.reports import create_subscription, VALID_SECTIONS
+        from ..notifications.reports import PRESET_CRONS, VALID_SECTIONS, create_subscription
+        if not cron and frequency not in PRESET_CRONS:
+            # Saved as the weekly cron, with nothing said, for any other word.
+            return {"error": (f"frequency must be one of {', '.join(PRESET_CRONS)} "
+                              f"(got {frequency!r}), or pass cron. Nothing was saved.")}
         invalid = [s for s in sections if s not in VALID_SECTIONS]
         if invalid:
             return {
@@ -740,6 +754,13 @@ async def export_cost_report_csv(
         return ("The scan took unusually long (a region or API may be slow). Try again, "
                 "or pass a specific region.")
     findings = result.findings
+    coverage = result.coverage_lines()
+    if not findings and result.errors and len(result.errors) == result.scanners_run:
+        # A file reading "Total monthly saving $0.00" for a sweep none of whose
+        # checks could read is a clean bill nobody earned. Write nothing. When
+        # only some could not run, the file is written and says which.
+        return ("No report was written: the checks could not read the account. "
+                + " ".join(coverage))
     # Slice first, then collapse. Collapsing the whole list first would let one
     # resource's folded-away alternatives push real findings off the end of the
     # export, so the file would be short by however many duplicates existed.
@@ -771,10 +792,10 @@ async def export_cost_report_csv(
         writer.writerow(["Total monthly saving", f"${total_monthly:,.2f}"])
         writer.writerow(["Total annual saving", f"${total_annual:,.2f}"])
         writer.writerow(["Opportunities found", len(top)])
-        if result.errors:
-            # The total above is missing whatever these would have found.
-            writer.writerow(["Scanners that could not run or read everything",
-                             "; ".join(result.errors)])
+        # The total above is missing whatever the checks that could not run, or
+        # read only part of the account, would have found.
+        for line in coverage:
+            writer.writerow(["Incomplete", line])
         writer.writerow([])
 
         # Column headers
@@ -803,9 +824,8 @@ async def export_cost_report_csv(
     if collapsed:
         note = (f" {collapsed} alternative fix(es) on the same resources are excluded from "
                 f"the total: you can bank one fix per resource, not all of them.")
-    if result.errors:
-        note += (f" Partial: {', '.join(result.errors)} could not run or read everything, "
-                 "so the total is missing whatever they would have found.")
+    if coverage:
+        note += " Incomplete: " + " ".join(coverage)
     return (
         f"Exported {len(top)} opportunities to {dest}. "
         f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note}"
@@ -973,6 +993,9 @@ async def publish_cost_report_to_notion(
     top_findings, collapsed = collapse_per_resource(findings[:20])
 
     if not top_findings:
+        if result.errors or result.partial:
+            return ("Nothing was published: no findings, and not every check could read "
+                    "the account. " + " ".join(result.coverage_lines()))
         return "No savings opportunities found, nothing to publish."
 
     # `or 0`: the critique sets monthly_savings to None on a retracted claim.
@@ -987,9 +1010,9 @@ async def publish_cost_report_to_notion(
     except Exception:
         pass
 
-    partial_note = (f"Partial: {', '.join(result.errors)} could not run or read everything, "
-                    "so the total is missing whatever they would have found."
-                    if result.errors else "")
+    # The same account of the checks that could not run or read everything as
+    # the audit and the CSV export give, so the total is not read as complete.
+    partial_note = " ".join(result.coverage_lines())
     report = {
         "findings": top_findings,
         "total_monthly_savings": total_monthly,
