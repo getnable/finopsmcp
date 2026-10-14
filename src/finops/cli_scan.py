@@ -486,12 +486,19 @@ def _demo_payload() -> tuple[dict, dict]:
         "services": services[:3],
         "regions": {},
     }
+    # Priced the way the engine prices the same findings (aws_prices), so the
+    # sample cannot claim more than a real scan would. It used to: 4 idle NAT
+    # gateways at $12,960/mo ($3,240 each, where the engine's fixed charge is
+    # $32.85) and 3 idle db.r5.xlarge at $2,840/mo (the engine: $1,051.20 single-AZ).
+    from .aws_prices import HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH, rds_hourly
+
+    rds_monthly = round(3 * (rds_hourly("db.r5.xlarge", "mysql") or 0.0) * HOURS_PER_MONTH, 2)
     findings = [
         {
             "waste_type": "idle_nat_gateway",
-            "description": "4 NAT gateways with no traffic in 30 days",
+            "description": "4 NAT gateways with no traffic in 7 days",
             "region": "us-east-1",
-            "estimated_monthly_savings": 12960.0,
+            "estimated_monthly_savings": round(4 * NAT_GATEWAY_PER_MONTH, 2),
         },
         {
             "waste_type": "unattached_ebs",
@@ -507,9 +514,9 @@ def _demo_payload() -> tuple[dict, dict]:
         },
         {
             "waste_type": "idle_rds",
-            "description": "3 idle RDS instances (db.r5.xlarge, <2% CPU)",
+            "description": "3 idle RDS instances (db.r5.xlarge MySQL, no connections in 14 days)",
             "region": "eu-west-1",
-            "estimated_monthly_savings": 2840.0,
+            "estimated_monthly_savings": rds_monthly,
         },
         {
             "waste_type": "oversized_ec2",
