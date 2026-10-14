@@ -894,6 +894,10 @@ def main(args: list[str] | None = None) -> None:
         description="Health check for your nable (finops-mcp) installation",
     )
     p.add_argument("--json", action="store_true", help="Output results as JSON")
+    # Every other entry point answers --version; this one exited 2 on it.
+    from . import __version__
+    p.add_argument("--version", action="version",
+                   version=f"finops-doctor (finops-mcp) {__version__ or 'unknown'}")
     p.add_argument(
         "--audit", action="store_true",
         help="Print audit log entries instead of running health checks",

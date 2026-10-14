@@ -210,6 +210,20 @@ def test_credits_without_the_feature_fails_on_stderr_like_serve(tmp_path):
         assert "hosted" in r.stderr and r.stdout.strip() == "", argv
 
 
+# ── finops-doctor --version ───────────────────────────────────────────────────
+
+def test_finops_doctor_answers_version(tmp_path):
+    from finops import __version__
+    code = ("import sys; sys.argv[0] = 'finops-doctor'; "
+            "from finops.doctor import main; main()")
+    r = subprocess.run(
+        [sys.executable, "-c", code, "--version"], check=False,
+        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+        env={**os.environ, "HOME": str(tmp_path), "PYTHONPATH": SRC})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == f"finops-doctor (finops-mcp) {__version__}"
+
+
 # ── a broken guard policy file ────────────────────────────────────────────────
 
 _BROKEN_POLICIES = {
