@@ -383,7 +383,25 @@ def _flatten(cmd: str) -> str:
     if "\\" in cmd:
         cmd = _ESCAPE_RE.sub(r"\1", cmd)
     cmd = cmd.replace('"', "").replace("'", "")
-    return _lower_programs(" ".join(cmd.split()))
+    return _cli_images(_lower_programs(" ".join(cmd.split())))
+
+
+# The CLIs' own container images, whose entrypoint is the CLI itself: `docker
+# run amazon/aws-cli ec2 terminate-instances` (the AWS CLI's documented way
+# to run in a container) is `aws ec2 terminate-instances`, and `docker run
+# hashicorp/terraform:1.9 destroy` is `terraform destroy`. Read as the
+# program they run, tag and digest dropped.
+_CLI_IMAGE_HINTS = ("aws-cli", "hashicorp/terraform", "bitnami/kubectl", "alpine/helm")
+_CLI_IMAGE_RE = re.compile(
+    r"(?<![\w./:@-])(?:(?:docker\.io/)?amazon/aws-cli|public\.ecr\.aws/aws-cli/aws-cli"
+    r"|(?:docker\.io/)?hashicorp/(terraform)|(?:docker\.io/)?bitnami/(kubectl)"
+    r"|(?:docker\.io/)?alpine/(helm))(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?(?![\w./:@-])")
+
+
+def _cli_images(cmd: str) -> str:
+    if not any(h in cmd for h in _CLI_IMAGE_HINTS):
+        return cmd
+    return _CLI_IMAGE_RE.sub(lambda m: m.group(1) or m.group(2) or m.group(3) or "aws", cmd)
 
 
 # One left-to-right reading of the shell's quoting: a backslash escape, an
