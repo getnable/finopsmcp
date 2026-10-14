@@ -2505,6 +2505,17 @@ def _run_guard(parsed) -> None:
             "hook_form": guard.hook_form(),
         })
         print()
+        dead = guard.broken_hook_command(path)
+        if dead and guard.hook_pin(dead) is not None:
+            # No `finops` stays on PATH, so the hook is the uvx form, and there
+            # is no uvx: Claude Code would skip it on every call, silently.
+            print(f"  {amber('✗')} Hook written to {path}, but it cannot start here: it runs")
+            print("    uvx, and uvx is not on PATH, so Claude Code would skip it, silently.")
+            print("    Install uv (https://docs.astral.sh/uv/) and it starts as written, or")
+            print("    install nable so a `finops` stays on PATH (pipx install finops-mcp)")
+            print("    and run this again.")
+            print()
+            return
         if was_broken:
             print(f"  {green('✓')} Guard repaired: the hooked command no longer existed → {path}")
         elif was_unpinned:
@@ -2796,6 +2807,16 @@ def _run_guard(parsed) -> None:
                       "silently. Fix:"))
             print(f"  {cyan(settings_hook_fix(release, ' --global' if is_global else ''))}")
             print()
+    no_uvx = [g for g in stale
+              if guard.hook_pin(guard.broken_hook_command(guard._settings_path(g)) or "")]
+    stale = [g for g in stale if g not in no_uvx]
+    if no_uvx:
+        # A reinstall would write the same uvx hook: uv is the fix.
+        print(f"  {amber('The hook runs uvx, and uvx is not on PATH, so the guard is not running.')}")
+        print(dim("  Claude Code skips a hook it cannot execute, silently. Install uv"))
+        print(dim("  (https://docs.astral.sh/uv/) and it starts as written, or install nable so"))
+        print(dim("  a `finops` stays on PATH (pipx install finops-mcp), then:"))
+        _fix(no_uvx)
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))

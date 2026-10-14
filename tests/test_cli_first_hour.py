@@ -129,3 +129,57 @@ def test_brief_names_the_directory_instead_of_the_exception_class(
     assert e.value.code == 1
     assert "failed (PermissionError)" not in err
     assert str(unwritable_data_dir) in err and "chown" in err
+
+
+# ── no uvx ─────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def guard_home(tmp_path, monkeypatch):
+    import finops.guard_plugin as gp
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    home.mkdir()
+    proj.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(proj)
+    for var in ("CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR", "FINOPS_DATA_DIR", "FINOPS_GUARD"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(gp, "_data_root_override", None)
+    monkeypatch.setattr(gp, "_user_dir_override", None)
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
+    return home
+
+
+def _no_uvx(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda n, *a, **k: None)
+
+
+def _out(argv, capsys) -> str:
+    try:
+        setup_wizard.main(argv)
+    except SystemExit as e:
+        assert not e.code, e.code
+    return " ".join(capsys.readouterr().out.split())
+
+
+def test_install_without_uvx_says_the_hook_cannot_start(guard_home, monkeypatch, capsys):
+    """With no uvx and no `finops` that stays on PATH, install wrote a uvx
+    hook Claude Code cannot run and printed "Agent cost guardrail installed"."""
+    _no_uvx(monkeypatch)
+    out = _out(["guard", "install", "--global"], capsys)
+    assert "Agent cost guardrail installed" not in out
+    assert "uvx is not on PATH" in out and "https://docs.astral.sh/uv/" in out
+
+
+def test_status_and_doctor_name_uv_not_a_reinstall_that_writes_the_same(
+        guard_home, monkeypatch, capsys):
+    """`nable guard status` said "Re-run: nable guard install", which writes
+    the same hook again: the fix is uv (or a `finops` on PATH)."""
+    import finops.guard as g
+    monkeypatch.setattr(g, "_hook_command", lambda: g._UVX_HOOK_CMD)
+    g.install(True)
+    _no_uvx(monkeypatch)
+    out = _out(["guard", "status"], capsys)
+    assert "uvx is not on PATH" in out and "https://docs.astral.sh/uv/" in out
+    d = g.doctor()
+    assert any("uvx, which is not on PATH" in c for c in d["not_covered"])
+    assert any("https://docs.astral.sh/uv/" in r for r in d["recommendations"])

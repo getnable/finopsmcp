@@ -5305,7 +5305,11 @@ def doctor() -> dict[str, Any]:
     which a clean check moves forward: it inspects settings files and the ledger
     and calls no cloud API. It runs nothing but what the guard itself would
     start: with a Cursor Admin API key and an old or missing Cursor cache, the
-    background refresh (background_refresh), which it does not wait for."""
+    background refresh (background_refresh), which it does not wait for; and,
+    for a hook that starts nable through uvx, uvx, to learn whether the release
+    it pins can start (guard_release)."""
+    import shutil
+
     from . import guard_ledger
     from .guard_mcp import MCP_RULES
 
@@ -5364,6 +5368,14 @@ def doctor() -> dict[str, Any]:
                         f"{r['release']}, which uvx cannot install here, so it checks "
                         f"nothing ({r['problem']})")
             fix(_settings_hook_fix(r["release"], flag), "a hook this machine can start")
+            continue
+        if not r["runs"] and r.get("pin") != "binary" and not shutil.which("uvx"):
+            # A reinstall writes the same uvx hook again: uv is the fix.
+            gaps.append(f"Claude Code ({r['scope']}): the hook runs uvx, which is not on "
+                        "PATH, so it checks nothing")
+            fix("install uv (https://docs.astral.sh/uv/)", "the hook then starts as "
+                "written; or install nable so a `finops` stays on PATH (pipx install "
+                f"finops-mcp), then nable guard install{flag}")
             continue
         if not r["runs"]:
             gaps.append(f"Claude Code ({r['scope']}): the hooked command no longer exists")
