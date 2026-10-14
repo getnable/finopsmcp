@@ -91,6 +91,33 @@ def test_slice_total_shown_is_the_sum_of_the_rows_shown(monkeypatch, args, shown
     assert out["total_shown"] == pytest.approx(sum(r["metric"] for r in out["rows"]))
 
 
+# ── get_commitment_analysis: unknown coverage is not 0% coverage ──────────────
+
+@pytest.mark.parametrize("ri_coverage", [None, 0.0])
+def test_commitment_projection_is_not_made_on_unread_savings_plan_coverage(
+        monkeypatch, ri_coverage):
+    """ce:GetSavingsPlansCoverage denied, EC2 spend readable: the tool reported
+    combined_coverage_pct 0.0, a coverage gap of 80 points and "Buying a 1-year
+    Compute Savings Plan at $X/mo would save ~$Y/mo", a purchase advised off a
+    coverage figure nobody read."""
+    from finops.recommendations import commitments as C
+
+    def _analysis(*a, **k):
+        return C.CommitmentAnalysis(
+            savings_plan_coverage_pct=None, savings_plan_utilization_pct=0.0,
+            savings_plan_unused_usd=0.0, ri_coverage_pct=ri_coverage,
+            ri_utilization_pct=0.0, ri_unused_usd=0.0,
+            uncovered_on_demand_usd=30000.0)
+
+    monkeypatch.setattr(C, "analyze_commitments", _analysis)
+    out = _call("get_commitment_analysis")
+    actionable = out["actionable_analysis"]
+
+    assert "if_you_bought_more" not in actionable, actionable
+    assert actionable["coverage_gap_pct"] is None
+    assert "Savings Plans coverage could not be read" in actionable["note"]
+
+
 # ── forecast_costs: the horizon is bounded ────────────────────────────────────
 
 @pytest.mark.parametrize("args", [
