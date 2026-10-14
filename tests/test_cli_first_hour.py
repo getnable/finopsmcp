@@ -183,3 +183,45 @@ def test_status_and_doctor_name_uv_not_a_reinstall_that_writes_the_same(
     d = g.doctor()
     assert any("uvx, which is not on PATH" in c for c in d["not_covered"])
     assert any("https://docs.astral.sh/uv/" in r for r in d["recommendations"])
+
+
+# ── nable brief with no usable AWS credentials ────────────────────────────────
+
+def _unreadable_audit(code: str, seen: dict):
+    """run_deep_audit on a machine whose every AWS call fails with `code`, as
+    it does with no credentials (NoCredentialsError) or an expired SSO login
+    (TokenRetrievalError)."""
+    import logging
+
+    def audit(*_a, **_k):
+        seen["analyzer_warnings"] = logging.getLogger(
+            "finops.analyzers.optimizer").isEnabledFor(logging.WARNING)
+        return {"findings": [], "checks_run": [], "regions_scanned": ["us-east-1"],
+                "checks_failed": [{"check": c, "region": "us-east-1", "error_code": code}
+                                  for c in ("ebs", "nat", "rds")]}
+    return audit
+
+
+@pytest.mark.parametrize("code,exit_code,fix", [
+    ("NoCredentialsError", 6, "aws configure sso"),
+    ("TokenRetrievalError", 3, "aws sso login --profile dev"),
+])
+def test_brief_on_an_unreadable_account_says_how_to_fix_it(code, exit_code, fix, tmp_path,
+                                                          monkeypatch, capsys):
+    """`nable brief` exited 0 here, listed every check as failed with the
+    exception's class name, and printed one log line per failed check, but
+    never said what to do. It now ends the way `nable scan` does."""
+    seen: dict = {}
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("AWS_PROFILE", "dev")
+    monkeypatch.delenv("FINOPS_DEBUG", raising=False)
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
+    monkeypatch.setattr("finops.analyzers.optimizer.run_deep_audit",
+                        _unreadable_audit(code, seen))
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(["brief", "--no-save"])
+    err = capsys.readouterr().err
+    assert e.value.code == exit_code
+    assert fix in err
+    assert seen["analyzer_warnings"] is False, "one log line per failed check, again"
