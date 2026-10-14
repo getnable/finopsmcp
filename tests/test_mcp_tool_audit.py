@@ -126,6 +126,27 @@ def test_scan_waste_patterns_with_no_cost_history_is_not_clean(db):
     assert "total_monthly_waste" not in out
 
 
+# ── get_efficiency_scorecard: an ungraded card carries no score ───────────────
+
+def test_an_ungraded_scorecard_has_no_total_score(db, monkeypatch):
+    """With nothing measured it answered grade "N/A" next to total_score 80.0."""
+    from finops import demo_data
+    from finops.connectors.kubernetes import KubernetesConnector
+    from finops.recommendations import commitments
+
+    async def _no_cluster(self):
+        return False
+
+    monkeypatch.setattr(demo_data, "_real_provider_connected", lambda: True)
+    monkeypatch.setattr(KubernetesConnector, "is_configured", _no_cluster)
+    monkeypatch.setattr(commitments, "analyze_commitments", lambda *a, **k: None)
+    out = _call("get_efficiency_scorecard")
+
+    assert out["grade"] == "N/A", out
+    assert out["total_score"] is None
+    assert "Not graded" in out["total_score_note"]
+
+
 # ── slice_costs: total_shown is what the shown rows add up to ─────────────────
 
 def _focus(service: str, cost: float):

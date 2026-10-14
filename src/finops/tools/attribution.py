@@ -323,7 +323,16 @@ async def get_efficiency_scorecard(
             tag_filter=tag_filter,
         )
 
-        return scorecard.as_dict()
+        out = scorecard.as_dict()
+        # An ungraded card carried total_score 80.0 beside grade "N/A". A model
+        # reads the number, so a card that is not graded carries none. (Each
+        # unmeasured dimension keeps its neutral placeholder, marked
+        # data_available false.)
+        if out.get("grade") == "N/A":
+            out["total_score"] = None
+            out["total_score_note"] = ("Not graded: too little was measured for a score. "
+                                       "This is not a score of 0 or of any other value.")
+        return out
 
     except Exception as e:
         _srv.log.exception("Scorecard generation failed")
