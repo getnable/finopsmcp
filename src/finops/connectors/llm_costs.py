@@ -617,7 +617,11 @@ def _generate_recommendations(
                 "recommendation": f"Consider {cheaper} for lower-complexity tasks",
                 "estimated_savings_pct": f"{savings_frac * 100:.0f}%",
                 "estimated_savings_usd": round(spend * savings_frac, 2),
-                "basis": "price-ratio estimate assuming a balanced input/output token mix; actual savings depend on your ratio",
+                # A ceiling: priced on all of the model's spend, as if every
+                # call were one the cheaper model can take.
+                "basis": ("a ceiling: assumes every call to this model moves, and a balanced "
+                          "input/output token mix (price-ratio estimate); only the "
+                          "lower-complexity calls should move, so the real saving is lower"),
             })
             break
 
