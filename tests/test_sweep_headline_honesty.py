@@ -212,3 +212,41 @@ def test_the_notion_report_renders_a_finding_without_a_figure():
              for row in table["table"]["children"][1:]]
     assert cells[0][2:] == ["$40.00", "$480.00"]
     assert "needs confirming" in cells[1][2] and "$" not in cells[1][3], cells
+
+
+# ── 3. a commitment sized on spend another fix removes ───────────────────────
+
+def _dbsp(**kw):
+    return {"current_monthly_rds_spend": 10_000.0, "current_sp_coverage_pct": 0.0,
+            "uncovered_monthly_spend": 10_000.0, "estimated_monthly_savings": 3_000.0}
+
+
+def _idle_rds(**kw):
+    return [{"resource_id": "db-idle-1", "region": "us-east-1", "engine": "mysql",
+             "current_class": "db.r5.2xlarge", "estimated_monthly_savings": 2_000.0}]
+
+
+def test_a_database_plan_is_not_sized_on_instances_the_audit_says_to_stop(monkeypatch):
+    """Database Savings Plan: 30% off $10,000/mo of uncovered RDS = $3,000. Idle
+    RDS: stop a $2,000/mo instance that is part of that $10,000. Summed, $5,000.
+    Stop the instance first and the plan covers $8,000: $2,400. Together $4,400;
+    the $600 overlap (30% of the stopped $2,000) was counted twice."""
+    monkeypatch.setattr(sweep_mod, "build_specs", lambda aws, regions: [
+        ("db_sp", _dbsp, {}), ("idle_rds", _idle_rds, {})])
+    result = asyncio.run(sweep_mod.sweep(None, deadline_s=30))
+    kept, _ = sweep_mod.collapse_per_resource(result.findings)
+    total = sum(f.get("monthly_savings") or 0 for f in kept)
+    assert round(total, 2) == 4_400.0, kept
+    plan = next(f for f in kept if "Database Savings Plan" in f["title"])
+    assert "idle" in plan["detail"].lower(), plan
+
+
+def test_a_scanner_that_returned_an_error_is_named(monkeypatch):
+    def _incomplete(**kw):
+        return {"data_incomplete": True, "error": "Could not read RDS compute spend",
+                "finding": None}
+
+    monkeypatch.setattr(sweep_mod, "build_specs", lambda aws, regions: [
+        ("db_sp", _incomplete, {}), ("idle_rds", _idle_rds, {})])
+    result = asyncio.run(sweep_mod.sweep(None, deadline_s=30))
+    assert any(e.startswith("db_sp") for e in result.errors), result.errors

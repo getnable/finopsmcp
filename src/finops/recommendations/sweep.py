@@ -322,6 +322,32 @@ def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
     return kept, collapsed
 
 
+def _net_database_plan_of_idle_rds(findings: list[dict], db_sp: Any) -> None:
+    """Take the idle-RDS overlap out of the Database Savings Plan saving, in place.
+
+    The plan's saving is its discount on the uncovered RDS spend Cost Explorer
+    reported, and that spend includes the instances idle_rds says to stop. Both
+    cannot be banked in full: 30% off $10,000/mo is $3,000, stopping a $2,000/mo
+    idle instance is $2,000, and done together the plan covers $8,000 for $2,400,
+    $4,400 in all, not $5,000. The plan is reduced by its discount on the idle
+    spend's uncovered share; the idle findings, which are per resource and
+    certain, keep their full figure.
+    """
+    from .database_savings_plans import DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT as discount
+
+    plan = next((f for f in findings if f.get("_scanner") == "db_sp"), None)
+    idle = sum(f.get("monthly_savings") or 0 for f in findings if f.get("_scanner") == "idle_rds")
+    if not plan or not idle or not isinstance(db_sp, dict):
+        return
+    uncovered_share = max(0.0, 1.0 - float(db_sp.get("current_sp_coverage_pct") or 0.0) / 100)
+    overlap = min(plan.get("monthly_savings") or 0, discount * idle * uncovered_share)
+    if overlap <= 0:
+        return
+    plan["monthly_savings"] = round((plan.get("monthly_savings") or 0) - overlap, 2)
+    plan["detail"] = (f"{plan.get('detail', '')}; less ${overlap:,.2f}/mo for idle RDS "
+                      "instances listed separately, which the plan would otherwise cover")
+
+
 async def sweep(
     aws: Any,
     regions: list[str] | None = None,
@@ -356,6 +382,7 @@ async def sweep(
         return SweepResult(timed_out=True)
 
     out = SweepResult()
+    raw: dict[str, Any] = {}
     for name, data in results:
         if data is None:
             out.errors.append(name)
@@ -365,9 +392,20 @@ async def sweep(
         not_read = getattr(data, "regions_not_read", None)
         if not_read:
             out.errors.append(f"{name} (could not read {', '.join(sorted(not_read))})")
+        # A scanner that answered with an error dict (Cost Explorer throttled,
+        # a permission missing) normalises to nothing, which read as "found
+        # nothing". It could not look, and the total is missing it.
+        if isinstance(data, dict) and (data.get("error") or data.get("data_incomplete")):
+            out.errors.append(f"{name} (could not read its data)")
+        raw[name] = data
         for f in normalise(name, data):
             f["source"] = SOURCE_MAP.get(name, name)
+            f["_scanner"] = name
             out.findings.append(f)
+
+    _net_database_plan_of_idle_rds(out.findings, raw.get("db_sp"))
+    for f in out.findings:
+        f.pop("_scanner", None)
 
     # Sort by monthly savings descending first (the stable base order). `or 0`:
     # an investigation carries None, which a bare comparison cannot order.
