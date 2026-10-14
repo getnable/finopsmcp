@@ -94,6 +94,22 @@ def test_the_ipv4_title_counts_what_its_total_covers():
     assert "$3.65 per IP" in f["detail"]
 
 
+def test_the_rds_snapshot_row_says_its_figure_is_an_upper_bound():
+    """audit_rds_manual_snapshots prices each snapshot at its database's
+    allocated storage and says so: "up to $28.50/mo ... An upper bound". The
+    audit and CSV row for the same two snapshots (200 GB + 100 GB at the
+    AmazonRDS us-east-1 $0.095/GB-month) read "$28.50/mo at $0.095/GB-month",
+    with nothing saying it is a bound."""
+    from finops.recommendations.sweep import normalise
+
+    [f] = normalise("rds_snapshots", {
+        "orphaned_snapshots": [{"snapshot_id": "a", "allocated_storage_gb": 100}],
+        "old_snapshots": [{"snapshot_id": "b", "allocated_storage_gb": 200}],
+        "potential_monthly_savings": 28.5})
+    assert f["monthly_savings"] == 28.5
+    assert "upper bound" in f["detail"], f["detail"]
+
+
 # ── one month, one rate ──────────────────────────────────────────────────────
 
 def test_kubernetes_costs_uses_the_730_hour_month():

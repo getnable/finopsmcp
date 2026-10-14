@@ -227,7 +227,9 @@ def normalise(name, data) -> list[dict]:
             items = data.get("orphaned_snapshots", []) + data.get("old_snapshots", []) if isinstance(data, dict) else []
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
             if total > 0:
-                out.append({"title": f"Delete {len(items)} old/orphaned RDS manual snapshots", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo at $0.095/GB-month"})
+                # The scanner prices each snapshot at its database's allocated
+                # storage and calls the figure an upper bound; the row says so.
+                out.append({"title": f"Delete {len(items)} old/orphaned RDS manual snapshots", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo at $0.095/GB-month of allocated storage, an upper bound"})
         elif name == "spot" and isinstance(data, list):
             for r in data:
                 s = r.get("monthly_savings", 0) or 0
