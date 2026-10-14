@@ -23,9 +23,17 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_COMPUTE_SP_DISCOUNT = 0.66   # ~34% off on-demand (1yr no-upfront compute SP)
-_EC2_SP_DISCOUNT = 0.72       # ~28% off on-demand (1yr no-upfront EC2 SP)
-_RI_DISCOUNT = 0.60           # ~40% off on-demand (1yr no-upfront RI)
+# A 1-year no-upfront Compute Savings Plan rate as a fraction of Linux
+# on-demand, so the discount is 1 minus this. AWS Price List,
+# AWSComputeSavingsPlan us-east-1 version 20261013035015, matched to the
+# AmazonEC2 us-east-1 offer (20261012193925): over the 168 instance types
+# aws_prices.EC2_HOURLY holds, the discount runs 18.6% to 29.1%, median 27.1%.
+# Fargate is 20.0%. This read 0.66 (34% off), above every type in the table.
+# Two more constants here (28% for an EC2 Instance SP, 40% for an RI) were used
+# nowhere and matched nothing in the same price list (37.0% and 37.0% medians),
+# so they are gone rather than corrected.
+_COMPUTE_SP_DISCOUNT = 0.729
+COMPUTE_SP_DISCOUNT_RANGE = "19-29% by EC2 instance type, 20% on Fargate"
 
 
 @dataclass
@@ -439,9 +447,12 @@ def _build_recommendations(
         }]
 
     # Size to the CONSISTENT BASELINE: the floor of monthly uncovered on-demand (what
-    # is uncovered EVERY month), not the 3-month average or a peak. Committing to the
-    # floor is the safe amount, a quiet month never leaves you over-committed. Falls
-    # back to the 3-month average when no monthly series is available.
+    # is uncovered EVERY month), not the 3-month average or a peak, so a quiet month
+    # does not leave the plan over-committed. It is still a monthly figure: a Savings
+    # Plan commits per hour, and hours below the month's average (nights, weekends)
+    # leave commitment unused that no monthly total can show. The recommendation
+    # says so and stays at medium confidence. Falls back to the 3-month average when
+    # no monthly series is available.
     series = [m for m in (monthly_uncovered_series or []) if m and m > 0]
     if len(series) >= 2:
         baseline = min(series)
@@ -460,7 +471,14 @@ def _build_recommendations(
         desc = (
             f"Your SP coverage is {sp_coverage:.0f}%. A 1-year no-upfront Compute SP at "
             f"${commitment_to_add:,.0f}/mo hourly commitment covers {basis} "
-            f"(${baseline:,.0f}/mo of on-demand)."
+            f"(${baseline:,.0f}/mo of on-demand). The saving assumes the median "
+            f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount of the AWS rate card "
+            f"({COMPUTE_SP_DISCOUNT_RANGE}); your instance mix sets the real one. "
+            f"Sized from monthly totals, but the commitment is hourly: if usage dips "
+            f"at night or at weekends the plan sits partly unused in those hours, and "
+            f"below {_COMPUTE_SP_DISCOUNT:.0%} average utilization it costs more than "
+            f"on-demand. Check the hourly floor (Cost Explorer's Savings Plans "
+            f"recommendations use hourly usage) before buying."
         )
         if spiky:
             desc += (f" Sized to the floor, not your ${peak:,.0f}/mo peak, so a slow month "
@@ -480,7 +498,11 @@ def _build_recommendations(
             # What the commitment bounds a pack declares read the rec against
             # (commitment_bounds.apply_compute): coverage before the purchase.
             "coverage_pct_now": round(sp_coverage, 1),
-            "confidence": "high" if baseline > 5000 else "medium",
+            "assumed_discount_pct": round((1 - _COMPUTE_SP_DISCOUNT) * 100, 1),
+            "sizing_granularity": "monthly",
+            # Was "high" above 5,000 a month: dollar size is not evidence, and
+            # three monthly totals cannot show the hourly floor a plan needs.
+            "confidence": "medium",
         })
 
     # Warn about over-commitment (low utilization = waste)

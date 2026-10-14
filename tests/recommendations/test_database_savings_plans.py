@@ -19,11 +19,13 @@ from finops.recommendations.database_savings_plans import (
 
 def _ce_cost_response(monthly_amount: float) -> dict:
     # Grouped by usage type: the engine only counts instance-usage (compute) hours,
-    # which Database Savings Plans actually discount.
+    # which Database Savings Plans actually discount. db.r7g, not db.r5: the AWS
+    # price list has no Database Savings Plan rate for db.r5, so spend on it can
+    # not be sized into a plan (tests/test_compute_savings_audit.py).
     return {
         "ResultsByTime": [
             {"Groups": [
-                {"Keys": ["USE1-InstanceUsage:db.r5.large"],
+                {"Keys": ["USE1-InstanceUsage:db.r7g.large"],
                  "Metrics": {"UnblendedCost": {"Amount": str(monthly_amount)}}},
             ]}
         ]
@@ -60,8 +62,10 @@ class TestDiscountConstants:
     def test_3yr_all_upfront_highest(self):
         assert DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT > DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT
 
-    def test_no_upfront_is_30_pct(self):
-        assert DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.30
+    def test_no_upfront_is_20_pct(self):
+        # The AWS price list rate for every eligible provisioned instance. This
+        # pinned 0.30, which no Database Savings Plan rate matches.
+        assert DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT == 0.20
 
 
 # ── unit: _get_rds_spend ──────────────────────────────────────────────────────
@@ -203,7 +207,7 @@ class TestRecommendDatabaseSavingsPlans:
         assert result["recommended_sp_hourly_commitment"] == 0.0
         assert result["estimated_monthly_savings"] == 0.0
 
-    def test_savings_is_30_pct_of_uncovered(self):
+    def test_savings_is_20_pct_of_uncovered(self):
         monthly_spend = 8_000.0
         ce = _make_ce_client(spend=monthly_spend, coverage_pct=0.0)
         mock_boto3 = MagicMock()
@@ -240,7 +244,7 @@ class TestRecommendDatabaseSavingsPlans:
 
     def test_hourly_commitment_is_sized_at_discounted_rate(self):
         # Uncovered on-demand spend = 7300/month. The SP commitment is the
-        # DISCOUNTED hourly rate, not on-demand/730: 7300 * (1-0.30) / 730 = 7.0.
+        # DISCOUNTED hourly rate, not on-demand/730: 7300 * (1-0.20) / 730 = 8.0.
         # Committing on-demand/730 (=10.0) would over-buy by 1/(1-discount).
         from finops.recommendations.database_savings_plans import (
             DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT as _disc,

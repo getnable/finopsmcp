@@ -354,8 +354,11 @@ def _commitment_gap_ticket(gap: dict[str, Any]) -> tuple[str, str, str, list[str
     coverage_pct = gap.get("coverage_pct", 0)
     uncovered_usd = gap.get("uncovered_on_demand_usd", 0)
     monthly_uncovered = uncovered_usd / 3  # 3-month window
-    projected_savings = gap.get("projected_annual_savings", monthly_uncovered * 0.34 * 12)
+    from ..recommendations.commitments import _COMPUTE_SP_DISCOUNT
+    projected_savings = gap.get("projected_annual_savings",
+                                monthly_uncovered * (1 - _COMPUTE_SP_DISCOUNT) * 12)
     recommendation = gap.get("recommendation", "Purchase Compute Savings Plan")
+    disc, floor = 1 - _COMPUTE_SP_DISCOUNT, _COMPUTE_SP_DISCOUNT
 
     title = (
         f"[FinOps] Commitment gap: {coverage_pct:.0f}% coverage, "
@@ -369,9 +372,11 @@ def _commitment_gap_ticket(gap: dict[str, Any]) -> tuple[str, str, str, list[str
 **Recommendation:** {recommendation}
 
 ### Why now
-At <60% coverage, you're paying full on-demand rates for usage that has
-been consistent for 3+ months. A 1-year no-upfront Savings Plan pays back
-immediately — there's no break-even period.
+At <60% coverage, you're paying full on-demand rates on most of this usage.
+A 1-year no-upfront Savings Plan has no upfront payment, but it only saves
+money while its hourly commitment is used: at a {disc:.0%} discount, a plan
+whose utilization averages under {floor:.0%} costs more than on-demand. Size
+it to the hourly usage floor, not this monthly average.
 
 ### Action
 - [ ] Review SP/RI recommendations in AWS Cost Explorer

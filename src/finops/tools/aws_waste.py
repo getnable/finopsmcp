@@ -568,7 +568,7 @@ async def get_rds_rightsizing_recommendations(
             "findings": kept,
             **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(all_findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": (
-                "Verify FreeStorageSpace and DatabaseConnections before resizing. "
+                "Each downsize halves memory, which was not read: check FreeableMemory and DatabaseConnections before resizing. "
                 "Take a snapshot before any instance class change."
             ),
         }

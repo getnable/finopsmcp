@@ -1309,7 +1309,15 @@ def check_idle_ec2(
                         f"check the real rate in Cost Explorer). ")
             severity = "unknown"
         else:
-            cost_txt = f"Running cost: ~${monthly_savings:,.2f}/mo on demand. "
+            # EC2_MONTHLY is the us-east-1 Linux list rate. Say so, and say when
+            # the instance's OS carries a licence that rate leaves out.
+            platform = str(inst.get("PlatformDetails") or "")
+            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the us-east-1 Linux "
+                        f"on-demand list rate"
+                        + (f" (rates differ in {region})" if region != "us-east-1" else "")
+                        + (f"; this is {platform}, whose licence makes the real cost higher"
+                           if platform and platform != "Linux/UNIX" else "")
+                        + ". ")
             severity = _severity_from_savings(monthly_savings)
 
         findings.append({
@@ -1369,13 +1377,18 @@ def check_rds_rightsizing(
     region: str = "unknown",
     cpu_threshold_pct: float = 20.0,
     lookback_days: int = 14,
+    max_cpu_threshold_pct: float = 50.0,
 ) -> list[dict]:
     """
     Detect RDS instances with consistently low CPU utilization.
 
     RDS Compute Optimizer integration is limited, so we use CloudWatch
     CPUUtilization as the primary signal. Instances with average CPU below
-    cpu_threshold_pct over lookback_days are candidates for downsizing.
+    cpu_threshold_pct over lookback_days are candidates for downsizing,
+    unless their busiest hour reached max_cpu_threshold_pct: every downsize
+    here halves memory and, but for db.t3.medium and db.t3.large, vCPU too,
+    so an hour at 50% would need all of the smaller class, the same limit the
+    EC2 fallback applies. Memory (FreeableMemory) is not read.
 
     Excludes Aurora Serverless (scales automatically) and read replicas.
     """
@@ -1430,7 +1443,7 @@ def check_rds_rightsizing(
         avg_cpu = sum(datapoints) / len(datapoints)
         max_cpu = max(datapoints)
 
-        if avg_cpu >= cpu_threshold_pct:
+        if avg_cpu >= cpu_threshold_pct or max_cpu >= max_cpu_threshold_pct:
             continue
 
         recommended_class = _RDS_DOWNSIZE.get(db_class)
@@ -1460,7 +1473,8 @@ def check_rds_rightsizing(
                 f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
                 f"Recommend downsizing to {recommended_class}. "
                 f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
-                f"Verify FreeStorageSpace and DatabaseConnections before resizing."
+                f"The smaller class has half the memory, which was not read: "
+                f"check FreeableMemory and DatabaseConnections before resizing."
             ),
             "severity": _severity_from_savings(monthly_savings),
             "region": region,
@@ -2215,6 +2229,36 @@ def check_dynamodb_provisioned(
 
 # ── ECS Fargate rightsizing ───────────────────────────────────────────────────
 
+# Fargate task sizes: the memory (MiB) each CPU-unit size accepts, as
+# (lowest, highest, step). AWS ECS API reference, RegisterTaskDefinition
+# `memory`, as shipped in botocore's ecs service model.
+_FARGATE_MEMORY_BY_CPU: dict[int, tuple[int, int, int]] = {
+    256: (512, 2048, 512),        # 512, 1024 and 2048 only
+    512: (1024, 4096, 1024),
+    1024: (2048, 8192, 1024),
+    2048: (4096, 16384, 1024),
+    4096: (8192, 30720, 1024),
+    8192: (16384, 61440, 4096),
+    16384: (32768, 122880, 8192),
+}
+
+# Fargate per vCPU-hour, us-east-1 on-demand, AmazonECS offer:
+# USE1-Fargate-vCPU-Hours:perCPU and USE1-Fargate-ARM-vCPU-Hours:perCPU.
+_FARGATE_VCPU_HOURLY_X86 = 0.04048
+_FARGATE_VCPU_HOURLY_ARM = 0.03238
+
+
+def _fargate_size_ok(cpu: int, memory_mb: int) -> bool:
+    """Whether Fargate runs a task of this CPU and memory."""
+    rng = _FARGATE_MEMORY_BY_CPU.get(cpu)
+    if rng is None:
+        return False
+    lo, hi, step = rng
+    if cpu == 256:
+        return memory_mb in (512, 1024, 2048)
+    return lo <= memory_mb <= hi and (memory_mb - lo) % step == 0
+
+
 def check_ecs_task_rightsizing(
     ecs_client: Any,
     cw_client: Any,
@@ -2226,16 +2270,17 @@ def check_ecs_task_rightsizing(
     Detect ECS Fargate services with over-provisioned CPU allocations.
 
     Uses Container Insights CpuUtilized metric. Only clusters with
-    Container Insights enabled produce usable data.
+    Container Insights enabled produce usable data. Memory use is not read,
+    so a halved CPU is only proposed where the task's current memory is a
+    size Fargate accepts at that CPU; otherwise the cut would need a memory
+    cut nobody measured, and the service is left out.
 
-    Fargate billing: $0.04048/vCPU-hr, $0.004445/GB-hr.
+    Fargate billing, us-east-1: $0.04048/vCPU-hr x86, $0.03238 ARM64.
     """
     findings = CheckFindings()
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
-
-    _FARGATE_VCPU_HOURLY = 0.04048
 
     try:
         cluster_paginator = ecs_client.get_paginator("list_clusters")
@@ -2287,23 +2332,25 @@ def check_ecs_task_rightsizing(
                     td = td_resp.get("taskDefinition", {})
                     allocated_cpu = int(td.get("cpu", 256))
                     allocated_memory_mb = int(td.get("memory", 512))
+                    arch = str((td.get("runtimePlatform") or {}).get("cpuArchitecture")
+                               or "X86_64").upper()
                 except Exception as exc:
                     findings.note_failure(
                         "ecs.describe_task_definition", exc, unit="services",
                         effect="services not checked")
                     continue
-                services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
+                services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb, arch))
 
     failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(i, "ECS/ContainerInsights", "CpuUtilized",
                     (("ClusterName", cluster_name), ("ServiceName", svc.get("serviceName", ""))),
                     "Average", 3600)
-        for i, (cluster_name, svc, _, _) in enumerate(services)
+        for i, (cluster_name, svc, _, _, _) in enumerate(services)
     ], start, now, failures=failed)
     _note_unread(findings, failed, "services", "CpuUtilized")
 
-    for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb) in enumerate(services):
+    for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb, arch) in enumerate(services):
         svc_name = svc.get("serviceName", "")
 
         cpu_datapoints = series.get(i)
@@ -2317,9 +2364,14 @@ def check_ecs_task_rightsizing(
             continue
 
         recommended_cpu = max(256, allocated_cpu // 2)
+        if not _fargate_size_ok(recommended_cpu, allocated_memory_mb):
+            # Half the CPU cannot carry this much memory on Fargate, so the
+            # cut needs a memory cut too, and memory use was never read.
+            continue
         cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
         desired_count = svc.get("desiredCount", 1)
-        monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
+        vcpu_hourly = _FARGATE_VCPU_HOURLY_ARM if arch == "ARM64" else _FARGATE_VCPU_HOURLY_X86
+        monthly_cpu_savings = cpu_vcpu_saved * vcpu_hourly * HOURS_PER_MONTH * desired_count
 
         if monthly_cpu_savings < 5:
             continue
@@ -2334,6 +2386,7 @@ def check_ecs_task_rightsizing(
                 f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
                 f"Desired count: {desired_count}. "
                 f"Recommend reducing CPU to {recommended_cpu} units. "
+                f"Memory stays at {allocated_memory_mb} MiB; its use was not checked. "
                 f"Requires Container Insights enabled."
             ),
             "severity": _severity_from_savings(monthly_cpu_savings),

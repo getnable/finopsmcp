@@ -51,17 +51,28 @@ def get_commitment_analysis() -> dict:
 
         # "If you bought $X more in commitments" projection
         if monthly_uncovered > 100:
-            # Compute SP covers eligible spend at ~34% discount (1yr no-upfront)
-            _COMPUTE_SP_DISCOUNT_RATE = 0.34
-            # Covering the full gap would require this hourly commitment
-            additional_commitment = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
-            projected_savings = additional_commitment * _COMPUTE_SP_DISCOUNT_RATE
+            # One rate for every Compute SP figure, the one recommendations.
+            # commitments documents against the AWS price list. This used a
+            # local 34%, and applied it to the commitment, while describing the
+            # commitment as covering half the on-demand spend. A commitment C
+            # covers C / rate of on-demand, so those three could not all hold.
+            # Now: cover half the uncovered on-demand, commit rate x that, and
+            # save the rest of it.
+            from ..recommendations.commitments import (
+                COMPUTE_SP_DISCOUNT_RANGE, _COMPUTE_SP_DISCOUNT,
+            )
+            covered_on_demand = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
+            additional_commitment = covered_on_demand * _COMPUTE_SP_DISCOUNT
+            projected_savings = covered_on_demand - additional_commitment
             actionable["if_you_bought_more"] = {
                 "description": (
                     f"Buying a 1-year no-upfront Compute Savings Plan at "
                     f"${additional_commitment:,.0f}/mo hourly commitment would cover "
-                    f"~50% of your uncovered on-demand spend and save "
-                    f"~${projected_savings:,.0f}/mo (${projected_savings * 12:,.0f}/yr)."
+                    f"${covered_on_demand:,.0f}/mo, about 50% of your average uncovered "
+                    f"on-demand spend, and save ~${projected_savings:,.0f}/mo "
+                    f"(${projected_savings * 12:,.0f}/yr) at the median "
+                    f"{1 - _COMPUTE_SP_DISCOUNT:.0%} rate-card discount "
+                    f"({COMPUTE_SP_DISCOUNT_RANGE})."
                 ),
                 "additional_monthly_commitment_usd": round(additional_commitment, 2),
                 "projected_monthly_savings_usd": round(projected_savings, 2),
@@ -356,8 +367,9 @@ async def scan_graviton_migration_opportunities(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds EC2 instances that can migrate to Graviton (arm64) for 20-40% savings.
-    Returns ranked candidates with estimated monthly savings per instance.
+    Finds x86 EC2 instances with a same-size Graviton (arm64) equivalent.
+    Returns ranked candidates with the monthly on-demand list-price gap per
+    instance (5-19% for the mapped types, us-east-1 Linux rates).
 
     Args:
         regions: AWS regions to scan. Defaults to us-east-1.
@@ -438,10 +450,14 @@ async def scan_graviton_migration_opportunities(
 
         lines += [
             "",
-            "**How to migrate:** Most workloads (web servers, APIs, background workers) "
-            "require only an instance type change and a reboot. Verify your AMI supports "
-            "arm64 (Amazon Linux 2/2023 and Ubuntu 20.04+ are multi-arch). "
-            "Test in staging before switching production.",
+            "**Basis:** savings are the us-east-1 Linux on-demand list price gap between "
+            "the two types. An RI or Savings Plan already covering the x86 instance makes "
+            "the real saving smaller.",
+            "",
+            "**How to migrate:** an x86_64 AMI does not boot on an arm64 instance type, so "
+            "this is a relaunch from an arm64 image, not an in-place type change. Confirm "
+            "the OS, container images, agents and any licensed software have arm64 builds, "
+            "then validate in staging before switching production.",
             "",
             _srv.cost_note("\n".join(lines), savings_found_usd=total_savings),
         ]
@@ -466,8 +482,10 @@ def recommend_spot_adoption(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds on-demand EC2 instances to migrate to spot for 60-80% savings. Uses
-    env tags, ASG membership, CPU variance, and Spot Advisor interruption data.
+    Finds on-demand EC2 instances that could move to spot. Uses env tags, ASG
+    membership, CPU variance, and a dated us-east-1 snapshot of Spot Instance
+    Advisor savings and interruption bands; outside that snapshot the band is
+    unknown and the saving an assumed 65%, and each row says which.
     Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.
 
     Args:
@@ -511,7 +529,7 @@ def recommend_spot_adoption(
             f"Potential spot savings: ${total_savings:,.2f}/mo "
             f"({len(recommended)} RECOMMENDED, {len(possible)} POSSIBLE)**",
             "",
-            "| Instance | Name | Type | Region | Env | In ASG | Interruption % | Recommendation | Monthly Saving | Saving % |",
+            "| Instance | Name | Type | Region | Env | In ASG | Interruption (Spot Advisor) | Recommendation | Monthly Saving | Saving % |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
 
@@ -524,16 +542,22 @@ def recommend_spot_adoption(
                 f"| {c['region']} "
                 f"| {c['environment'] or '-'} "
                 f"| {'yes' if c['in_asg'] else 'no'} "
-                f"| {c['interruption_freq_pct']:.1f}% "
+                f"| {c.get('interruption_band', 'unknown')} "
                 f"| {c['recommendation']} "
                 f"| ${c['monthly_savings']:,.2f} "
-                f"| {c['savings_pct']:.1f}% |"
+                f"| {c['savings_pct']:.1f}%"
+                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (assumed)'} |"
             )
 
         if unread_note:
             lines += ["", unread_note]
 
         lines += [
+            "",
+            "**Basis:** on-demand cost is the us-east-1 Linux list rate. Interruption bands "
+            "and savings are the Spot Instance Advisor's us-east-1 figures as of "
+            "2026-03-20 where nable has them; \"unknown\" and \"(assumed)\" mark the rest. "
+            "Check the Spot Advisor for your region before sizing the saving.",
             "",
             "**How to migrate:** Use a Launch Template with a mixed instances policy. "
             "Set OnDemandPercentageAboveBaseCapacity=0 to run fully on spot. "
@@ -562,8 +586,10 @@ def recommend_spot_adoption(
 async def recommend_database_savings_plans() -> dict:
     """
     Recommends AWS Database Savings Plans for RDS and Aurora spend. Database
-    SPs (re:Invent 2025) offer up to 45% savings, separate from Compute SPs.
-    Sizes a 1-year no-upfront plan to uncovered baseline spend.
+    SPs (re:Invent 2025), separate from Compute SPs, take 20% off provisioned
+    instance hours on the newer families (m7, m8, r7, r8 and similar) and come
+    only as 1-year no-upfront. Sizes one to the uncovered spend on those
+    families; older families are reported, not sized.
 
     Examples:
         - "Should we buy Database Savings Plans?"
