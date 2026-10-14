@@ -53,18 +53,64 @@ class SweepResult:
     """What every caller gets: findings, and an honest account of what failed."""
 
     findings: list[dict] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)      # scanners that returned nothing
+    errors: list[str] = field(default_factory=list)      # scanners that could not run
     learned_note: str | None = None
     timed_out: bool = False
+    # Why each scanner in `errors` could not run, and the scanners that ran
+    # with some of their reads failed (so their findings may be incomplete).
+    error_reasons: dict[str, str] = field(default_factory=dict)
+    partial: dict[str, str] = field(default_factory=dict)
+    scanners_run: int = 0
+
+    def coverage_lines(self) -> list[str]:
+        """What a report must say about the checks that did not fully run."""
+        lines: list[str] = []
+        if self.errors:
+            lines.append(
+                f"{len(self.errors)} of {self.scanners_run} checks could not run, so "
+                "their savings are not in this report: "
+                + "; ".join(f"{n} ({self.error_reasons.get(n, 'no result')})"
+                            for n in self.errors))
+        if self.partial:
+            lines.append(
+                "Checks that ran with some reads failed, so they may be missing "
+                "findings: " + "; ".join(f"{n} ({why})" for n, why in self.partial.items()))
+        return lines
 
 
 def _call(name, fn, **kwargs):
-    try:
-        res = asyncio.run(fn(**kwargs)) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
-        return name, res
-    except Exception as exc:
-        log.warning("audit scanner %s failed: %s", name, exc)
-        return name, None
+    """Run one scanner. Returns (name, result, error, reads): the AWS reads it
+    made are recorded, because most scanners swallow a failed region and return
+    an empty result that is otherwise indistinguishable from a clean one."""
+    from ..aws_read_failures import carry_into_default_executor, watching
+
+    async def _on_this_loop():
+        carry_into_default_executor(asyncio.get_running_loop())
+        return await fn(**kwargs)
+
+    with watching() as reads:
+        try:
+            res = asyncio.run(_on_this_loop()) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
+            return name, res, None, reads
+        except Exception as exc:
+            log.warning("audit scanner %s failed: %s", name, exc)
+            return name, None, f"{type(exc).__name__}: {exc}", reads
+
+
+def _declared_failure(data) -> str | None:
+    """A scanner result that says itself that it could not run."""
+    if isinstance(data, dict):
+        if data.get("error"):
+            return str(data["error"])
+        if data.get("data_incomplete"):
+            return "data incomplete"
+        if data.get("status") == "not_evaluated":
+            return str(data.get("message") or "not evaluated")
+    recs = getattr(data, "recommendations", None)
+    if isinstance(recs, list) and any(
+            isinstance(r, dict) and r.get("type") == "coverage_unavailable" for r in recs):
+        return "commitment coverage could not be read"
+    return None
 
 
 def build_specs(aws: Any, regions: list[str] | None) -> list[tuple[str, Any, dict]]:
@@ -170,8 +216,11 @@ def normalise(name, data) -> list[dict]:
                 s = r.get("monthly_savings", 0) or 0
                 if s > 0 and r.get("recommendation") == "RECOMMENDED":
                     out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"{r.get('savings_pct',0)*100:.0f}% saving"})
-        elif name == "cw_cardinality" and isinstance(data, list):
-            for r in data:
+        elif name == "cw_cardinality":
+            # The scanner returns a dict; reading only a list dropped every
+            # finding it made from the sweep.
+            items = data.get("high_cardinality_namespaces", []) if isinstance(data, dict) else data
+            for r in items if isinstance(items, list) else []:
                 s = r.get("estimated_monthly_cost", 0) or 0
                 if s > 0:
                     out.append({"title": f"Reduce CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": s, "category": "Observability", "detail": f"{r.get('metric_count',0)} metrics"})
@@ -180,10 +229,13 @@ def normalise(name, data) -> list[dict]:
             total = sum(r.get("monthly_cost", 0) for r in items)
             if total > 0:
                 out.append({"title": f"Delete {len(items)} orphaned CloudWatch alarm(s)", "monthly_savings": total, "category": "Observability", "detail": f"${total:.2f}/mo"})
-        elif name == "cw_logs_ia" and isinstance(data, list):
-            total = sum(r.get("monthly_savings", 0) for r in data)
+        elif name == "cw_logs_ia":
+            # Same as cw_cardinality: the scanner returns a dict of candidates.
+            items = data.get("candidates", []) if isinstance(data, dict) else data
+            items = items if isinstance(items, list) else []
+            total = sum(r.get("monthly_savings", 0) or 0 for r in items)
             if total > 0:
-                out.append({"title": f"Move {len(data)} log group(s) to Infrequent Access", "monthly_savings": total, "category": "Observability", "detail": "50% ingestion cost reduction"})
+                out.append({"title": f"Move {len(items)} log group(s) to Infrequent Access", "monthly_savings": total, "category": "Observability", "detail": "50% ingestion cost reduction"})
         elif name == "snapstart" and isinstance(data, list):
             total = sum(r.get("monthly_pc_cost", 0) for r in data if r.get("recommendation") == "ENABLE_SNAPSTART_REPLACE_PC")
             if total > 0:
@@ -345,12 +397,20 @@ async def sweep(
         log.warning("cost sweep hit the %ss deadline; returning early", deadline_s)
         return SweepResult(timed_out=True)
 
-    out = SweepResult()
-    for name, data in results:
-        if data is None:
+    out = SweepResult(scanners_run=len(results))
+    for name, data, err, reads in results:
+        found = normalise(name, data) if data is not None else []
+        why = err or _declared_failure(data)
+        if why is None and not found and reads.nothing_read:
+            # Nothing found, and every read it made failed: it did not look.
+            why = reads.sentence()
+        if why is not None and not found:
             out.errors.append(name)
+            out.error_reasons[name] = why
             continue
-        for f in normalise(name, data):
+        if reads.failed:
+            out.partial[name] = reads.sentence()
+        for f in found:
             f["source"] = SOURCE_MAP.get(name, name)
             out.findings.append(f)
 

@@ -740,6 +740,13 @@ async def export_cost_report_csv(
         return ("The scan took unusually long (a region or API may be slow). Try again, "
                 "or pass a specific region.")
     findings = result.findings
+    coverage = result.coverage_lines()
+    if not findings and result.errors and len(result.errors) == result.scanners_run:
+        # A file reading "Total monthly saving $0.00" for a sweep none of whose
+        # checks could read is a clean bill nobody earned. Write nothing. When
+        # only some could not run, the file is written and says which.
+        return ("No report was written: the checks could not read the account. "
+                + " ".join(coverage))
     # Slice first, then collapse. Collapsing the whole list first would let one
     # resource's folded-away alternatives push real findings off the end of the
     # export, so the file would be short by however many duplicates existed.
@@ -771,6 +778,8 @@ async def export_cost_report_csv(
         writer.writerow(["Total monthly saving", f"${total_monthly:,.2f}"])
         writer.writerow(["Total annual saving", f"${total_annual:,.2f}"])
         writer.writerow(["Opportunities found", len(top)])
+        for line in coverage:
+            writer.writerow(["Incomplete", line])
         writer.writerow([])
 
         # Column headers
@@ -799,6 +808,8 @@ async def export_cost_report_csv(
     if collapsed:
         note = (f" {collapsed} alternative fix(es) on the same resources are excluded from "
                 f"the total: you can bank one fix per resource, not all of them.")
+    if coverage:
+        note += " Incomplete: " + " ".join(coverage)
     return (
         f"Exported {len(top)} opportunities to {dest}. "
         f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note}"
@@ -966,6 +977,9 @@ async def publish_cost_report_to_notion(
     top_findings, collapsed = collapse_per_resource(findings[:20])
 
     if not top_findings:
+        if result.errors or result.partial:
+            return ("Nothing was published: no findings, and not every check could read "
+                    "the account. " + " ".join(result.coverage_lines()))
         return "No savings opportunities found, nothing to publish."
 
     # `or 0`: the critique sets monthly_savings to None on a retracted claim.

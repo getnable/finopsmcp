@@ -456,6 +456,30 @@ _EXTRA_TOOLS = {
 _REGISTER_EXTRAS = os.getenv("FINOPS_ALL_TOOLS", "").strip().lower() in ("1", "true", "yes")
 
 
+from . import aws_read_failures as _aws_reads
+
+_aws_reads.install()
+
+
+def _label_failed_reads(result, reads):
+    """Attach what failed to a tool's answer. A refusal ("error") already says
+    it read nothing and is left alone; everything else carries the label, so a
+    "none found" or "$0.00" built on denied reads cannot pass as a result."""
+    note = reads.sentence()
+    if isinstance(result, dict):
+        if "error" in result:
+            return result
+        result.setdefault("aws_reads_failed", {**reads.summary(), "note": note})
+        if reads.nothing_read:
+            result.setdefault("status", "not_evaluated")
+        else:
+            result.setdefault("partial", True)
+        return result
+    if isinstance(result, str):
+        return f"{result}\n\n**AWS reads failed:** {note}"
+    return result
+
+
 def _instrumented_tool(*dargs, **dkwargs):
     """Thin shim around mcp.tool() that injects telemetry into the registered fn."""
     decorator = _original_mcp_tool(*dargs, **dkwargs)
@@ -551,15 +575,17 @@ def _instrumented_tool(*dargs, **dkwargs):
                 # Only await coroutines/awaitables, otherwise sync tools
                 # (whoami, *_api_key) raise "object dict can't be used in
                 # 'await' expression".
-                if _demo is not None:
-                    result = _demo
-                elif _is_coroutine_tool:
-                    result = await fn(*args, **kwargs)
-                else:
-                    global _TOOL_LOOP
-                    _TOOL_LOOP = asyncio.get_running_loop()
-                    _ret = await asyncio.to_thread(fn, *args, **kwargs)
-                    result = await _ret if _inspect.isawaitable(_ret) else _ret
+                _aws_reads.carry_into_default_executor(asyncio.get_running_loop())
+                with _aws_reads.watching() as _reads:
+                    if _demo is not None:
+                        result = _demo
+                    elif _is_coroutine_tool:
+                        result = await fn(*args, **kwargs)
+                    else:
+                        global _TOOL_LOOP
+                        _TOOL_LOOP = asyncio.get_running_loop()
+                        _ret = await asyncio.to_thread(fn, *args, **kwargs)
+                        result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
                 _duration = int((_time.monotonic() - _t0) * 1000)
                 _audit.log_tool_call(
@@ -570,6 +596,11 @@ def _instrumented_tool(*dargs, **dkwargs):
                 )
                 raise
             _duration = int((_time.monotonic() - _t0) * 1000)
+            # AWS reads that failed inside this call, whatever the tool did with
+            # them. A scanner that swallowed AccessDenied in every region used to
+            # answer "none found"; the answer now says the reads failed.
+            if _reads.failed:
+                result = _label_failed_reads(result, _reads)
             # An in-chat connect is the way out of demo. Say which side of the
             # line the session is on now, so the model never presents the sample
             # as the user's account or the user's account as the sample.

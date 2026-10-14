@@ -76,6 +76,44 @@ def connectors_fixture(monkeypatch, tmp_path):
     cache.clear()
 
 
+def aws_answers(monkeypatch, code: str = "AccessDeniedException", *, status: int = 400,
+                allow=("sts:GetCallerIdentity",)):
+    """Make every real botocore client answer every call with `code`, the way
+    botocore's own Stubber does: a before-call handler returns the response, so
+    nothing is signed and nothing reaches the network, and the rest of
+    botocore's call path (after-call, the raised ClientError) is the real one.
+    Calls named in `allow` answer successfully with a fixed identity."""
+    import boto3
+    from botocore import handlers
+    from botocore.awsrequest import AWSResponse
+
+    try:
+        from finops.aws_read_failures import install
+    except ImportError:  # an older tree: the canned answers still work
+        install = None
+    if install is not None:
+        install()   # what finops.server does at import; the copy below must carry it
+
+    def _before_call(model=None, **kw):
+        op = f"{model.service_model.endpoint_prefix}:{model.name}"
+        if op in allow:
+            return AWSResponse(None, 200, {}, None), {
+                "Account": "111122223333", "Arn": "arn:aws:iam::111122223333:user/t",
+                "UserId": "AIDATEST", "ResponseMetadata": {"HTTPStatusCode": 200}}
+        return AWSResponse(None, status, {}, None), {
+            "Error": {"Code": code, "Message": f"{op} answered {code}"},
+            "ResponseMetadata": {"HTTPStatusCode": status}}
+
+    monkeypatch.setattr(handlers, "BUILTIN_HANDLERS",
+                        [*handlers.BUILTIN_HANDLERS, ("before-call", _before_call)])
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    # Placeholders so botocore builds a client; nothing is ever signed with them.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
 def call(name: str, args: dict | None = None, identity=None):
     """One tool call through the in-memory MCP client. JSON answers come back
     decoded, text answers as text. `identity` is the API key identity the

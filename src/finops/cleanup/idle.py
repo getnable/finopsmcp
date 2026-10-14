@@ -27,6 +27,7 @@ from ..aws_prices import ALB_PER_MONTH as _ALB_PER_MONTH
 from ..aws_prices import EBS_SNAPSHOT_PER_GB_MONTH as _SNAPSHOT_PER_GB_MONTH
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH as _EIP_PER_MONTH
 from ..aws_prices import ebs_volume_monthly
+from ..aws_read_failures import carry
 
 
 @dataclass
@@ -351,7 +352,7 @@ def _scan_idle_load_balancers(
 
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            checked = list(pool.map(_healthy_targets, lbs))
+            checked = list(pool.map(carry(_healthy_targets), lbs))
 
         for lb, healthy in checked:
             if healthy > 0:
@@ -450,7 +451,7 @@ def scan_idle_resources(
     # releases the GIL, so threads give a real speedup here.
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(regions), 12) or 1) as pool:
-        for sub in pool.map(_scan_region, regions):
+        for sub in pool.map(carry(_scan_region), regions):
             results.extend(sub)
 
     results.sort(key=lambda r: r.monthly_cost_usd, reverse=True)

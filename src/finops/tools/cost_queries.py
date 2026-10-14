@@ -1931,9 +1931,21 @@ async def run_full_cost_audit(
     learned_note = result.learned_note
 
     top = findings[:top_n]
+    coverage = result.coverage_lines()
 
     if not top:
-        return "No savings opportunities found. Your infrastructure looks well-optimized, or no AWS account is connected."
+        if result.errors or result.partial:
+            # Checks that could not read are not checks that found nothing. With
+            # every AWS call denied this said "Your infrastructure looks
+            # well-optimized".
+            return "\n\n".join([
+                "## Cost Audit: incomplete, no findings from the checks that ran",
+                *coverage,
+                ("This is not a finding that the account is optimized: the checks above "
+                 "did not look. Fix the access they name and run the audit again."),
+            ])
+        return ("No savings opportunities found by any of the "
+                f"{result.scanners_run} checks, and none of them reported a failed read.")
 
     # A finding the critique retracted carries None, not a number, and it must not
     # be counted toward a total we are asking someone to believe. `or 0` keeps it
@@ -2007,8 +2019,11 @@ async def run_full_cost_audit(
     lines.append("- `push to n8n`, trigger your automation workflow")
     lines.append("- `tell me more about #1`, deep dive on the top opportunity")
 
-    if errors:
-        lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
+    if errors or result.partial:
+        # Said "no data or not configured" whatever the reason, including a
+        # denied read, and only for scanners that raised.
+        lines.append("")
+        lines.extend(f"*{line}*" for line in coverage)
 
     body = "\n".join(lines)
     # Make the token cost visible against the savings found. Under our pricing,
