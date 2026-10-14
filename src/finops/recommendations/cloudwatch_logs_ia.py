@@ -2,8 +2,8 @@
 CloudWatch Logs Infrequent Access (IA) class migration audit.
 
 CloudWatch Logs IA costs 50% less for ingestion:
-  Standard:           $0.075/GB ingested
-  Infrequent Access:  $0.0375/GB ingested
+  Standard:           $0.50/GB ingested (us-east-1 list)
+  Infrequent Access:  $0.25/GB ingested
 
 Log groups that are STANDARD class, older than 30 days, and ingesting >1 GB/month
 are candidates for migration to IA class.
@@ -83,10 +83,12 @@ def _get_incoming_bytes_gb(
     cw: Any,
     log_group_name: str,
     lookback_days: int = _LOOKBACK_DAYS,
-) -> float:
+) -> float | None:
     """
     Fetch total IncomingBytes for the log group over the last lookback_days.
-    Returns the value in GB.
+    Returns the value in GB, or None when the read failed: a denied or
+    throttled read used to return 0.0, which fell under the ingestion
+    threshold and dropped the group as if measured.
     """
     now = datetime.now(tz=timezone.utc)
     start = now - timedelta(days=lookback_days)
@@ -107,7 +109,7 @@ def _get_incoming_bytes_gb(
         return total_bytes / _BYTES_PER_GB
     except Exception as exc:
         log.debug("get_metric_statistics (IncomingBytes) failed for %s: %s", log_group_name, exc)
-        return 0.0
+        return None
 
 
 def _group_age_days(log_group: dict, now: datetime) -> int:
@@ -126,7 +128,9 @@ def _build_recommendation(log_group_name: str, monthly_savings: float) -> str:
         f"subscription filters first. The log class is set at creation and cannot "
         f"be changed in place: create a replacement and repoint producers, e.g. "
         f"aws logs create-log-group --log-group-name '{log_group_name}-ia' "
-        f"--log-group-class INFREQUENT_ACCESS, then delete the old group."
+        f"--log-group-class INFREQUENT_ACCESS. Keep the old group until its stored "
+        f"logs pass your retention need (set a retention on it); deleting a group "
+        f"deletes every log it holds."
     )
 
 
@@ -138,6 +142,7 @@ def _audit_region(session_or_none: Any, region: str) -> dict:
 
     groups = _list_log_groups(logs)
     candidates: list[dict] = []
+    not_assessed = 0
 
     for group in groups:
         storage_class = group.get("logGroupClass", "STANDARD")
@@ -156,6 +161,9 @@ def _audit_region(session_or_none: Any, region: str) -> dict:
         retention_days = group.get("retentionInDays")  # None means infinite
 
         monthly_ingestion_gb = _get_incoming_bytes_gb(cw, log_group_name, _LOOKBACK_DAYS)
+        if monthly_ingestion_gb is None:
+            not_assessed += 1
+            continue
 
         if monthly_ingestion_gb < _MIN_INGESTION_GB:
             continue
@@ -182,6 +190,7 @@ def _audit_region(session_or_none: Any, region: str) -> dict:
     return {
         "region": region,
         "total_groups_scanned": len(groups),
+        "groups_not_assessed": not_assessed,
         "candidates": candidates,
     }
 
@@ -193,7 +202,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
     """
     Identify CloudWatch Log groups that can be migrated to Infrequent Access class.
 
-    IA class cuts ingestion cost by 50% ($0.075 -> $0.0375/GB). Flags STANDARD
+    IA class cuts ingestion cost by 50% ($0.50 -> $0.25/GB, us-east-1). Flags STANDARD
     class groups older than 30 days with >1 GB/month ingestion.
 
     Limitations of IA: no metric filters, no subscription filters, no live tail.
@@ -237,6 +246,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
     all_candidates: list[dict] = []
     by_region: dict[str, dict] = {}
     grand_total_groups = 0
+    grand_not_assessed = 0
 
     for result in region_results:
         if isinstance(result, Exception):
@@ -245,9 +255,11 @@ async def audit_cloudwatch_logs_ia_opportunities(
         region_name = result["region"]
         candidates = result["candidates"]
         grand_total_groups += result["total_groups_scanned"]
+        grand_not_assessed += result.get("groups_not_assessed", 0)
         region_savings = sum(c["monthly_savings"] for c in candidates)
         by_region[region_name] = {
             "groups_scanned": result["total_groups_scanned"],
+            "groups_not_assessed": result.get("groups_not_assessed", 0),
             "candidates_count": len(candidates),
             "monthly_savings": round(region_savings, 4),
         }
@@ -317,6 +329,8 @@ async def audit_cloudwatch_logs_ia_opportunities(
 
     return {
         "total_groups_scanned": grand_total_groups,
+        # Groups whose IncomingBytes could not be read: not assessed, not low.
+        "groups_not_assessed": grand_not_assessed,
         "total_candidates": len(all_candidates),
         "total_monthly_savings": total_savings,
         "candidates": all_candidates,

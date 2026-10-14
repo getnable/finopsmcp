@@ -2098,7 +2098,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
 ) -> str:
     """
     Finds CloudWatch Log groups to migrate to Infrequent Access class. IA cuts
-    ingestion cost 50% ($0.075 to $0.0375/GB). Candidates: groups older than
+    ingestion cost 50% ($0.50 to $0.25/GB, us-east-1 list). Candidates: groups older than
     30 days with >1 GB/month still on STANDARD. Note: IA does not support
     metric filters or subscription filters.
 
