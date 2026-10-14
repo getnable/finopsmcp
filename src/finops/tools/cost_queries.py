@@ -1909,6 +1909,12 @@ async def run_full_cost_audit(
 
     total_monthly = sum(f.get("monthly_savings") or 0 for f in top)
     total_annual = total_monthly * 12
+    # The headline covers the rows shown. Say what the rest is worth, on the same
+    # one-fix-per-resource basis, so it is not read as the whole sweep (the CSV
+    # export of "these results" lists up to 50 and totalled a larger figure).
+    everything, _ = _collapse_per_resource(findings)
+    rest_rows = len(everything) - len(top)
+    rest_usd = max(0.0, sum(f.get("monthly_savings") or 0 for f in everything) - total_monthly)
 
     def _savings_cell(f: dict) -> str:
         """The dollar figure, or the band when the claim did not survive review."""
@@ -1935,7 +1941,9 @@ async def run_full_cost_audit(
 
     lines = [
         f"## Cost Audit, Top {len(top)} Opportunities",
-        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}**"
+        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}** (the {len(top)} shown)"
+        + (f"  \n*{rest_rows} more opportunit{'ies' if rest_rows != 1 else 'y'} worth ${rest_usd:,.2f}/mo "
+           f"are not shown (raise top_n, or export to CSV).*" if rest_rows > 0 else "")
         + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else ""),
         "",
     ]

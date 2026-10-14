@@ -214,6 +214,25 @@ def test_the_notion_report_renders_a_finding_without_a_figure():
     assert "needs confirming" in cells[1][2] and "$" not in cells[1][3], cells
 
 
+def test_the_audit_headline_says_what_the_rows_it_does_not_show_are_worth(monkeypatch):
+    """The audit's "Estimated monthly saving" summed the top 10 rows only; the
+    CSV export it offers next sums up to 50 under "Total monthly saving". On 15
+    findings of $100 the audit read $1,000.00 and the export $1,500.00 for the
+    same sweep, with nothing on the audit to say $500 more existed."""
+    _audit_env(monkeypatch)
+
+    def _graviton(**kw):
+        return [{"instance_id": f"i-{i:02d}", "instance_type": "m5.large",
+                 "graviton_equivalent": "m6g.large", "savings_estimate": 100.0,
+                 "region": "us-east-1"} for i in range(15)]
+
+    monkeypatch.setattr(sweep_mod, "build_specs", lambda aws, regions: [
+        ("graviton", _graviton, {})])
+    out = asyncio.run(server.run_full_cost_audit())
+    assert "Estimated monthly saving: $1,000.00" in out, out
+    assert "5 more opportunities worth $500.00/mo" in out, out
+
+
 # ── 3. a commitment sized on spend another fix removes ───────────────────────
 
 def _dbsp(**kw):
