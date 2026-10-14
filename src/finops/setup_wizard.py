@@ -3658,20 +3658,27 @@ def _cannot_write_message(e: OSError) -> str:
     return "\n".join(lines)
 
 
+def _explains_refusals(fn):
+    """The CLI's entry: a file system refusal ends in what it means and how
+    to fix it rather than a traceback; FINOPS_DEBUG=1 keeps the traceback.
+    A decorator, so `main` stays the function the CLI's own tests read."""
+    import functools
+
+    @functools.wraps(fn)
+    def run(args: list[str] | None = None) -> None:
+        try:
+            fn(args)
+        except Exception as e:
+            refusal = _as_refusal(e)
+            if refusal is None or os.environ.get("FINOPS_DEBUG") == "1":
+                raise
+            print(_cannot_write_message(refusal), file=sys.stderr)
+            raise SystemExit(1) from None
+    return run
+
+
+@_explains_refusals
 def main(args: list[str] | None = None) -> None:
-    """The CLI. A file system refusal ends in what it means and how to fix
-    it rather than a traceback; FINOPS_DEBUG=1 keeps the traceback."""
-    try:
-        _main(args)
-    except Exception as e:
-        refusal = _as_refusal(e)
-        if refusal is None or os.environ.get("FINOPS_DEBUG") == "1":
-            raise
-        print(_cannot_write_message(refusal), file=sys.stderr)
-        raise SystemExit(1) from None
-
-
-def _main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
         args = _sys.argv[1:]

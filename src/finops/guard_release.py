@@ -24,7 +24,8 @@ A release that cannot be told either way (no uvx, a timeout, air-gapped)
 reads as no problem: this reports what uvx said, never a guess. Answers are
 kept for the life of the process. FINOPS_GUARD_RELEASE_CHECK=0 turns the
 check off (the suite sets it, and replaces _probe_override, so tests never
-run uvx or reach an index: tests/conftest.py).
+run uvx or reach an index: tests/conftest.py). uvx runs with a fixed
+argument list and no shell.
 """
 from __future__ import annotations
 
@@ -32,7 +33,6 @@ import json
 import os
 import re
 import shutil
-# Runs uvx with a fixed argument list and no shell.
 import subprocess  # nosec B404
 from collections.abc import Callable
 from pathlib import Path
