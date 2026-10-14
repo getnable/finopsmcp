@@ -209,6 +209,13 @@ def test_setup_slack_bot_does_not_send_people_to_a_command_that_is_not_here(
     assert "finops-slack" not in out and "self-hosted" in out
 
 
+def test_license_status_has_no_escape_codes_in_a_pipe(tmp_path):
+    """`nable license-status | cat` printed "Plan:    \\x1b[33mPro trial\\x1b[0m"."""
+    r = _cli(["license-status"], tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "Plan:" in r.stdout and "\x1b[" not in r.stdout
+
+
 # ── nable brief with no usable AWS credentials ────────────────────────────────
 
 def _unreadable_audit(code: str, seen: dict):

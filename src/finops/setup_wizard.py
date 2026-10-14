@@ -4682,7 +4682,10 @@ def _run_license_status() -> None:
     color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
              "free": "90", "invalid": "31"}.get(status.mode)
     label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
-    mode_display = f"\033[{color}m{label}\033[0m" if color else label
+    # welcome._c colours only on a terminal (and honours NO_COLOR), so a pipe
+    # or a log gets the plain word.
+    from .welcome import _c
+    mode_display = _c(color, label) if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
