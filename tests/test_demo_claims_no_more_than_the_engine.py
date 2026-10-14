@@ -37,6 +37,27 @@ def test_each_scan_demo_line_is_at_most_what_the_engine_would_price_it_at():
     assert report["total_estimated_monthly_savings"] == round(sum(lines.values()), 2)
 
 
+def test_the_scan_demo_counts_as_recoverable_only_what_the_engine_would():
+    """A real scan counts as recoverable only what the audit measured
+    (analyzers/waste_evidence): old snapshots (old_unmanaged_snapshot) and
+    instances judged on CPU alone (idle_ec2_low_cpu) are investigations, shown
+    to confirm. The sample counted its 1,900 old snapshots and its 9 low-CPU
+    instances as recoverable."""
+    from finops.analyzers.waste_evidence import spec_for
+    from finops.recommendations.envelope import INFERRED
+
+    lines, report = _scan_lines()
+    by_type = {f["waste_type"]: f for f in report["findings"]}
+    assert spec_for("old_unmanaged_snapshot").evidence == INFERRED
+    assert spec_for("idle_ec2_low_cpu").evidence == INFERRED
+    for wt in ("old_snapshots", "oversized_ec2"):
+        assert by_type[wt].get("kind") == "investigation", by_type[wt]
+    measured, to_confirm, n = cli_scan._recoverable_split(report)
+    assert n == 2
+    assert to_confirm == round(lines["old_snapshots"] + lines["oversized_ec2"], 2)
+    assert measured == round(report["total_estimated_monthly_savings"] - to_confirm, 2)
+
+
 def test_landed_savings_are_not_also_open_potential():
     d = demo_data.dashboard_data()
     landed = {v["resource"] for v in d["verified_savings"]["ledger"]}

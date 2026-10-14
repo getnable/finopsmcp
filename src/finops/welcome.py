@@ -437,9 +437,11 @@ def _free_scan_value_moment() -> bool:
     report = _run_capped(_free_waste_scan, _FREE_SCAN_DEADLINE + 15)
     if not isinstance(report, dict) or report.get("error") or not report.get("checks_run"):
         return False
-    from .cli_scan import _group_findings
+    from .cli_scan import _group_findings, _recoverable_split
 
-    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    # What the audit measured, as `nable scan` and `nable brief` count it; the
+    # findings it files as inferences are shown beside it, to confirm.
+    recoverable, to_confirm, _n = _recoverable_split(report)
     findings = report.get("findings") or []
     regions = report.get("regions_scanned") or []
     _blank()
@@ -450,6 +452,9 @@ def _free_scan_value_moment() -> bool:
     _line(f"  {dim('Recoverable')}      {amber('$' + format(recoverable, ',.2f') + '/mo')}  "
           + dim(f"{len(findings)} finding{'s' if len(findings) != 1 else ''} across "
                 f"{len(regions)} region{'s' if len(regions) != 1 else ''}"))
+    if to_confirm > 0:
+        _line(f"  {dim('To confirm')}       {'$' + format(to_confirm, ',.2f') + '/mo to confirm'}  "
+              + dim("rests on an inference; not counted as recoverable"))
     groups = _group_findings(findings)
     if groups:
         g = groups[0]
