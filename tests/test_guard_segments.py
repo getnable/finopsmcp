@@ -53,8 +53,8 @@ def test_no_change_is_not_a_door(cmd):
 @pytest.mark.parametrize("cmd", [
     # The real command after the dry run, in the same line or a nested shell.
     "kubectl delete ns x --dry-run=client && kubectl delete ns x",
-    "aws ec2 terminate-instances --dry-run --instance-ids i-1; "
-    "aws ec2 terminate-instances --instance-ids i-1",
+    ("aws ec2 terminate-instances --dry-run --instance-ids i-1; "
+    "aws ec2 terminate-instances --instance-ids i-1"),
     "bash -c 'kubectl delete ns x --dry-run=client; kubectl delete ns x'",
     "bash -c 'kubectl auth can-i list pods; kubectl delete ns x'",
     # A dry run switched off again, or a flag that is an argument after `--`.

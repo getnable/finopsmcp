@@ -14,8 +14,8 @@ import finops.guard as g
 
 
 @pytest.mark.parametrize("cmd,want", [
-    ("docker run --rm -v ~/.aws:/root/.aws amazon/aws-cli ec2 terminate-instances "
-     "--instance-ids i-1", ("one_way", "terminate_instance")),
+    (("docker run --rm -v ~/.aws:/root/.aws amazon/aws-cli ec2 terminate-instances "
+     "--instance-ids i-1"), ("one_way", "terminate_instance")),
     ("docker run --rm public.ecr.aws/aws-cli/aws-cli:2.17.0 s3 rb s3://old --force",
      ("one_way", "delete_resource")),
     ("docker run --rm -v $PWD:/w -w /w hashicorp/terraform:1.9 destroy -auto-approve",

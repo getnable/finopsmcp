@@ -27,8 +27,8 @@ def _clean(monkeypatch, tmp_path):
 @pytest.mark.parametrize("cmd,price_list_hourly,sku", [
     ("aws ec2 run-instances --region sa-east-1 --instance-type c5.4xlarge --image-id ami-1",
      1.048, "S8SHPWRKY2EMQG6C"),
-    ("aws --region ap-northeast-1 ec2 run-instances --instance-type p4d.24xlarge "
-     "--image-id ami-1", 30.09784, "CASSTWDHBMWC5PPU"),
+    (("aws --region ap-northeast-1 ec2 run-instances --instance-type p4d.24xlarge "
+     "--image-id ami-1"), 30.09784, "CASSTWDHBMWC5PPU"),
     ("AWS_REGION=eu-west-1 aws ec2 run-instances --instance-type m5.4xlarge --image-id ami-1",
      0.856, "HUR96BZEUM9ZQAKA"),
     ("aws ec2 run-instances --region sa-east-1 --instance-type g5.xlarge --image-id ami-1",
@@ -64,8 +64,8 @@ def test_a_region_cheaper_or_unknown_keeps_the_us_east_1_figure(region, says):
 def test_no_region_or_two_regions_is_us_east_1_as_before():
     for cmd in ("aws ec2 run-instances --instance-type m5.4xlarge --image-id ami-1",
                 "aws ec2 run-instances --region us-west-2 --instance-type m5.4xlarge",
-                "aws ec2 run-instances --region sa-east-1 --instance-type m5.4xlarge "
+                ("aws ec2 run-instances --region sa-east-1 --instance-type m5.4xlarge "
                 "--image-id ami-1 && aws ec2 run-instances --region eu-west-1 "
-                "--instance-type m5.4xlarge --image-id ami-1"):
+                "--instance-type m5.4xlarge --image-id ami-1")):
         est = g.estimate_command_monthly_cost(cmd)
         assert "region" not in est and "the least" not in est["basis"]

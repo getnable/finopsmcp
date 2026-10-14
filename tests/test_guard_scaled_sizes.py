@@ -31,10 +31,10 @@ def _clean(monkeypatch, tmp_path):
      "BQE6XQ9SJ9ZWTHDX"),
     ("aws ec2 run-instances --instance-type r6i.16xlarge --count 2 --image-id ami-1",
      2 * 4.032, "J4EBNS2ZR7N8TB8T"),
-    ("aws rds create-db-instance --db-instance-identifier big --db-instance-class "
-     "db.r6g.8xlarge --engine mysql", 3.437, "JEUU8MQD5B9QGEDC"),
-    ("aws rds create-db-instance --db-instance-identifier big --db-instance-class "
-     "db.r6i.32xlarge --engine postgres", 16.0, "HP9TE3NZ64XQ65FH"),
+    (("aws rds create-db-instance --db-instance-identifier big --db-instance-class "
+     "db.r6g.8xlarge --engine mysql"), 3.437, "JEUU8MQD5B9QGEDC"),
+    (("aws rds create-db-instance --db-instance-identifier big --db-instance-class "
+     "db.r6i.32xlarge --engine postgres"), 16.0, "HP9TE3NZ64XQ65FH"),
 ])
 def test_an_unlisted_size_is_priced_at_its_list_rate(cmd, hourly, sku):
     est = g.estimate_command_monthly_cost(cmd)

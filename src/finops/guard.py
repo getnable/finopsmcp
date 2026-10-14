@@ -229,8 +229,8 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # The other ways to change a workload in place, which the MCP side
     # (kubectl_patch, kubectl_rollout) already counted: a new image, an
     # environment change, a restart, a rollback.
-    (rf"\bkubectl\s+(?:\S+\s+)*(?:set\s+(?:image|env|resources)|"
-     rf"rollout\s+(?:restart|undo|resume)){_END}", "infra_apply"),
+    ((rf"\bkubectl\s+(?:\S+\s+)*(?:set\s+(?:image|env|resources)|"
+      rf"rollout\s+(?:restart|undo|resume)){_END}"), "infra_apply"),
     # The IaC tools' own apply verbs: `terraform apply` in production asked
     # and `pulumi up --stack prod`, `cdk deploy` and `sam deploy` did not.
     (rf"\bpulumi\s+(?:\S+\s+)*(?:up|update){_END}", "infra_apply"),
@@ -776,7 +776,7 @@ class _Segments:
     ends (a break belongs to the next one), and which run nothing (_inert),
     each looked up once."""
 
-    __slots__ = ("cmd", "starts", "ends", "_inert")
+    __slots__ = ("_inert", "cmd", "ends", "starts")
 
     def __init__(self, cmd: str) -> None:
         self.cmd = cmd
