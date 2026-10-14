@@ -201,6 +201,26 @@ def test_the_if_you_bought_more_projection_adds_up(monkeypatch):
     assert covered == 5000.0
 
 
+def test_a_savings_plan_sized_from_monthly_totals_says_so():
+    """A Savings Plan commitment is per hour; the sizing reads three monthly
+    totals. A workload that runs 12 hours a day at 2.00 an hour on demand is
+    730 a month. The plan sized to it commits 0.729 an hour (532.17 a month):
+    in the 12 busy hours it covers 1.00 of the 2.00, and in the 12 idle ones
+    it is paid for and unused, so the month costs 532.17 + 365 = 897.17
+    against 730 on demand, while the recommendation promised 197.83 saved.
+    The claim that a quiet month "never" over-commits, and a "high"
+    confidence earned by dollar size alone, said more than three monthly
+    totals can show."""
+    from finops.recommendations.commitments import _build_recommendations
+
+    recs = _build_recommendations(10.0, 21900.0, 0.0, 0.0,
+                                  monthly_uncovered_series=[7300.0, 7300.0, 7300.0])
+    [sp] = [r for r in recs if r["type"] == "savings_plan"]
+    assert sp["confidence"] == "medium"
+    assert sp["sizing_granularity"] == "monthly"
+    assert "hourly" in sp["description"] and "never" not in sp["description"]
+
+
 def test_the_commitment_gap_ticket_uses_the_same_rate():
     from finops.integrations.ticketing import _commitment_gap_ticket
 
