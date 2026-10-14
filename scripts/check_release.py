@@ -31,7 +31,7 @@ import argparse
 import json
 import os
 import re
-import subprocess  # nosec B404 - fixed git argv, no shell
+import subprocess  # nosec B404
 import sys
 import time
 import tomllib
@@ -100,7 +100,7 @@ def on_pypi(version: str, timeout: float = 15.0) -> bool | None:
     url = f"https://pypi.org/pypi/{PACKAGE}/{version}/json"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310 - fixed https URL
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # nosec B310
             return r.status == 200
     except urllib.error.HTTPError as e:
         return False if e.code == 404 else None
@@ -110,7 +110,8 @@ def on_pypi(version: str, timeout: float = 15.0) -> bool | None:
 
 def _git(root: Path, *args: str) -> str | None:
     try:
-        out = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+        # A fixed git argv and no shell.
+        out = subprocess.run(  # nosec B603 B607
             ["git", *args], cwd=root, capture_output=True, text=True, timeout=60, check=False)
     except (OSError, subprocess.SubprocessError):
         return None

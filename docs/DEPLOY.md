@@ -37,7 +37,7 @@ dashboard, see [getnable.com](https://getnable.com).
 
 ## Shared team mode: one Postgres
 
-Set `DATABASE_URL=postgresql://user:pass@host:5432/finops` on every machine
+Set `DATABASE_URL` to the same `postgresql://` connection URL on every machine
 (install `finops-mcp[postgres]` for the driver) and they share cost snapshots,
 budgets and history instead of each keeping a local SQLite file. Add
 `FINOPS_REQUIRE_AUTH=1` to enforce role-based access with API keys (viewer,
