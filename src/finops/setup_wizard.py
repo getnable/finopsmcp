@@ -27,6 +27,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 
 def _parse_combined_aws_paste(combined: str) -> tuple[str, str] | None:
@@ -3475,6 +3476,17 @@ def _guard_export(parsed) -> None:
         sys.stdout.write(body)
 
 
+# The exit status of a command whose feature is not in this package (`serve`,
+# the hosted dashboard; `credits`, managed-AI credits): 1, with the reason on
+# stderr and nothing on stdout. docs/HEADLESS.md documents it.
+EXIT_NOT_IN_THIS_PACKAGE = 1
+
+
+def _not_in_this_package(message: str) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(EXIT_NOT_IN_THIS_PACKAGE)
+
+
 def _run_credits(parsed) -> None:
     """`finops credits` - the box-side half of the hosting-credit purchase flow.
 
@@ -3487,11 +3499,12 @@ def _run_credits(parsed) -> None:
     try:
         from .billing import credits as _credits
     except ImportError:
-        print(
+        # The same answer as `serve`: nothing was shown or granted, so a
+        # script must not read this as a balance it can act on.
+        _not_in_this_package(
             "Managed-AI credits are a hosted/enterprise feature and aren't part of the\n"
             "open-source nable package. See https://getnable.com."
         )
-        return
     action = getattr(parsed, "action", "show")
     usd = getattr(parsed, "usd", None)
     if action == "grant":
@@ -4005,7 +4018,7 @@ def main(args: list[str] | None = None) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
-    cr_p = sub.add_parser("credits", help="Managed-AI credit balance for this instance (show / grant / budget)")
+    cr_p = sub.add_parser("credits", help="Managed-AI credit balance (hosted nable only; exits 1 here)")
     cr_p.add_argument("action", nargs="?", default="show", choices=["show", "grant", "budget"],
                       help="show = balance, grant = add a purchased top-up, budget = set the monthly allowance")
     cr_p.add_argument("usd", nargs="?", type=float, default=None, help="Dollar amount for grant/budget")
@@ -4033,11 +4046,12 @@ def main(args: list[str] | None = None) -> None:
 
     serve_p = sub.add_parser(
         "serve",
-        help="Start the web dashboard (hosted nable only; see --help)",
+        help="Start the web dashboard (hosted nable only; exits 1 here)",
         description=(
             "Start the team web dashboard. The dashboard, the scheduler that pushes "
             "digests on a timer and the two-way Slack bot are part of hosted nable, "
-            "not the open-source package: here this command says so and exits. The "
+            "not the open-source package: here this command says so on stderr and "
+            "exits 1. The "
             "open-source product is the MCP server in your editor; it sends reports "
             "and alerts to Slack or email when you ask (send_report_now, "
             "send_digest_now)."
@@ -4423,17 +4437,15 @@ def main(args: list[str] | None = None) -> None:
         try:
             from .server_web import run_server, set_connectors
         except ImportError:
-            # stderr and exit 1: nothing was served. This is the container
-            # image's default command, and exit 0 read as "finished cleanly" to
-            # `docker run`, to a supervisor and to any script that started it.
-            print(
+            # Nothing was served. This is the container image's default
+            # command, and exit 0 read as "finished cleanly" to `docker run`,
+            # to a supervisor and to any script that started it.
+            _not_in_this_package(
                 "The local web dashboard has been removed from the open-source nable package.\n"
                 "It's now a hosted/enterprise feature. The local product is the MCP server that\n"
                 "runs inside your editor (Claude, Cursor, etc.). For a hosted dashboard, see\n"
-                "https://getnable.com.",
-                file=sys.stderr,
+                "https://getnable.com."
             )
-            raise SystemExit(1) from None
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
         # canonical connector set. Without this the serve process ran with an empty

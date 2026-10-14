@@ -194,6 +194,22 @@ def test_aws_cur_and_infra_print_no_escape_codes_into_a_pipe(tmp_path):
         assert "\x1b[" not in r.stdout + r.stderr
 
 
+# ── credits: the other command whose feature is hosted ────────────────────────
+
+def test_credits_without_the_feature_fails_on_stderr_like_serve(tmp_path):
+    """`serve` exits 1 with its reason on stderr when the dashboard is not in
+    this package; `credits` said the same about managed-AI credits on stdout
+    and exited 0, as if it had shown a balance."""
+    import importlib.util
+    if importlib.util.find_spec("finops.billing") is not None:
+        import pytest
+        pytest.skip("managed-AI credits are installed here")
+    for argv in (("credits",), ("credits", "grant", "50")):
+        r = nable(tmp_path, *argv)
+        assert r.returncode == 1, argv
+        assert "hosted" in r.stderr and r.stdout.strip() == "", argv
+
+
 # ── a broken guard policy file ────────────────────────────────────────────────
 
 _BROKEN_POLICIES = {
