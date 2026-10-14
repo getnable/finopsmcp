@@ -1216,7 +1216,9 @@ async def scan_waste_patterns(
             result["owner"] = acct_owner.compact()
         result["note"] = (
             "Findings based on cost time-series only. "
-            "Connect EC2/RDS/Lambda metadata for higher-confidence results."
+            "Connect EC2/RDS/Lambda metadata for higher-confidence results. "
+            "Savings Plans coverage is not in the cost history, so no Savings Plan "
+            "saving is priced here: get_commitment_analysis reads coverage and prices one."
         )
         return result
     except Exception as e:

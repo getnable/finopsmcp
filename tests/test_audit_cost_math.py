@@ -562,10 +562,20 @@ def test_waste_patterns_fire_on_real_cost_explorer_service_names():
 
     assert "error" not in result, result
     fired = {f["pattern_id"] for f in result["findings"]}
-    assert "no-savings-plans" in fired, (
-        f"${EC2_PER_DAY * 30:,.0f}/mo of uncovered EC2 and the savings-plans "
-        f"pattern did not fire; patterns that did: {sorted(fired) or 'none at all'}")
+    assert fired, "no pattern resolved the Cost Explorer service name"
     assert result["total_monthly_waste"] > 0
+    # The savings-plans pattern finds this CE-named series, and prices it when
+    # coverage has been read: 0% read is 26% of $27,000, $7,020 a month. The
+    # cost history holds no coverage, so scan_waste_patterns does not price it
+    # (it used to call this account 0% covered without reading anything).
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+
+    series = {CE_EC2: [EC2_PER_DAY] * 90}
+    read = _check_savings_plans_coverage(PatternContext(
+        daily_costs=series, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 0.0}]))
+    assert read is not None and read.monthly_waste == pytest.approx(EC2_PER_DAY * 30 * 0.26)
+    assert "no-savings-plans" not in fired, (
+        "the savings-plans pattern priced coverage it never read")
 
 
 def _service_literals_in_patterns() -> set[str]:

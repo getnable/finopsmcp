@@ -576,14 +576,20 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
     if total < 200:
         return None
 
-    # Check if any savings plans coverage exists in the context
-    sp_coverage = 0.0
+    # The coverage the context carries, or None when it carries none. This
+    # defaulted to 0.0, and scan_waste_patterns builds its context from the
+    # daily cost history, which holds no coverage, so every account read as 0%
+    # covered and was priced 26% of all its compute, the part a plan already
+    # covers included. Coverage that was not read is not 0%: without it the
+    # saving is not priced here (get_commitment_analysis reads coverage and
+    # prices the plan). A 0% that was read is a real answer and is priced.
+    sp_coverage: float | None = None
     for snap in ctx.snapshots:
-        if snap.get("savings_plan_coverage_pct"):
-            sp_coverage = snap.get("savings_plan_coverage_pct", 0.0)
+        if snap.get("savings_plan_coverage_pct") is not None:
+            sp_coverage = float(snap["savings_plan_coverage_pct"])
             break
 
-    if sp_coverage > 70:
+    if sp_coverage is None or sp_coverage > 70:
         return None
 
     uncovered = total * (1 - sp_coverage / 100)
