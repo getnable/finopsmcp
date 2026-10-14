@@ -2,9 +2,12 @@
 Database Savings Plans recommender.
 
 AWS launched Database Savings Plans at re:Invent 2025, separate from Compute
-Savings Plans. The AWS price list offers them on a 1-year no-upfront term
-only, at 20% off provisioned RDS and Aurora instance hours, and only for the
-newer instance families (DATABASE_SP_ELIGIBLE_FAMILIES).
+Savings Plans. The AWS Price List (AWSDatabaseSavingsPlans us-east-1, version
+20261007173435, read 2026-10-13) offers one term, 1 year No Upfront, at 20% off
+every provisioned RDS and Aurora instance hour it covers, and covers only the
+7th-generation and later families (DATABASE_SP_ELIGIBLE_FAMILIES: m7g, m7i,
+r7g, r7i, x2m and the m8 and r8 families), not m5, m6i, m6g, r5, r6g, r6i, t3
+or t4g.
 
 This module:
 1. Pulls current RDS/Aurora instance-hour spend from Cost Explorer (last 30
@@ -12,7 +15,7 @@ This module:
 2. Checks existing Savings Plans coverage filtered to database services.
 3. Calculates the uncovered spend on eligible families.
 4. Recommends a 1-year no-upfront Database SP sized to that.
-5. Estimates savings at the 20% price-list rate.
+5. Estimates savings at the listed 20% instance-hour discount.
 """
 from __future__ import annotations
 
@@ -31,15 +34,34 @@ except ImportError:  # pragma: no cover
 
 # Discount relative to on-demand list price. AWS Price List,
 # AWSDatabaseSavingsPlans us-east-1 version 20261007173435, matched to the
-# AmazonRDS us-east-1 on-demand offer by usage type and operation: every
-# provisioned-instance rate (MySQL, PostgreSQL, MariaDB, Aurora, Oracle, SQL
-# Server, Db2) is exactly 20.0% below on-demand. This read 30%.
+# AmazonRDS us-east-1 on-demand offer by usage type and operation: 1-year No
+# Upfront is the only term the offer lists, and every provisioned-instance rate
+# (MySQL, PostgreSQL, MariaDB, Aurora, Oracle, SQL Server, Db2; 1,328 RDS
+# instance-hour rates in all) is exactly 20.0% below on-demand (e.g.
+# db.r7g.large $0.239 -> $0.1912, SKU DZCHH8H3SPVYZ2Z4). It used to be 0.30,
+# called "conservative", which overstated every saving by half.
 DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT = 0.20
-# The same price list (and the eu-west-1 and ap-southeast-2 ones) offers no
-# all-upfront and no 3-year Database Savings Plan. Nothing here uses these two;
-# they stay only so code importing them keeps working.
+# Not offered: the same price list (and the eu-west-1 and ap-southeast-2 ones)
+# has no all-upfront and no 3-year Database Savings Plan. These two are
+# unverified and nothing here prices with them; they stay only so code
+# importing them keeps working, and as the ordering the tests document if AWS
+# adds the terms.
 DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT = 0.35
 DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT = 0.45
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT": {
+        "source": "AWS Price List, AWSDatabaseSavingsPlans us-east-1, version "
+                  "20261007173435: DatabaseSP:1yrNoUpfront, 20% off every RDS "
+                  "InstanceUsage rate it lists (SKU DZCHH8H3SPVYZ2Z4)",
+        "as_of": "2026-10-13"},
+    "DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+    "DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+}
 
 # Instance families the same price list gives a Database Savings Plan rate.
 # Spend on any other family (db.t3, db.t4g, db.m5, db.m6g, db.m6i, db.r5,
@@ -215,8 +237,9 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         # only lands if that RDS/Aurora baseline keeps running for the term. We have only
         # looked at the last 30 days, so we cannot confirm the spend is stable enough to
         # commit to. That makes this an investigation: a band plus the steps to confirm
-        # the baseline holds, not a precise promise. The discount is the published
-        # 20% rate; private pricing on top of it would change the dollar figure.
+        # the baseline holds, not a precise promise. The discount is the listed
+        # 20% rate, not your account's actual SP rate card; private pricing on top
+        # of it would change the dollar figure.
         finding = None
         if uncovered_monthly > 50:
             finding = Finding(
@@ -238,11 +261,12 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 assumptions=[
                     "The uncovered RDS/Aurora baseline keeps running at this level for the "
                     "1-year term.",
-                    "Saving uses the 20% the AWS price list gives every eligible provisioned "
-                    "instance on the 1-year no-upfront plan, the only term offered.",
+                    "Saving uses the listed 20% the AWS price list gives every eligible "
+                    "provisioned instance hour on the 1-year no-upfront plan, the only term "
+                    "offered.",
                     f"${round(ineligible_spend, 0):,.0f}/mo of instance hours is on older "
                     "families (db.t3, db.m5, db.r5, db.r6g and the like) that no Database "
-                    "Savings Plan covers, so it is left out of the sizing.",
+                    "Savings Plan covers, so it is left out of the sizing and saves nothing.",
                     "Instance-hour line items were identified correctly (storage, IOPS, "
                     "backups, and transfer are excluded, since Database SPs do not cover them).",
                 ],
@@ -259,7 +283,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 pro_unlock=("On Pro, nable reads several months of your CUR to confirm the "
                             "database baseline is stable, models the right commitment to the "
                             "stable floor, and prices it on the rates your account actually "
-                            "pays."),
+                            "pays instead of the published list discount."),
                 remediation=[
                     "Confirm first: verify the baseline holds over a longer window and rule out "
                     "planned changes to the fleet.",

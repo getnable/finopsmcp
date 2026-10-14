@@ -35,14 +35,18 @@ from .envelope import INFERRED, MEASURED, Finding
 
 log = logging.getLogger(__name__)
 
-# ── Pricing (GCP list-price estimates, us-central1-ish, USD/month) ─────────────
-# Persistent disk storage, per GB-month. Picked by disk type.
+# ── Pricing (GCP list prices, us-central1, USD/month) ──────────────────────────
+# Persistent disk storage, per GB-month, picked by disk type: the hourly
+# per-GiB rates on https://cloud.google.com/compute/disks-image-pricing (Iowa,
+# read 2026-10-13) x 730. Hyperdisk Balanced space is $0.000109589/GiB-hr,
+# $0.08 a month, not the $0.10 it read; its provisioned IOPS and throughput
+# above the baseline bill on top and are not counted.
 DISK_RATES: dict[str, float] = {
     "pd-standard": 0.04,
     "pd-balanced": 0.10,
     "pd-ssd": 0.17,
     "pd-extreme": 0.125,
-    "hyperdisk-balanced": 0.10,
+    "hyperdisk-balanced": 0.08,
 }
 DISK_RATE_DEFAULT: float = 0.10
 
@@ -50,14 +54,44 @@ DISK_RATE_DEFAULT: float = 0.10
 # GCP bills a 730-hour average month. Attached/in-use IPs are not the waste here.
 IDLE_IP_MONTHLY: float = 0.010 * 730  # ~$7.30/mo
 
-# Snapshot storage, per GB-month (multi-regional standard ~ $0.026).
-SNAPSHOT_GB_MONTHLY: float = 0.026
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "DISK_RATES": {
+        "source": "https://cloud.google.com/compute/disks-image-pricing, Iowa (us-central1): "
+                  "standard $0.000054795, balanced $0.000136986, SSD $0.000232877, extreme "
+                  "$0.000171233, Hyperdisk Balanced $0.000109589 per GiB-hour, x 730",
+        "as_of": "2026-10-13"},
+    "SNAPSHOT_GB_MONTHLY": {
+        "source": "https://cloud.google.com/compute/disks-image-pricing, regional standard "
+                  "snapshot storage, Iowa (us-central1), $0.000068493 per GiB-hour x 730",
+        "as_of": "2026-10-13"},
+    "VM_VCPU_MONTHLY": {
+        "source": "https://cloud.google.com/products/compute/pricing/general-purpose, Iowa "
+                  "(us-central1), e2-highcpu-2 $0.04947024/hr / 2 vCPUs x 730, rounded down",
+        "as_of": "2026-10-13"},
+    "IDLE_IP_MONTHLY": {
+        "source": "unverified: the VPC IP address pricing page was not read in the "
+                  "2026-10-13 audit",
+        "as_of": "2026-10-13", "verified": "no"},
+}
 
-# Idle VM: blended on-demand estimate per vCPU-month covering vCPU + memory +
-# overhead (e2/n1-standard land near here). Used only when we can parse the vCPU
-# count from the machine type name; otherwise the VM is still flagged with $0 so
-# the idleness is visible without us inventing a number.
-VM_VCPU_MONTHLY: float = 24.0
+# Standard snapshot storage, per GB-month. $0.026 was the multi-regional rate
+# before Google's October 2022 snapshot repricing. The same page now lists
+# regional standard snapshot storage in us-central1 at $0.000068493/GiB-hr
+# ($0.05 a month); multi-regional storage, where snapshots go by default, lists
+# higher (Asia, the page's default multi-region, is $0.083). The regional rate
+# is used, so a figure is a floor, never above what the snapshot is billed.
+SNAPSHOT_GB_MONTHLY: float = 0.05
+
+# Idle VM: a type in connectors.kubernetes._GCE_HOURLY is priced at its
+# us-central1 list rate. Any other type is priced per vCPU at this floor: the
+# cheapest per-vCPU general-purpose rate on the same page is e2-highcpu
+# ($0.04947024/hr for 2 vCPUs, $18.06 a vCPU-month). It was $24, said to be
+# where "e2/n1-standard land", which overstated an e2-highcpu VM by a third
+# (e2-standard is $24.46, n1-standard $34.67, n2-standard $35.45 a vCPU-month).
+# Used only when we can parse the vCPU count from the machine type name;
+# otherwise the VM is still flagged with $0 so the idleness is visible without
+# us inventing a number.
+VM_VCPU_MONTHLY: float = 18.0
 
 # An instance averaging below this CPU fraction over the window is "idle".
 IDLE_CPU_THRESHOLD: float = 0.05  # 5%
@@ -312,7 +346,9 @@ def _check_snapshots(project: str, snapshots: list[Any], age_days: int) -> list[
 def _idle_vm_finding(project: str, inst: Any, avg_cpu: float) -> dict:
     machine = _short(getattr(inst, "machine_type", ""))
     vcpus = _vcpus_from_machine_type(getattr(inst, "machine_type", ""))
-    monthly = round((vcpus or 0) * VM_VCPU_MONTHLY, 2)
+    from ..connectors.kubernetes import _GKE_MONTHLY
+    listed = _GKE_MONTHLY.get(machine)
+    monthly = listed if listed is not None else round((vcpus or 0) * VM_VCPU_MONTHLY, 2)
     zone = _short(getattr(inst, "zone", ""))
     return {
         "category": "idle_vm",

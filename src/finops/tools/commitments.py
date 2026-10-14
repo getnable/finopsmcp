@@ -51,28 +51,33 @@ def get_commitment_analysis() -> dict:
 
         # "If you bought $X more in commitments" projection
         if monthly_uncovered > 100:
-            # One rate for every Compute SP figure, the one recommendations.
-            # commitments documents against the AWS price list. This used a
-            # local 34%, and applied it to the commitment, while describing the
-            # commitment as covering half the on-demand spend. A commitment C
-            # covers C / rate of on-demand, so those three could not all hold.
-            # Now: cover half the uncovered on-demand, commit rate x that, and
-            # save the rest of it.
+            # One rate for every Compute SP figure: the 1-year no-upfront rate
+            # recommendations.commitments documents against the AWS price list
+            # (26% off, the m5.large rate). This used a local 34%, more than even
+            # the 1-year all-upfront plan lists, and applied it to the
+            # commitment while describing the commitment as covering half the
+            # on-demand spend. A commitment C is billed at the discounted rate
+            # and covers C / rate of on-demand, so those three could not all
+            # hold. Now, the same formula as _build_recommendations: cover half
+            # the uncovered on-demand, commit rate x that, save (1 - rate) x
+            # that. At 10,000 a month uncovered: cover 5,000, commit
+            # 5,000 x 0.74 = 3,700, save 5,000 x 0.26 = 1,300, and
+            # 3,700 + 1,300 = 5,000.
             from ..recommendations.commitments import (
                 COMPUTE_SP_DISCOUNT_RANGE, _COMPUTE_SP_DISCOUNT,
             )
             covered_on_demand = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
             additional_commitment = covered_on_demand * _COMPUTE_SP_DISCOUNT
-            projected_savings = covered_on_demand - additional_commitment
+            projected_savings = covered_on_demand * (1 - _COMPUTE_SP_DISCOUNT)
             actionable["if_you_bought_more"] = {
                 "description": (
                     f"Buying a 1-year no-upfront Compute Savings Plan at "
                     f"${additional_commitment:,.0f}/mo hourly commitment would cover "
                     f"${covered_on_demand:,.0f}/mo, about 50% of your average uncovered "
                     f"on-demand spend, and save ~${projected_savings:,.0f}/mo "
-                    f"(${projected_savings * 12:,.0f}/yr) at the median "
-                    f"{1 - _COMPUTE_SP_DISCOUNT:.0%} rate-card discount "
-                    f"({COMPUTE_SP_DISCOUNT_RANGE})."
+                    f"(${projected_savings * 12:,.0f}/yr) at a "
+                    f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount, the m5.large rate on the "
+                    f"AWS rate card ({COMPUTE_SP_DISCOUNT_RANGE})."
                 ),
                 "additional_monthly_commitment_usd": round(additional_commitment, 2),
                 "projected_monthly_savings_usd": round(projected_savings, 2),

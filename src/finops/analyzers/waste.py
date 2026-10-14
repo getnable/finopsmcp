@@ -54,7 +54,11 @@ _EBS_GP3_PER_GB_MONTH = EBS_PER_GB_MONTH["gp3"]
 _EBS_GP2_TO_GP3_SAVINGS_PCT = 0.20    # 20% cheaper
 _CW_LOGS_STORAGE_PER_GB_MONTH = 0.03  # archived log storage
 _S3_STANDARD_PER_GB_MONTH = 0.023
-_S3_INT_TIER_PER_GB_MONTH = 0.0125    # Intelligent-Tiering (frequent-access tier)
+# Intelligent-Tiering's Infrequent Access tier, where data not read for 30 days
+# settles (AmazonS3 us-east-1 offer 20261012231102, SKU M7WA952JTYFHTE64). The
+# Frequent Access tier is $0.023, the Standard rate; the comment here used to
+# call $0.0125 the frequent-access rate.
+_S3_INT_TIER_PER_GB_MONTH = 0.0125
 _RDS_BACKUP_EXTRA_PER_GB_MONTH = 0.095 # RDS backup storage beyond 1x DB size
 
 # Sentinel for "savings unknown" — will be treated as 0 in sorting but surfaced

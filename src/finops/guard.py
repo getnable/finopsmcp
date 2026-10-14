@@ -999,6 +999,39 @@ def _int_flag(cmd: str, name: str) -> int:
     return int(_num(_flag(cmd, name)) or 0)
 
 
+# One EBS volume in a --block-device-mappings value, JSON or shorthand, quotes
+# already stripped: `Ebs:{VolumeSize:16000,VolumeType:io2,Iops:64000}`.
+_EBS_MAPPING_RE = re.compile(r"\bEbs\s*[=:]\s*\{([^{}]{0,400})\}")
+
+
+def _ebs_field(body: str, name: str) -> str | None:
+    m = re.search(rf"\b{name}\s*[=:]\s*([\w.]+)", body)
+    return m.group(1) if m else None
+
+
+def _launch_volumes(cmd: str) -> tuple[float, list[str], int]:
+    """(list monthly cost of the EBS volumes each instance is launched with,
+    their descriptions, how many named no size). A volume with no VolumeType is
+    priced at gp3, the lower of the two defaults, so the figure is not above
+    what it is billed. Sizes, IOPS and throughput come from aws_prices."""
+    from .aws_prices import ebs_volume_monthly
+    flag = cmd.find("--block-device-mappings")
+    if flag < 0:
+        return 0.0, [], 0
+    total, said, unsized = 0.0, [], 0
+    for m in _EBS_MAPPING_RE.finditer(cmd, flag):
+        body = m.group(1)
+        size = _num(_ebs_field(body, "VolumeSize"))
+        if size is None:
+            unsized += 1               # from a snapshot: its size is not in the command
+            continue
+        vtype = (_ebs_field(body, "VolumeType") or "gp3").lower()
+        iops, tput = _num(_ebs_field(body, "Iops")), _num(_ebs_field(body, "Throughput"))
+        total += ebs_volume_monthly(vtype, size, iops, tput)
+        said.append(f"{size:,.0f} GB {vtype}" + (f" at {iops:,.0f} IOPS" if iops else ""))
+    return total, said, unsized
+
+
 def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     m = _INSTANCE_TYPE_RE.search(cmd)
     if not m:
@@ -1009,7 +1042,23 @@ def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     cm = _COUNT_RE.search(cmd)
     if cm:
         count = max(count, int(cm.group(1)), int(cm.group(2) or 0))
-    return _price_ec2(m.group(1), count or 1)
+    # EBS volumes in --block-device-mappings bill per instance whether or not
+    # the instance runs. They used to be left out without a word: four
+    # instances each with a 16,000 GB io2 volume at 64,000 IOPS read ~$280/mo
+    # when the volumes alone list at about $22,000.
+    per_instance, said, unsized = _launch_volumes(cmd)
+    basis = _ON_DEMAND_BASIS + "; the AMI's root volume is not counted" + (
+        f", nor {unsized} volume{'s' if unsized != 1 else ''} from a snapshot" if unsized else "")
+    est = _price_ec2(m.group(1), count or 1, basis=basis)
+    if est is None or not per_instance:
+        return est
+    n = est["count"]
+    ebs = per_instance * n
+    est["ebs_monthly_usd"] = round(ebs, 2)
+    est["monthly_usd"] = round(est["monthly_usd"] + ebs, 2)
+    est["line"] += (f", plus {n}x EBS ({', '.join(said)}) at ${per_instance:,.2f}/mo "
+                    f"each (us-east-1 list), ~${est['monthly_usd']:,.0f}/mo in all")
+    return est
 
 
 def _price_instance_type_change(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -1055,16 +1104,28 @@ def _price_fleet(cmd: str, **_: Any) -> dict[str, Any] | None:
 
 
 def _price_nodegroup(cmd: str, **_: Any) -> dict[str, Any] | None:
-    """create-nodegroup at its desired size, the nodes it starts with."""
+    """create-nodegroup at its desired size, the nodes it starts with. With
+    several --instance-types the group launches whichever it gets, so it is
+    priced at the dearest one listed (it used to take the first, which on
+    `g5.xlarge,g5.12xlarge` was a sixth of the ceiling). A SPOT group says the
+    on-demand rate is its ceiling."""
+    from .aws_prices import EC2_HOURLY
     types = _flag(cmd, "instance-types")
     desired = re.search(r"\bdesiredSize\s*[=:]\s*(\d+)", cmd)
     if not types or not desired:
         return None
+    listed = [t for t in types.split(",") if t]
+    if any(t not in EC2_HOURLY for t in listed):
+        itype = listed[0]              # price book or no figure, as for one type
+    else:
+        itype = max(listed, key=lambda t: EC2_HOURLY[t])
+    spot = re.search(r"--capacity-type[=\s]+spot\b", cmd, re.IGNORECASE)
     most = re.search(r"\bmaxSize\s*[=:]\s*(\d+)", cmd)
-    basis = _ON_DEMAND_BASIS + (f"; the group may scale to {most.group(1)} nodes"
-                                if most and most.group(1) != desired.group(1) else "")
-    return _price_ec2(types.split(",")[0], int(desired.group(1)), basis=basis,
-                      lead="a node group of ")
+    basis = (_SPOT_BASIS if spot else _ON_DEMAND_BASIS) + (
+        f"; the dearest of {len(listed)} instance types listed" if len(listed) > 1 else "") + (
+        f"; the group may scale to {most.group(1)} nodes"
+        if most and most.group(1) != desired.group(1) else "")
+    return _price_ec2(itype, int(desired.group(1)), basis=basis, lead="a node group of ")
 
 
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -1239,7 +1300,7 @@ def _price_gce(cmd: str, **_: Any) -> dict[str, Any] | None:
     return _price_table_vm(
         cmd, flag="machine-type", table=_GKE_MONTHLY,
         count=max(1, _leading_names(cmd, m.end())), provider="gcp",
-        basis="on-demand monthly, nable's Compute Engine node price table")
+        basis="on-demand us-central1 list price, nable's Compute Engine node price table")
 
 
 def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -1247,7 +1308,8 @@ def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
     return _price_table_vm(
         cmd, flag="size", table=_AKS_MONTHLY,
         count=int(_num(_flag(cmd, "count")) or 1), provider="azure",
-        basis="pay-as-you-go monthly, nable's Azure VM price table")
+        basis="pay-as-you-go monthly, nable's Azure VM price table, not verified "
+              "against Azure's current retail prices")
 
 
 _TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")
@@ -1592,6 +1654,27 @@ def _pricing_forms(command: str):
             yield forms
 
 
+# `--region ap-southeast-1` on the command, or AWS_REGION / AWS_DEFAULT_REGION
+# set in it. The normalized reading the pricers see drops global options, so
+# this reads the command as written.
+_REGION_RE = re.compile(
+    r"(?:--region[=\s]+|\bAWS_(?:DEFAULT_)?REGION=)['\"]?([a-z]{2}(?:-gov)?-[a-z]+-\d)\b")
+
+
+def _with_region(est: dict[str, Any], command: str) -> dict[str, Any]:
+    """A us-east-1 figure for a command that names another AWS region says so.
+    List prices elsewhere are mostly higher (m5.large $0.096 in us-east-1,
+    $0.12 in ap-southeast-1, AWS Price List AmazonEC2 offer 20261012193925), so
+    the figure is a floor there, not a quote."""
+    regions = sorted({r for r in _REGION_RE.findall(command) if r != "us-east-1"})
+    if not regions or "us-east-1" not in str(est.get("basis", "")):
+        return est
+    note = (f"the command targets {', '.join(regions)}; the figure is the us-east-1 "
+            "list rate, and list prices there are often higher")
+    return {**est, "region": regions[0] if len(regions) == 1 else regions,
+            "basis": f"{est['basis']}; {note}", "line": f"{est['line']} ({note})"}
+
+
 def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> dict[str, Any] | None:
     """A local, list-price estimate for a shell command, or None.
 
@@ -1618,7 +1701,7 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
                 if est is not None and (best is None or _size(est) > _size(best)):
                     best = est
             if best is not None:
-                return best
+                return _with_region(best, command)
         return None
     except Exception:
         return None                    # a pricing bug must not cost the verdict

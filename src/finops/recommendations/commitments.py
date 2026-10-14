@@ -11,7 +11,8 @@ Calculates:
   - Coverage gap (on-demand that commitments could cover)
   - Recommended purchase: type, term, payment, projected ROI
 
-All figures come directly from the Cost Explorer API — no estimates.
+Coverage, utilization and on-demand spend come from the Cost Explorer API. A
+projected purchase saving is an estimate at the listed discount below.
 """
 from __future__ import annotations
 
@@ -23,17 +24,47 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# A 1-year no-upfront Compute Savings Plan rate as a fraction of Linux
-# on-demand, so the discount is 1 minus this. AWS Price List,
-# AWSComputeSavingsPlan us-east-1 version 20261013035015, matched to the
-# AmazonEC2 us-east-1 offer (20261012193925): over the 168 instance types
-# aws_prices.EC2_HOURLY holds, the discount runs 18.6% to 29.1%, median 27.1%.
-# Fargate is 20.0%. This read 0.66 (34% off), above every type in the table.
-# Two more constants here (28% for an EC2 Instance SP, 40% for an RI) were used
-# nowhere and matched nothing in the same price list (37.0% and 37.0% medians),
-# so they are gone rather than corrected.
-_COMPUTE_SP_DISCOUNT = 0.729
+# What a 1-year no-upfront commitment costs as a fraction of on-demand, us-east-1
+# Linux, so the discount is 1 minus it. AWS Price List (AWSComputeSavingsPlan
+# us-east-1, version 20261013035015, which carries the EC2 Instance SP rates too,
+# and the AmazonEC2 offer 20261012193925 for Reserved Instances), read 2026-10-13:
+#   Compute SP      m5.large 26.0% off (SKU BB7BKBSC6NZW7P5B), m6i, m7i and m7g
+#                   26.5%, c and r families 27.5 to 28.3%, GPU 21 to 24%. Over
+#                   the 168 instance types aws_prices.EC2_HOURLY holds it runs
+#                   18.6% to 29.1%, median 27.1%; Fargate is 20.0%.
+#   EC2 Instance SP m6i, m7i, r6i, c6i 33.8 to 33.9% off (m6i SKU
+#                   DC4GCSR3H4S43EMU), m5 and t3 37.5%
+#   Standard RI     the same as the EC2 Instance SP, type for type
+# These used to say 34%, 28% and 40%: the Compute and EC2 Instance figures were
+# the wrong way round (a Compute SP never beats an EC2 Instance SP on the same
+# type), 34% was above every type in the table, and 40% is the 1-year
+# all-upfront rate, not no-upfront. The Compute SP figure is the m5.large rate,
+# 26%, a point under the 27.1% median, so a projected saving is not above what
+# the plan lists for the common general-purpose types; COMPUTE_SP_DISCOUNT_RANGE
+# is what the text quotes around it. Nothing prices with the EC2 Instance SP or
+# RI figures; they stay, corrected and sourced, as the listed rates the price
+# audit tests pin (and the ordering they show against the Compute SP).
+_COMPUTE_SP_DISCOUNT = 0.74   # 26% off on-demand (1yr no-upfront Compute SP)
 COMPUTE_SP_DISCOUNT_RANGE = "19-29% by EC2 instance type, 20% on Fargate"
+_EC2_SP_DISCOUNT = 0.662      # 33.8% off on-demand (1yr no-upfront EC2 Instance SP)
+_RI_DISCOUNT = 0.662          # 33.8% off on-demand (1yr no-upfront Standard RI)
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_COMPUTE_SP_DISCOUNT": {
+        "source": "AWS Price List, AWSComputeSavingsPlan us-east-1 20261013035015, "
+                  "ComputeSavingsPlans 1yr No Upfront: m5.large $0.071 vs $0.096 "
+                  "(BB7BKBSC6NZW7P5B), m6i.large $0.07053 vs $0.096",
+        "as_of": "2026-10-13"},
+    "_EC2_SP_DISCOUNT": {
+        "source": "AWSComputeSavingsPlan us-east-1 20261013035015, EC2InstanceSavingsPlans "
+                  "1yr No Upfront: m6i.large $0.0635 vs $0.096 (DC4GCSR3H4S43EMU), "
+                  "m7i.large $0.06668 vs $0.1008 (XGZ84KZ7PE29FA8C)",
+        "as_of": "2026-10-13"},
+    "_RI_DISCOUNT": {
+        "source": "AWS Price List, AmazonEC2 us-east-1 20261012193925, Reserved standard "
+                  "1yr No Upfront Linux: m6i.large $0.0635/hr vs $0.096 on demand",
+        "as_of": "2026-10-13"},
+}
 
 
 @dataclass
@@ -471,9 +502,10 @@ def _build_recommendations(
         desc = (
             f"Your SP coverage is {sp_coverage:.0f}%. A 1-year no-upfront Compute SP at "
             f"${commitment_to_add:,.0f}/mo hourly commitment covers {basis} "
-            f"(${baseline:,.0f}/mo of on-demand). The saving assumes the median "
-            f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount of the AWS rate card "
-            f"({COMPUTE_SP_DISCOUNT_RANGE}); your instance mix sets the real one. "
+            f"(${baseline:,.0f}/mo of on-demand). The saving assumes a "
+            f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount, the m5.large rate and under the "
+            f"median of the AWS rate card ({COMPUTE_SP_DISCOUNT_RANGE}); your instance "
+            f"mix sets the real one. "
             f"Sized from monthly totals, but the commitment is hourly: if usage dips "
             f"at night or at weekends the plan sits partly unused in those hours, and "
             f"below {_COMPUTE_SP_DISCOUNT:.0%} average utilization it costs more than "

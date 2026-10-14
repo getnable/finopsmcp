@@ -186,8 +186,16 @@ def test_idle_vm_flagged():
     assert out["total_findings"] == 1
     f = out["findings"][0]
     assert f["category"] == "idle_vm"
-    assert f["estimated_monthly_savings"] == round(4 * VM_VCPU_MONTHLY, 2)
+    # e2-standard-4 is in the GCE table: $0.13402284/hr x 730 (us-central1 list,
+    # cloud.google.com/products/compute/pricing/general-purpose, 2026-10-13).
+    assert f["estimated_monthly_savings"] == 97.84
     assert f["detail"]["avg_cpu_pct"] == 2.0
+
+
+def test_idle_vm_of_an_unlisted_type_is_priced_at_the_per_vcpu_floor():
+    out = _with(_patch_all(insts=[_inst("vm1", "c3-highcpu-8")], cpu=0.02),
+                lambda: _run(projects=["proj-1"], checks=["idle_vms"]))
+    assert out["findings"][0]["estimated_monthly_savings"] == round(8 * VM_VCPU_MONTHLY, 2)
 
 
 def test_busy_vm_not_flagged():
@@ -217,11 +225,13 @@ def test_aggregates_and_sorting():
         lambda: _run(projects=["proj-1"]),
     )
     assert out["total_findings"] == 5
-    # sorted by monthly savings desc: idle vm ($96) first, snapshot ($5.2) last
+    # sorted by monthly savings desc: idle vm ($97.84, the e2-standard-4 list rate)
+    # first. The snapshot is 200 GB at $0.05 (regional standard snapshot storage,
+    # us-central1, cloud.google.com/compute/disks-image-pricing): it was $0.026.
     savings = [f["estimated_monthly_savings"] for f in out["findings"]]
     assert savings == sorted(savings, reverse=True)
     assert out["findings"][0]["category"] == "idle_vm"
-    expected = round(96 + 20 + 17 + 7.30 + 5.2, 2)
+    expected = round(97.84 + 20 + 17 + 7.30 + 10.0, 2)
     assert out["total_estimated_monthly_savings"] == expected
     assert out["total_estimated_annual_savings"] == round(expected * 12, 2)
     assert out["by_category"]["unattached_disk"]["count"] == 2

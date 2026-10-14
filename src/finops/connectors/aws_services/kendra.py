@@ -12,10 +12,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
-# Fixed monthly costs per edition (us-east-1 on-demand pricing)
+# Fixed monthly cost per edition: the us-east-1 hourly list rate x 730 hours.
+# Enterprise used to read $1,400/mo, which no SKU lists, and Developer $810
+# (a 720-hour month). The us-east-1 offer lists Enterprise Edition under two
+# SKUs, USE1-Kendra-Enterprise-Edition at $1.40/hr and the older
+# USE1-KendraEnterpriseEdition at $7.00/hr; the lower is used, so the figure
+# is never above what an index can be billed, and the "switch to Developer"
+# saving it implies is the smallest either SKU gives.
 _EDITION_MONTHLY_USD = {
-    "DEVELOPER_EDITION": 810.0,
-    "ENTERPRISE_EDITION": 1400.0,
+    "DEVELOPER_EDITION": round(1.125 * 730, 2),    # 821.25
+    "ENTERPRISE_EDITION": round(1.40 * 730, 2),    # 1022.0
+}
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_EDITION_MONTHLY_USD": {
+        "source": "AWS Price List, AmazonKendra us-east-1 offer, version 20260911124443: "
+                  "Developer NSTMQK2AFGH9HENZ ($1.125/hr), Enterprise 6ENMMB4KRPAZVYZ2 "
+                  "($1.40/hr; the older SKU GP4AS824V32A3HRZ lists $7.00/hr)",
+        "as_of": "2026-10-13"},
 }
 
 _EDITION_LABEL = {

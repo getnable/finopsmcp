@@ -149,15 +149,21 @@ def test_the_graviton_tool_does_not_advertise_a_saving_its_table_cannot_reach():
 # discount is 18.6% to 29.1%, median 27.1% (m5.large 0.096 -> 0.071, 26.0%;
 # c5.xlarge 0.17 -> 0.123, 27.6%). Fargate (AmazonECS offer, same dates) is
 # 0.04048 -> 0.032384 a vCPU-hour, 20.0%. The engine assumed 34%, above the
-# highest rate of any type in the table.
+# highest rate of any type in the table. The engine prices at 26%, the
+# m5.large rate, a point under that median: the price audit
+# (tests/test_price_audit_2026_10.py) read the same offer and took the
+# general-purpose rate rounded down, and the integration keeps the smaller
+# saving of the two.
 
-def test_the_compute_savings_plan_rate_is_the_price_list_median():
+def test_the_compute_savings_plan_rate_is_at_or_under_the_price_list_median():
     from finops.recommendations.commitments import _COMPUTE_SP_DISCOUNT
 
-    assert round(1 - _COMPUTE_SP_DISCOUNT, 3) == 0.271
+    # 26.0% (m5.large 0.096 -> 0.071), not above the 27.1% median.
+    assert round(1 - _COMPUTE_SP_DISCOUNT, 3) == 0.26
+    assert round(1 - _COMPUTE_SP_DISCOUNT, 3) <= 0.271
 
 
-def test_a_compute_savings_plan_recommendation_saves_27_percent_of_its_baseline():
+def test_a_compute_savings_plan_recommendation_saves_26_percent_of_its_baseline():
     from finops.recommendations.commitments import _build_recommendations
 
     recs = _build_recommendations(20.0, 33000.0, 0.0, 0.0,
@@ -165,9 +171,10 @@ def test_a_compute_savings_plan_recommendation_saves_27_percent_of_its_baseline(
     [sp] = [r for r in recs if r["type"] == "savings_plan"]
     assert sp["baseline_monthly_uncovered_usd"] == 10000.0
     # Was 3,400 saved on a 6,600 commitment: a 6,600 commitment at the real
-    # rate covers 9,053 of on-demand and saves 2,453, not 3,400.
-    assert sp["monthly_savings"] == 2710.0
-    assert sp["commitment_per_month"] == 7290.0
+    # rate covers 6,600 / 0.74 = 8,919 of on-demand and saves 2,319, not 3,400.
+    # Now 10,000 x 0.26 = 2,600 saved on 10,000 x 0.74 = 7,400 committed.
+    assert sp["monthly_savings"] == 2600.0
+    assert sp["commitment_per_month"] == 7400.0
     assert sp["commitment_per_month"] + sp["monthly_savings"] == 10000.0
 
 
@@ -190,13 +197,13 @@ def test_the_if_you_bought_more_projection_adds_up(monkeypatch):
     """It said a commitment of half the uncovered on-demand spend "would cover
     ~50%" of it, then took 34% of the commitment as the saving. A commitment C
     covers C / (1 - d) of on-demand spend, so the three figures could not all
-    be true. Covering half of 10,000 a month at 27.1% is a 3,645 commitment
-    saving 1,355."""
+    be true. Covering half of 10,000 a month at 26% is a 5,000 x 0.74 = 3,700
+    commitment saving 5,000 x 0.26 = 1,300, 15,600 a year."""
     out = _commitment_tool(monkeypatch, 30000.0)
     proj = out["actionable_analysis"]["if_you_bought_more"]
-    assert proj["additional_monthly_commitment_usd"] == 3645.0
-    assert proj["projected_monthly_savings_usd"] == 1355.0
-    assert proj["projected_annual_savings_usd"] == 16260.0
+    assert proj["additional_monthly_commitment_usd"] == 3700.0
+    assert proj["projected_monthly_savings_usd"] == 1300.0
+    assert proj["projected_annual_savings_usd"] == 15600.0
     covered = proj["additional_monthly_commitment_usd"] + proj["projected_monthly_savings_usd"]
     assert covered == 5000.0
 
@@ -204,10 +211,10 @@ def test_the_if_you_bought_more_projection_adds_up(monkeypatch):
 def test_a_savings_plan_sized_from_monthly_totals_says_so():
     """A Savings Plan commitment is per hour; the sizing reads three monthly
     totals. A workload that runs 12 hours a day at 2.00 an hour on demand is
-    730 a month. The plan sized to it commits 0.729 an hour (532.17 a month):
+    730 a month. The plan sized to it commits 0.74 an hour (540.20 a month):
     in the 12 busy hours it covers 1.00 of the 2.00, and in the 12 idle ones
-    it is paid for and unused, so the month costs 532.17 + 365 = 897.17
-    against 730 on demand, while the recommendation promised 197.83 saved.
+    it is paid for and unused, so the month costs 540.20 + 365 = 905.20
+    against 730 on demand, while the recommendation promised 189.80 saved.
     The claim that a quiet month "never" over-commits, and a "high"
     confidence earned by dollar size alone, said more than three monthly
     totals can show."""
@@ -226,8 +233,9 @@ def test_the_commitment_gap_ticket_uses_the_same_rate():
 
     title, body, _, _ = _commitment_gap_ticket(
         {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0})
-    # 10,000 a month uncovered, all of it covered at 27.1%: 2,710 a month.
-    assert "saves $32,520/yr" in title
+    # 10,000 a month uncovered, all of it covered at 26%: 10,000 x 0.26 =
+    # 2,600 a month, 31,200 a year.
+    assert "saves $31,200/yr" in title
     assert "no break-even period" not in body
 
 

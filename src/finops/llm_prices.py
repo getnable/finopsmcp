@@ -27,8 +27,13 @@ import functools
 import re
 from dataclasses import dataclass
 
-# The day every row below was last read from its source.
-AS_OF = "2026-09-24"
+# The day each provider's rows were last read from its source. The Anthropic
+# rows were re-read from ANTHROPIC_SOURCE on 2026-10-13 and all matched; the
+# OpenAI rows could not be (openai.com and developers.openai.com were not
+# reachable from the audit environment) and keep their 2026-09-24 date.
+AS_OF_BY_PROVIDER = {"anthropic": "2026-10-13", "openai": "2026-09-24"}
+# The oldest of those: what a figure built from this table can claim.
+AS_OF = min(AS_OF_BY_PROVIDER.values())
 
 ANTHROPIC_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing"
 # Read through a search index of the model pages under
@@ -86,8 +91,15 @@ class ModelPrice:
 # (input, output, 5-minute cache write, 1-hour cache write, cache read), the
 # columns of the "Model pricing" table at ANTHROPIC_SOURCE. Writes are 1.25x and
 # 2x input on every model. Reads are 0.1x input except Claude Fable 5.1 and
-# Mythos 5.1 (0.025x) and Claude Opus 5.5 (0.05x), which is why the read column
-# is carried rather than derived.
+# Mythos 5.1 (0.025x) and Claude Opus 5.5 and Sonnet 5.5 (0.05x), which is why
+# the read column is carried rather than derived.
+#
+# Claude Haiku 5.5 is on the page and deliberately not here: it is priced by
+# prompt length ($0.10 in / $0.50 out up to 100,000 prompt tokens, $0.50 /
+# $2.50 above, with cache rates to match), and a usage record nable reads can
+# be a daily total rather than one request, so one row would understate long
+# prompts fivefold or overstate short ones fivefold. It reads as unpriced until
+# the cost can be computed per request.
 #
 # Opus 4, Opus 4.1, Sonnet 4 and Haiku 3.5 are retired on the Claude API and
 # still served on Bedrock or Google Cloud, which is where nable meets them.
@@ -99,6 +111,7 @@ _ANTHROPIC: dict[str, tuple[float, float, float, float, float]] = {
     "claude-fable-5":    (10.00, 50.00, 12.50, 20.00, 1.00),
     "claude-mythos-5":   (10.00, 50.00, 12.50, 20.00, 1.00),
     "claude-opus-5-5":   (4.00,  20.00, 5.00,  8.00,  0.20),
+    "claude-sonnet-5-5": (2.00,  10.00, 2.50,  4.00,  0.10),
     "claude-opus-5":     (5.00,  25.00, 6.25,  10.00, 0.50),
     "claude-opus-4-8":   (5.00,  25.00, 6.25,  10.00, 0.50),
     "claude-opus-4-7":   (5.00,  25.00, 6.25,  10.00, 0.50),

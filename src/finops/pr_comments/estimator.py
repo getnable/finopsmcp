@@ -38,14 +38,47 @@ _FIXED_MONTHLY: dict[str, float] = {
     "aws_alb": ALB_PER_MONTH,
     "aws_nlb": NLB_PER_MONTH,
     "aws_eks_cluster": round(0.10 * HOURS_PER_MONTH, 2),   # $0.10/hr control plane
-    "aws_redshift_cluster": 180.00,
-    "aws_msk_cluster": 200.00,
-    "aws_elasticache_cluster": 52.00,
+    # Redshift, MSK and ElastiCache used to be flat guesses here ($180, $200
+    # and $52 a month whatever the node type and count) at "high" confidence.
+    # They are priced per node from terraform_estimate's tables below.
     "aws_cloudfront_distribution": 0.0,  # pay-per-use
     "aws_lambda_function": 0.0,          # pay-per-use, negligible base
 }
 
 _EBS_MONTHLY_PER_GB: dict[str, float] = EBS_PER_GB_MONTH
+
+_NODE_PRICED = ("aws_elasticache_cluster", "aws_elasticache_replication_group",
+                "aws_redshift_cluster", "aws_msk_cluster")
+
+
+def _node_priced(rtype: str, props: dict, multiplier: float) -> tuple[float, str, str]:
+    """(monthly, confidence, note) for a per-node service, from the node type
+    and count in the diff, at terraform_estimate's list rates. No node type, or
+    one the tables do not hold, is no figure."""
+    from ..connectors.terraform_estimate import (
+        _MSK_BROKER_HOURLY,
+        _REDSHIFT_HOURLY,
+        elasticache_hourly,
+        elasticache_node_count,
+    )
+    attrs = {k: _text(v) for k, v in props.items()}
+    if rtype == "aws_redshift_cluster":
+        node, hourly = attrs.get("node_type", ""), _REDSHIFT_HOURLY.get(attrs.get("node_type", ""))
+        count = max(1, int(as_number(attrs.get("number_of_nodes"), None) or 1))
+    elif rtype == "aws_msk_cluster":
+        node, hourly = attrs.get("instance_type", ""), _MSK_BROKER_HOURLY.get(
+            attrs.get("instance_type", ""))
+        count = int(as_number(attrs.get("number_of_broker_nodes"), None) or 0)
+        if not count:
+            return 0.0, "low", f"{node or 'MSK'}: number_of_broker_nodes not in the diff, not priced"
+    else:
+        node = attrs.get("node_type", "")
+        hourly = elasticache_hourly(node, attrs.get("engine") or "redis")
+        count = elasticache_node_count(rtype, attrs)
+    if hourly is None:
+        return 0.0, "low", f"{count}x {node or 'no node type'}: not in nable's price table, not priced"
+    return (round(hourly * HOURS_PER_MONTH * count * multiplier, 2), "high",
+            f"{count}x {node} at ${hourly}/hr list")
 
 
 @dataclass
@@ -210,6 +243,13 @@ def estimate_changes(
                 vol_type, size_gb, props.get("iops"), props.get("throughput")) * multiplier, 2)
             breakdown["storage"] = monthly
 
+        # Per-node services: the node type and count price them, or nothing does.
+        elif rtype in _NODE_PRICED:
+            monthly, confidence, note = _node_priced(rtype, props, multiplier)
+            if monthly:
+                breakdown["nodes"] = monthly
+            notes.append(note)
+
         # Fixed-cost resources
         elif rtype in _FIXED_MONTHLY:
             base = _FIXED_MONTHLY[rtype]
@@ -221,16 +261,22 @@ def estimate_changes(
 
         # EKS node group
         elif rtype == "aws_eks_node_group":
-            itype = props.get("instance_types", "m5.large").split(",")[0].strip()
             raw_desired = props.get("desired_size") or (
                 (str(props.get("scaling_config") or "").split() or [None])[0])
             # The same raw text as the EBS attributes: var.nodes must not raise.
             desired = max(1, int(as_number(raw_desired, None) or 1))
-            per_node = _ec2_monthly(itype, multiplier)
-            monthly = round(per_node * desired, 2)
-            breakdown["nodes"] = monthly
-            confidence = "medium"
-            notes.append(f"{desired}x {itype}")
+            if not _text(props.get("instance_types")):
+                # Not in the diff: EKS picks the type (or a launch template
+                # does). This used to be priced as m5.large, a guess.
+                confidence = "low"
+                notes.append(f"{desired} node(s), instance_types not in the diff, so not priced")
+            else:
+                itype = _text(props.get("instance_types")).split(",")[0].strip().strip("[]\"' ")
+                per_node = _ec2_monthly(itype, multiplier)
+                monthly = round(per_node * desired, 2)
+                breakdown["nodes"] = monthly
+                confidence = "medium"
+                notes.append(f"{desired}x {itype}")
 
         else:
             confidence = "low"
