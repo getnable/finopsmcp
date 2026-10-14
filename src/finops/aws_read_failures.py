@@ -13,38 +13,60 @@ that ships without it. This module is the one place that sees every call:
 botocore emits after-call (with the HTTP status) and after-call-error (with the
 exception) for every API call on every client, and a handler registered here
 records the ones that failed for a reason that means "not read": denied,
-throttled, expired or missing credentials, unreachable. A "not found" error
-(NoSuchLifecycleConfiguration and friends) is an answer, not a failed read, and
-is not recorded.
+throttled, expired or missing credentials, unreachable, or the service failing
+to answer. A "not found" error (NoSuchLifecycleConfiguration and friends) is an
+answer, not a failed read, and is not recorded.
 
 Recording is scoped: watching() opens a scope for the current context (one tool
 call, one scanner in a sweep), and only reads made inside it are counted there.
 Scopes nest, so a scanner's failures count for the sweep and for the tool call
-around it. Worker threads started with a plain ThreadPoolExecutor do not inherit
-the scope; carry() wraps a function so that they do.
+around it. The scope is a ContextVar, so it follows the work wherever the
+context goes: asyncio tasks and asyncio.to_thread carry it, and so does
+ScopedThreadPool. A plain ThreadPoolExecutor or loop.run_in_executor does not,
+and tests/test_aws_read_scope.py keeps them out of the package.
 """
 from __future__ import annotations
 
-import asyncio
 import contextvars
-import weakref
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
 
-# Error codes that mean the read did not happen. Matched as substrings so the
+# Error codes that mean the read did not happen, matched as substrings so the
 # service-specific spellings (AccessDeniedException, AccessDenied,
-# ThrottlingException, Throttling, RequestLimitExceeded) all count.
-_UNREAD_CODES = (
+# ThrottlingException, Throttling, InternalServerError, InternalFailure) count.
+_UNREAD_MARKERS = (
     "AccessDenied", "UnauthorizedOperation", "AuthFailure", "AuthorizationError",
     "InvalidClientTokenId", "UnrecognizedClient", "ExpiredToken", "RequestExpired",
     "SignatureDoesNotMatch", "InvalidAccessKeyId", "MissingAuthenticationToken",
     "Throttl", "RequestLimitExceeded", "TooManyRequests", "SlowDown",
-    "OptInRequired", "ServiceUnavailable", "InternalFailure", "InternalError",
+    "OptInRequired", "ServiceUnavailable", "RequestTimeout",
 )
+# Exact codes. The throttling and transient ones are botocore's own standard
+# retry lists (botocore.retries.standard), so a code botocore retries because
+# the service did not answer is a read that did not happen here too: Cost
+# Explorer throttles with LimitExceededException.
+_UNREAD_CODES = frozenset({
+    "LimitExceededException", "BandwidthLimitExceeded", "PriorRequestNotComplete",
+    "ProvisionedThroughputExceededException", "TransactionInProgressException",
+    "IncompleteSignature", "InvalidSignatureException", "ServiceException",
+})
+
+
+def is_unread(code: str, status: int = 400) -> bool:
+    """True when an AWS answer of (error code, HTTP status) means the data was
+    not read: denied, throttled, unauthenticated, or the service failing to
+    answer. False for an answer, including "there is no such thing"."""
+    code = str(code or "")
+    if status >= 500 or status in (401, 429):
+        return True
+    if status == 403 and (not code or code.isdigit()):
+        return True     # a HEAD request has no body: the denial is its status
+    if code.startswith("Internal"):
+        return True     # InternalError, InternalFailure, InternalServerException...
+    return code in _UNREAD_CODES or any(marker in code for marker in _UNREAD_MARKERS)
 
 
 # Answered calls that are not a read of the data a tool reports on: knowing
@@ -104,75 +126,73 @@ def watching() -> Iterator[ReadLog]:
         _scopes.reset(token)
 
 
-def carry(fn: Callable) -> Callable:
-    """Wrap fn so that a ThreadPoolExecutor worker runs it inside the caller's
-    scopes. Each call gets its own copy of the caller's context, since one
-    Context cannot be entered by two threads at once."""
-    ctx = contextvars.copy_context()
-
-    def _run(*args: Any, **kwargs: Any) -> Any:
-        return ctx.copy().run(fn, *args, **kwargs)
-    return _run
-
-
-class _ContextExecutor(ThreadPoolExecutor):
-    """A default executor whose workers run in the submitter's context.
-    loop.run_in_executor, unlike asyncio.to_thread, does not carry contextvars,
-    and a dozen scanners hand their boto3 calls to it."""
+class ScopedThreadPool(ThreadPoolExecutor):
+    """A ThreadPoolExecutor whose tasks run in the submitter's context, so the
+    AWS reads a scanner makes on its own worker threads count for the tool call
+    that started it. Each task gets its own copy, since one Context cannot be
+    entered by two threads at once. map() goes through submit(), so it carries
+    the context too."""
 
     def submit(self, fn, /, *args, **kwargs):
         return super().submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 
-_carried_loops: weakref.WeakSet = weakref.WeakSet()
-
-
-def carry_into_default_executor(loop: asyncio.AbstractEventLoop) -> None:
-    """Make loop.run_in_executor(None, ...) carry the read scopes. Once per loop."""
-    if loop in _carried_loops:
-        return
-    try:
-        loop.set_default_executor(_ContextExecutor(thread_name_prefix="nable-io"))
-        _carried_loops.add(loop)
-    except Exception:  # noqa: BLE001 - scoping must never stop a call
-        return
-
-
-def _is_unread(code: str) -> bool:
-    return any(marker in code for marker in _UNREAD_CODES)
-
-
-def _operation(event_name: str) -> str:
+def _operation(event_name) -> str:
     # "after-call.cloudwatch.ListMetrics" -> "cloudwatch:ListMetrics"
-    parts = (event_name or "").split(".")
-    return f"{parts[1]}:{parts[2]}" if len(parts) >= 3 else event_name
+    parts = str(event_name or "").split(".")
+    return f"{parts[1]}:{parts[2]}" if len(parts) >= 3 else str(event_name or "")
 
 
-def _after_call(http_response=None, parsed=None, event_name: str = "", **_kw) -> None:
-    scopes = _scopes.get()
-    if not scopes:
+# A handler registered twice on one session (BUILTIN_HANDLERS and the boto3
+# default session) runs twice per call. The call's own context dict marks it
+# seen, so it is counted once whatever the registration count.
+_SEEN = "finops_read_watch_seen"
+
+
+def _first_sighting(context) -> bool:
+    if not isinstance(context, dict):
+        return True
+    if context.get(_SEEN):
+        return False
+    context[_SEEN] = True
+    return True
+
+
+def _after_call(http_response=None, parsed=None, event_name: str = "",
+                context=None, **_kw) -> None:
+    try:
+        scopes = _scopes.get()
+        if not scopes or not _first_sighting(context):
+            return
+        status = getattr(http_response, "status_code", 200) or 200
+        status = status if isinstance(status, int) else int(status)
+        code = ""
+        if status >= 300 and isinstance(parsed, dict):
+            error = parsed.get("Error")
+            code = str(error.get("Code") or "") if isinstance(error, dict) else ""
+        op = _operation(event_name)
+        unread = status >= 300 and is_unread(code, status)
+        for log in scopes:
+            if unread:
+                log.failed.append((op, code or str(status)))
+            elif op not in _NOT_DATA:
+                log.answered += 1
+    except Exception:  # noqa: BLE001 - observing must never stop a read
         return
-    status = getattr(http_response, "status_code", 200) or 200
-    code = ""
-    if status >= 300 and isinstance(parsed, dict):
-        code = str((parsed.get("Error") or {}).get("Code") or "")
-    op = _operation(event_name)
-    for log in scopes:
-        if status >= 300 and _is_unread(code):
-            log.failed.append((op, code))
-        elif op not in _NOT_DATA:
-            log.answered += 1
 
 
-def _after_call_error(exception=None, event_name: str = "", **_kw) -> None:
+def _after_call_error(exception=None, event_name: str = "", context=None, **_kw) -> None:
     # Raised before any HTTP answer: no credentials, an expired SSO token, a
     # timeout, an endpoint that does not resolve. None of those is an answer.
-    scopes = _scopes.get()
-    if not scopes:
+    try:
+        scopes = _scopes.get()
+        if not scopes or not _first_sighting(context):
+            return
+        code = type(exception).__name__ if exception is not None else "Error"
+        for log in scopes:
+            log.failed.append((_operation(event_name), code))
+    except Exception:  # noqa: BLE001 - observing must never stop a read
         return
-    code = type(exception).__name__ if exception is not None else "Error"
-    for log in scopes:
-        log.failed.append((_operation(event_name), code))
 
 
 def install() -> None:

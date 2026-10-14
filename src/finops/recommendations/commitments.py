@@ -600,9 +600,9 @@ def estimate_coverage_for_partial_tag(
         # concurrently (CE is 2-8s per call, so serial was ~6x the latency); the
         # botocore client is thread-safe for concurrent operations. Mirrors the pool
         # already used in analyze_commitments.
-        from concurrent.futures import ThreadPoolExecutor
+        from ..aws_read_failures import ScopedThreadPool
 
-        with ThreadPoolExecutor(max_workers=6) as _pool:
+        with ScopedThreadPool(max_workers=6) as _pool:
             f_tagged_sp    = _pool.submit(_savings_plan_coverage, ce, start, end, {tag_key: tag_value})
             f_tagged_ri    = _pool.submit(_ri_coverage, ce, start, end, {tag_key: tag_value})
             f_tagged_spend = _pool.submit(_ec2_spend_for_tag, ce, start, end, tag_key, tag_value)
@@ -714,9 +714,9 @@ def analyze_commitments(
         # rather than back-to-back: CE is 2-8s per call, so serial was 5x the
         # latency. botocore low-level clients are thread-safe for concurrent
         # operations, so one shared ce client across the pool is fine.
-        from concurrent.futures import ThreadPoolExecutor
+        from ..aws_read_failures import ScopedThreadPool
 
-        with ThreadPoolExecutor(max_workers=5) as _pool:
+        with ScopedThreadPool(max_workers=5) as _pool:
             # Utilization is always account-level: AWS can't filter it by tag.
             f_sp_util = _pool.submit(_savings_plan_utilization, ce, start, end)
             f_ri_util = _pool.submit(_ri_utilization, ce, start, end)

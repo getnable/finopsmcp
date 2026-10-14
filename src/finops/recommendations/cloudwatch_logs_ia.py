@@ -227,18 +227,17 @@ async def audit_cloudwatch_logs_ia_opportunities(
     """
     import asyncio
 
-    loop = asyncio.get_event_loop()
     session = getattr(aws_client, "_session", None)
 
     if not regions:
         try:
-            regions = await loop.run_in_executor(None, _get_opted_in_regions, session)
+            regions = await asyncio.to_thread(_get_opted_in_regions, session)
         except Exception as exc:
             log.warning("Could not list regions, falling back to us-east-1: %s", exc)
             regions = ["us-east-1"]
 
     tasks = [
-        loop.run_in_executor(None, _audit_region, session, region)
+        asyncio.to_thread(_audit_region, session, region)
         for region in regions
     ]
     region_results = await asyncio.gather(*tasks, return_exceptions=True)

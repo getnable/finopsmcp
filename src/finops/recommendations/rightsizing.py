@@ -438,7 +438,7 @@ def _analyze_cloudwatch_fallback(
     concurrently. Bounded workers keep well under CloudWatch API limits.
     """
     import boto3
-    from concurrent.futures import ThreadPoolExecutor
+    from ..aws_read_failures import ScopedThreadPool
 
     cw_cov: dict[str, Any] = {
         "regions_scanned": len(regions), "regions_failed": [],
@@ -449,7 +449,7 @@ def _analyze_cloudwatch_fallback(
 
     # Phase 1: discover running instances, regions in parallel.
     instances: list[dict] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
+    with ScopedThreadPool(max_workers=min(8, max(1, len(regions)))) as pool:
         for region, result in zip(regions, pool.map(_list_instances_or_error, regions)):
             if isinstance(result, str):
                 cw_cov["regions_failed"].append({"region": region, "error_class": result})
@@ -477,7 +477,7 @@ def _analyze_cloudwatch_fallback(
         return inst, avg_cpu, max_cpu
 
     results: list[RightsizingRecommendation] = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ScopedThreadPool(max_workers=10) as pool:
         for inst, avg_cpu, max_cpu in pool.map(_cpu, instances):
             if avg_cpu is None or max_cpu is None:
                 cw_cov["instances_skipped"] += 1

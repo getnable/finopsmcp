@@ -578,7 +578,6 @@ def _instrumented_tool(*dargs, **dkwargs):
                 # Only await coroutines/awaitables, otherwise sync tools
                 # (whoami, *_api_key) raise "object dict can't be used in
                 # 'await' expression".
-                _aws_reads.carry_into_default_executor(asyncio.get_running_loop())
                 with _aws_reads.watching() as _reads:
                     if _demo is not None:
                         result = _demo
