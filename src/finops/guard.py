@@ -110,6 +110,7 @@ What happened afterwards (setup_wizard's `nable guard ...`):
 """
 from __future__ import annotations
 
+import bisect
 import contextlib
 import contextvars
 import functools
@@ -640,6 +641,124 @@ class _Lazy:
         return getattr(self._re, name)
 
 
+# ── One shell command at a time ───────────────────────────────────────────────
+# A rule names a program and a verb (`kubectl ... delete`). Read across the
+# whole line, `kubectl get events | grep -i delete` was a delete and
+# `terraform plan | grep destroy` a destroy, so an expert's every look at a
+# plan asked to confirm one. A rule now matches only where its program and
+# its verb sit in the same shell command (_Segments.live), except the two
+# heuristics that read across a pipe by design (a decoded script fed to a
+# shell, a Python one-liner with its own `;`).
+#
+# And a command that runs nothing is not a change (_inert): a dry run (`aws
+# ec2 ... --dry-run`, `aws s3 ... --dryrun`, `kubectl|helm ...
+# --dry-run[=client|server]`), a permission check (`kubectl auth can-i
+# delete pods`), and the helm subcommands that never touch a release (`helm
+# diff upgrade`, `helm plugin uninstall`, `helm template`).
+#
+# Neither may hide a change the shell runs. classify_command judges two
+# splits of the command and the more severe answer stands: one where an
+# operator inside quotes splits it too (what the shell `bash -c '...'`
+# starts sees) and one where it does not (what the outer shell sees). A
+# command with a substitution (`$(...)`, backticks, `<(...)`), which can
+# carry a verb from one command into another, is judged whole, as before.
+# A dry run counts only in a command that names exactly one cloud or IaC
+# CLI, with the flag after it, and `--no-dry-run` or `--dry-run=none|false`
+# makes it real.
+
+# The operators between shell commands in a normalized command.
+_COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
+_SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
+_CROSS_SEGMENT = frozenset({"python-boto3-delete", "base64-to-shell"})
+_CLI_WORD_RE = re.compile(r"(?<![\w./-])(?:aws|kubectl|helm|terraform|tofu|terragrunt|pulumi|"
+                          r"gcloud|az|cdk|sam|doctl|eksctl|gsutil)(?![\w.-])")
+_AWS_EC2_RE = re.compile(r"aws\s+ec2\s")
+_AWS_S3_RE = re.compile(r"aws\s+s3\s")
+_EC2_DRY_RUN_RE = re.compile(r"(?<!\S)--dry-run(?!\S)")
+_S3_DRY_RUN_RE = re.compile(r"(?<!\S)--dryrun(?!\S)")
+_K8S_DRY_RUN_RE = re.compile(r"(?<!\S)--dry-run(?:=(?:client|server|true))?(?!\S)")
+_REAL_RUN_RE = re.compile(r"(?<!\S)--(?:no-dry-run|dry-run=(?:none|false))(?!\S)")
+_END_OF_OPTIONS_RE = re.compile(r"(?<!\S)--(?!\S)")
+# Global flags that may come before the subcommand: a value-taking flag
+# consumes the next word. Anything not listed ends the match, so an unknown
+# flag can never make a release name read as a subcommand.
+_KUBECTL_GLOBAL = (r"(?:(?:-n|--namespace|--context|--kubeconfig|--cluster|--user|-s|--server|"
+                   r"--token|--as|--as-group|--as-uid|--request-timeout|"
+                   r"--certificate-authority|--client-certificate|--client-key|"
+                   r"--tls-server-name|--cache-dir|-v|--v)(?:=\S*|\s+\S+)"
+                   r"|--insecure-skip-tls-verify(?:=\S*)?|--warnings-as-errors"
+                   r"|--match-server-version)\s+")
+_HELM_GLOBAL = (r"(?:(?:-n|--namespace|--kube-context|--kubeconfig|--kube-apiserver|"
+                r"--kube-as-group|--kube-as-user|--kube-ca-file|--kube-tls-server-name|"
+                r"--kube-token|--registry-config|--repository-cache|--repository-config|"
+                r"--burst-limit|--qps|--content-cache)(?:=\S*|\s+\S+)"
+                r"|--debug|--kube-insecure-skip-tls-verify)\s+")
+_INERT_SUBCOMMAND_RE = re.compile(
+    rf"(?<![\w./-])kubectl\s+(?:{_KUBECTL_GLOBAL})*auth\s+can-i{_END}"
+    rf"|(?<![\w./-])helm\s+(?:{_HELM_GLOBAL})*(?:diff|template|plugin|show|inspect|search|repo|"
+    rf"lint|dependency|dep|pull|fetch|package|verify|history|status|get|list|ls|env|version|"
+    rf"completion|help){_END}")
+
+
+def _inert(seg: str) -> bool:
+    """Does this one shell command run nothing: a dry run, a permission
+    check, or a helm subcommand that never touches a release?"""
+    clis = _CLI_WORD_RE.finditer(seg)
+    prog = next(clis, None)
+    if prog is None or next(clis, None) is not None:
+        return False
+    if _INERT_SUBCOMMAND_RE.match(seg, prog.start()):
+        return True
+    # After a bare `--` a flag is an argument: `kubectl delete ns x --
+    # --dry-run` deletes the namespace.
+    if ("dry" not in seg or _REAL_RUN_RE.search(seg, prog.end())
+            or _END_OF_OPTIONS_RE.search(seg, prog.end())):
+        return False
+    if prog.group() == "aws":
+        return bool((_AWS_EC2_RE.match(seg, prog.start())
+                     and _EC2_DRY_RUN_RE.search(seg, prog.end()))
+                    or (_AWS_S3_RE.match(seg, prog.start())
+                        and _S3_DRY_RUN_RE.search(seg, prog.end())))
+    if prog.group() in ("kubectl", "helm"):
+        return _K8S_DRY_RUN_RE.search(seg, prog.end()) is not None
+    return False
+
+
+class _Segments:
+    """The shell commands in a normalized command: where each starts and
+    ends (a break belongs to the next one), and which run nothing (_inert),
+    each looked up once."""
+
+    __slots__ = ("cmd", "starts", "ends", "_inert")
+
+    def __init__(self, cmd: str) -> None:
+        self.cmd = cmd
+        starts, ends, pos = [], [], 0
+        for m in _COMMAND_BREAK_RE.finditer(cmd):
+            starts.append(pos)
+            ends.append(m.start())
+            pos = m.end()
+        starts.append(pos)
+        ends.append(len(cmd))
+        self.starts, self.ends = starts, ends
+        self._inert: dict[int, bool] = {}
+
+    def __len__(self) -> int:
+        return len(self.starts)
+
+    def index(self, pos: int) -> int:
+        """The segment that offset `pos` falls in."""
+        return max(bisect.bisect_right(self.starts, pos) - 1, 0)
+
+    def text(self, i: int) -> str:
+        return self.cmd[self.starts[i]:self.ends[i]]
+
+    def inert(self, i: int) -> bool:
+        if i not in self._inert:
+            self._inert[i] = _inert(self.text(i))
+        return self._inert[i]
+
+
 class _Rule:
     """A compiled classifier pattern with search() linear in the command.
 
@@ -661,6 +780,32 @@ class _Rule:
         m = self.head.search(cmd)
         return self.tail.search(cmd, m.end()) if m else None
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        """search(), with the program and the verb in one shell command that
+        is not inert. Still linear: each head search starts at a later
+        segment than the last, and each tail search stays inside one."""
+        if self.head is None:
+            for m in self.tail.finditer(cmd):
+                if not segs.inert(segs.index(m.start())):
+                    return m
+            return None
+        pos = i = 0
+        ends, last = segs.ends, len(segs) - 1
+        while True:
+            h = self.head.search(cmd, pos)
+            if h is None:
+                return None
+            while i < last and ends[i] <= h.start():
+                i += 1
+            end = ends[i]
+            t = self.tail.search(cmd, h.end(), end) if h.end() <= end else None
+            if t is not None and not segs.inert(i):
+                return t
+            if i >= last:
+                return None
+            i += 1
+            pos = segs.starts[i]
+
 
 class _VerbWithFlag:
     """PROGRAM ... VERB ... FLAG within one shell segment, e.g. `terraform
@@ -677,16 +822,32 @@ class _VerbWithFlag:
         # The flag may also sit between the program and the verb.
         self._flag_anywhere = flag_anywhere
 
+    def _find(self, seg: str) -> re.Match[str] | None:
+        tool = self._tool.search(seg)
+        if tool is None:
+            return None
+        verb = self._verb.search(seg, tool.end())
+        if verb is None:
+            return None
+        return self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
+
     def search(self, cmd: str) -> re.Match[str] | None:
+        if self._tool.search(cmd) is None:
+            return None
         for seg in re.split(r"[|;&]", cmd):
-            tool = self._tool.search(seg)
-            if tool is None:
-                continue
-            verb = self._verb.search(seg, tool.end())
-            if verb is not None:
-                flag = self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
-                if flag is not None:
-                    return flag
+            flag = self._find(seg)
+            if flag is not None:
+                return flag
+        return None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        tool = self._tool.search(cmd)
+        if tool is None:
+            return None
+        for i in range(segs.index(tool.start()), len(segs)):
+            flag = self._find(segs.text(i))
+            if flag is not None and not segs.inert(i):
+                return flag
         return None
 
 
@@ -704,6 +865,9 @@ class _TfCliArgsDestroy:
                 return m
         return None
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
+
 
 class _S3MoveOutOfBucket:
     """`aws s3 mv s3://bucket/prefix <dest> --recursive`: every object under the
@@ -720,23 +884,34 @@ class _S3MoveOutOfBucket:
                           "--no-progress", "--ignore-glacier-warnings",
                           "--force-glacier-transfer", "--validate-same-s3-paths"})
 
+    def _find(self, seg: str) -> re.Match[str] | None:
+        mv = self._mv.search(seg)
+        if mv is None or self._recursive.search(seg, mv.end()) is None:
+            return None
+        skip = False
+        for tok in seg[mv.end():].split():
+            if skip:
+                skip = False
+            elif tok.startswith("-"):
+                skip = "=" not in tok and tok not in self._BOOLEAN
+            else:
+                return mv if tok.lower().startswith("s3://") else None
+        return None
+
     def search(self, cmd: str) -> re.Match[str] | None:
         if self._mv.search(cmd) is None:
             return None
         for seg in re.split(r"[|;&]", cmd):
-            mv = self._mv.search(seg)
-            if mv is None or self._recursive.search(seg, mv.end()) is None:
-                continue
-            skip = False
-            for tok in seg[mv.end():].split():
-                if skip:
-                    skip = False
-                elif tok.startswith("-"):
-                    skip = "=" not in tok and tok not in self._BOOLEAN
-                else:
-                    if tok.lower().startswith("s3://"):
-                        return mv
-                    break
+            mv = self._find(seg)
+            if mv is not None:
+                return mv
+        return None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        for i in range(len(segs)):
+            mv = self._find(segs.text(i))
+            if mv is not None and not segs.inert(i):
+                return mv
         return None
 
 
@@ -758,6 +933,9 @@ class _PythonBoto3Delete:
             return None
         return self._delete.search(cmd, py.end())
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
+
 
 class _Base64ToShell:
     """`... | base64 -d | sh`: a script decoded straight into a shell, so the
@@ -772,6 +950,9 @@ class _Base64ToShell:
     def search(self, cmd: str) -> re.Match[str] | None:
         decode = self._decode.search(cmd)
         return self._to_shell.search(cmd, decode.end()) if decode else None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
 
 
 _SPECIAL_RULES = {r.pattern: r for r in (
@@ -808,8 +989,24 @@ def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
     when it is not an infrastructure mutation nable cares about. Linear in the
     length of the command (see _Rule). Every reading of the command is judged
-    and the most severe wins (_worst_reading)."""
-    return _worst_reading(command, _classify_normalized)
+    and the most severe wins (_worst_reading), one shell command at a time
+    (_classify_live), in both splits of its quoting (_quoting_splits)."""
+    hit = None
+    for form in _quoting_splits(command):
+        found = _worst_reading(form, _classify_live)
+        if _rank(found) > _rank(hit):
+            hit = found
+    return hit
+
+
+def _quoting_splits(command: str) -> tuple[str, ...]:
+    """The command with an unquoted newline made a `;`, read twice: with an
+    operator inside quotes splitting it (as the shell that `bash -c '...'`
+    starts would) and with it spaced out (as the outer shell does). One form
+    when there are no quotes to tell them apart."""
+    inner = _price_rewrite(command, split_quoted=True)
+    outer = _price_rewrite(command, split_quoted=False)
+    return (inner,) if inner == outer else (inner, outer)
 
 
 def _classify_normalized(cmd: str) -> tuple[str, str] | None:
@@ -819,6 +1016,24 @@ def _classify_normalized(cmd: str) -> tuple[str, str] | None:
     for rule, action in _TWO_WAY_RULES:
         if rule.search(cmd):
             return ("two_way", action)
+    return None
+
+
+def _classify_live(cmd: str) -> tuple[str, str] | None:
+    """_classify_normalized, where a rule's program and verb sit in one shell
+    command that runs something (see _Segments). A command with a
+    substitution is judged whole."""
+    if _SUBSTITUTION_RE.search(cmd):
+        return _classify_normalized(cmd)
+    segs: _Segments | None = None
+    for table, door in ((_ONE_WAY_RULES, "one_way"), (_TWO_WAY_RULES, "two_way")):
+        for rule, action in table:
+            if rule.search(cmd) is None:
+                continue
+            if segs is None:
+                segs = _Segments(cmd)
+            if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
+                return (door, action)
     return None
 
 
@@ -1479,8 +1694,6 @@ _PRICERS: list[tuple[Any, Any]] = [
 # read the whole line, find the first --instance-type and price the t3.micro;
 # so each shell command is priced on its own and the figures are added up.
 
-# The operators between shell commands in a normalized command.
-_COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
 _QUOTED_OPS = str.maketrans({";": " ", "&": " ", "|": " ", "\n": " "})
 
 
@@ -1497,7 +1710,7 @@ def _price_rewrite(command: str, split_quoted: bool) -> str:
             return tok.translate(_QUOTED_OPS)
         return tok
     command = _unfold(command)
-    if "\n" not in command and "'" not in command and '"' not in command:
+    if "\n" not in command and (split_quoted or ("'" not in command and '"' not in command)):
         return command
     return _SHELL_LEX_RE.sub(one, command)
 
@@ -1523,10 +1736,12 @@ def _commands_in(form: str):
 def _price_form(form: str, cwd: str | None) -> tuple[list[dict[str, Any]], int]:
     """(figures, how many changes had none) for each command in `form`: the
     first pricer whose command it is prices it, and a command it cannot price
-    does not stop the others."""
+    does not stop the others. A dry run costs nothing and is not priced."""
     parts: list[dict[str, Any]] = []
     unpriced = 0
     for seg, at in _commands_in(form):
+        if "dry" in seg and _inert(seg):
+            continue
         for pattern, pricer in _PRICERS:
             if pattern.search(seg):
                 try:
@@ -2634,9 +2849,15 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
     what = _ACTION_PHRASES.get(action_type)
     if what is None:
         what = "would delete cloud resources"
-        # The reading the classifier took it from: blanked, expanded, as written.
-        rule = next((rule for form in (r.masked, r.expanded, r.raw)
-                     for rule, _ in _ONE_WAY_RULES if rule.search(form)), None)
+        # The reading the classifier took it from: blanked, expanded, as
+        # written, in either split of the quoting; the rule that matched in
+        # a shell command that runs, not a dry run or a pipe into grep.
+        forms = [f for split in _quoting_splits(command)
+                 for f in dict.fromkeys(_readings(split)[:3])]
+        rule = next((rule for form in forms for rule, _ in _ONE_WAY_RULES
+                     if rule.search(form) and (
+                         rule.pattern in _CROSS_SEGMENT or _SUBSTITUTION_RE.search(form)
+                         or rule.search_live(form, _Segments(form)))), None)
         if rule is not None:
             what = next((phrase for frag, phrase in _ONE_WAY_PHRASES
                          if frag in rule.pattern), what)
