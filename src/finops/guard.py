@@ -224,8 +224,20 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
-    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade){_END}", "infra_apply"),
-    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale){_END}", "infra_apply"),
+    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade|rollback){_END}", "infra_apply"),
+    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale|patch){_END}", "infra_apply"),
+    # The other ways to change a workload in place, which the MCP side
+    # (kubectl_patch, kubectl_rollout) already counted: a new image, an
+    # environment change, a restart, a rollback.
+    (rf"\bkubectl\s+(?:\S+\s+)*(?:set\s+(?:image|env|resources)|"
+     rf"rollout\s+(?:restart|undo|resume)){_END}", "infra_apply"),
+    # The IaC tools' own apply verbs: `terraform apply` in production asked
+    # and `pulumi up --stack prod`, `cdk deploy` and `sam deploy` did not.
+    (rf"\bpulumi\s+(?:\S+\s+)*(?:up|update){_END}", "infra_apply"),
+    (rf"\bcdk\s+(?:\S+\s+)*deploy{_END}", "infra_apply"),
+    (rf"\bsam\s+(?:\S+\s+)*deploy{_END}", "infra_apply"),
+    # eksctl creates a cluster's or a node group's instances itself.
+    (rf"\beksctl\s+(?:\S+\s+)*create\s+(?:cluster|nodegroup|ng){_END}", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
@@ -1568,6 +1580,49 @@ def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
         basis="pay-as-you-go monthly, nable's Azure VM price table")
 
 
+# `eksctl create cluster|nodegroup --node-type T --nodes N`. eksctl starts
+# 2 nodes when --nodes is not given, and a cluster brings its EKS control
+# plane ($0.10/hr, AWS Price List SKU ZYWMR684YSMFHWEU, us-east-1). A config
+# file (-f) decides everything and is not read: no figure.
+_EKSCTL_CREATE_RE = _Rule(rf"\beksctl\s+(?:\S+\s+)*create\s+(?:cluster|nodegroup|ng){_END}")
+_EKSCTL_DEFAULT_NODES = 2
+_EKS_CONTROL_PLANE_HOURLY = 0.10
+
+
+def _short_or_long(cmd: str, short: str, long: str) -> str | None:
+    val = _flag(cmd, long)
+    if val is None:
+        m = re.search(rf"(?<!\S)-{short}(?:=|\s+)(?!-)(\S+)", cmd)
+        val = m.group(1) if m else None
+    return val
+
+
+def _price_eksctl(cmd: str, **_: Any) -> dict[str, Any] | None:
+    if re.search(r"(?<!\S)(?:-f|--config-file)(?:=|\s|$)", cmd):
+        return None
+    cluster = re.search(r"(?<!\S)create\s+cluster(?!\S)", cmd) is not None
+    itype = _short_or_long(cmd, "t", "node-type")
+    nodes = _num(_short_or_long(cmd, "N", "nodes"))
+    without = _has_flag(cmd, "without-nodegroup")
+    if not itype or without:
+        return None
+    count = int(nodes) if nodes else _EKSCTL_DEFAULT_NODES
+    most = _short_or_long(cmd, "M", "nodes-max")
+    basis = (_SPOT_BASIS if _has_flag(cmd, "spot") else _ON_DEMAND_BASIS) + (
+        "" if nodes else f"; eksctl starts {_EKSCTL_DEFAULT_NODES} nodes when --nodes is "
+                         "not given") + (
+        f"; the group may scale to {most} nodes" if most and most != str(count) else "")
+    est = _price_ec2(itype, count, basis=basis, lead="a node group of ")
+    if est is None or not cluster:
+        return est
+    plane = _EKS_CONTROL_PLANE_HOURLY * _hours_per_month()
+    total = est["monthly_usd"] + plane
+    return {**est, "monthly_usd": round(total, 2),
+            "line": (f"{est['line']}, plus the EKS control plane at "
+                     f"{_rate(_EKS_CONTROL_PLANE_HOURLY)}/hr (~${plane:,.0f}/mo): "
+                     f"~${total:,.0f}/mo together")}
+
+
 _TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")
 # `cd DIR` or `pushd DIR` as a command of its own, anywhere before the apply:
 # `git pull && cd infra && terraform apply tfplan`, `(cd infra && ...)`,
@@ -1788,6 +1843,7 @@ _PRICERS: list[tuple[Any, Any]] = [
     (_RESERVED_RE, _price_reserved_instances),
     (_GCE_CREATE_RE, _price_gce),
     (_AZ_VM_CREATE_RE, _price_az_vm),
+    (_EKSCTL_CREATE_RE, _price_eksctl),
     (_TF_APPLY_RE, _price_planfile),
 ]
 
@@ -2152,6 +2208,7 @@ _PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
     _price_reserved_instances: ("aws", None),
     _price_gce: ("gcp", "Compute Engine"),
     _price_az_vm: ("azure", "Virtual Machines"),
+    _price_eksctl: ("aws", _EC2_SERVICE),
     _price_planfile: (None, None),
 }
 _BUDGETS_LISTED = 5
@@ -2747,6 +2804,14 @@ def _judged(command: str, hit: tuple[str, str], *, context: str | None, via: str
     return v
 
 
+# A deny from the allowed-actions list, in the guard's words: the policy
+# gate's own ("nable will not propose applying it") was written for the
+# advisor, which proposes; the guard stops a command an agent is running.
+_ALLOWLIST_REASON = ("'{action}' is not in your allowlist of permitted actions "
+                     "(FINOPS_POLICY_ALLOWED_ACTIONS), so the guard denies it; add "
+                     "{action} there to allow changes like this one.")
+
+
 def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
                     via: str = "", cwd: str | None = None,
                     org: _OrgLens | None = None) -> dict[str, Any]:
@@ -2834,11 +2899,21 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                                    est=est)
                 # `rule` tells the learning loop an ask the threshold caused
                 # (the only kind a threshold fact can stop) from the rest.
+                why = (_ALLOWLIST_REASON.format(action=action_type)
+                       if gate.get("rule") == "allowlist"
+                       else gate.get("reason", "a human must review this action."))
                 return {**verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
-                    f"{_cost_line(est)}. "
-                    f"{gate.get('reason', 'a human must review this action.')}",
-                    est=est), "rule": gate.get("rule")}
+                    f"{_cost_line(est)}. {why}", est=est), "rule": gate.get("rule")}
+        else:
+            # Unpriced, it is still an action the policy names: with
+            # infra_apply left out of the allowed actions, a $8/mo t3.micro
+            # launch was denied and `terraform apply` let through. Read from
+            # the policy alone, so an unpriced change never loads the org
+            # model (whose thresholds only a figure can reach).
+            if action_type not in load_policy().get("allowed_action_types", []):
+                return {**verdict("deny", _ALLOWLIST_REASON.format(action=action_type)),
+                        "rule": "allowlist"}
         cost = f" {_cost_line(est)}." if est else ""
         if _strict():
             return verdict("ask", "this changes infrastructure and therefore the "
