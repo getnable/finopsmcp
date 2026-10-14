@@ -2662,6 +2662,18 @@ def _run_guard(parsed) -> None:
                   file=sys.stderr)
             raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
+        if getattr(parsed, "guard_json", False):
+            # The verdict as data, for a pipeline vetting a command. "allow" is
+            # the guard having no opinion; infra says whether it classified it.
+            hit = guard.classify_command(cmd) if verdict is None else None
+            doc = ({"command": cmd, **verdict} if verdict is not None else
+                   {"command": cmd, "decision": "allow", "infra": hit is not None,
+                    "action_type": hit[1] if hit else None,
+                    "reason": ("reversible and in policy: the guard stays silent" if hit
+                               else "not an infra-mutating command: the guard stays silent")})
+            doc.setdefault("infra", True)
+            print(json.dumps(doc, indent=2, default=str))
+            return
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
@@ -3811,7 +3823,15 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
-    sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p = sub.add_parser("doctor", help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p.add_argument("--json", dest="doctor_json", action="store_true",
+                          help="One JSON list of checks on stdout; exit 1 when any check failed")
+    doctor_p.add_argument("--audit", dest="doctor_audit", action="store_true",
+                          help="Print vault audit log entries instead of running health checks")
+    doctor_p.add_argument("--hours", dest="doctor_hours", type=int, default=24,
+                          help="With --audit: hours of audit log to show (default: 24)")
+    doctor_p.add_argument("--limit", dest="doctor_limit", type=int, default=50,
+                          help="With --audit: max entries to show (default: 50)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
@@ -3845,8 +3865,8 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
-                              "print JSON")
+                         help="With 'check', 'report', 'verify-log', 'doctor' or "
+                              "'reconcile': print JSON")
     guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
                          help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
     guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
@@ -4131,7 +4151,9 @@ def main(args: list[str] | None = None) -> None:
                                         getattr(parsed, "yes", False),
                                         getattr(parsed, "dry_run", False)))
     elif parsed.cmd in ("license-status", "whoami", "plan"):
-        _run_license_status()
+        _code = _run_license_status()
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "serve":
         if getattr(parsed, "demo", False):
@@ -4148,13 +4170,17 @@ def main(args: list[str] | None = None) -> None:
         try:
             from .server_web import run_server, set_connectors
         except ImportError:
+            # stderr and exit 1: nothing was served. This is the container
+            # image's default command, and exit 0 read as "finished cleanly" to
+            # `docker run`, to a supervisor and to any script that started it.
             print(
                 "The local web dashboard has been removed from the open-source nable package.\n"
                 "It's now a hosted/enterprise feature. The local product is the MCP server that\n"
                 "runs inside your editor (Claude, Cursor, etc.). For a hosted dashboard, see\n"
-                "https://getnable.com."
+                "https://getnable.com.",
+                file=sys.stderr,
             )
-            return
+            raise SystemExit(1) from None
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
         # canonical connector set. Without this the serve process ran with an empty
@@ -4225,10 +4251,14 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
-        # Pass empty args: doctor.main() defaults to parsing sys.argv, which still
-        # contains the consumed "doctor" token and would error. For flags
-        # (--json/--audit), use the standalone `finops-doctor` command.
-        _doctor_main([])
+        # Explicit args: doctor.main() defaults to parsing sys.argv, which still
+        # contains the consumed "doctor" token and would error. The flags are
+        # parsed here, so `nable doctor --json` works the way `finops-doctor
+        # --json` always did (a pipeline has no other way to read the checks).
+        _dargs = ["--hours", str(parsed.doctor_hours), "--limit", str(parsed.doctor_limit)]
+        _dargs += ["--json"] if parsed.doctor_json else []
+        _dargs += ["--audit"] if parsed.doctor_audit else []
+        _doctor_main(_dargs)
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
@@ -4252,7 +4282,8 @@ def main(args: list[str] | None = None) -> None:
             from .welcome import _cli
             print(f"\n  Nothing was connected, so there is nothing to restart. Run "
                   f"{_cli('setup ' + parsed.cmd)} again when you have the key.\n")
-            return
+            # Not a success: a script piping a key in (or none) reads this.
+            raise SystemExit(1)
     else:
         # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
         # the editor, ambient-credential scan, value moment, never dead-ends), so
@@ -4473,16 +4504,19 @@ def _run_license_setup(key: str = "") -> int:
     return 0
 
 
-def _run_license_status() -> None:
+def _run_license_status() -> int:
     """
     Print current license status without restarting anything.
     Called by: finops setup license-status
                finops license-status
+    Returns the exit code: 1 when the configured key is invalid (a pipeline
+    checking its FINOPS_LICENSE_KEY secret has only that to go on), else 0.
     """
     from .license import (
         _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
         trial_last_day, trial_line,
     )
+    from .welcome import _c
 
     status = check_license()
 
@@ -4491,7 +4525,8 @@ def _run_license_status() -> None:
     color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
              "free": "90", "invalid": "31"}.get(status.mode)
     label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
-    mode_display = f"\033[{color}m{label}\033[0m" if color else label
+    # Colour only on a terminal: in a CI log the escapes are noise.
+    mode_display = _c(color, label) if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
@@ -4518,6 +4553,7 @@ def _run_license_status() -> None:
         print("  Then run:   finops login\n")
     else:
         print()
+    return 1 if status.mode == "invalid" else 0
 
 
 def _run_login(email: str = "") -> int:

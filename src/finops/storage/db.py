@@ -10,10 +10,12 @@ to shared mode. All table definitions work on both backends.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import stat
 import threading
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -717,6 +719,38 @@ def get_engine() -> Engine:
         return engine
 
 
+@contextlib.contextmanager
+def _schema_lock(db_path: Path) -> Iterator[None]:
+    """One PROCESS at a time brings a SQLite file's schema up to date.
+
+    _ENGINE_LOCK covers threads. Two processes are the headless case: two
+    cron jobs (or a cron job and an editor's MCP server) starting together on
+    a data dir nable has not used yet. create_all checks for each table and
+    then creates it, so both saw no table, both issued CREATE TABLE, and the
+    slower one died on "table cost_snapshots already exists" (exit 1). A new
+    release that adds a table or column reopens the same window.
+
+    A lock file of its own, never the database: an fd opened and closed on
+    the database file would drop SQLite's own POSIX locks in this process.
+    POSIX only (flock); elsewhere it is the single-writer best effort it
+    always was."""
+    try:
+        import fcntl
+    except ImportError:  # Windows
+        yield
+        return
+    try:
+        fd = os.open(db_path.with_name(f".{db_path.name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:      # an unwritable directory fails at the database anyway
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def _build_engine() -> Engine:
     """Create the engine and bring its schema up to date. Never publishes."""
     database_url = os.environ.get("DATABASE_URL", "")
@@ -760,8 +794,9 @@ def _build_engine() -> Engine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
-        metadata.create_all(engine)
-        _run_sqlite_migrations(engine)
+        with _schema_lock(db_path):
+            metadata.create_all(engine)
+            _run_sqlite_migrations(engine)
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         # WAL mode creates -wal/-shm sidecars under the process umask; they
         # briefly hold recently written rows, so clamp them too when present.
