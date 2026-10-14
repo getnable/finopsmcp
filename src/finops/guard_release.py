@@ -32,7 +32,8 @@ import json
 import os
 import re
 import shutil
-import subprocess  # nosec B404 - runs uvx with a fixed argument list, no shell
+# Runs uvx with a fixed argument list and no shell.
+import subprocess  # nosec B404
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
