@@ -37,6 +37,60 @@ def test_guard_prices_rds_m5_8xlarge_at_the_listed_rate():
     assert est["monthly_usd"] == round(2.74 * HOURS_PER_MONTH, 2)
 
 
+# ── the guard ────────────────────────────────────────────────────────────────
+
+def test_guard_prices_ebs_volumes_launched_with_the_instances():
+    from finops.guard import estimate_command_monthly_cost
+
+    est = estimate_command_monthly_cost(
+        "aws ec2 run-instances --image-id ami-1 --instance-type m5.large --count 4 "
+        "--block-device-mappings '[{\"DeviceName\":\"/dev/sdb\",\"Ebs\":{\"VolumeSize\":16000,"
+        "\"VolumeType\":\"io2\",\"Iops\":64000}}]'")
+    # Per volume: 16,000 GB x $0.125 + 32,000 IOPS x $0.065 + 32,000 x $0.0455
+    # (AmazonEC2 offer 20261012193925: 6V576P37PS7K7KYU, X9AGQNCQXFA9Q8XZ,
+    # KDKG2R3W4NMV7CHP) = $5,536/mo. This read 4 x m5.large only, ~$280/mo.
+    assert est["ebs_monthly_usd"] == 4 * 5536.0
+    assert est["monthly_usd"] == round(4 * 0.096 * HOURS_PER_MONTH + 4 * 5536.0, 2)
+    shorthand = estimate_command_monthly_cost(
+        "aws ec2 run-instances --image-id ami-1 --instance-type m5.large "
+        "--block-device-mappings DeviceName=/dev/sdb,Ebs={VolumeSize=500,VolumeType=gp3}")
+    assert shorthand["ebs_monthly_usd"] == 40.0
+    plain = estimate_command_monthly_cost("aws ec2 run-instances --instance-type m5.large")
+    assert "root volume is not counted" in plain["line"]
+
+
+@pytest.mark.parametrize("cmd,region", [
+    ("aws ec2 run-instances --region ap-southeast-1 --instance-type m5.large", "ap-southeast-1"),
+    ("AWS_REGION=eu-west-1 aws ec2 run-instances --instance-type m5.large", "eu-west-1"),
+    (("aws rds create-db-instance --region=us-west-2 --db-instance-class db.m5.large "
+      "--engine mysql"), "us-west-2"),
+])
+def test_guard_says_when_a_us_east_1_figure_is_for_another_region(cmd, region):
+    from finops.guard import estimate_command_monthly_cost
+
+    # m5.large lists $0.12 in ap-southeast-1 against $0.096 in us-east-1 (AmazonEC2
+    # offer 20261012193925); the figure stays the us-east-1 one and now says so.
+    est = estimate_command_monthly_cost(cmd)
+    assert est["region"] == region
+    assert f"targets {region}" in est["line"] and "often higher" in est["basis"]
+    same = estimate_command_monthly_cost(
+        "aws ec2 run-instances --region us-east-1 --instance-type m5.large")
+    assert "region" not in same and "targets" not in same["line"]
+
+
+def test_guard_prices_a_node_group_at_its_dearest_type_and_labels_spot():
+    from finops.guard import estimate_command_monthly_cost
+
+    est = estimate_command_monthly_cost(
+        "aws eks create-nodegroup --cluster-name c --nodegroup-name n "
+        "--instance-types g5.xlarge,g5.12xlarge --capacity-type SPOT "
+        "--scaling-config minSize=1,maxSize=10,desiredSize=4")
+    # It took the first type, g5.xlarge ($1.006), for a group that may launch
+    # g5.12xlarge ($5.672, SKU UH59G55UJ94HZTJJ), and called a SPOT group on-demand.
+    assert est["instance_type"] == "g5.12xlarge" and est["hourly_usd"] == 5.672
+    assert "spot prices vary" in est["basis"]
+
+
 # ── Terraform estimator: ElastiCache, OpenSearch, MSK, Redshift ──────────────
 
 def _rc(rtype: str, after: dict):
