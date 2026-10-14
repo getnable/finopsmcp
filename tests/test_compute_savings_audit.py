@@ -323,6 +323,7 @@ def test_the_spot_tables_are_the_spot_advisor_figures():
     for itype, (saving, band) in _ADVISOR_US_EAST_1.items():
         assert sa.SPOT_DISCOUNT[itype] == saving, itype
         assert sa.SPOT_INTERRUPTION_BAND[itype] == band, itype
+        assert sa.SPOT_INTERRUPTION_FREQ[itype] == sa._BAND_FLOOR[band], itype
 
 
 def _spot_rows(itype: str, region: str):

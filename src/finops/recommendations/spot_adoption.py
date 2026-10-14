@@ -72,10 +72,14 @@ _BAND_FLOOR: dict[str, float] = {
     "<5%": 0.0, "5-10%": 0.05, "10-15%": 0.10, "15-20%": 0.15, ">20%": 0.20,
 }
 
-# Interruption frequency (fraction) per type: the lower edge of its band. The
-# default is not a measurement; it keeps an unknown rate at POSSIBLE at best.
+# Interruption frequency (fraction) per type: the lower edge of its band in
+# SPOT_INTERRUPTION_BAND (tests hold the two together). The default is not a
+# measurement; it keeps an unknown rate at POSSIBLE at best.
 SPOT_INTERRUPTION_FREQ: dict[str, float] = {
-    **{t: _BAND_FLOOR[b] for t, b in SPOT_INTERRUPTION_BAND.items()},
+    "m5.large":   0.20,  "m5.xlarge":  0.20,  "m5.2xlarge": 0.20,
+    "m6i.large":  0.20,  "m6i.xlarge": 0.20,
+    "c5.large":   0.10,  "c5.xlarge":  0.10,
+    "r5.large":   0.20,  "r5.xlarge":  0.20,
     "_default":   0.10,
 }
 
