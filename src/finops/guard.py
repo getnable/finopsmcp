@@ -1239,7 +1239,7 @@ def _price_gce(cmd: str, **_: Any) -> dict[str, Any] | None:
     return _price_table_vm(
         cmd, flag="machine-type", table=_GKE_MONTHLY,
         count=max(1, _leading_names(cmd, m.end())), provider="gcp",
-        basis="on-demand monthly, nable's Compute Engine node price table")
+        basis="on-demand us-central1 list price, nable's Compute Engine node price table")
 
 
 def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -1247,7 +1247,8 @@ def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
     return _price_table_vm(
         cmd, flag="size", table=_AKS_MONTHLY,
         count=int(_num(_flag(cmd, "count")) or 1), provider="azure",
-        basis="pay-as-you-go monthly, nable's Azure VM price table")
+        basis="pay-as-you-go monthly, nable's Azure VM price table, not verified "
+              "against Azure's current retail prices")
 
 
 _TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
-from ..aws_prices import EC2_MONTHLY
+from ..aws_prices import EC2_MONTHLY, HOURS_PER_MONTH
 
 log = logging.getLogger("finops.connectors.kubernetes")
 
@@ -46,21 +46,48 @@ log = logging.getLogger("finops.connectors.kubernetes")
 # $0.038, none of them a rate any other table in the repo used.
 _EC2_MONTHLY = EC2_MONTHLY
 
+# Compute Engine on-demand list, us-central1 (Iowa), USD per hour, the
+# "Default" column of https://cloud.google.com/products/compute/pricing/general-purpose
+# read 2026-10-13. GKE Standard nodes bill as these VMs. The monthly figures
+# used to be typed in, and the N1 and N2 rows were 23% and 15% under list
+# (n2-standard-8 $241.95/mo against $283.58, n1-standard-4 $106.92 against
+# $138.70); the E2 rows were the hourly rate rounded to three places.
+_GCE_HOURLY: dict[str, float] = {
+    "e2-standard-2": 0.06701142, "e2-standard-4": 0.13402284, "e2-standard-8": 0.26804568,
+    "e2-standard-16": 0.53609136, "e2-standard-32": 1.07218272,
+    "n2-standard-2": 0.097118, "n2-standard-4": 0.194236, "n2-standard-8": 0.388472,
+    "n2-standard-16": 0.776944, "n2-standard-32": 1.553888,
+    "n1-standard-1": 0.04749975, "n1-standard-2": 0.0949995, "n1-standard-4": 0.189999,
+    "n1-standard-8": 0.379998, "n1-standard-16": 0.759996,
+}
+# Derived, never typed: list hourly x 730, rounded to cents. N1 and N2 earn a
+# sustained-use discount when they run most of a month; that is a discount on
+# the bill, not the list price, and is not netted out here.
 _GKE_MONTHLY: dict[str, float] = {
-    "e2-standard-2": 48.91,  "e2-standard-4": 97.82,  "e2-standard-8": 195.64,
-    "e2-standard-16": 391.28,"e2-standard-32": 782.56,
-    "n2-standard-2": 60.49,  "n2-standard-4": 120.97,  "n2-standard-8": 241.95,
-    "n2-standard-16": 483.89,"n2-standard-32": 967.78,
-    "n1-standard-1": 26.73,  "n1-standard-2": 53.46,   "n1-standard-4": 106.92,
-    "n1-standard-8": 213.83, "n1-standard-16": 427.67,
+    t: round(h * HOURS_PER_MONTH, 2) for t, h in _GCE_HOURLY.items()
 }
 
+# Unverified: prices.azure.com was not reachable from the 2026-10-13 audit, so
+# these rows are as they were. Each is a whole-cent hourly rate x 730 (the
+# Dv3/Dv5 rows are $0.096 per 2 vCPUs, F4s_v2 $0.17, E4s_v3 $0.252), with no
+# region or OS recorded; read them as approximate pay-as-you-go Linux rates.
 _AKS_MONTHLY: dict[str, float] = {
     "Standard_D2s_v3": 70.08, "Standard_D4s_v3": 140.16,"Standard_D8s_v3": 280.32,
     "Standard_D16s_v3": 560.64,
     "Standard_D2s_v5": 70.08, "Standard_D4s_v5": 140.16,"Standard_D8s_v5": 280.32,
     "Standard_F4s_v2": 124.10,"Standard_F8s_v2": 248.20,
     "Standard_E4s_v3": 183.96,"Standard_E8s_v3": 367.92,
+}
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_GCE_HOURLY": {
+        "source": "https://cloud.google.com/products/compute/pricing/general-purpose, Iowa "
+                  "(us-central1), Default (on-demand) column, E2, N2 and N1 standard",
+        "as_of": "2026-10-13"},
+    "_AKS_MONTHLY": {
+        "source": "unverified: prices.azure.com was not reachable from the audit "
+                  "environment on 2026-10-13, and the rows record no region or OS",
+        "as_of": "2026-10-13", "verified": "no"},
 }
 
 

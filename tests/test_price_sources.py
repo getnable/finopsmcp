@@ -75,7 +75,20 @@ _OTHER_TABLES: list[tuple[str, str]] = [
     ("finops.recommendations.commitments", "_EC2_SP_DISCOUNT"),
     ("finops.recommendations.commitments", "_RI_DISCOUNT"),
     ("finops.recommendations.database_savings_plans", "DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT"),
+    ("finops.connectors.kubernetes", "_GCE_HOURLY"),
+    ("finops.connectors.kubernetes", "_AKS_MONTHLY"),
+    ("finops.recommendations.gcp_waste", "DISK_RATES"),
+    ("finops.recommendations.gcp_waste", "SNAPSHOT_GB_MONTHLY"),
+    ("finops.recommendations.gcp_waste", "VM_VCPU_MONTHLY"),
 ]
+
+
+def test_unverified_tables_say_why():
+    from finops.connectors import kubernetes
+
+    entry = kubernetes.PRICE_SOURCES["_AKS_MONTHLY"]
+    assert entry["verified"] == "no"
+    assert "not reachable" in entry["source"]
 
 
 @pytest.mark.parametrize("module,table", _OTHER_TABLES)

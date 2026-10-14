@@ -258,6 +258,46 @@ def test_database_savings_plan_is_twenty_percent():
     assert d.PRICE_SOURCES["DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT"]["verified"] == "no"
 
 
+# ── Google Cloud ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("machine,was,now", [
+    # cloud.google.com/products/compute/pricing/general-purpose, Iowa
+    # (us-central1), Default column, read 2026-10-13, x 730.
+    ("n2-standard-8", 241.95, 283.58),     # $0.388472/hr
+    ("n2-standard-2", 60.49, 70.90),       # $0.097118/hr
+    ("n1-standard-4", 106.92, 138.70),     # $0.189999/hr
+    ("n1-standard-1", 26.73, 34.67),       # $0.04749975/hr
+    ("e2-standard-4", 97.82, 97.84),       # $0.13402284/hr
+])
+def test_gce_node_rows_are_the_us_central1_list_rates(machine, was, now):
+    from finops.connectors.kubernetes import _GKE_MONTHLY, _node_monthly_cost
+
+    assert _GKE_MONTHLY[machine] == now != was
+    assert _node_monthly_cost(machine, "gcp") == now
+
+
+def test_guard_labels_the_gce_region_and_the_unverified_azure_table():
+    from finops.guard import estimate_command_monthly_cost
+
+    gce = estimate_command_monthly_cost(
+        "gcloud compute instances create vm-1 --machine-type n2-standard-8")
+    assert gce["monthly_usd"] == 283.58 and "us-central1" in gce["basis"]
+    az = estimate_command_monthly_cost("az vm create -g rg -n vm1 --size Standard_D4s_v5")
+    assert "not verified" in az["basis"]
+
+
+def test_gcp_disk_and_snapshot_rates():
+    from finops.recommendations import gcp_waste
+
+    # cloud.google.com/compute/disks-image-pricing, us-central1: Hyperdisk
+    # Balanced space $0.000109589/GiB-hr ($0.08/mo, was $0.10); regional standard
+    # snapshot storage $0.000068493/GiB-hr ($0.05/mo, was the pre-2022 $0.026).
+    assert gcp_waste.DISK_RATES["hyperdisk-balanced"] == 0.08
+    assert gcp_waste.SNAPSHOT_GB_MONTHLY == 0.05
+    # The per-vCPU idle-VM floor is e2-highcpu's $18.06, not $24.
+    assert gcp_waste.VM_VCPU_MONTHLY == 18.0
+
+
 _PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / "prices.ts"
 
 

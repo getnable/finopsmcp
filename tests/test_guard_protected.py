@@ -806,7 +806,10 @@ def test_a_monthly_rate_and_the_vm_tables(packs_env, tmp_path):
     assert "at your price book rate" in est["line"] and "~$100/mo" in est["line"]
     est = g.estimate_command_monthly_cost(
         "gcloud compute instances create vm-1 vm-2 --machine-type e2-standard-4")
-    assert est["monthly_usd"] == round(97.82 * 2, 2)
+    # e2-standard-4 at its us-central1 list rate, $0.13402284/hr x 730 = $97.84
+    # (cloud.google.com/products/compute/pricing/general-purpose, 2026-10-13);
+    # the table held $97.82, the hourly rate rounded to three places.
+    assert est["monthly_usd"] == round(97.84 * 2, 2)
     assert "at your price book rate of $50.00/mo each" in est["line"] and "~$100/mo" in est["line"]
     _install_prices(tmp_path, _book("e2-standard-4", 120, unit="month", provider="gcp"),
                     name="dearer")
