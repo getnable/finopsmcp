@@ -568,3 +568,41 @@ def test_compute_optimizer_maxima_are_not_reported_as_averages():
     html = build_html_report("r", "2026-09-01", "2026-09-30",
                              rightsizing={"recommendations": [row]})
     assert "peak 38%" in html
+
+
+# ── an RDS downsize has to fit the peak it already measured ──────────────────
+#
+# check_rds_rightsizing halves the instance class (db.m5.xlarge 4 vCPU,
+# 16 GiB to db.m5.large 2 vCPU, 8 GiB: AmazonRDS us-east-1 offer, vCPU and
+# Memory columns) on average CPU alone. A database at 5% for 300 hours and 90%
+# for 36 averages 14.1%, under the 20% gate, and was told to halve, though the
+# hours it already logged at 90% would need 180% of the smaller class. The
+# EC2 fallback refuses the same move at a 50% peak, the point past which a
+# halved instance runs out. Its advice also named FreeStorageSpace, which an
+# instance class does not change, and not memory, which it halves.
+
+def _rds_rightsize(cpu: list[float]):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock
+
+    from finops.analyzers import waste
+
+    rds, cw = MagicMock(), MagicMock()
+    rds.get_paginator.return_value.paginate.return_value = [{"DBInstances": [{
+        "DBInstanceIdentifier": "orders", "DBInstanceClass": "db.m5.xlarge",
+        "Engine": "mysql", "DBInstanceStatus": "available", "MultiAZ": False}]}]
+    now = datetime.now(timezone.utc)
+    cw.get_metric_statistics.return_value = {"Datapoints": [
+        {"Timestamp": now - timedelta(hours=h), "Average": v} for h, v in enumerate(cpu)]}
+    return waste.check_rds_rightsizing(rds, cw, region="us-east-1")
+
+
+def test_an_rds_instance_that_peaks_past_half_is_not_halved(monkeypatch):
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    assert _rds_rightsize([5.0] * 300 + [90.0] * 36) == []
+    [f] = _rds_rightsize([5.0] * 300 + [40.0] * 36)
+    # (0.342 - 0.171) x 730, MySQL single-AZ.
+    assert f["estimated_monthly_savings"] == 124.83
+    assert "FreeableMemory" in f["detail"] and "FreeStorageSpace" not in f["detail"]

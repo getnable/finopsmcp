@@ -1369,13 +1369,18 @@ def check_rds_rightsizing(
     region: str = "unknown",
     cpu_threshold_pct: float = 20.0,
     lookback_days: int = 14,
+    max_cpu_threshold_pct: float = 50.0,
 ) -> list[dict]:
     """
     Detect RDS instances with consistently low CPU utilization.
 
     RDS Compute Optimizer integration is limited, so we use CloudWatch
     CPUUtilization as the primary signal. Instances with average CPU below
-    cpu_threshold_pct over lookback_days are candidates for downsizing.
+    cpu_threshold_pct over lookback_days are candidates for downsizing,
+    unless their busiest hour reached max_cpu_threshold_pct: every downsize
+    here halves memory and, but for db.t3.medium and db.t3.large, vCPU too,
+    so an hour at 50% would need all of the smaller class, the same limit the
+    EC2 fallback applies. Memory (FreeableMemory) is not read.
 
     Excludes Aurora Serverless (scales automatically) and read replicas.
     """
@@ -1430,7 +1435,7 @@ def check_rds_rightsizing(
         avg_cpu = sum(datapoints) / len(datapoints)
         max_cpu = max(datapoints)
 
-        if avg_cpu >= cpu_threshold_pct:
+        if avg_cpu >= cpu_threshold_pct or max_cpu >= max_cpu_threshold_pct:
             continue
 
         recommended_class = _RDS_DOWNSIZE.get(db_class)
@@ -1460,7 +1465,8 @@ def check_rds_rightsizing(
                 f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
                 f"Recommend downsizing to {recommended_class}. "
                 f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
-                f"Verify FreeStorageSpace and DatabaseConnections before resizing."
+                f"The smaller class has half the memory, which was not read: "
+                f"check FreeableMemory and DatabaseConnections before resizing."
             ),
             "severity": _severity_from_savings(monthly_savings),
             "region": region,
