@@ -410,7 +410,9 @@ _DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git|gh)(?![\w.-])")
 _DATA_SEGMENT_RE = re.compile(
     r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
     r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
-    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S)"
+    # A commit or tag message, and what `git grep` and `git log -S|-G|--grep`
+    # search for.
+    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag|grep|log)(?!\S)"
     # A pull request's or an issue's title, body or comment.
     r"|gh\s+(?:pr|issue)\s+(?:create|edit|comment|review|close)(?!\S))")
 # Blanking is for commands short enough to check this carefully (and to hand
@@ -423,12 +425,20 @@ _MASK_MAX_CHARS = 16 * 1024
 # `$` and backticks (substitutions, `$'...'`), escaped quotes, process
 # substitution, a PATH change, `.` or a program started by path (`./x.sh`
 # may be a file this command just wrote), and the flags that make a search
-# tool run a command (`rg --pre`, `ag --pager`).
+# tool run a command (`rg --pre`, `ag --pager`, `git grep -O`).
+#
+# The names are looked for outside the quoted data only: inside it they are
+# words of a message, and "Remove the destroy step from the staging env" or
+# "drain the node pool" turned blanking off and asked about a commit. The
+# substitutions and escaped quotes are looked for everywhere, since `$(...)`
+# inside double quotes runs.
+_NO_MASK_ANYWHERE_RE = re.compile(r"\\[\"']|[$`]|<\(|>\(")
 _NO_MASK_RE = re.compile(
     r"(?<![\w.-])(?:(?:ba|z|da|k|mk|c|tc|r)?sh|fish|busybox|xargs|parallel|eval|source|exec|"
     r"env|alias|python[\d.]*|node(?:js)?|deno|bun|perl|ruby|php|lua|tclsh|awk|gawk|mawk|"
     r"nawk|osascript|pwsh|powershell)(?![\w-])"
     r"|\\[\"']|[$`]|<\(|>\(|(?<![\w-])PATH=|--pre(?![\w-])|--pager(?![\w-])"
+    r"|(?<!\S)-O|--open-files-in-pager"
     r"|(?:^|[;&|\n])\s*(?:[A-Za-z_]\w*=[^\s;&|]*\s+)*[./~]")
 # What a data program's output may be piped into with its quoted text still
 # data: programs that only read and print. Anything else (at, crontab, ssh,
@@ -466,7 +476,7 @@ def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
     anything _NO_MASK_RE names means nothing is blanked and the command is
     judged as written."""
     if (len(cmd) > _MASK_MAX_CHARS or ('"' not in cmd and "'" not in cmd)
-            or not _DATA_PROGRAM_RE.search(cmd) or _NO_MASK_RE.search(cmd)):
+            or not _DATA_PROGRAM_RE.search(cmd) or _NO_MASK_ANYWHERE_RE.search(cmd)):
         return []
     spans: list[tuple[int, int]] = []
     seg_start = last = 0
@@ -499,6 +509,13 @@ def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
             seg_start, data, fed = end, None, False
     if not _plain_ok(cmd, last, len(cmd)):
         return []
+    if spans:
+        outside, at = [], 0
+        for a, b in spans:
+            outside += (cmd[at:a], '""')
+            at = b
+        if _NO_MASK_RE.search("".join(outside) + cmd[at:]):
+            return []
     return spans
 
 
