@@ -192,3 +192,85 @@ def test_aws_cur_and_infra_print_no_escape_codes_into_a_pipe(tmp_path):
     assert infra.returncode == 0 and "connector overview" in infra.stdout
     for r in (cur, infra):
         assert "\x1b[" not in r.stdout + r.stderr
+
+
+# ── a broken guard policy file ────────────────────────────────────────────────
+
+_BROKEN_POLICIES = {
+    "bad YAML": "on_budget_breach: deny\nmax_auto_monthly_usd: [200\n",
+    "a non-numeric threshold": "max_auto_monthly_usd: lots\n",
+}
+
+
+def _policy_env(tmp_path: Path, text: str) -> tuple[dict[str, str], Path]:
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    policy = data / "nable.policy.yaml"
+    policy.write_text(text)
+    return {"FINOPS_DATA_DIR": str(data)}, policy
+
+
+def test_guard_check_says_a_broken_policy_file_is_broken(tmp_path):
+    """The guard ignored a broken nable.policy.yaml silently (its fail-safe:
+    judge with the defaults) and so did `guard check`, the command people run
+    to see what the guard will do. Only `guard doctor` mentioned it."""
+    for case, text in _BROKEN_POLICIES.items():
+        env, policy = _policy_env(tmp_path, text)
+        r = nable(tmp_path, "guard", "check", "--command", "terraform destroy", env=env)
+        assert r.returncode == 1, case
+        assert "ask" in r.stdout, case                    # the verdict still prints
+        err = " ".join(r.stderr.split())
+        assert str(policy) in err, case
+        assert "Fix: correct" in err, case
+        assert "max_auto_monthly_usd 500 (default)" in err, case
+
+        j = nable(tmp_path, "guard", "check", "--json", "--command", "terraform destroy",
+                  env=env)
+        assert j.returncode == 1, case
+        doc = json.loads(j.stdout)
+        assert doc["decision"] == "ask" and doc["policy"]["broken"] is True, case
+        assert doc["policy"]["path"] == str(policy), case
+        assert doc["policy"]["in_effect"]["max_auto_monthly_usd"] == {
+            "value": 500.0, "source": "default"}, case
+
+
+def test_a_policy_file_threshold_is_read_and_reported(tmp_path):
+    env, _policy = _policy_env(tmp_path, "max_auto_monthly_usd: 200\n")
+    r = nable(tmp_path, "guard", "check", "--json", "--command", "ls", env=env)
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    assert doc["policy"]["broken"] is False
+    assert doc["policy"]["in_effect"]["max_auto_monthly_usd"] == {"value": 200.0,
+                                                                  "source": "file"}
+
+
+def test_the_hook_keeps_its_fail_safe_on_a_broken_policy_file(tmp_path):
+    """The hook is a machine protocol: a broken policy still gets the default
+    verdict as JSON on stdout, exit 0, and no human text."""
+    env, _ = _policy_env(tmp_path, _BROKEN_POLICIES["bad YAML"])
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    full = {k: v for k, v in os.environ.items() if k not in _DROP and not k.startswith("NABLE_")}
+    full.update(HOME=str(home), PYTHONPATH=SRC, FINOPS_NO_KEYRING="1", **env)
+    payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": "terraform destroy -auto-approve"},
+               "cwd": str(home), "tool_use_id": "t"}
+    r = subprocess.run([sys.executable, "-m", "finops.entry", "guard", "hook"], check=False,
+                       input=json.dumps(payload), capture_output=True, text=True,
+                       timeout=120, env=full, cwd=str(home))
+    assert r.returncode == 0
+    out = json.loads(r.stdout)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "ask"
+    assert "policy" not in r.stderr.lower()
+
+
+def test_doctor_names_a_broken_policy_file_with_its_fix(tmp_path):
+    env, policy = _policy_env(tmp_path, _BROKEN_POLICIES["a non-numeric threshold"])
+    r = nable(tmp_path, "doctor", "--json", env=env)
+    assert r.returncode == 1
+    check = next(c for c in json.loads(r.stdout) if c["name"] == "Guard policy")
+    assert check["ok"] is False and check["path"] == str(policy)
+    assert "lots" in check["detail"] and "500" in check["detail"]
+    assert check["recommendation"].startswith(f"correct {policy}")
+    text = nable(tmp_path, "doctor", env=env)
+    assert "Guard policy" in text.stdout and str(policy) in text.stdout

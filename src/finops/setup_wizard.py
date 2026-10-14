@@ -2686,6 +2686,28 @@ def _run_guard(parsed) -> None:
                   file=sys.stderr)
             raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
+        # An explicit check says when the policy it judged with is not the one
+        # written down. The hook judges with the defaults silently, on every
+        # tool call (its fail-safe); here a broken nable.policy.yaml or a bad
+        # FINOPS_POLICY_* value is named, with the fix and what applied
+        # instead, on stderr, and the check exits 1.
+        from .policy import in_effect_text, policy_report
+        report = policy_report()
+        if report["broken"]:
+            def _lines(text: str) -> list[str]:
+                # Paths stay whole: a copied path must work when pasted.
+                return textwrap.wrap(text, 74, break_on_hyphens=False,
+                                     break_long_words=False)
+            print(f"\n  {amber('The guard policy could not be used as written:')}",
+                  file=sys.stderr)
+            for problem in report["problems"]:
+                for i, line in enumerate(_lines(problem)):
+                    print(f"  {'- ' if i == 0 else '  '}{line}", file=sys.stderr)
+            for i, line in enumerate(_lines(f"Fix: {report['fix']}.")):
+                print(f"  {line}" if i == 0 else f"       {line}", file=sys.stderr)
+            for i, line in enumerate(_lines(
+                    f"In effect for this check: {in_effect_text(report)}.")):
+                print(f"  {line}" if i == 0 else f"    {line}", file=sys.stderr)
         if getattr(parsed, "guard_json", False):
             # The verdict as data, for a pipeline vetting a command. "allow" is
             # the guard having no opinion; infra says whether it classified it.
@@ -2696,7 +2718,10 @@ def _run_guard(parsed) -> None:
                     "reason": ("reversible and in policy: the guard stays silent" if hit
                                else "not an infra-mutating command: the guard stays silent")})
             doc.setdefault("infra", True)
+            doc["policy"] = report
             print(json.dumps(doc, indent=2, default=str))
+            if report["broken"]:
+                raise SystemExit(1)
             return
         print()
         if verdict is None:
@@ -2709,6 +2734,8 @@ def _run_guard(parsed) -> None:
         else:
             print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
         print()
+        if report["broken"]:
+            raise SystemExit(1)
         return
 
     # status (default)
