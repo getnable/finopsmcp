@@ -59,20 +59,31 @@ def test_guard_prices_ebs_volumes_launched_with_the_instances():
     assert "root volume is not counted" in plain["line"]
 
 
-@pytest.mark.parametrize("cmd,region", [
-    ("aws ec2 run-instances --region ap-southeast-1 --instance-type m5.large", "ap-southeast-1"),
-    ("AWS_REGION=eu-west-1 aws ec2 run-instances --instance-type m5.large", "eu-west-1"),
+@pytest.mark.parametrize("cmd,region,premium", [
+    ("aws ec2 run-instances --region ap-southeast-1 --instance-type m5.large",
+     "ap-southeast-1", 1.149),
+    ("AWS_REGION=eu-west-1 aws ec2 run-instances --instance-type m5.large", "eu-west-1", 1.069),
     (("aws rds create-db-instance --region=us-west-2 --db-instance-class db.m5.large "
-      "--engine mysql"), "us-west-2"),
+      "--engine mysql"), "us-west-2", None),
 ])
-def test_guard_says_when_a_us_east_1_figure_is_for_another_region(cmd, region):
+def test_guard_says_when_a_us_east_1_figure_is_for_another_region(cmd, region, premium):
     from finops.guard import estimate_command_monthly_cost
 
     # m5.large lists $0.12 in ap-southeast-1 against $0.096 in us-east-1 (AmazonEC2
-    # offer 20261012193925); the figure stays the us-east-1 one and now says so.
+    # offer 20261012193925). An EC2 launch is judged in the region it names (the
+    # guard audit's regional pricing): $0.096 x 1.149 = $0.1103/hr there, the
+    # least ap-southeast-1 charges over us-east-1, at or under its $0.12 list,
+    # and the figure no longer calls itself the us-east-1 rate. eu-west-1: $0.096
+    # x 1.069 = $0.1026/hr. A figure that has no regional rates (RDS) stays the
+    # us-east-1 one and says so.
     est = estimate_command_monthly_cost(cmd)
     assert est["region"] == region
-    assert f"targets {region}" in est["line"] and "often higher" in est["basis"]
+    if premium is None:
+        assert f"targets {region}" in est["line"] and "often higher" in est["basis"]
+    else:
+        assert est["hourly_usd"] == pytest.approx(0.096 * premium)
+        assert f"in {region}" in est["line"] and "the least" in est["basis"]
+        assert "us-east-1 list rate" not in est["basis"] and "often higher" not in est["line"]
     same = estimate_command_monthly_cost(
         "aws ec2 run-instances --region us-east-1 --instance-type m5.large")
     assert "region" not in same and "targets" not in same["line"]

@@ -110,6 +110,7 @@ What happened afterwards (setup_wizard's `nable guard ...`):
 """
 from __future__ import annotations
 
+import bisect
 import contextlib
 import contextvars
 import functools
@@ -223,8 +224,20 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
-    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade){_END}", "infra_apply"),
-    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale){_END}", "infra_apply"),
+    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade|rollback){_END}", "infra_apply"),
+    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale|patch){_END}", "infra_apply"),
+    # The other ways to change a workload in place, which the MCP side
+    # (kubectl_patch, kubectl_rollout) already counted: a new image, an
+    # environment change, a restart, a rollback.
+    ((rf"\bkubectl\s+(?:\S+\s+)*(?:set\s+(?:image|env|resources)|"
+      rf"rollout\s+(?:restart|undo|resume)){_END}"), "infra_apply"),
+    # The IaC tools' own apply verbs: `terraform apply` in production asked
+    # and `pulumi up --stack prod`, `cdk deploy` and `sam deploy` did not.
+    (rf"\bpulumi\s+(?:\S+\s+)*(?:up|update){_END}", "infra_apply"),
+    (rf"\bcdk\s+(?:\S+\s+)*deploy{_END}", "infra_apply"),
+    (rf"\bsam\s+(?:\S+\s+)*deploy{_END}", "infra_apply"),
+    # eksctl creates a cluster's or a node group's instances itself.
+    (rf"\beksctl\s+(?:\S+\s+)*create\s+(?:cluster|nodegroup|ng){_END}", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
@@ -382,7 +395,25 @@ def _flatten(cmd: str) -> str:
     if "\\" in cmd:
         cmd = _ESCAPE_RE.sub(r"\1", cmd)
     cmd = cmd.replace('"', "").replace("'", "")
-    return _lower_programs(" ".join(cmd.split()))
+    return _cli_images(_lower_programs(" ".join(cmd.split())))
+
+
+# The CLIs' own container images, whose entrypoint is the CLI itself: `docker
+# run amazon/aws-cli ec2 terminate-instances` (the AWS CLI's documented way
+# to run in a container) is `aws ec2 terminate-instances`, and `docker run
+# hashicorp/terraform:1.9 destroy` is `terraform destroy`. Read as the
+# program they run, tag and digest dropped.
+_CLI_IMAGE_HINTS = ("aws-cli", "hashicorp/terraform", "bitnami/kubectl", "alpine/helm")
+_CLI_IMAGE_RE = re.compile(
+    r"(?<![\w./:@-])(?:(?:docker\.io/)?amazon/aws-cli|public\.ecr\.aws/aws-cli/aws-cli"
+    r"|(?:docker\.io/)?hashicorp/(terraform)|(?:docker\.io/)?bitnami/(kubectl)"
+    r"|(?:docker\.io/)?alpine/(helm))(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?(?![\w./:@-])")
+
+
+def _cli_images(cmd: str) -> str:
+    if not any(h in cmd for h in _CLI_IMAGE_HINTS):
+        return cmd
+    return _CLI_IMAGE_RE.sub(lambda m: m.group(1) or m.group(2) or m.group(3) or "aws", cmd)
 
 
 # One left-to-right reading of the shell's quoting: a backslash escape, an
@@ -409,7 +440,9 @@ _DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git|gh)(?![\w.-])")
 _DATA_SEGMENT_RE = re.compile(
     r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
     r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
-    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S)"
+    # A commit or tag message, and what `git grep` and `git log -S|-G|--grep`
+    # search for.
+    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag|grep|log)(?!\S)"
     # A pull request's or an issue's title, body or comment.
     r"|gh\s+(?:pr|issue)\s+(?:create|edit|comment|review|close)(?!\S))")
 # Blanking is for commands short enough to check this carefully (and to hand
@@ -422,12 +455,20 @@ _MASK_MAX_CHARS = 16 * 1024
 # `$` and backticks (substitutions, `$'...'`), escaped quotes, process
 # substitution, a PATH change, `.` or a program started by path (`./x.sh`
 # may be a file this command just wrote), and the flags that make a search
-# tool run a command (`rg --pre`, `ag --pager`).
+# tool run a command (`rg --pre`, `ag --pager`, `git grep -O`).
+#
+# The names are looked for outside the quoted data only: inside it they are
+# words of a message, and "Remove the destroy step from the staging env" or
+# "drain the node pool" turned blanking off and asked about a commit. The
+# substitutions and escaped quotes are looked for everywhere, since `$(...)`
+# inside double quotes runs.
+_NO_MASK_ANYWHERE_RE = re.compile(r"\\[\"']|[$`]|<\(|>\(")
 _NO_MASK_RE = re.compile(
     r"(?<![\w.-])(?:(?:ba|z|da|k|mk|c|tc|r)?sh|fish|busybox|xargs|parallel|eval|source|exec|"
     r"env|alias|python[\d.]*|node(?:js)?|deno|bun|perl|ruby|php|lua|tclsh|awk|gawk|mawk|"
     r"nawk|osascript|pwsh|powershell)(?![\w-])"
     r"|\\[\"']|[$`]|<\(|>\(|(?<![\w-])PATH=|--pre(?![\w-])|--pager(?![\w-])"
+    r"|(?<!\S)-O|--open-files-in-pager"
     r"|(?:^|[;&|\n])\s*(?:[A-Za-z_]\w*=[^\s;&|]*\s+)*[./~]")
 # What a data program's output may be piped into with its quoted text still
 # data: programs that only read and print. Anything else (at, crontab, ssh,
@@ -465,7 +506,7 @@ def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
     anything _NO_MASK_RE names means nothing is blanked and the command is
     judged as written."""
     if (len(cmd) > _MASK_MAX_CHARS or ('"' not in cmd and "'" not in cmd)
-            or not _DATA_PROGRAM_RE.search(cmd) or _NO_MASK_RE.search(cmd)):
+            or not _DATA_PROGRAM_RE.search(cmd) or _NO_MASK_ANYWHERE_RE.search(cmd)):
         return []
     spans: list[tuple[int, int]] = []
     seg_start = last = 0
@@ -498,6 +539,13 @@ def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
             seg_start, data, fed = end, None, False
     if not _plain_ok(cmd, last, len(cmd)):
         return []
+    if spans:
+        outside, at = [], 0
+        for a, b in spans:
+            outside += (cmd[at:a], '""')
+            at = b
+        if _NO_MASK_RE.search("".join(outside) + cmd[at:]):
+            return []
     return spans
 
 
@@ -640,6 +688,124 @@ class _Lazy:
         return getattr(self._re, name)
 
 
+# ── One shell command at a time ───────────────────────────────────────────────
+# A rule names a program and a verb (`kubectl ... delete`). Read across the
+# whole line, `kubectl get events | grep -i delete` was a delete and
+# `terraform plan | grep destroy` a destroy, so an expert's every look at a
+# plan asked to confirm one. A rule now matches only where its program and
+# its verb sit in the same shell command (_Segments.live), except the two
+# heuristics that read across a pipe by design (a decoded script fed to a
+# shell, a Python one-liner with its own `;`).
+#
+# And a command that runs nothing is not a change (_inert): a dry run (`aws
+# ec2 ... --dry-run`, `aws s3 ... --dryrun`, `kubectl|helm ...
+# --dry-run[=client|server]`), a permission check (`kubectl auth can-i
+# delete pods`), and the helm subcommands that never touch a release (`helm
+# diff upgrade`, `helm plugin uninstall`, `helm template`).
+#
+# Neither may hide a change the shell runs. classify_command judges two
+# splits of the command and the more severe answer stands: one where an
+# operator inside quotes splits it too (what the shell `bash -c '...'`
+# starts sees) and one where it does not (what the outer shell sees). A
+# command with a substitution (`$(...)`, backticks, `<(...)`), which can
+# carry a verb from one command into another, is judged whole, as before.
+# A dry run counts only in a command that names exactly one cloud or IaC
+# CLI, with the flag after it, and `--no-dry-run` or `--dry-run=none|false`
+# makes it real.
+
+# The operators between shell commands in a normalized command.
+_COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
+_SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
+_CROSS_SEGMENT = frozenset({"python-boto3-delete", "base64-to-shell"})
+_CLI_WORD_RE = re.compile(r"(?<![\w./-])(?:aws|kubectl|helm|terraform|tofu|terragrunt|pulumi|"
+                          r"gcloud|az|cdk|sam|doctl|eksctl|gsutil)(?![\w.-])")
+_AWS_EC2_RE = re.compile(r"aws\s+ec2\s")
+_AWS_S3_RE = re.compile(r"aws\s+s3\s")
+_EC2_DRY_RUN_RE = re.compile(r"(?<!\S)--dry-run(?!\S)")
+_S3_DRY_RUN_RE = re.compile(r"(?<!\S)--dryrun(?!\S)")
+_K8S_DRY_RUN_RE = re.compile(r"(?<!\S)--dry-run(?:=(?:client|server|true))?(?!\S)")
+_REAL_RUN_RE = re.compile(r"(?<!\S)--(?:no-dry-run|dry-run=(?:none|false))(?!\S)")
+_END_OF_OPTIONS_RE = re.compile(r"(?<!\S)--(?!\S)")
+# Global flags that may come before the subcommand: a value-taking flag
+# consumes the next word. Anything not listed ends the match, so an unknown
+# flag can never make a release name read as a subcommand.
+_KUBECTL_GLOBAL = (r"(?:(?:-n|--namespace|--context|--kubeconfig|--cluster|--user|-s|--server|"
+                   r"--token|--as|--as-group|--as-uid|--request-timeout|"
+                   r"--certificate-authority|--client-certificate|--client-key|"
+                   r"--tls-server-name|--cache-dir|-v|--v)(?:=\S*|\s+\S+)"
+                   r"|--insecure-skip-tls-verify(?:=\S*)?|--warnings-as-errors"
+                   r"|--match-server-version)\s+")
+_HELM_GLOBAL = (r"(?:(?:-n|--namespace|--kube-context|--kubeconfig|--kube-apiserver|"
+                r"--kube-as-group|--kube-as-user|--kube-ca-file|--kube-tls-server-name|"
+                r"--kube-token|--registry-config|--repository-cache|--repository-config|"
+                r"--burst-limit|--qps|--content-cache)(?:=\S*|\s+\S+)"
+                r"|--debug|--kube-insecure-skip-tls-verify)\s+")
+_INERT_SUBCOMMAND_RE = re.compile(
+    rf"(?<![\w./-])kubectl\s+(?:{_KUBECTL_GLOBAL})*auth\s+can-i{_END}"
+    rf"|(?<![\w./-])helm\s+(?:{_HELM_GLOBAL})*(?:diff|template|plugin|show|inspect|search|repo|"
+    rf"lint|dependency|dep|pull|fetch|package|verify|history|status|get|list|ls|env|version|"
+    rf"completion|help){_END}")
+
+
+def _inert(seg: str) -> bool:
+    """Does this one shell command run nothing: a dry run, a permission
+    check, or a helm subcommand that never touches a release?"""
+    clis = _CLI_WORD_RE.finditer(seg)
+    prog = next(clis, None)
+    if prog is None or next(clis, None) is not None:
+        return False
+    if _INERT_SUBCOMMAND_RE.match(seg, prog.start()):
+        return True
+    # After a bare `--` a flag is an argument: `kubectl delete ns x --
+    # --dry-run` deletes the namespace.
+    if ("dry" not in seg or _REAL_RUN_RE.search(seg, prog.end())
+            or _END_OF_OPTIONS_RE.search(seg, prog.end())):
+        return False
+    if prog.group() == "aws":
+        return bool((_AWS_EC2_RE.match(seg, prog.start())
+                     and _EC2_DRY_RUN_RE.search(seg, prog.end()))
+                    or (_AWS_S3_RE.match(seg, prog.start())
+                        and _S3_DRY_RUN_RE.search(seg, prog.end())))
+    if prog.group() in ("kubectl", "helm"):
+        return _K8S_DRY_RUN_RE.search(seg, prog.end()) is not None
+    return False
+
+
+class _Segments:
+    """The shell commands in a normalized command: where each starts and
+    ends (a break belongs to the next one), and which run nothing (_inert),
+    each looked up once."""
+
+    __slots__ = ("_inert", "cmd", "ends", "starts")
+
+    def __init__(self, cmd: str) -> None:
+        self.cmd = cmd
+        starts, ends, pos = [], [], 0
+        for m in _COMMAND_BREAK_RE.finditer(cmd):
+            starts.append(pos)
+            ends.append(m.start())
+            pos = m.end()
+        starts.append(pos)
+        ends.append(len(cmd))
+        self.starts, self.ends = starts, ends
+        self._inert: dict[int, bool] = {}
+
+    def __len__(self) -> int:
+        return len(self.starts)
+
+    def index(self, pos: int) -> int:
+        """The segment that offset `pos` falls in."""
+        return max(bisect.bisect_right(self.starts, pos) - 1, 0)
+
+    def text(self, i: int) -> str:
+        return self.cmd[self.starts[i]:self.ends[i]]
+
+    def inert(self, i: int) -> bool:
+        if i not in self._inert:
+            self._inert[i] = _inert(self.text(i))
+        return self._inert[i]
+
+
 class _Rule:
     """A compiled classifier pattern with search() linear in the command.
 
@@ -661,6 +827,32 @@ class _Rule:
         m = self.head.search(cmd)
         return self.tail.search(cmd, m.end()) if m else None
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        """search(), with the program and the verb in one shell command that
+        is not inert. Still linear: each head search starts at a later
+        segment than the last, and each tail search stays inside one."""
+        if self.head is None:
+            for m in self.tail.finditer(cmd):
+                if not segs.inert(segs.index(m.start())):
+                    return m
+            return None
+        pos = i = 0
+        ends, last = segs.ends, len(segs) - 1
+        while True:
+            h = self.head.search(cmd, pos)
+            if h is None:
+                return None
+            while i < last and ends[i] <= h.start():
+                i += 1
+            end = ends[i]
+            t = self.tail.search(cmd, h.end(), end) if h.end() <= end else None
+            if t is not None and not segs.inert(i):
+                return t
+            if i >= last:
+                return None
+            i += 1
+            pos = segs.starts[i]
+
 
 class _VerbWithFlag:
     """PROGRAM ... VERB ... FLAG within one shell segment, e.g. `terraform
@@ -677,16 +869,32 @@ class _VerbWithFlag:
         # The flag may also sit between the program and the verb.
         self._flag_anywhere = flag_anywhere
 
+    def _find(self, seg: str) -> re.Match[str] | None:
+        tool = self._tool.search(seg)
+        if tool is None:
+            return None
+        verb = self._verb.search(seg, tool.end())
+        if verb is None:
+            return None
+        return self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
+
     def search(self, cmd: str) -> re.Match[str] | None:
+        if self._tool.search(cmd) is None:
+            return None
         for seg in re.split(r"[|;&]", cmd):
-            tool = self._tool.search(seg)
-            if tool is None:
-                continue
-            verb = self._verb.search(seg, tool.end())
-            if verb is not None:
-                flag = self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
-                if flag is not None:
-                    return flag
+            flag = self._find(seg)
+            if flag is not None:
+                return flag
+        return None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        tool = self._tool.search(cmd)
+        if tool is None:
+            return None
+        for i in range(segs.index(tool.start()), len(segs)):
+            flag = self._find(segs.text(i))
+            if flag is not None and not segs.inert(i):
+                return flag
         return None
 
 
@@ -704,6 +912,9 @@ class _TfCliArgsDestroy:
                 return m
         return None
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
+
 
 class _S3MoveOutOfBucket:
     """`aws s3 mv s3://bucket/prefix <dest> --recursive`: every object under the
@@ -720,23 +931,34 @@ class _S3MoveOutOfBucket:
                           "--no-progress", "--ignore-glacier-warnings",
                           "--force-glacier-transfer", "--validate-same-s3-paths"})
 
+    def _find(self, seg: str) -> re.Match[str] | None:
+        mv = self._mv.search(seg)
+        if mv is None or self._recursive.search(seg, mv.end()) is None:
+            return None
+        skip = False
+        for tok in seg[mv.end():].split():
+            if skip:
+                skip = False
+            elif tok.startswith("-"):
+                skip = "=" not in tok and tok not in self._BOOLEAN
+            else:
+                return mv if tok.lower().startswith("s3://") else None
+        return None
+
     def search(self, cmd: str) -> re.Match[str] | None:
         if self._mv.search(cmd) is None:
             return None
         for seg in re.split(r"[|;&]", cmd):
-            mv = self._mv.search(seg)
-            if mv is None or self._recursive.search(seg, mv.end()) is None:
-                continue
-            skip = False
-            for tok in seg[mv.end():].split():
-                if skip:
-                    skip = False
-                elif tok.startswith("-"):
-                    skip = "=" not in tok and tok not in self._BOOLEAN
-                else:
-                    if tok.lower().startswith("s3://"):
-                        return mv
-                    break
+            mv = self._find(seg)
+            if mv is not None:
+                return mv
+        return None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        for i in range(len(segs)):
+            mv = self._find(segs.text(i))
+            if mv is not None and not segs.inert(i):
+                return mv
         return None
 
 
@@ -758,6 +980,9 @@ class _PythonBoto3Delete:
             return None
         return self._delete.search(cmd, py.end())
 
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
+
 
 class _Base64ToShell:
     """`... | base64 -d | sh`: a script decoded straight into a shell, so the
@@ -772,6 +997,9 @@ class _Base64ToShell:
     def search(self, cmd: str) -> re.Match[str] | None:
         decode = self._decode.search(cmd)
         return self._to_shell.search(cmd, decode.end()) if decode else None
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return self.search(cmd)
 
 
 _SPECIAL_RULES = {r.pattern: r for r in (
@@ -808,8 +1036,24 @@ def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
     when it is not an infrastructure mutation nable cares about. Linear in the
     length of the command (see _Rule). Every reading of the command is judged
-    and the most severe wins (_worst_reading)."""
-    return _worst_reading(command, _classify_normalized)
+    and the most severe wins (_worst_reading), one shell command at a time
+    (_classify_live), in both splits of its quoting (_quoting_splits)."""
+    hit = None
+    for form in _quoting_splits(command):
+        found = _worst_reading(form, _classify_live)
+        if _rank(found) > _rank(hit):
+            hit = found
+    return hit
+
+
+def _quoting_splits(command: str) -> tuple[str, ...]:
+    """The command with an unquoted newline made a `;`, read twice: with an
+    operator inside quotes splitting it (as the shell that `bash -c '...'`
+    starts would) and with it spaced out (as the outer shell does). One form
+    when there are no quotes to tell them apart."""
+    inner = _price_rewrite(command, split_quoted=True)
+    outer = _price_rewrite(command, split_quoted=False)
+    return (inner,) if inner == outer else (inner, outer)
 
 
 def _classify_normalized(cmd: str) -> tuple[str, str] | None:
@@ -819,6 +1063,24 @@ def _classify_normalized(cmd: str) -> tuple[str, str] | None:
     for rule, action in _TWO_WAY_RULES:
         if rule.search(cmd):
             return ("two_way", action)
+    return None
+
+
+def _classify_live(cmd: str) -> tuple[str, str] | None:
+    """_classify_normalized, where a rule's program and verb sit in one shell
+    command that runs something (see _Segments). A command with a
+    substitution is judged whole."""
+    if _SUBSTITUTION_RE.search(cmd):
+        return _classify_normalized(cmd)
+    segs: _Segments | None = None
+    for table, door in ((_ONE_WAY_RULES, "one_way"), (_TWO_WAY_RULES, "two_way")):
+        for rule, action in table:
+            if rule.search(cmd) is None:
+                continue
+            if segs is None:
+                segs = _Segments(cmd)
+            if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
+                return (door, action)
     return None
 
 
@@ -966,6 +1228,123 @@ def _book_field(book: dict[str, Any], judged: bool = True,
     return out
 
 
+# A size the tables do not list, in a family they do: `c6i.32xlarge`,
+# `m7i.48xlarge`, `db.r6g.8xlarge`. Each priced nothing, so a $16k/mo launch
+# passed in silence while its smaller sizes asked. AWS prices the sizes of
+# one family by vCPU (a 4xlarge is four times an xlarge), so the missing size
+# is the family's per-size rate times its size, and the basis says it was
+# scaled. Checked against the AWS Price List (us-east-1, 2026-10-12): exact
+# for 59 EC2 sizes, at most 0.24% high (i4i); RDS classes within -0.05% to
+# +0.78%. The family's highest per-size rate is used, so a scaled figure
+# leans high. Accelerated families (p, g, trn, inf, dl, f, vt) price by
+# accelerator, not vCPU, and are never scaled; nor is `metal`.
+_ACCELERATED_RE = re.compile(r"(?:db\.)?(?:p|g|trn|inf|dl|f|vt)\d")
+_SIZE_RE = re.compile(r"(\d*)xlarge")
+_SMALL_SIZES = {"nano": 0.0625, "micro": 0.125, "small": 0.25, "medium": 0.5, "large": 1.0}
+_PER_SIZE: dict[int, dict[str, float]] = {}
+
+
+def _size_units(size: str) -> float | None:
+    if size in _SMALL_SIZES:
+        return _SMALL_SIZES[size]
+    m = _SIZE_RE.fullmatch(size)
+    return 2.0 * int(m.group(1) or 1) if m else None
+
+
+def _scaled(table: dict[str, float], itype: str) -> tuple[float | None, str]:
+    """(the rate `itype` scales to from its family's listed sizes, the
+    family), or (None, "") when its family or size cannot be scaled."""
+    family, _, size = itype.rpartition(".")
+    units = _size_units(size)
+    if not family or units is None or _ACCELERATED_RE.match(family):
+        return None, ""
+    per = _PER_SIZE.get(id(table))
+    if per is None:
+        per = {}
+        for t, hourly in table.items():
+            fam, _, sz = t.rpartition(".")
+            u = _size_units(sz)
+            if u:
+                per[fam] = max(per.get(fam, 0.0), hourly / u)
+        _PER_SIZE[id(table)] = per
+    rate = per.get(family)
+    return (round(rate * units, 6), family) if rate else (None, "")
+
+
+def _scaled_basis(basis: str, family: str) -> str:
+    return (f"{basis}, scaled from the {family} sizes nable lists (AWS prices a family's "
+            "sizes by vCPU)")
+
+
+# The region a command names (`--region`, or an AWS_REGION=/AWS_DEFAULT_REGION=
+# prefix). Every EC2 rate nable holds is us-east-1's, and `aws --region
+# sa-east-1 ec2 run-instances --instance-type c5.4xlarge` was judged at
+# $496/mo, a warn under the $500 threshold, for an instance AWS lists at
+# $765/mo there. For each region, the least and the most it charges over
+# us-east-1 for any EC2 type nable lists (Linux on-demand, AWS Price List
+# regional offer files, October 2026): the guard judges at the least, which
+# is a floor for every listed type, and says the range. A region that is
+# cheaper than us-east-1 for some types keeps the us-east-1 figure (a
+# guess may raise a figure, never lower it), and an unknown one is named.
+_EC2_REGION_RANGE: dict[str, tuple[float, float]] = {
+    "af-south-1": (1.286, 1.428), "ap-east-1": (1.253, 1.595), "ap-east-2": (1.052, 1.178),
+    "ap-northeast-1": (1.169, 1.5), "ap-northeast-2": (1.124, 1.45),
+    "ap-northeast-3": (1.169, 1.45), "ap-south-1": (0.611, 1.3), "ap-south-2": (0.611, 1.201),
+    "ap-southeast-1": (1.149, 1.45), "ap-southeast-2": (1.198, 1.45),
+    "ap-southeast-3": (1.149, 1.45), "ap-southeast-4": (1.198, 1.45),
+    "ap-southeast-5": (0.975, 1.305), "ap-southeast-7": (0.975, 1.305),
+    "ca-central-1": (1.088, 1.15), "ca-west-1": (1.088, 1.115), "eu-central-1": (1.135, 1.5),
+    "eu-central-2": (1.251, 1.54), "eu-north-1": (1.024, 1.14), "eu-south-1": (1.143, 1.26),
+    "eu-south-2": (1.054, 1.2), "eu-west-1": (1.069, 1.25), "eu-west-2": (1.119, 1.5),
+    "eu-west-3": (1.119, 1.4), "il-central-1": (1.121, 1.296), "me-central-1": (1.18, 1.247),
+    "me-south-1": (1.19, 1.375), "mx-central-1": (1.047, 1.058), "sa-east-1": (1.529, 1.95),
+    "us-east-2": (0.994, 1.0), "us-gov-east-1": (1.167, 1.267),
+    "us-gov-west-1": (1.167, 1.267), "us-west-1": (1.099, 1.3), "us-west-2": (1.0, 1.0),
+}
+_REGION_RE = re.compile(r"(?:(?<!\S)--region(?:=|\s+)|\bAWS_(?:DEFAULT_)?REGION=)"
+                        r"[\"']?([a-z]{2}(?:-gov)?-[a-z]+-\d)(?![\w-])")
+_PRICING_REGION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "pricing_region", default=None)
+
+
+def _named_region(command: str) -> str | None:
+    """The one AWS region the command names, or None (none, or several)."""
+    found = set(_REGION_RE.findall(command))
+    return found.pop() if len(found) == 1 else None
+
+
+def _regional(listed: float | None, basis: str) -> tuple[float | None, str, str]:
+    """(the rate judged in the command's region, its basis, " in REGION" for
+    the line) for a us-east-1 EC2 list rate."""
+    region = _PRICING_REGION.get()
+    if listed is None or region is None or region == "us-east-1":
+        return listed, basis, ""
+    span = _EC2_REGION_RANGE.get(region)
+    if span is None:
+        return listed, (f"{basis}; the command targets {region}, whose rates nable does not "
+                        "hold, so this is the us-east-1 figure"), f" in {region}"
+    low, high = span
+    if high <= 1.0:
+        # Priced as us-east-1 (us-west-2, us-east-2), and the basis says so, so
+        # nothing later appends a "list prices there are often higher" note.
+        same = ("at the us-east-1 rate" if low == high
+                else f"at {low:g}x to {high:g}x us-east-1, so this is the us-east-1 figure")
+        return listed, f"{basis}; {region} lists EC2 {same}", ""
+    if low <= 1.0:
+        return listed, (f"{basis}; {region} lists EC2 at {low:g}x to {high:g}x us-east-1, "
+                        "so this is the us-east-1 figure"), f" in {region}"
+    # Said where the rate is named, so the figure reads as the region's floor,
+    # not as the us-east-1 rate (audit-prices' launch-volume and node-group
+    # notes follow the rate in the basis, and the multiplier used to land
+    # after them).
+    floor = (f"{region} floor: the us-east-1 list price x{low:g}, the least {region} "
+             f"charges over us-east-1 for the EC2 types nable lists (its rates run "
+             f"{low:g}x to {high:g}x)")
+    regional = (basis.replace("us-east-1 list price", floor, 1)
+                if "us-east-1 list price" in basis else f"{basis}; {floor}")
+    return listed * low, regional, f" in {region}"
+
+
 def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
                lead: str = "") -> dict[str, Any] | None:
     """`count` instances of `itype` at the EC2 table's rate (or the org's
@@ -973,11 +1352,16 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     if not itype:
         return None
     from .aws_prices import EC2_HOURLY
-    hourly, book, judged = _gated("aws", itype, EC2_HOURLY.get(itype))
+    listed, family = EC2_HOURLY.get(itype), ""
+    if listed is None:
+        listed, family = _scaled(EC2_HOURLY, itype)
+    if family:
+        basis = _scaled_basis(basis, family)
+    listed, regional_basis, where = _regional(listed, basis)
+    hourly, book, judged = _gated("aws", itype, listed)
     if hourly is None:
         return None
-    if book and judged:
-        basis = _book_basis(basis, book)
+    basis = _book_basis(basis, book) if book and judged else regional_basis
     count = max(count, 1)
     hours = count * _hours_per_month()
     monthly = hourly * hours
@@ -989,7 +1373,8 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
         "count": count,
         "basis": basis,
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
-        "line": (f"{lead}{count}x {itype} {at}{_rate(hourly)}/hr ({basis}) "
+        **({"region": where[4:]} if where else {}),
+        "line": (f"{lead}{count}x {itype}{where} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
     }
@@ -1056,8 +1441,13 @@ def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     ebs = per_instance * n
     est["ebs_monthly_usd"] = round(ebs, 2)
     est["monthly_usd"] = round(est["monthly_usd"] + ebs, 2)
+    # The EBS rates are us-east-1's in any region; say so when the command
+    # names another one (the instances above are judged there).
+    region = _PRICING_REGION.get()
+    ebs_basis = "us-east-1 list" + (f", not {region}'s" if region and region != "us-east-1"
+                                    else "")
     est["line"] += (f", plus {n}x EBS ({', '.join(said)}) at ${per_instance:,.2f}/mo "
-                    f"each (us-east-1 list), ~${est['monthly_usd']:,.0f}/mo in all")
+                    f"each ({ebs_basis}), ~${est['monthly_usd']:,.0f}/mo in all")
     return est
 
 
@@ -1128,6 +1518,17 @@ def _price_nodegroup(cmd: str, **_: Any) -> dict[str, Any] | None:
     return _price_ec2(itype, int(desired.group(1)), basis=basis, lead="a node group of ")
 
 
+def _rds_list_rate(cls: str, engine: str) -> tuple[float | None, str]:
+    """(single-AZ hourly list rate, the family it was scaled from or "")."""
+    from .aws_prices import RDS_HOURLY, RDS_HOURLY_POSTGRES, rds_hourly
+    listed = rds_hourly(cls, engine)
+    if listed is not None:
+        return listed, ""
+    table = {"mysql": RDS_HOURLY, "mariadb": RDS_HOURLY,
+             "postgres": RDS_HOURLY_POSTGRES}.get(engine.lower())
+    return _scaled(table, cls) if table else (None, "")
+
+
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     cls = _flag(cmd, "db-instance-class")
     engine = (_flag(cmd, "engine") or "").lower()
@@ -1135,8 +1536,7 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
         return None
     # A price book's rate for the class stands for whatever engine the org
     # priced it on, so it also prices an engine the list tables do not hold.
-    from .aws_prices import rds_hourly
-    listed = rds_hourly(cls, engine) if engine in _RDS_TABLE_ENGINES else None
+    listed, family = _rds_list_rate(cls, engine) if engine in _RDS_TABLE_ENGINES else (None, "")
     hourly, book, judged = _gated("aws", cls, listed)
     if hourly is None:
         return None
@@ -1148,6 +1548,8 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     basis = f"{_ON_DEMAND_BASIS}, instance hours only; storage and I/O not included"
     if book and judged:
         basis = _book_basis(basis, book)
+    elif family:
+        basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
     return {
         "monthly_usd": round(monthly, 2),
@@ -1174,10 +1576,11 @@ def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     if not cls:
         return None
     multi_az = _has_flag(cmd, "multi-az")
-    from .aws_prices import rds_hourly
-    rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
-             "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
+    found = {"PostgreSQL": _rds_list_rate(cls, "postgres"),
+             "MySQL/MariaDB": _rds_list_rate(cls, "mysql")}
+    rates = {k: v[0] or 0.0 for k, v in found.items()}
     engine, listed = max(rates.items(), key=lambda kv: kv[1])
+    family = found[engine][1]
     if len(set(rates.values())) == 1:
         engine = "MySQL, MariaDB and PostgreSQL alike"
     hourly, book, judged = _gated("aws", cls, listed or None)
@@ -1189,6 +1592,8 @@ def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     else:
         basis = (f"{_ON_DEMAND_BASIS}, the {engine} rate (the engine is not in the command), "
                  "instance hours only, before subtracting the current class")
+        if family:
+            basis = _scaled_basis(basis, family)
     hours = (2 if multi_az else 1) * _hours_per_month()
     monthly = hourly * hours
     at = "at your price book rate of " if judged else "at "
@@ -1310,6 +1715,49 @@ def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
         count=int(_num(_flag(cmd, "count")) or 1), provider="azure",
         basis="pay-as-you-go monthly, nable's Azure VM price table, not verified "
               "against Azure's current retail prices")
+
+
+# `eksctl create cluster|nodegroup --node-type T --nodes N`. eksctl starts
+# 2 nodes when --nodes is not given, and a cluster brings its EKS control
+# plane ($0.10/hr, AWS Price List SKU ZYWMR684YSMFHWEU, us-east-1). A config
+# file (-f) decides everything and is not read: no figure.
+_EKSCTL_CREATE_RE = _Rule(rf"\beksctl\s+(?:\S+\s+)*create\s+(?:cluster|nodegroup|ng){_END}")
+_EKSCTL_DEFAULT_NODES = 2
+_EKS_CONTROL_PLANE_HOURLY = 0.10
+
+
+def _short_or_long(cmd: str, short: str, long: str) -> str | None:
+    val = _flag(cmd, long)
+    if val is None:
+        m = re.search(rf"(?<!\S)-{short}(?:=|\s+)(?!-)(\S+)", cmd)
+        val = m.group(1) if m else None
+    return val
+
+
+def _price_eksctl(cmd: str, **_: Any) -> dict[str, Any] | None:
+    if re.search(r"(?<!\S)(?:-f|--config-file)(?:=|\s|$)", cmd):
+        return None
+    cluster = re.search(r"(?<!\S)create\s+cluster(?!\S)", cmd) is not None
+    itype = _short_or_long(cmd, "t", "node-type")
+    nodes = _num(_short_or_long(cmd, "N", "nodes"))
+    without = _has_flag(cmd, "without-nodegroup")
+    if not itype or without:
+        return None
+    count = int(nodes) if nodes else _EKSCTL_DEFAULT_NODES
+    most = _short_or_long(cmd, "M", "nodes-max")
+    basis = (_SPOT_BASIS if _has_flag(cmd, "spot") else _ON_DEMAND_BASIS) + (
+        "" if nodes else f"; eksctl starts {_EKSCTL_DEFAULT_NODES} nodes when --nodes is "
+                         "not given") + (
+        f"; the group may scale to {most} nodes" if most and most != str(count) else "")
+    est = _price_ec2(itype, count, basis=basis, lead="a node group of ")
+    if est is None or not cluster:
+        return est
+    plane = _EKS_CONTROL_PLANE_HOURLY * _hours_per_month()
+    total = est["monthly_usd"] + plane
+    return {**est, "monthly_usd": round(total, 2),
+            "line": (f"{est['line']}, plus the EKS control plane at "
+                     f"{_rate(_EKS_CONTROL_PLANE_HOURLY)}/hr (~${plane:,.0f}/mo): "
+                     f"~${total:,.0f}/mo together")}
 
 
 _TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")
@@ -1532,6 +1980,7 @@ _PRICERS: list[tuple[Any, Any]] = [
     (_RESERVED_RE, _price_reserved_instances),
     (_GCE_CREATE_RE, _price_gce),
     (_AZ_VM_CREATE_RE, _price_az_vm),
+    (_EKSCTL_CREATE_RE, _price_eksctl),
     (_TF_APPLY_RE, _price_planfile),
 ]
 
@@ -1541,8 +1990,6 @@ _PRICERS: list[tuple[Any, Any]] = [
 # read the whole line, find the first --instance-type and price the t3.micro;
 # so each shell command is priced on its own and the figures are added up.
 
-# The operators between shell commands in a normalized command.
-_COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
 _QUOTED_OPS = str.maketrans({";": " ", "&": " ", "|": " ", "\n": " "})
 
 
@@ -1559,7 +2006,7 @@ def _price_rewrite(command: str, split_quoted: bool) -> str:
             return tok.translate(_QUOTED_OPS)
         return tok
     command = _unfold(command)
-    if "\n" not in command and "'" not in command and '"' not in command:
+    if "\n" not in command and (split_quoted or ("'" not in command and '"' not in command)):
         return command
     return _SHELL_LEX_RE.sub(one, command)
 
@@ -1585,10 +2032,12 @@ def _commands_in(form: str):
 def _price_form(form: str, cwd: str | None) -> tuple[list[dict[str, Any]], int]:
     """(figures, how many changes had none) for each command in `form`: the
     first pricer whose command it is prices it, and a command it cannot price
-    does not stop the others."""
+    does not stop the others. A dry run costs nothing and is not priced."""
     parts: list[dict[str, Any]] = []
     unpriced = 0
     for seg, at in _commands_in(form):
+        if "dry" in seg and _inert(seg):
+            continue
         for pattern, pricer in _PRICERS:
             if pattern.search(seg):
                 try:
@@ -1654,20 +2103,20 @@ def _pricing_forms(command: str):
             yield forms
 
 
-# `--region ap-southeast-1` on the command, or AWS_REGION / AWS_DEFAULT_REGION
-# set in it. The normalized reading the pricers see drops global options, so
-# this reads the command as written.
-_REGION_RE = re.compile(
-    r"(?:--region[=\s]+|\bAWS_(?:DEFAULT_)?REGION=)['\"]?([a-z]{2}(?:-gov)?-[a-z]+-\d)\b")
-
-
 def _with_region(est: dict[str, Any], command: str) -> dict[str, Any]:
     """A us-east-1 figure for a command that names another AWS region says so.
     List prices elsewhere are mostly higher (m5.large $0.096 in us-east-1,
     $0.12 in ap-southeast-1, AWS Price List AmazonEC2 offer 20261012193925), so
-    the figure is a floor there, not a quote."""
+    the figure is a floor there, not a quote.
+
+    `command` is read as written (`--region`, or AWS_REGION / AWS_DEFAULT_REGION
+    set in it, by _REGION_RE): the normalized reading the pricers see drops
+    global options. An EC2 figure _price_ec2 judged in the named region (or kept
+    at us-east-1 and said why) already names the region in its basis, and gets
+    no note: it is not the us-east-1 rate, or it says what it is."""
+    basis = str(est.get("basis", ""))
     regions = sorted({r for r in _REGION_RE.findall(command) if r != "us-east-1"})
-    if not regions or "us-east-1" not in str(est.get("basis", "")):
+    if not regions or "us-east-1" not in basis or all(r in basis for r in regions):
         return est
     note = (f"the command targets {', '.join(regions)}; the figure is the us-east-1 "
             "list rate, and list prices there are often higher")
@@ -1690,29 +2139,44 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
     Anything unpriceable returns None: an unknown type must degrade to the
     guard's existing behaviour, never to an invented figure.
     """
+    token = None
     try:
         r = _readings(command)
         if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
             return None
+        token = _PRICING_REGION.set(_named_region(command))
         for forms in _pricing_forms(command):
             best: dict[str, Any] | None = None
             for form in forms:
-                est = _added_up(*_price_form(form, cwd))
+                parts, unpriced = _price_form(form, cwd)
+                # Each part says on its own when its figure is us-east-1's for
+                # a command that names another region.
+                est = _added_up([_with_region(p, command) for p in parts], unpriced)
                 if est is not None and (best is None or _size(est) > _size(best)):
                     best = est
             if best is not None:
-                return _with_region(best, command)
+                return best
         return None
     except Exception:
         return None                    # a pricing bug must not cost the verdict
+    finally:
+        if token is not None:
+            _PRICING_REGION.reset(token)
 
 
 def _cost_line(est: dict[str, Any]) -> str:
     return est["line"]
 
 
-def _prod_context(command: str) -> bool:
-    """Does this command look aimed at production?
+def _sentence(text: str) -> str:
+    """`text` with its first letter capitalised, for where it starts a
+    sentence: "a $2.50/hr Savings Plan ..." after "This would buy a
+    commitment (...). " read as a typo."""
+    return text[:1].upper() + text[1:]
+
+
+def _prod_context(command: str) -> str | None:
+    """What in this command looks aimed at production (`-n prod`), or None.
 
     Word-boundary match so 'product' never trips it. Patterns are overridable
     (comma-separated regexes) via FINOPS_GUARD_PROD_PATTERNS; set it to 'off'
@@ -1721,15 +2185,16 @@ def _prod_context(command: str) -> bool:
     """
     raw = os.getenv("FINOPS_GUARD_PROD_PATTERNS", "")
     if raw.strip().lower() == "off":
-        return False
+        return None
     patterns = [p.strip() for p in raw.split(",") if p.strip()] or [r"\bprod(uction)?\b"]
     for pat in patterns:
         try:
-            if re.search(pat, command, re.IGNORECASE):
-                return True
+            m = re.search(pat, command, re.IGNORECASE)
         except re.error:
             continue
-    return False
+        if m:
+            return m.group(0) or pat
+    return None
 
 
 def _stop_on_budget() -> bool:
@@ -1917,6 +2382,7 @@ _PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
     _price_reserved_instances: ("aws", None),
     _price_gce: ("gcp", "Compute Engine"),
     _price_az_vm: ("azure", "Virtual Machines"),
+    _price_eksctl: ("aws", _EC2_SERVICE),
     _price_planfile: (None, None),
 }
 _BUDGETS_LISTED = 5
@@ -2512,6 +2978,14 @@ def _judged(command: str, hit: tuple[str, str], *, context: str | None, via: str
     return v
 
 
+# A deny from the allowed-actions list, in the guard's words: the policy
+# gate's own ("nable will not propose applying it") was written for the
+# advisor, which proposes; the guard stops a command an agent is running.
+_ALLOWLIST_REASON = ("'{action}' is not in your allowlist of permitted actions "
+                     "(FINOPS_POLICY_ALLOWED_ACTIONS), so the guard denies it; add "
+                     "{action} there to allow changes like this one.")
+
+
 def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
                     via: str = "", cwd: str | None = None,
                     org: _OrgLens | None = None) -> dict[str, Any]:
@@ -2536,6 +3010,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     def verdict(decision: str, body: str, *, strict: bool = False,
                 est: dict[str, Any] | None = None) -> dict[str, Any]:
         head = "nable guard (strict)" if strict else "nable guard"
+        if lead:
+            body = _sentence(body)     # after "... amounts to `...`. "
         v: dict[str, Any] = {"decision": decision, "action_type": action_type,
                              "door": door, "reason": f"{head}: {lead}{body}"}
         if est is not None:
@@ -2599,21 +3075,34 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                                    est=est)
                 # `rule` tells the learning loop an ask the threshold caused
                 # (the only kind a threshold fact can stop) from the rest.
+                why = (_ALLOWLIST_REASON.format(action=action_type)
+                       if gate.get("rule") == "allowlist"
+                       else gate.get("reason", "a human must review this action."))
                 return {**verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
-                    f"{_cost_line(est)}. "
-                    f"{gate.get('reason', 'a human must review this action.')}",
-                    est=est), "rule": gate.get("rule")}
+                    f"{_cost_line(est)}. {why}", est=est), "rule": gate.get("rule")}
+        else:
+            # Unpriced, it is still an action the policy names: with
+            # infra_apply left out of the allowed actions, a $8/mo t3.micro
+            # launch was denied and `terraform apply` let through. Read from
+            # the policy alone, so an unpriced change never loads the org
+            # model (whose thresholds only a figure can reach).
+            if action_type not in load_policy().get("allowed_action_types", []):
+                return {**verdict("deny", _ALLOWLIST_REASON.format(action=action_type)),
+                        "rule": "allowlist"}
         cost = f" {_cost_line(est)}." if est else ""
         if _strict():
             return verdict("ask", "this changes infrastructure and therefore the "
                            f"bill.{cost} Cost it first (ask nable to "
                            "estimate_change_cost) or confirm to proceed.",
                            strict=True, est=est)
-        if _prod_context(context if context is not None else command):
+        prod = _prod_context(context if context is not None else command)
+        if prod:
             return verdict("ask", "this mutates infrastructure in what looks like a "
-                           f"PRODUCTION context.{cost} Confirm to proceed, or cost it "
-                           "first (ask nable to estimate_change_cost).", est=est)
+                           f"PRODUCTION context (`{prod}`).{cost} Confirm to proceed, or "
+                           "cost it first (ask nable to estimate_change_cost); "
+                           "FINOPS_GUARD_PROD_PATTERNS sets what counts as production.",
+                           est=est)
         if est is not None:
             # Allowed, but close to the line: say so without stopping anyone.
             # "warn" never changes the permission flow; the hook shows the
@@ -2654,7 +3143,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
             opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
             closing = closing.replace("; confirm to proceed.", ".")
-            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing + " "
+            return verdict("ask", ("" if via else f"{opening}. ") + _sentence(cost) + closing
+                           + " "
                            + budget_txt, est=est)
         return verdict("ask", cost + budget_txt, est=est)
     if gate.get("gate") == GATE_ESCALATE:
@@ -2662,7 +3152,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
             # Say what the command does and to what, in words: "'delete_resource'
             # is a one-way door" was the policy's vocabulary, not the human's.
             opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
-            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing, est=est)
+            return verdict("ask", ("" if via else f"{opening}. ") + _sentence(cost) + closing,
+                           est=est)
         return verdict("ask", cost + gate.get("reason", "a human must review this action."),
                        est=est)
     if gate.get("gate") == GATE_BLOCK:
@@ -2689,8 +3180,11 @@ _ONE_WAY_PHRASES: list[tuple[str, str]] = [
     ("gsutil", "would delete stored data"),
     ("storage\\s+rm", "would delete stored data"),
     ("schedule-key-deletion", "would schedule a KMS key for deletion"),
+    ("terragrunt", "would destroy infrastructure"),
     ("terraform", "would destroy infrastructure"),
     ("tofu", "would destroy infrastructure"),
+    ("close-account", "would close an AWS account and everything in it"),
+    ("deregister-", "would deregister an image or resource so it cannot be used again"),
     ("pulumi", "would destroy infrastructure"),
     ("cdk", "would destroy infrastructure"),
     ("sam", "would destroy infrastructure"),
@@ -2717,9 +3211,15 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
     what = _ACTION_PHRASES.get(action_type)
     if what is None:
         what = "would delete cloud resources"
-        # The reading the classifier took it from: blanked, expanded, as written.
-        rule = next((rule for form in (r.masked, r.expanded, r.raw)
-                     for rule, _ in _ONE_WAY_RULES if rule.search(form)), None)
+        # The reading the classifier took it from: blanked, expanded, as
+        # written, in either split of the quoting; the rule that matched in
+        # a shell command that runs, not a dry run or a pipe into grep.
+        forms = [f for split in _quoting_splits(command)
+                 for f in dict.fromkeys(_readings(split)[:3])]
+        rule = next((rule for form in forms for rule, _ in _ONE_WAY_RULES
+                     if rule.search(form) and (
+                         rule.pattern in _CROSS_SEGMENT or _SUBSTITUTION_RE.search(form)
+                         or rule.search_live(form, _Segments(form)))), None)
         if rule is not None:
             what = next((phrase for frag, phrase in _ONE_WAY_PHRASES
                          if frag in rule.pattern), what)
@@ -2740,6 +3240,10 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
         where = f" in {d.rstrip('/')}/" if d else ""
     if action_type == "purchase_commitment":
         closing = "It cannot be cancelled once bought; confirm to proceed."
+    elif what == "would evict every pod from a node":
+        closing = ("The evicted pods restart elsewhere only if the cluster has room, and "
+                   "their emptyDir data is lost; `kubectl uncordon` reopens the node. "
+                   "Confirm to proceed.")
     elif what.startswith(("runs", "looks")):
         closing = "The guard cannot see exactly what it does; confirm to proceed."
     else:
