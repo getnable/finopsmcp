@@ -1091,6 +1091,9 @@ def set_ai_budget(mode: str | None = None,
     The current session must be known, from session_id or the agent's own
     environment; a cap on a guessed session is refused and nothing is saved."""
     from ..ai_budget import resolve_session, set_budget
+    if mode is not None and mode not in ("flat", "metered"):
+        # Answered "Saved." and stored mode "" for any other word.
+        return {"error": f"mode must be 'flat' or 'metered' (got {mode!r}). Nothing was saved."}
     sid, source = (None, None)
     if session_cap is not None and not every_session:
         sid, source = resolve_session(session_id or None)

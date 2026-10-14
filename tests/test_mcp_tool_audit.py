@@ -49,6 +49,51 @@ def test_budget_status_for_a_name_that_matches_nothing_says_so(db):
     assert out["budgets_available"] == ["data"]
 
 
+# ── write tools: an argument they cannot honour is refused, nothing saved ─────
+
+@pytest.mark.parametrize(("args", "word"), [
+    # Saved with the alert above the block: a budget that blocks before it warns.
+    ({"alert_at_pct": 150, "block_at_pct": 50}, "alert_at_pct"),
+    # Saved as "fortnightly", then checked over a rolling 30 days.
+    ({"period": "fortnightly"}, "period"),
+    ({"alert_at_pct": 0}, "alert_at_pct"),
+])
+def test_set_budget_refuses_thresholds_or_periods_it_cannot_enforce(db, args, word):
+    out = _call("set_budget", {"name": "x", "limit_usd": 100.0, **args})
+
+    assert word in out.get("error", ""), out
+    assert _call("list_budgets")["count"] == 0, "the budget was saved anyway"
+
+
+def test_set_ai_budget_refuses_an_unknown_mode(db, monkeypatch, tmp_path):
+    """set_ai_budget(mode="galaxy") answered "Saved." and stored mode ""."""
+    monkeypatch.setenv("NABLE_HOME", str(tmp_path / "nable"))
+    out = _call("set_ai_budget", {"mode": "galaxy", "spend_cap": 50.0})
+
+    assert "mode" in out.get("error", ""), out
+    assert "Nothing was saved" in out["error"]
+
+
+def test_subscribe_to_report_refuses_an_unknown_frequency(db):
+    """frequency="hourly" was saved as the weekly cron, with no word about it."""
+    out = _call("subscribe_to_report", {"name": "x", "sections": ["spend"],
+                                        "frequency": "hourly"})
+
+    assert "frequency" in out.get("error", ""), out
+    assert _call("list_report_subscriptions")["count"] == 0
+
+
+@pytest.mark.parametrize(("args", "word"), [
+    ({"formats": ["exe"]}, "formats"),     # "Report generated" with no file written
+    ({"sections": ["nope"]}, "sections"),  # "Make sure a provider is configured"
+])
+def test_export_cost_report_names_the_argument_it_cannot_use(db, args, word):
+    out = _call("export_cost_report", {"open_file": False, **args})
+
+    assert word in out.get("error", ""), out
+    assert "files" not in out
+
+
 # ── slice_costs: total_shown is what the shown rows add up to ─────────────────
 
 def _focus(service: str, cost: float):

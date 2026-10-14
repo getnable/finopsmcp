@@ -43,6 +43,15 @@ def set_budget(
     """
     if err := _srv.require_role("analyst"):
         return err
+    # Refused before anything is saved. A period the checker does not know was
+    # stored as given and then read as a rolling 30 days, and an alert above the
+    # block made a budget that blocks before it ever warns.
+    if period not in ("monthly", "weekly"):
+        return {"error": f"period must be 'monthly' or 'weekly' (got {period!r}). "
+                         "Nothing was saved."}
+    if not 0 < alert_at_pct <= block_at_pct:
+        return {"error": (f"alert_at_pct ({alert_at_pct:g}) must be above 0 and at most "
+                          f"block_at_pct ({block_at_pct:g}). Nothing was saved.")}
     try:
         from ..budget.enforcer import create_budget
         b = create_budget(

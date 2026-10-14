@@ -130,6 +130,16 @@ async def export_cost_report(
     all_sections = ["cost_summary", "services", "anomalies", "rightsizing", "savings", "budgets"]
     wanted = set(sections or all_sections)
     fmt_list = formats or ["html", "csv"]
+    # Checked before any data is fetched. An unknown format wrote no file and
+    # answered "Report generated"; an unknown section answered "Make sure at
+    # least one provider is configured".
+    bad_sections = sorted(wanted - set(all_sections))
+    bad_formats = sorted(set(fmt_list) - {"html", "csv"})
+    if bad_sections or bad_formats:
+        return {"error": " ".join(filter(None, [
+            f"Unknown sections {bad_sections}; use {all_sections}." if bad_sections else "",
+            f"Unknown formats {bad_formats}; use ['html', 'csv']." if bad_formats else "",
+        ])) + " Nothing was written."}
 
     collected: dict = {}
 
@@ -510,7 +520,11 @@ def subscribe_to_report(
     if err := _srv.require_role("analyst"):
         return err
     try:
-        from ..notifications.reports import create_subscription, VALID_SECTIONS
+        from ..notifications.reports import PRESET_CRONS, VALID_SECTIONS, create_subscription
+        if not cron and frequency not in PRESET_CRONS:
+            # Saved as the weekly cron, with nothing said, for any other word.
+            return {"error": (f"frequency must be one of {', '.join(PRESET_CRONS)} "
+                              f"(got {frequency!r}), or pass cron. Nothing was saved.")}
         invalid = [s for s in sections if s not in VALID_SECTIONS]
         if invalid:
             return {
