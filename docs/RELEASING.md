@@ -4,6 +4,13 @@ A release is a version bump merged to `main` and a `vX.Y.Z` tag pushed for
 that commit. The tag is what publishes. Merging a bump without tagging it
 publishes nothing, and that is not harmless: see "Why the tag cannot wait".
 
+**A person pushes the tag.** An agent session can prepare the bump, the
+changelog and the pull request, but its permission settings block it from
+pushing a release tag or starting a publish workflow, on purpose: publishing
+is a one-way door. So every release ends with a maintainer running step 5
+from their own terminal. An agent that prepared a release says so in its
+hand-off, with the exact tag command, rather than reporting the release done.
+
 ## Why the tag cannot wait
 
 Claude Code installs the nable plugin from this repository's default branch
@@ -38,8 +45,9 @@ not act on, ended with:
 Pointing the pin back at 0.8.216 does not help either: 0.8.216 rejects
 `--via plugin` (`unrecognized arguments`). The only fix is to publish.
 
-So tag in the same sitting as the merge. `scripts/check_release.py` (below)
-reports when this has not happened.
+So tag in the same sitting as the merge, and the person who merges a bump is
+the person who pushes its tag (or hands it, in that sitting, to someone who
+will). `scripts/check_release.py` (below) reports when this has not happened.
 
 ## What runs on a tag
 
@@ -74,7 +82,8 @@ point at a commit that already passed on `main`.
    `python -m build && twine check dist/*`.
 4. **Merge to `main`** and wait for the Tests workflow to pass on the merge
    commit.
-5. **Tag that commit and push the tag**, in the same sitting:
+5. **A maintainer tags that commit and pushes the tag**, from their own
+   terminal, in the same sitting (an agent session cannot do this step):
 
    ```bash
    git fetch origin
@@ -120,7 +129,8 @@ workflow already proves an anonymous `docker pull` of both tags.
 
 ## When a leg fails
 
-- **Re-run, do not re-tag.** Publish has a manual trigger. Run it from the
+- **Re-run, do not re-tag.** Publish has a manual trigger, which a maintainer
+  starts (an agent session cannot). Run it from the
   tag (Actions, Publish, "Use workflow from: Tags: vX.Y.Z"), not from `main`:
   a manual run builds the ref you select, and if `main` has moved to another
   version it would publish that one. `skip-existing` makes the PyPI step a
