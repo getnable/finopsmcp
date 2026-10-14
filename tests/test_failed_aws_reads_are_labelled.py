@@ -118,4 +118,11 @@ def test_the_sweep_keeps_findings_the_scanner_returns_as_a_dict(name, data):
 
     found = normalise(name, data)
     assert len(found) == 1, found
-    assert found[0]["monthly_savings"] > 0
+    if name == "cw_cardinality":
+        # A custom-metric bill is an investigation, not a saving (see
+        # tests/test_cloudwatch_metric_cost_is_not_a_saving.py): the finding is
+        # kept, sized by the bill at stake, with no dollar saving.
+        assert found[0]["monthly_savings"] is None
+        assert found[0]["rough_monthly"] > 0
+    else:
+        assert found[0]["monthly_savings"] > 0

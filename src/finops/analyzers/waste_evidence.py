@@ -70,8 +70,20 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
         MEASURED, "high",
         assumptions=("Untagged and older than the cutoff means unreferenced.",),
     ),
+    # The duplicate trails are observed; the dollars are a flat $20/mo per
+    # region, not derived from anything read. This was MEASURED/high.
     "duplicate_cloudtrail_management_events": EvidenceSpec(
-        MEASURED, "high",
+        INFERRED, "medium",
+        why_unsure=(
+            "The duplicate trails are real, but the figure is a flat $20/mo placeholder. "
+            "Each extra copy bills $2 per 100,000 management events, and the event count "
+            "for this region was not read."
+        ),
+        confirm_steps=(
+            ("Check the CloudTrail line in Cost Explorer (usage type ending "
+             "PaidEventsRecorded) for the billed copies."),
+            "Confirm no audit or organization requirement needs the second trail.",
+        ),
         assumptions=("The first management-events trail is free; each extra copy bills.",),
     ),
 

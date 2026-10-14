@@ -226,7 +226,13 @@ def normalise(name, data) -> list[dict]:
             for r in items if isinstance(items, list) else []:
                 s = r.get("estimated_monthly_cost", 0) or 0
                 if s > 0:
-                    out.append({"title": f"Reduce CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": s, "category": "Observability", "detail": f"{r.get('metric_count',0)} metrics"})
+                    # Never a figure in a total. What a namespace's metrics cost is
+                    # a list-price upper bound on a bill, not a saving: what a
+                    # cardinality cut saves depends on which dimensions are
+                    # dropped, which nothing here has measured (the scanner files
+                    # it as an INFERRED investigation). It stays listed, with a
+                    # size band, as the investigation it is.
+                    out.append({"title": f"Review CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": None, "kind": INVESTIGATION, "magnitude": magnitude_band(s), "rough_monthly": s, "category": "Observability", "detail": f"{r.get('metric_count',0)} metrics; ${s:,.2f}/mo of metric list cost at stake, an upper bound and not a saving"})
         elif name == "cw_alarms":
             items = data.get("orphaned_alarms", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             total = sum(r.get("monthly_cost", 0) for r in items)
@@ -299,7 +305,7 @@ def normalise(name, data) -> list[dict]:
                 # savings == the resource's own cost by construction (delete
                 # it, stop paying it); carrying the cost makes that invariant
                 # checkable by the critique instead of assumed.
-                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, idle {r.idle_days}d, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
+                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
         elif name == "idle_rds" and isinstance(data, list):
             for r in data:
                 s = r.get("estimated_monthly_savings", 0) or 0

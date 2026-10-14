@@ -956,9 +956,12 @@ async def list_idle_resources(
         - "List any unattached EBS volumes older than 90 days"
         - "What stopped EC2 instances are we still paying for?"
     Args:
-        resource_types: Subset to scan, e.g. ["ebs", "eip", "nat"]. All types when omitted.
+        resource_types: Subset to scan, e.g. ["ebs", "eip", "snapshot", "stopped", "lb"].
+            All types when omitted. NAT gateways and RDS are not in this scan.
         regions: AWS regions to scan. Defaults to all enabled regions.
-        min_idle_days: Only report resources idle at least this many days.
+        min_idle_days: Only report resources idle at least this many days. For a
+            stopped instance that is time since it stopped; for the rest it is the
+            resource's age, since AWS does not report when it went idle.
 
     """
     try:
@@ -1536,8 +1539,17 @@ async def audit_rds_manual_snapshots(
             f"(${total_monthly:,.2f}/mo)."
         )
         lines.append(
-            f"Potential saving if flagged snapshots are deleted: ${potential_savings:,.2f}/mo."
+            f"Potential saving if flagged snapshots are deleted: up to "
+            f"${potential_savings:,.2f}/mo. An upper bound: each snapshot is priced at its "
+            f"database's allocated storage, and backup storage within the free allocation "
+            f"is not billed."
         )
+        unassessed = result.get("unassessed_snapshots", 0)
+        if unassessed:
+            lines.append(
+                f"{unassessed} snapshot(s) not assessed: the DB instance list in their region "
+                f"could not be read, so whether their source exists is unknown."
+            )
         lines.append("")
 
         _SNAP_TABLE_CAP = 30
@@ -1590,7 +1602,7 @@ async def audit_rds_manual_snapshots(
                 )
             lines.append("")
 
-        if not orphaned and not old:
+        if not orphaned and not old and not unassessed:
             lines.append(
                 f"All {total_snapshots} snapshots are recent (under {age_threshold_days} days) "
                 f"and their source DBs still exist. No immediate action needed."
@@ -1800,8 +1812,9 @@ async def audit_s3_intelligent_tiering(
 ) -> dict:
     """
     Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds
-    savings. IT costs $0.0025/1,000 objects, making it more expensive than
-    S3 Standard for objects smaller than 128KB.
+    savings. IT costs $0.0025/1,000 monitored objects. Objects under 128 KB are
+    not monitored and pay no fee; monitored objects up to about 250 KB pay more
+    in fees than moving to Infrequent Access saves.
 
     Args:
         regions: Unused (S3 is global). Present for API consistency.
@@ -1832,8 +1845,9 @@ async def audit_s3_intelligent_tiering(
         shown = findings[:max_results]
         omitted = len(findings) - len(shown)
         note = (
-            "Objects below 128KB cost more in IT monitoring fees than they save "
-            "in storage tiering. Enable S3 bucket metrics for accurate object size data."
+            "Objects under 128 KB are not monitored and pay no IT fee. Monitored objects "
+            "up to about 250 KB pay more in fees than tiering saves. Sizes are bucket "
+            "averages from S3 bucket metrics, so a bucket that mixes sizes is approximate."
         )
         if omitted > 0:
             note += f" Showing top {max_results} by impact. {omitted} more findings omitted."
@@ -1938,9 +1952,10 @@ async def audit_cloudwatch_metric_cardinality(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits CloudWatch custom metric cardinality. Custom metrics above the 10,000
-    free-tier threshold cost $0.30/metric/month. High-cardinality dimensions like
-    pod_id or request_id can cause thousands of metrics per microservice.
+    Audits CloudWatch custom metric cardinality. Custom metrics bill per
+    metric-month at $0.30 for the first 10,000, then $0.10, $0.05 and $0.02
+    (us-east-1 list), with 10 free. High-cardinality dimensions like pod_id or
+    request_id can cause thousands of metrics per microservice.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
@@ -1965,7 +1980,8 @@ async def audit_cloudwatch_metric_cardinality(
 
         lines: list[str] = ["## CloudWatch Custom Metric Cardinality Audit", ""]
         lines.append(f"Total custom metrics found: **{total:,}**")
-        lines.append(f"Estimated monthly cost (above 10k free tier): **${cost:,.2f}**")
+        lines.append(f"Estimated monthly list cost (tiered, 10 metrics free; an upper "
+                     f"bound, see the finding): **${cost:,.2f}**")
         lines.append("")
 
         if not findings:
@@ -2015,7 +2031,7 @@ async def audit_cloudwatch_orphaned_alarms(
 ) -> str:
     """
     Finds CloudWatch alarms on deleted resources. Standard alarms cost
-    $0.10/month, composite $0.30/month. Terminated instances and deleted
+    $0.10/month, composite $0.50/month. Terminated instances and deleted
     queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.
 
     Args:
@@ -2095,7 +2111,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
 ) -> str:
     """
     Finds CloudWatch Log groups to migrate to Infrequent Access class. IA cuts
-    ingestion cost 50% ($0.075 to $0.0375/GB). Candidates: groups older than
+    ingestion cost 50% ($0.50 to $0.25/GB, us-east-1 list). Candidates: groups older than
     30 days with >1 GB/month still on STANDARD. Note: IA does not support
     metric filters or subscription filters.
 

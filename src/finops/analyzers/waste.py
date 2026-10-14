@@ -59,6 +59,13 @@ _S3_STANDARD_PER_GB_MONTH = 0.023
 # Frequent Access tier is $0.023, the Standard rate; the comment here used to
 # call $0.0125 the frequent-access rate.
 _S3_INT_TIER_PER_GB_MONTH = 0.0125
+# A lifecycle transition into Standard-IA or Intelligent-Tiering, per object:
+# $0.01 per 1,000 (AWS Price List, AmazonS3 us-east-1, Requests-Tier4).
+_S3_TRANSITION_PER_1000 = 0.01
+# Standard-IA bills an object under 128 KB as 128 KB, Intelligent-Tiering does
+# not monitor or tier one, and a lifecycle rule does not transition one by
+# default (S3 API reference, TransitionDefaultMinimumObjectSize).
+_S3_SMALL_OBJECT_KB = 128.0
 _RDS_BACKUP_EXTRA_PER_GB_MONTH = 0.095 # RDS backup storage beyond 1x DB size
 
 # Sentinel for "savings unknown" — will be treated as 0 in sorting but surfaced
@@ -500,6 +507,8 @@ def check_nat_gateways(
     """
     Detect NAT Gateways with low throughput — they still cost ~$32/mo in fixed
     charges even with zero traffic. If a NAT GW processes <1 GB/day it's likely idle.
+    Traffic is BytesOutToDestination plus BytesInFromDestination: requests out
+    and responses back.
     """
     findings = CheckFindings()
 
@@ -522,14 +531,24 @@ def check_nat_gateways(
     nats = [nat for page in pages for nat in page.get("NatGateways", [])
             if not _created_after(nat.get("CreateTime"), start)]
 
-    # BytesOutToDestination (egress through NAT GW), one batched read for all
+    # Traffic in both directions, one batched read for all. BytesOutToDestination
+    # alone is the request side: a gateway that private subnets pull images,
+    # packages and S3 objects through sends a few percent of what it receives
+    # (requests and ACKs), so 30 GB/day of downloads with 0.5 GB/day of requests
+    # was flagged idle, measured at high confidence, and its deletion drafted.
+    # BytesInFromDestination is the response side, and NAT data processing is
+    # billed on both.
     failed: dict = {}
     sums = fetch_metric_values(cw_client, [
-        MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
+        MetricQuery((nat["NatGatewayId"], metric), "AWS/NATGateway", metric,
                     (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
         for nat in nats
+        for metric in ("BytesOutToDestination", "BytesInFromDestination")
     ], start, now, failures=failed)
-    _note_unread(findings, failed, "NAT gateways", "traffic (BytesOutToDestination)")
+    # Counted per gateway, not per series: a gateway with either direction
+    # unread is one gateway not assessed.
+    _note_unread(findings, {key[0]: code for key, code in failed.items()}, "NAT gateways",
+                 "traffic (BytesOutToDestination, BytesInFromDestination)")
 
     for nat in nats:
         nat_id = nat["NatGatewayId"]
@@ -539,26 +558,27 @@ def check_nat_gateways(
             (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
         )
 
-        datapoints = sums.get(nat_id)
-        if datapoints is None:
+        out_points = sums.get((nat_id, "BytesOutToDestination"))
+        in_points = sums.get((nat_id, "BytesInFromDestination"))
+        if out_points is None or in_points is None:
             # A failed read is not zero traffic. Collapsing it to 0.0 flagged
             # every NAT gateway in the region as idle the moment CloudWatch
             # was unreachable or the IAM permission was missing, and the
             # trust envelope then stamped each one MEASURED/high. The sibling
             # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
-            # exact failure. BytesOutToDestination is the only evidence this
-            # detector has, so without it there is no finding to make.
+            # exact failure. Traffic is the only evidence this detector has,
+            # so without both directions there is no finding to make.
             log.debug("CW metrics failed for NAT GW %s", nat_id)
             continue
 
-        if not datapoints:
+        days_seen = max(len(out_points), len(in_points))
+        if not days_seen:
             # The read SUCCEEDED and returned nothing, which is different from
             # the read failing: the gateway is new, or genuinely carrying no
             # traffic. That is a real observation.
             avg_bytes_per_day = 0.0
         else:
-            total_bytes = sum(datapoints)
-            avg_bytes_per_day = total_bytes / len(datapoints)
+            avg_bytes_per_day = (sum(out_points) + sum(in_points)) / days_seen
 
         avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
 
@@ -572,7 +592,8 @@ def check_nat_gateways(
                 "estimated_monthly_savings": round(monthly_savings, 2),
                 "detail": (
                     f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
-                    f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
+                    f"{avg_gb_per_day:.3f} GB/day of traffic, both directions, over "
+                    f"{lookback_days} days "
                     f"(threshold: {low_throughput_gb_per_day} GB/day). "
                     f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
                     f"Name: {name_tag or 'untagged'}. "
@@ -823,19 +844,42 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
                     recommended_days = days
                     break
 
+            # A retention of N days deletes only what is older than N days.
+            # The whole stored cost used to be the saving, so a group created
+            # ten days ago and told to keep thirty "saved" all its storage. A
+            # group no older than the retention loses nothing yet; an older
+            # one saves at most its stored cost (the API does not say how much
+            # of the volume is older than N days).
+            created_ms = lg.get("creationTime")
+            age_days = (
+                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
+                if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
+            if age_days is not None and age_days <= recommended_days:
+                savings = 0.0
+                saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
+                              f"retention deletes nothing yet.")
+            else:
+                savings = monthly_cost
+                saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
+                              f"older than {recommended_days} days, which the API does not "
+                              f"break out.")
+
             findings.append({
                 "resource_id": group_name,
                 "resource_type": "CloudWatch Log Group",
                 "waste_type": "log_group_infinite_retention",
-                "estimated_monthly_savings": round(monthly_cost, 2),
+                "estimated_monthly_savings": round(savings, 2),
+                "price_basis": "upper_bound_all_stored_bytes",
+                "age_days": age_days,
                 "detail": (
                     f"Log group '{group_name}' has no retention policy (infinite). "
                     f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
+                    f"{saving_txt} "
                     f"Recommended retention: {recommended_days} days based on log type. "
                     f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
                     f"--retention-in-days {recommended_days}"
                 ),
-                "severity": _severity_from_savings(monthly_cost),
+                "severity": _severity_from_savings(savings),
                 "region": region,
                 "account_id": None,
                 "stored_gb": round(stored_gb, 3),
@@ -875,6 +919,10 @@ def check_s3_storage_class(
     5. Access frequency comes from GetRequests, which S3 publishes only for a
        bucket with request metrics enabled under the filter id "AllRequests".
        A bucket with no GetRequests datapoints is skipped, never read as idle.
+    6. A bucket whose average object is under 128 KB is skipped: Standard-IA
+       bills such an object as 128 KB and Intelligent-Tiering never tiers it.
+    7. The one-time lifecycle transition cost ($0.01 per 1,000 objects) is
+       reported next to the monthly saving, not netted out of it.
 
     STANDARD:           $0.023/GB-mo
     STANDARD-IA:        $0.0125/GB-mo + $0.01/GB retrieval
@@ -972,6 +1020,20 @@ def check_s3_storage_class(
         size_gb = size_gb_by_bucket[bucket_name]
         avg_daily_gets = daily_gets_by_bucket[bucket_name]
         object_count = max(objects.get(bucket_name) or [], default=0)
+        if object_count <= 0:
+            # Docstring item 4. The STANDARD_IA branch below used to run on an
+            # unknown count and print "(object count unknown)".
+            continue
+        # Bucket metrics give a count and a size, not a distribution, so this
+        # takes objects to be the average size. Under 128 KB, Standard-IA bills
+        # each as 128 KB and Intelligent-Tiering never tiers them: neither
+        # class saves anything, and Standard-IA costs more. 500 GB in 10M
+        # objects used to read "$5.25/mo net saving" in Standard-IA and would
+        # bill $15.26 there against $11.50 in STANDARD.
+        avg_object_kb = size_gb * 1024 ** 2 / object_count
+        if avg_object_kb < _S3_SMALL_OBJECT_KB:
+            continue
+        transition_cost = round(object_count / 1000 * _S3_TRANSITION_PER_1000, 2)
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
 
@@ -986,7 +1048,19 @@ def check_s3_storage_class(
         ia_net_savings = monthly_standard_cost - monthly_ia_cost
 
         # Only flag if there's meaningful ROI (>$5/mo net) and we can be specific
-        if object_count > 0 and it_net_savings > 5:
+        # Moving existing objects is a lifecycle transition rule. The bucket
+        # Intelligent-Tiering configuration this used to print (ARCHIVE_ACCESS)
+        # does not move a STANDARD object, and opts objects already in the
+        # class into a tier that must be restored before it can be read. The
+        # Standard-IA command was an in-place `aws s3 cp`, which on a versioned
+        # bucket leaves every STANDARD copy behind as a billed noncurrent version.
+        lifecycle_note = (
+            f"Move objects with a lifecycle transition rule, which costs "
+            f"${transition_cost:,.2f} once ({int(object_count):,} transitions at "
+            f"$0.01/1,000). put-bucket-lifecycle-configuration replaces the bucket's "
+            f"whole lifecycle configuration, so merge the rule into any existing ones."
+        )
+        if it_net_savings > 5:
             # IT makes sense: savings outweigh monitoring cost
             recommendation = "INTELLIGENT_TIERING"
             net_savings = it_net_savings
@@ -994,24 +1068,23 @@ def check_s3_storage_class(
                 f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
                 f"(${monthly_standard_cost:.2f}/mo). {int(object_count):,} objects. "
                 f"IT monitoring cost: ${it_monitoring_cost:.2f}/mo. "
-                f"Net saving with Intelligent-Tiering: ${it_net_savings:.2f}/mo. "
-                f"Command: aws s3api put-bucket-intelligent-tiering-configuration "
-                f"--bucket {bucket_name} --id default --intelligent-tiering-configuration "
-                f"'{{\"Id\":\"default\",\"Status\":\"Enabled\",\"Tierings\":[{{\"Days\":90,\"AccessTier\":\"ARCHIVE_ACCESS\"}}]}}'"
+                f"Net saving with Intelligent-Tiering: up to ${it_net_savings:.2f}/mo, "
+                f"if every byte reaches the Infrequent Access tier (an upper bound). "
+                f"{lifecycle_note}"
             )
         elif ia_net_savings > 5 and avg_daily_gets < 10:
-            # Very low access: STANDARD-IA is better — no monitoring fee, retrieval is cheap
+            # Very low access: STANDARD-IA is better: no monitoring fee, retrieval is cheap
             recommendation = "STANDARD_IA"
             net_savings = ia_net_savings
             detail = (
                 f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
                 f"(${monthly_standard_cost:.2f}/mo), avg {avg_daily_gets:.0f} GETs/day. "
                 f"STANDARD-IA costs ${monthly_ia_cost:.2f}/mo with no monitoring fee. "
-                f"Net saving: ${ia_net_savings:.2f}/mo. "
+                f"Net saving: ${ia_net_savings:.2f}/mo, before retrieval at $0.01/GB and "
+                f"assuming objects are near the {avg_object_kb:,.0f} KB average (one under "
+                f"128 KB bills as 128 KB) and stay at least the 30-day minimum. "
                 f"Note: Intelligent-Tiering monitoring would cost ${it_monitoring_cost:.2f}/mo "
-                f"{'(not worth it for this object count)' if object_count > 0 else '(object count unknown)'}. "
-                f"Command: aws s3 cp s3://{bucket_name} s3://{bucket_name} "
-                f"--recursive --storage-class STANDARD_IA"
+                f"(not worth it for this object count). {lifecycle_note}"
             )
         else:
             # Either monitoring cost eats the savings or bucket is too small to matter
@@ -1031,6 +1104,8 @@ def check_s3_storage_class(
             "object_count": int(object_count) if object_count else None,
             "avg_daily_gets": round(avg_daily_gets, 1),
             "it_monitoring_cost_mo": round(it_monitoring_cost, 2) if object_count else None,
+            "one_time_transition_cost": transition_cost,
+            "avg_object_kb": round(avg_object_kb, 1),
         })
 
     return findings
@@ -2032,9 +2107,12 @@ def check_data_transfer_costs(
     """
     findings: list[dict] = []
 
+    # "natgateway", not "nat": the bare substring matched any usage type with
+    # "nat" in a word (International, Destination, Alternate) and filed it as
+    # data transfer.
     data_transfer_keywords = [
         "DataTransfer", "Transfer", "data transfer",
-        "inter-region", "NAT",
+        "inter-region", "NatGateway-Bytes",
     ]
 
     try:
@@ -2048,51 +2126,64 @@ def check_data_transfer_costs(
         log.warning("Data transfer CE query failed: %s", exc)
         return findings
 
+    # One line per usage type over the whole window. MONTHLY granularity splits
+    # a window that crosses a month boundary into partial months, which used
+    # to become two findings per usage type, each called a monthly cost and
+    # each held to the threshold alone ($40 + $40 of an $80 line: no finding).
+    totals: dict[str, float] = {}
     for period in resp.get("ResultsByTime", []):
         for group in period.get("Groups", []):
             usage_type = group.get("Keys", [""])[0]
             amount = float(group.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0))
+            totals[usage_type] = totals.get(usage_type, 0.0) + amount
 
-            if amount < threshold_usd:
-                continue
+    for usage_type, amount in totals.items():
+        if amount < threshold_usd:
+            continue
 
-            is_transfer = any(kw.lower() in usage_type.lower() for kw in data_transfer_keywords)
-            if not is_transfer:
-                continue
+        is_transfer = any(kw.lower() in usage_type.lower() for kw in data_transfer_keywords)
+        if not is_transfer:
+            continue
 
-            if "NAT" in usage_type:
-                rec = (
-                    "Replace NAT Gateway with VPC endpoints for S3 and DynamoDB traffic "
-                    "(free for gateway endpoints). Use Interface endpoints for other services."
-                )
-            elif "inter-region" in usage_type.lower() or "Region to Region" in usage_type:
-                rec = (
-                    "Consolidate workloads to a single region where possible. "
-                    "Use S3 replication only for DR, not hot data access."
-                )
-            elif "Internet" in usage_type:
-                rec = (
-                    "Use CloudFront to cache and reduce egress costs. "
-                    "Ensure API clients are in the same region as your endpoints."
-                )
-            else:
-                rec = "Review usage type. Consider VPC endpoints, CloudFront, or regional consolidation."
+        if "natgateway" in usage_type.lower():
+            rec = (
+                "Replace NAT Gateway with VPC endpoints for S3 and DynamoDB traffic "
+                "(free for gateway endpoints). Use Interface endpoints for other services."
+            )
+        elif "inter-region" in usage_type.lower() or "Region to Region" in usage_type:
+            rec = (
+                "Consolidate workloads to a single region where possible. "
+                "Use S3 replication only for DR, not hot data access."
+            )
+        elif "Internet" in usage_type:
+            rec = (
+                "Use CloudFront to cache and reduce egress costs. "
+                "Ensure API clients are in the same region as your endpoints."
+            )
+        else:
+            rec = "Review usage type. Consider VPC endpoints, CloudFront, or regional consolidation."
 
-            findings.append({
-                "resource_id": usage_type,
-                "resource_type": "Data Transfer",
-                "waste_type": "data_transfer_cost",
-                "estimated_monthly_savings": round(amount * 0.3, 2),
-                "detail": (
-                    f"Usage type '{usage_type}' cost ${amount:,.2f} in the period. "
-                    f"Recommendation: {rec}"
-                ),
-                "severity": "high" if amount >= 200 else "medium",
-                "region": "global",
-                "account_id": None,
-                "usage_type": usage_type,
-                "monthly_cost": round(amount, 2),
-            })
+        findings.append({
+            "resource_id": usage_type,
+            "resource_type": "Data Transfer",
+            "waste_type": "data_transfer_cost",
+            # Spend, not a saving. This used to be 30% of the spend, a figure
+            # with no source; what an architecture change removes is not
+            # measured here, so the finding carries no savings number.
+            "estimated_monthly_savings": None,
+            "unpriced": True,
+            "detail": (
+                f"Usage type '{usage_type}' cost ${amount:,.2f} from {start} to {end}. "
+                f"How much of it a change would remove is not estimated. "
+                f"Recommendation: {rec}"
+            ),
+            "severity": "high" if amount >= 200 else "medium",
+            "region": "global",
+            "account_id": None,
+            "usage_type": usage_type,
+            "period_cost": round(amount, 2),
+            "period": {"start": start, "end": end},
+        })
 
     return findings
 
