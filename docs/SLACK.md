@@ -9,6 +9,12 @@ fixes without leaving Slack.
 > cost queries, anomaly detection, rightsizing, and one-way Slack alerts; the
 > two-way bot needs Team or an active trial. Start one with `finops setup
 > license`. Plans: [getnable.com/#pricing](https://getnable.com/#pricing).
+>
+> **Where it runs:** the bot is part of hosted nable and of the self-hosted
+> deployment ([DEPLOY.md](DEPLOY.md)), not the open-source `finops-mcp` package:
+> that package has no command that starts the bot and no Slack extra. From a
+> plain install, `nable setup slack` sets up the one-way alerts and reports
+> (an incoming webhook or a bot token).
 
 ## What it does
 
@@ -100,23 +106,14 @@ settings:
 with scope `connections:write` (that is your `xapp-...` App Token). Then Install
 to Workspace; OAuth & Permissions shows your `xoxb-...` Bot Token.
 
-**3. Run it locally** (nothing is hosted; the bot runs on your machine, your
-tokens stay in your OS keyring). Requires Python 3.10 or newer, check with
-`python3 --version`. On older Python, pip reports `No matching distribution
-found for finops-mcp`:
+**3. Run it** in the self-hosted deployment ([DEPLOY.md](DEPLOY.md)): give it
+the two tokens and your Anthropic key as `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`
+and `ANTHROPIC_API_KEY`, and its startup banner reports `Slack bot: ON`. The
+open-source package does not run the bot.
+Connect a cloud account first if you have not: `nable setup aws` (or azure/gcp).
 
-```
-pip install "finops-mcp[slack]"
-finops setup slack          # paste the two tokens + your Anthropic key when prompted
-finops-slack                # start the bot
-```
-
-`finops setup slack` also prints this exact manifest, so you can run it first and
-copy from the terminal instead. Connect a cloud account first if you have not:
-`finops setup aws` (or azure/gcp).
-
-> Why this and not the Slack Marketplace: nable's bot runs in Socket Mode on your
-> own machine, so your tokens and bill never leave it. Marketplace apps must be
+> Why this and not the Slack Marketplace: nable's bot runs in Socket Mode on a
+> machine you run, so your tokens and bill never leave it. Marketplace apps must be
 > publicly hosted OAuth apps that hold every workspace's tokens, which is the
 > opposite of local-first. The manifest install is the same two minutes without
 > handing your workspace to a third party.

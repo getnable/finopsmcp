@@ -95,8 +95,8 @@ advanced      config  vault  profile  sso  iam-template  infra
 ```
 
 `finops connect` scans the machine for provider credentials and connects
-everything in one keystroke. `finops serve` starts a local web dashboard the
-whole team can view in a browser.
+everything in one keystroke. The team web dashboard is part of hosted nable:
+in this package `finops serve` says so and exits.
 
 ---
 

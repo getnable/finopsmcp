@@ -22,11 +22,8 @@ convention.
 covered in its own section below.
 
 **A rules file** at `~/.finops/tag_rules.yaml` (override with `FINOPS_TAG_RULES`).
-Generate a starting point:
-
-```
-nable tags
-```
+Start from the example under "Writing rules" below: save it there and edit the
+tag keys to match yours.
 
 ## Writing rules
 
