@@ -558,9 +558,13 @@ def _check_s3_intelligent_tiering(ctx: PatternContext) -> PatternMatch | None:
 
 def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
     """
-    High EC2/Fargate spend with no Savings Plans — usually > 30% saving available.
-    Requires commitment metadata from the connectors.
+    High EC2/Fargate spend with little Savings Plans coverage. The saving is
+    priced at the one 1-year no-upfront Compute Savings Plan rate the
+    commitment engine uses (recommendations.commitments, from the AWS Price
+    List). Requires commitment metadata from the connectors.
     """
+    from ..recommendations.commitments import _COMPUTE_SP_DISCOUNT, COMPUTE_SP_DISCOUNT_RANGE
+
     ec2_monthly = ctx.service_monthly("Amazon EC2")
     fargate_monthly = ctx.service_monthly("AWS Fargate")
     total = ec2_monthly + fargate_monthly
@@ -579,7 +583,12 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
         return None
 
     uncovered = total * (1 - sp_coverage / 100)
-    potential_saving = uncovered * 0.32   # avg Compute SP saving
+    # This read 32% ("Compute Savings Plans typically save 32%"), above every
+    # EC2 type in the AWS rate card (19-29%) and Fargate's 20%. It is the
+    # commitment engine's rate now, 26% (the m5.large rate, under the 27.1%
+    # median), so this finding and get_commitment_analysis agree.
+    discount = 1 - _COMPUTE_SP_DISCOUNT
+    potential_saving = uncovered * discount
 
     return _match(
         "no-savings-plans", "Compute Spend Without Savings Plans Coverage", "compute", "high",
@@ -587,7 +596,8 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
         monthly_waste=potential_saving,
         evidence=[
             f"${total:.0f}/mo EC2+Fargate spend with {sp_coverage:.0f}% Savings Plans coverage",
-            f"${uncovered:.0f}/mo on-demand — Compute Savings Plans typically save 32%",
+            (f"${uncovered:.0f}/mo on-demand; a 1-year no-upfront Compute Savings Plan "
+             f"saves about {discount:.0%} of what it covers ({COMPUTE_SP_DISCOUNT_RANGE})"),
         ],
         remediation=(
             "Purchase 1-year Compute Savings Plans for your baseline compute spend. "

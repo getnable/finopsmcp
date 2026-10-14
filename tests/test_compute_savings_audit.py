@@ -228,6 +228,31 @@ def test_a_savings_plan_sized_from_monthly_totals_says_so():
     assert "hourly" in sp["description"] and "never" not in sp["description"]
 
 
+def test_the_waste_pattern_prices_a_savings_plan_at_the_same_rate():
+    """ml.patterns' "no-savings-plans" finding said "Compute Savings Plans
+    typically save 32%" and priced the uncovered spend at that, above every
+    EC2 type on the rate card. $100 a day of EC2 compute is $3,000 a month;
+    with nothing covered, 3,000 x 0.26 = 780 a month (9,360 a year), not
+    3,000 x 0.32 = 960. Half covered: 1,500 x 0.26 = 390."""
+    import pytest
+
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+    from finops.recommendations.commitments import _COMPUTE_SP_DISCOUNT
+
+    ec2 = {"Amazon Elastic Compute Cloud - Compute": [100.0] * 30}
+    m = _check_savings_plans_coverage(PatternContext(daily_costs=ec2, by_resource=[],
+                                                     snapshots=[]))
+    assert m.monthly_waste == pytest.approx(3000.0 * (1 - _COMPUTE_SP_DISCOUNT))
+    assert m.monthly_waste == pytest.approx(780.0)
+    assert m.annual_waste == 9360.0
+    said = " ".join(m.evidence)
+    assert "26%" in said and "32%" not in said
+
+    half = _check_savings_plans_coverage(PatternContext(
+        daily_costs=ec2, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 50.0}]))
+    assert half.monthly_waste == pytest.approx(390.0)
+
+
 def test_the_commitment_gap_ticket_uses_the_same_rate():
     from finops.integrations.ticketing import _commitment_gap_ticket
 
