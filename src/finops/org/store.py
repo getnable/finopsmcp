@@ -418,8 +418,8 @@ class _File:
         try:
             text = self.path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            self.error = f"{self.path.name}: not readable as YAML ({type(e).__name__}); ignored"
-            _warn(warnings, self.error)
+            self._unusable(f"could not be read ({type(e).__name__})",
+                           "check that it is a readable UTF-8 file", warnings)
             return self
         # A Windows editor's byte-order mark is not part of the header.
         text = text.removeprefix("\ufeff")
@@ -429,12 +429,16 @@ class _File:
         try:
             data = safe_yaml(text)
         except yaml.YAMLError as e:
-            self.error = f"{self.path.name}: not readable as YAML ({type(e).__name__}); ignored"
-            _warn(warnings, self.error)
+            mark = getattr(e, "problem_mark", None)
+            where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
+            why = getattr(e, "problem", None) or type(e).__name__
+            self._unusable(f"is not readable as YAML ({why}{where})",
+                           "correct the YAML" + (f" at line {mark.line + 1}" if mark else ""),
+                           warnings)
             return self
         if data is not None and not isinstance(data, list):
-            self.error = f"{self.path.name}: expected a list of facts; ignored"
-            _warn(warnings, self.error)
+            self._unusable(f"is a YAML {type(data).__name__}, not a list of facts",
+                           "make it a list (each fact a `- kind: ...` entry)", warnings)
             return self
         lines = text.splitlines()
         entries = data or []
@@ -474,6 +478,17 @@ class _File:
         _cache_put(self.path, digest, self.header, self.facts, self.unparsed, skipped,
                    self.why)
         return self
+
+    def _unusable(self, what: str, fix: str, warnings: list[str] | None) -> None:
+        """Record that this file is skipped, by its full path, with the fix.
+
+        It used to say `accounts.yaml: not readable as YAML (ParserError);
+        ignored`, with no directory (the org model reads several) and no way
+        out. self.error stays the short form, which OrgError extends."""
+        self.error = f"{self.path} {what}; ignored"
+        _warn(warnings, f"{self.path} {what}, so none of its facts are used. Fix: {fix}, "
+                        f"or move the file out of {self.path.parent}; `nable org status` "
+                        "checks it again.")
 
     def _from_cache(self, digest: str, warnings: list[str] | None) -> bool:
         doc = _cache_get(self.path, digest)

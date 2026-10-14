@@ -237,6 +237,22 @@ def _print(*args: Any, **kw: Any) -> None:
 
 
 def _status(parsed, org) -> int:
+    # Status prints every problem the load found (m.warnings, below). The org
+    # model also logs each one, and with no logging set up Python's last-resort
+    # handler wrote that log line to the same terminal first, so a broken file
+    # was reported twice. While status loads, the log line goes nowhere; the
+    # MCP server and any configured logging still get it.
+    import logging
+    quiet = logging.NullHandler()
+    logger = logging.getLogger("finops.org")
+    logger.addHandler(quiet)
+    try:
+        return _status_report(parsed, org)
+    finally:
+        logger.removeHandler(quiet)
+
+
+def _status_report(parsed, org) -> int:
     m = org.load(parsed.org_dir)
     cov = org.coverage(m)
     stale = m.stale()

@@ -274,3 +274,17 @@ def test_doctor_names_a_broken_policy_file_with_its_fix(tmp_path):
     assert check["recommendation"].startswith(f"correct {policy}")
     text = nable(tmp_path, "doctor", env=env)
     assert "Guard policy" in text.stdout and str(policy) in text.stdout
+
+
+# ── a broken org fact file ────────────────────────────────────────────────────
+
+def test_org_status_names_a_broken_fact_file_once_with_its_path_and_fix(tmp_path):
+    org_dir = tmp_path / "org"
+    org_dir.mkdir()
+    bad = org_dir / "accounts.yaml"
+    bad.write_text("- fact: owner\n  subject: {kind: aws_account, id: '1'\n")
+    r = nable(tmp_path, "org", "status", env={"FINOPS_ORG_DIR": str(org_dir)})
+    both = r.stdout + r.stderr
+    assert both.count("not readable as YAML") == 1, both
+    line = next(x for x in both.splitlines() if "not readable as YAML" in x)
+    assert str(bad) in line and "Fix:" in line and "line" in line
