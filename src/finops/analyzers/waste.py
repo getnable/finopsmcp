@@ -848,7 +848,7 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
             # of the volume is older than N days).
             created_ms = lg.get("creationTime")
             age_days = (
-                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
+                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
                 if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
             if age_days is not None and age_days <= recommended_days:
                 savings = 0.0

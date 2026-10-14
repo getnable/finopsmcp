@@ -80,8 +80,8 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
             "for this region was not read."
         ),
         confirm_steps=(
-            "Check the CloudTrail line in Cost Explorer (usage type ending "
-            "PaidEventsRecorded) for the billed copies.",
+            ("Check the CloudTrail line in Cost Explorer (usage type ending "
+             "PaidEventsRecorded) for the billed copies."),
             "Confirm no audit or organization requirement needs the second trail.",
         ),
         assumptions=("The first management-events trail is free; each extra copy bills.",),

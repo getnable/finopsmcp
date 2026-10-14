@@ -16,7 +16,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ def _stopped_at(reason: Any) -> datetime | None:
     if not m:
         return None
     try:
-        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     except ValueError:
         return None
 

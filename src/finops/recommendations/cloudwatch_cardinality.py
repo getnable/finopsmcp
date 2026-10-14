@@ -335,8 +335,8 @@ async def audit_cloudwatch_metric_cardinality(
                 "Every metric list_metrics returned published data all month.",
             ],
             confirm_steps=[
-                "Read the CloudWatch metrics line (MetricMonitorUsage) in Cost Explorer "
-                "for the billed figure.",
+                ("Read the CloudWatch metrics line (MetricMonitorUsage) in Cost Explorer "
+                 "for the billed figure."),
                 "Count the metrics a dimension contributes before and after dropping it.",
             ],
             rough_monthly=estimated_monthly_cost,

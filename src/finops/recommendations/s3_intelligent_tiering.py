@@ -373,10 +373,10 @@ async def audit_s3_intelligent_tiering(
             assumptions=[
                 "All bytes settle in the Infrequent Access tier (an upper bound on savings).",
                 "Bucket-level CloudWatch metrics reflect the steady-state object count and size.",
-                "Every object is near the average size, so all are monitored (the fee is "
-                "charged only on objects of 128 KB and up).",
-                "Every object counted is in the Intelligent-Tiering class; NumberOfObjects "
-                "counts all classes.",
+                ("Every object is near the average size, so all are monitored (the fee is "
+                 "charged only on objects of 128 KB and up)."),
+                ("Every object counted is in the Intelligent-Tiering class; NumberOfObjects "
+                 "counts all classes."),
             ],
             rough_monthly=worst["monthly_monitoring_cost"],
             confirm_steps=[

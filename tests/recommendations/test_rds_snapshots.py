@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -373,7 +373,7 @@ class TestAuditRdsManualSnapshots:
         assert len(result["old_snapshots"]) == 1
 
     def test_an_unreadable_db_list_leaves_snapshots_unassessed(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snaps = [{
             "DBSnapshotIdentifier": "snap-1", "DBInstanceIdentifier": "prod-db",
             "AllocatedStorage": 500, "Status": "available",
@@ -408,7 +408,7 @@ class TestAuditRdsManualSnapshots:
         List, AmazonRDS: "$0.095 per additional GB-month of backup storage
         exceeding free allocation"). So the figure is an upper bound and the
         finding carries no precise saving."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snaps = [{
             "DBSnapshotIdentifier": "snap-orphan", "DBInstanceIdentifier": "gone-db",
             "AllocatedStorage": 100, "Status": "available",

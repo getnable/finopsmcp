@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import sys
 import types
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from botocore.exceptions import ClientError
@@ -29,7 +29,7 @@ from botocore.exceptions import ClientError
 from finops.aws_prices import ALB_PER_MONTH, HOURS_PER_MONTH, lb_hourly
 from finops.cleanup import idle
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _denied(op: str) -> ClientError:

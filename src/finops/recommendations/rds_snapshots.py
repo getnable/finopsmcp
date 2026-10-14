@@ -236,12 +236,12 @@ async def audit_rds_manual_snapshots(
                 "the free allocation (the size of your live databases in the region) is "
                 "not billed."),
             assumptions=[
-                "Every snapshot is billed at AllocatedStorage x $0.095/GB-month "
-                "(us-east-1 list).",
+                ("Every snapshot is billed at AllocatedStorage x $0.095/GB-month "
+                 "(us-east-1 list)."),
             ],
             confirm_steps=[
-                "Read the RDS ChargedBackupUsage line in Cost Explorer for the billed "
-                "backup storage in each region.",
+                ("Read the RDS ChargedBackupUsage line in Cost Explorer for the billed "
+                 "backup storage in each region."),
             ],
             rough_monthly=potential_savings,
             remediation=remediation,

@@ -12,7 +12,7 @@ is not read.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from finops.analyzers import waste, waste_evidence
 
@@ -31,7 +31,7 @@ class _Logs:
 
 
 def _group(name: str, gb: float, age_days: int) -> dict:
-    created = datetime.now(timezone.utc) - timedelta(days=age_days)
+    created = datetime.now(UTC) - timedelta(days=age_days)
     return {"logGroupName": name, "storedBytes": int(gb * 1024 ** 3),
             "creationTime": int(created.timestamp() * 1000)}
 
