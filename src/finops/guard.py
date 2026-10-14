@@ -2002,8 +2002,15 @@ def _cost_line(est: dict[str, Any]) -> str:
     return est["line"]
 
 
-def _prod_context(command: str) -> bool:
-    """Does this command look aimed at production?
+def _sentence(text: str) -> str:
+    """`text` with its first letter capitalised, for where it starts a
+    sentence: "a $2.50/hr Savings Plan ..." after "This would buy a
+    commitment (...). " read as a typo."""
+    return text[:1].upper() + text[1:]
+
+
+def _prod_context(command: str) -> str | None:
+    """What in this command looks aimed at production (`-n prod`), or None.
 
     Word-boundary match so 'product' never trips it. Patterns are overridable
     (comma-separated regexes) via FINOPS_GUARD_PROD_PATTERNS; set it to 'off'
@@ -2012,15 +2019,16 @@ def _prod_context(command: str) -> bool:
     """
     raw = os.getenv("FINOPS_GUARD_PROD_PATTERNS", "")
     if raw.strip().lower() == "off":
-        return False
+        return None
     patterns = [p.strip() for p in raw.split(",") if p.strip()] or [r"\bprod(uction)?\b"]
     for pat in patterns:
         try:
-            if re.search(pat, command, re.IGNORECASE):
-                return True
+            m = re.search(pat, command, re.IGNORECASE)
         except re.error:
             continue
-    return False
+        if m:
+            return m.group(0) or pat
+    return None
 
 
 def _stop_on_budget() -> bool:
@@ -2836,6 +2844,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     def verdict(decision: str, body: str, *, strict: bool = False,
                 est: dict[str, Any] | None = None) -> dict[str, Any]:
         head = "nable guard (strict)" if strict else "nable guard"
+        if lead:
+            body = _sentence(body)     # after "... amounts to `...`. "
         v: dict[str, Any] = {"decision": decision, "action_type": action_type,
                              "door": door, "reason": f"{head}: {lead}{body}"}
         if est is not None:
@@ -2920,10 +2930,13 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                            f"bill.{cost} Cost it first (ask nable to "
                            "estimate_change_cost) or confirm to proceed.",
                            strict=True, est=est)
-        if _prod_context(context if context is not None else command):
+        prod = _prod_context(context if context is not None else command)
+        if prod:
             return verdict("ask", "this mutates infrastructure in what looks like a "
-                           f"PRODUCTION context.{cost} Confirm to proceed, or cost it "
-                           "first (ask nable to estimate_change_cost).", est=est)
+                           f"PRODUCTION context (`{prod}`).{cost} Confirm to proceed, or "
+                           "cost it first (ask nable to estimate_change_cost); "
+                           "FINOPS_GUARD_PROD_PATTERNS sets what counts as production.",
+                           est=est)
         if est is not None:
             # Allowed, but close to the line: say so without stopping anyone.
             # "warn" never changes the permission flow; the hook shows the
@@ -2964,7 +2977,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
             opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
             closing = closing.replace("; confirm to proceed.", ".")
-            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing + " "
+            return verdict("ask", ("" if via else f"{opening}. ") + _sentence(cost) + closing
+                           + " "
                            + budget_txt, est=est)
         return verdict("ask", cost + budget_txt, est=est)
     if gate.get("gate") == GATE_ESCALATE:
@@ -2972,7 +2986,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
             # Say what the command does and to what, in words: "'delete_resource'
             # is a one-way door" was the policy's vocabulary, not the human's.
             opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
-            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing, est=est)
+            return verdict("ask", ("" if via else f"{opening}. ") + _sentence(cost) + closing,
+                           est=est)
         return verdict("ask", cost + gate.get("reason", "a human must review this action."),
                        est=est)
     if gate.get("gate") == GATE_BLOCK:
@@ -2999,8 +3014,11 @@ _ONE_WAY_PHRASES: list[tuple[str, str]] = [
     ("gsutil", "would delete stored data"),
     ("storage\\s+rm", "would delete stored data"),
     ("schedule-key-deletion", "would schedule a KMS key for deletion"),
+    ("terragrunt", "would destroy infrastructure"),
     ("terraform", "would destroy infrastructure"),
     ("tofu", "would destroy infrastructure"),
+    ("close-account", "would close an AWS account and everything in it"),
+    ("deregister-", "would deregister an image or resource so it cannot be used again"),
     ("pulumi", "would destroy infrastructure"),
     ("cdk", "would destroy infrastructure"),
     ("sam", "would destroy infrastructure"),
@@ -3056,6 +3074,10 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
         where = f" in {d.rstrip('/')}/" if d else ""
     if action_type == "purchase_commitment":
         closing = "It cannot be cancelled once bought; confirm to proceed."
+    elif what == "would evict every pod from a node":
+        closing = ("The evicted pods restart elsewhere only if the cluster has room, and "
+                   "their emptyDir data is lost; `kubectl uncordon` reopens the node. "
+                   "Confirm to proceed.")
     elif what.startswith(("runs", "looks")):
         closing = "The guard cannot see exactly what it does; confirm to proceed."
     else:
