@@ -77,7 +77,7 @@ class _SurfacedFastMCP(FastMCP):
     async def list_tools(self):  # type: ignore[override]
         from mcp.types import ToolAnnotations
 
-        from .tool_surface import advertise, compact_description, tool_annotation
+        from .tool_surface import advertise, compact_description, tool_annotation, tool_hints
 
         tools = await super().list_tools()
         # Trim the ADVERTISED description to what helps the model choose. The
@@ -99,6 +99,7 @@ class _SurfacedFastMCP(FastMCP):
                     title=a["title"],
                     readOnlyHint=a["readOnlyHint"],
                     destructiveHint=a["destructiveHint"],
+                    **tool_hints(t.name),
                 )
             except Exception:
                 pass  # annotation must never break tool listing
