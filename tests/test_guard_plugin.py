@@ -57,6 +57,20 @@ def _machine(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "check_budget_gate", lambda *a, **k: None)
 
 
+@pytest.fixture
+def uvx_on_path(tmp_path, monkeypatch):
+    """A `uvx` on PATH, so a uvx-form hook counts as one that starts. Without
+    it these tests passed only on machines with uv installed: install says a
+    uvx hook with no uvx cannot start (65813cc), and CI runners have no uv."""
+    bin_dir = tmp_path / "uvx-bin"
+    bin_dir.mkdir()
+    uvx = bin_dir / "uvx"
+    uvx.write_text("#!/bin/sh\nexit 0\n")
+    uvx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return uvx
+
+
 def _records() -> int:
     path = gl.ledger_path()
     return len(path.read_text().splitlines()) if path.exists() else 0
@@ -411,7 +425,7 @@ def test_install_leaves_settings_alone_when_the_plugin_runs_the_guard(args, caps
     assert not (Path.cwd() / ".claude" / "settings.json").exists()
 
 
-def test_install_force_writes_the_hook_anyway(capsys, monkeypatch):
+def test_install_force_writes_the_hook_anyway(capsys, monkeypatch, uvx_on_path):
     monkeypatch.setattr(g, "_hook_command", lambda: g._UVX_HOOK_CMD)
     _settings(_user(), plugin=True)
     out = _run(["guard", "install", "--global", "--force"], capsys)
@@ -420,7 +434,7 @@ def test_install_force_writes_the_hook_anyway(capsys, monkeypatch):
     assert json.loads(_user().read_text())["enabledPlugins"] == {gp.PLUGIN_KEY: True}
 
 
-def test_install_all_skips_claude_code_when_the_plugin_runs_the_guard(capsys):
+def test_install_all_skips_claude_code_when_the_plugin_runs_the_guard(capsys, uvx_on_path):
     _settings(_user(), plugin=True)
     (Path.home() / ".gemini").mkdir()
     out = _run(["guard", "install", "--all", "--global"], capsys)
