@@ -318,3 +318,12 @@ def test_org_status_names_a_broken_fact_file_once_with_its_path_and_fix(tmp_path
     assert both.count("not readable as YAML") == 1, both
     line = next(x for x in both.splitlines() if "not readable as YAML" in x)
     assert str(bad) in line and "Fix:" in line and "line" in line
+
+
+def test_setup_aws_that_connects_nothing_exits_1(tmp_path):
+    """With no credentials and stdin closed, `nable setup aws` said "No key
+    entered" and exited 0, where `nable setup openai` exits 1: a provisioning
+    script read an AWS setup that connected nothing as a success."""
+    r = nable(tmp_path, "setup", "aws")
+    assert r.returncode == 1
+    assert "No AWS account was connected" in r.stdout

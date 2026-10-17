@@ -4538,10 +4538,18 @@ def main(args: list[str] | None = None) -> None:
             _print_aws_accounts()
         elif getattr(parsed, "org", False):
             setup_aws_org()
-        elif getattr(parsed, "add", False):
-            setup_aws_account()
         else:
+            # Every way setup_aws_account connects ends in add_account, so a
+            # run that added no account connected nothing. That exited 0
+            # after "No key entered", where `nable setup openai` exits 1.
+            from .accounts import list_accounts
+            before = {a.name for a in list_accounts()}
             setup_aws_account()
+            if not {a.name for a in list_accounts()} - before:
+                print("\n  No AWS account was connected. Run `nable setup aws` in a terminal, or "
+                      "set AWS credentials (AWS_PROFILE, or the access key variables) and run "
+                      "`nable connect`.\n")
+                raise SystemExit(1)
         return
     elif parsed.cmd in dispatch:
         _result = dispatch[parsed.cmd]()

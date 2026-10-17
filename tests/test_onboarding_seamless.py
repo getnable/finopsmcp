@@ -47,9 +47,15 @@ def test_setup_with_provider_dispatches_directly(monkeypatch):
     monkeypatch.setattr(w, "run_welcome_flow", lambda *a, **k: calls.append("welcome"))
     monkeypatch.setattr(sw, "_wizard_select_persona", lambda *a, **k: calls.append("menu"))
     monkeypatch.setattr(sw, "setup_aws_account", lambda *a, **k: calls.append("aws"))
+    exit_code = None
     with contextlib.redirect_stdout(io.StringIO()):
-        sw.main(["setup", "aws"])
+        try:
+            sw.main(["setup", "aws"])
+        except SystemExit as e:
+            exit_code = e.code
     assert calls == ["aws"]
+    # The stand-in connects no account, and setup that connects nothing exits 1.
+    assert exit_code == 1
 
 
 def test_hints_match_launch_method(monkeypatch):
