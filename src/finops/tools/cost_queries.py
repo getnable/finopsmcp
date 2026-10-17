@@ -2595,9 +2595,15 @@ def _cost_window(start_date: str | None, end_date: str | None):
         return None, None, {"error": (
             f"Invalid date (start_date={start_date!r}, end_date={end_date!r}). "
             "Use YYYY-MM-DD.")}, {}
-    if sd > ed:
+    if sd >= ed:
+        # Providers read [start_date, end_date): Cost Explorer's End is
+        # exclusive and the GCP connector reads the same way, so an equal pair
+        # is a window with no days in it. Cost Explorer rejected it; GCP would
+        # have answered with no rows, which reads as an empty bill.
         return None, None, {"error": (
-            f"start_date ({sd}) must be on or before end_date ({ed}).")}, {}
+            f"start_date ({sd}) must be before end_date ({ed}): end_date is "
+            f"exclusive. For the single day {sd}, pass end_date "
+            f"{sd + _srv.timedelta(days=1)}.")}, {}
     notes: dict = {}
     earliest = ed - _srv.timedelta(days=_srv.MAX_LOOKBACK_DAYS)
     if sd < earliest:
