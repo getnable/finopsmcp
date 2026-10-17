@@ -1,0 +1,5 @@
+# A sample CODEOWNERS for trying the approval-chains adapter.
+*                    @acme/platform
+/infra/payments/     @acme/payments @acme/platform @maria
+/infra/search/       @acme/search
+/docs/               @dana

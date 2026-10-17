@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.10.0"
+version = "0.11.0"
 description = "Prices what your coding agents are about to do, before they do it: a guard hook for Claude Code, Cursor, Codex CLI, Copilot, Gemini CLI and Cline, plus a local MCP server and CLI for cloud and AI cost."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -89,7 +89,7 @@ gcp = [
 ]
 keyring = ["keyring>=25.0.0"]
 pdf = [
-    "pdfplumber>=0.10.0",
+    "pdfplumber>=0.11.0",
     "pillow>=12.3.0",  # constrain pdfplumber's transitive pillow off the 12.2.0 image-parsing CVEs
 ]
 pr-comments = [
@@ -112,7 +112,7 @@ all = [
     "snowflake-connector-python>=3.6.0",
     "msal>=1.28.0",
     "keyring>=25.0.0",
-    "pdfplumber>=0.10.0",
+    "pdfplumber>=0.11.0",
     "pillow>=12.3.0",  # see [pdf] extra: keep pillow off the 12.2.0 CVEs
     "anthropic>=0.25.0",
     "kubernetes>=29.0.0",

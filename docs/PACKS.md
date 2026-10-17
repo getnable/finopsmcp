@@ -9,7 +9,8 @@ It runs out of process, behind a broker in the core, and gets only the data,
 secrets and network hosts its manifest declares.
 
 This page covers signing, what data packs may and may not do to the guard,
-and the broker. `nable pack --help` covers the rest.
+commitment bounds, report templates, the broker, and the first-party packs.
+`nable pack --help` covers the rest.
 
 ## Signing
 
@@ -92,6 +93,18 @@ runs under a 50 ms timer (POSIX, main thread); a pattern that runs out of time
 counts as a match that asks, with a reason that names the rule. Where no
 timer is available (Windows) only the validation-time check applies.
 
+A guard rule may say `during: freeze`: it applies only while a change freeze
+in the org model covers what the call touches, and does nothing otherwise.
+The condition only narrows when a rule fires. A freeze nobody confirmed (a
+proposal, or a repo's `nable.org/` nobody trusted) caps the rule at ask, so a
+guess never stops a command outright; when the guard cannot tell whether a
+freeze is in force, the rule asks. The freeze a rule applied under is kept
+in the ledger with the verdict.
+
+A rule that matches at the verdict the guard already gave (an ask or a
+deny) adds its reason to it without changing the decision, so a pack can say
+which of its bounds a call would breach.
+
 **Price books** need `pricing = ["override"]` in `[capabilities]`, which is
 shown at install, diffed on update, and limited by
 `allowed_capabilities.pricing`. A price book informs the estimates nable
@@ -102,6 +115,67 @@ higher of the list price and the book rate (for a Terraform plan, the higher
 for what is added and the lower for what is removed). A book rate below list
 is shown beside the list figure the guard judges by. A book rate of 0 is a
 rate, not "no price".
+
+## Commitment bounds
+
+A policy file may hold `commitment_bounds` beside (or instead of) `rules`:
+
+```yaml
+version: 1
+commitment_bounds:
+  - id: default-bounds
+    description: At most 80% coverage, one year, no money up front.
+    coverage_target_pct: 80
+    max_term_months: 12
+    payment_options: [no-upfront]
+    blackouts:
+      - id: eu-graviton-move
+        start: "2027-01-01T00:00:00+00:00"
+        end: "2027-04-01T00:00:00+00:00"
+        reason: Moving eu-west-1 compute to Graviton
+        regions: [eu-west-1]
+```
+
+nable applies them as a post-filter to the commitment purchases it
+recommends itself (the Compute and Database Savings Plan advice and the "if
+you bought more" projection). Google Cloud Recommender and Azure Advisor
+purchase advice is shown as the provider gave it and is not bounded yet; the
+guard still asks before any purchase on those clouds. A purchase past the coverage target is cut to the
+amount that reaches it; one with a longer term, another payment option, or a
+term that would run into a blackout over its scope is dropped, with the
+bound named. Bounds only restrict: several packs' bounds combine to the
+strictest, a figure nable does not have never loosens one, and when an
+installed pack with policies cannot be loaded, purchase advice is withheld.
+
+## Report templates over nable's data
+
+```
+nable pack report <ns/name> [<report>] [--since 30d | --days N] [--until WHEN]
+                  [--set key=value] [--each PATH] [--json] [--out FILE]
+```
+
+renders an installed pack's report template. `<report>` is the template's
+path in the pack, its file name or its stem, and may be left out when the
+pack has only one. A placeholder under a source's name reads that source,
+and only when the pack declares the source's `read_data` scope; a template
+that reads a scope its pack did not declare is refused, and the source never
+runs. nable builds the values in its own process and the template stays text
+(`content.render`: dict lookups, nothing evaluated); a placeholder nothing
+fills stays as written. The sources (`finops/packs/reports.py`):
+
+| Placeholder | Reads | What it holds |
+|---|---|---|
+| `${ledger.guard.*}` | `ledger.guard` | change-management evidence from the guard ledger (`finops.change_evidence`); the org model's approval chains and change freezes in it (the logins and emails they name, who confirmed them) only when the pack also declares `org.approvals`, and otherwise a note that they are not shown |
+| `${ai.*}` | `focus.cost` | AI and LLM spend by vendor, model, feature tag and customer tag, and what the pack's own attribution policies flag |
+
+The window is `--since` (24h, 30d, 2w or a date) and `--until`, or `--days
+N`, which is the same as `--since Nd` (the AI source counts it in local
+calendar days up to today). With neither, the ledger is read from its first
+record and AI spend over the last 30 days. `--set` fills plain placeholders
+and can never stand in for a source; `--each` renders once per record of a
+list; `--json` exports the values the text was rendered from; `--out` writes
+the report (or the JSON) to a file and refuses the guard's own files (its
+ledger, the installed packs, the org model, the policy).
 
 ## Running code
 
@@ -120,20 +194,30 @@ call the broker:
    file swapped in the packs root after the check is not the file that runs);
    starts `python -I -B` running `finops.packs.host` in a new process group,
    in a throwaway HOME, with only `PATH`, `HOME`, `LANG` and the declared
-   secrets in its environment. No `FINOPS_*`, `NABLE_*` or cloud credentials
-   cross;
+   secrets and settings in its environment. No `FINOPS_*`, `NABLE_*` or cloud
+   credentials cross;
 3. speaks JSON-RPC 2.0 over stdin and stdout with a per-call timeout that
    holds even when the pack stops reading (writes to it are bound by the same
    deadline, and the process is killed when it passes), at most 64 of the
    pack's requests unanswered at once, and an output cap; stderr goes, truncated and with
-   secret values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
+   credential values redacted, to `<data dir>/packs/logs/<namespace>/<name>.log`;
 4. answers `data.read` only for declared `read_data` scopes (`focus.cost`,
-   `org.owners` and `org.environments` today; the other scopes say they are not
-   available yet);
+   `org.owners`, `org.environments`, and `repo.files` (only the files the
+   manifest's `repo_files` declares) from the repos an adapter call names,
+   today; the other scopes say they are not available
+   yet). `ledger.guard` and `recommendations` are not handed to code: nable
+   reads them in its own process, for report templates and commitment
+   bounds;
 5. checks what comes back: FOCUS rows against nable's schema (invalid rows are
    dropped and reported), org facts as proposals whose source starts with the
    pack id, sink deliveries against the declared `act` kinds and
-   `max_autonomy` (checked before the process starts).
+   `max_autonomy` (checked before the process starts). A proposal or a row
+   that carries the value of one of the pack's credentials in any field is
+   refused, and the problem names the credential, never its value (see
+   Secrets and settings). Text a pack returns can still hold control
+   characters; `nable pack run` and `nable org status`, `review`,
+   `questions` and `export` show them on the terminal as visible escapes
+   (`\x1b`, `‮`), and their `--json` output stays JSON-escaped.
 
 Code must live in the pack directory, where its signature covers it. An entry
 point that resolves to an installed Python distribution instead runs only for
@@ -143,21 +227,63 @@ a pack the org allowlists.
 hands a pack no cloud credentials. A connector that needs an API key declares
 it in `secrets`.
 
-### Secrets
+### Secrets and settings
 
-A pack's secrets come only from its own entries in nable's vault, stored under
-`pack:<namespace>/<name>:<NAME>`:
+A pack declares what it is configured with in two lists:
+
+```toml
+[capabilities]
+secrets  = ["GITHUB_TOKEN"]                 # credentials: tokens, keys, passwords
+settings = ["GITHUB_ORG", "GITHUB_API_URL"] # configuration: names, URLs
+```
+
+Both reach the pack the same way: as environment variables, from its own
+entries in nable's vault (stored under `pack:<namespace>/<name>:<NAME>`),
+read in the pack with `ctx.secret(NAME)` and `ctx.setting(NAME)`. They
+differ in what nable does with their values:
+
+- A **secret** is a credential. Its value is redacted from the pack's log,
+  from a sink's receipt, from every problem and error the broker reports,
+  from `nable pack run` and from the pack's reports. A proposal (subject,
+  value, source, any other field) or a FOCUS row that carries it is refused:
+  it is dropped, and the problem says `fact[3] dropped: it carries the value
+  of the credential GITHUB_TOKEN`, so a token never lands in `nable.org/`
+  YAML. This catches a pack that puts its token where it should not; a pack
+  that encodes the value first gets past it, which is one more reason code
+  runs only when signed by a trusted key.
+- A **setting** is not a credential. A pack may use its value in what it
+  proposes (org-bootstrap puts the GitHub organization in subjects and
+  sources). A settings name that reads as a credential (one with a `TOKEN`,
+  `KEY`, `PAT` or `PASS` word, as in `GITHUB_TOKEN` or `API_KEY_ID`, or
+  with `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `PRIVATE` or `APIKEY`
+  anywhere in it) and every cloud credential name are refused at
+  validation: declare it under `secrets`. So is a name in both lists.
+
+A manifest with only `secrets` works as before, and every name in it is a
+credential. Both lists are shown at install and in `nable pack audit`, and
+an update that adds a name to either one waits for a person to approve it
+(a name moved from `secrets` to `settings` would otherwise stop being
+redacted without anyone saying so). Under `packs.allowed_capabilities`, a
+ceiling with no `settings` list reads its `secrets` list for settings.
 
 ```
 nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
 echo "$VALUE" | nable pack secret set com.example/example-csv-connector EXAMPLE_COSTS_CSV
 nable pack secret remove com.example/example-csv-connector EXAMPLE_COSTS_CSV
+
+nable pack setting set io.github.getnable/org-bootstrap GITHUB_ORG acme
+nable pack setting remove io.github.getnable/org-bootstrap GITHUB_ORG
 ```
 
-The value is read from a prompt (not echoed) or from stdin, never from the
-command line. A declared secret is never read from nable's environment or its
-provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack the
-keys nable itself uses. Cloud credential names are refused at validation for
+A secret's value is read from a prompt (not echoed) or from stdin, never
+from the command line. A setting's may be given on the command line (or,
+left out, from stdin or a prompt); `nable pack setting set` refuses a name
+the installed pack declares as a secret, so a credential never goes through
+argv. Both commands write the same vault entry, so a value stored with
+`nable pack secret set` before a pack moved the name to `settings` keeps
+working. Neither is ever read from nable's environment or
+its provider keys, so declaring `AWS_SECRET_ACCESS_KEY` does not hand a pack
+the keys nable itself uses. Cloud credential names are refused at validation for
 every pack that is not first-party: `AWS_*`, `GOOGLE_*`, `CLOUDSDK_*`,
 `AZURE_*`, `ARM_*`, `KUBECONFIG`, and anything ending in `_SECRET_ACCESS_KEY`
 or `_SESSION_TOKEN`. Each either is a cloud credential or points a cloud SDK at
@@ -204,7 +330,81 @@ def propose(ctx, context):           # adapter: org facts, always proposals
 def deliver(ctx, payload):           # sink: a receipt dict
 ```
 
-`ctx.secret(name)` and `ctx.read_data(scope, query)` refuse anything the
-manifest does not declare. Print freely: stdout is not the protocol channel.
+An adapter's `context` holds `today`, `cwd` (the directory nable ran in; the
+pack runs in a throwaway directory of its own) and anything given with
+`nable pack run <pack> <adapter> --context key=value`.
+
+`ctx.secret(name)`, `ctx.setting(name)` and `ctx.read_data(scope, query)`
+refuse anything the manifest does not declare. Print freely: stdout is not the protocol channel.
 `sdk.Context.for_testing(...)` lets a pack's own tests call its entry points
 without the broker.
+
+## First-party packs
+
+nable's own packs live in `packs/` in this repository, in the
+`io.github.getnable` namespace. Each is an ordinary pack: it validates with
+`nable pack validate`, declares only what it uses, and declares `support =
+"first-party"`. Releases are signed with nable's first-party key, and a
+first-party claim is honoured only with that key's signature: the copies here
+are unsigned, and install refuses them until a release signs them. For the
+code pack (org-bootstrap) that signature is also what lets its code run; an
+org's own changed copy declares `support = "community"` and runs only when
+the org signs it or allowlists its digest.
+
+| Pack | What it does | Capabilities |
+|---|---|---|
+| `io.github.getnable/change-control` ("Change control (SOC 2)", `packs/change-control`) | Guard rules that ask about deploys and deny teardowns during a change freeze, and always deny admin merges, force pushes to protected branches and branch protection changes; freeze-window templates as proposed org facts; an adapter that proposes approval chains from CODEOWNERS and exported GitHub branch protection and environment settings; CC8.1 change-management evidence and change tickets from the guard ledger, as markdown and JSON. Evidence, not a certification. | `read_data = ["ledger.guard", "org.approvals"]`, `write_org = ["proposals"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no network, no secrets |
+| `io.github.getnable/commitments-bounds` ("Commitments with bounds", `packs/commitments-bounds`) | Commitment bounds (coverage target, longest term, payment options, migration blackouts) that cut nable's commitment advice to them; guard rules that ask before every commitment purchase on AWS, Google Cloud and Azure and name the bound it would breach. Never buys anything. | `read_data = ["recommendations"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
+| `io.github.getnable/ai-spend` ("AI spend", `packs/ai-spend`) | A policy that flags AI spend without `feature:` or `customer:` request tags; guard rules that make every GPU or accelerator launch ask (AWS p, g, trn, inf and dl families, GCP a2, a3, a4, g2 and TPU types, Azure N-series); the skill `check-ai-budget` for coding agents; a report of AI spend by vendor, model, feature and customer. | `read_data = ["focus.cost"]`, `guard = "tighten-only"`, `max_autonomy = "L1"`; no code, no network, no secrets |
+| `io.github.getnable/org-bootstrap` ("Org bootstrap", `packs/org-bootstrap`) | Two adapters for `nable org init`: `backstage` proposes service owners, repo path owners and teams from `catalog-info.yaml` files (no network) and, when configured, a Backstage catalog API; `github-teams` proposes teams, members and repo owners from GitHub. | `read_data = ["repo.files"]` with `repo_files = ["catalog-info.yaml", "catalog-info.yml"]`, `write_org = ["proposals"]`, `network = ["api.github.com"]`, optional secrets (`GITHUB_TOKEN`, `BACKSTAGE_TOKEN`) and settings (`GITHUB_ORG`, `GITHUB_API_URL`, `BACKSTAGE_URL`), `max_autonomy = "L1"` |
+
+Each pack's README says what it reads, its secrets, settings and network, and
+why.
+
+### The `repo.files` data scope
+
+An adapter that declares `read_data = ["repo.files"]` gets, in its context,
+each repo `nable org init` (or `nable pack run`) reads: a name, a label and
+the `repo_path` subject prefix, not where the repo is on this machine (every
+adapter's context does carry `cwd`, the directory nable ran in).
+
+The manifest names the files it reads, in `repo_files`, which `repo.files`
+requires (and which needs `repo.files`):
+
+```toml
+[capabilities]
+read_data  = ["repo.files"]
+repo_files = ["catalog-info.yaml", "catalog-info.yml", ".github/CODEOWNERS"]
+```
+
+Each entry is a plain file name, found anywhere in the repo
+(`catalog-info.yaml`), a path from the repo's root (`.github/CODEOWNERS`,
+`docs/CODEOWNERS`), or a simple glob of either with `*` and `?` (a `*`
+never crosses a `/`; `**`, `..`, absolute paths and other glob syntax are
+refused). They are shown at install and in `nable pack audit`, and an update
+that adds one waits for a person to approve it. Under
+`packs.allowed_capabilities`, `repo_files` is a list of globs like the
+other keys.
+
+The adapter asks nable for files by what it declared (`{"names":
+["catalog-info.yaml"]}`): an entry it declared, or a name or path with no
+glob that a declared entry covers. Anything else is refused. nable walks
+the repos itself, skips `.git`, `node_modules`, vendored and build trees and
+every symlink, and caps the count and size of what it hands over.
+
+Some files are never read, declared or not: Terraform state (`*.tfstate`,
+`*.tfstate.*`), private keys and key stores (`id_rsa*`, `id_dsa*`,
+`id_ecdsa*`, `id_ed25519*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
+`*.keystore`), dotenv files (`.env`, `.env.*`, `*.env`), credential files
+(`credentials`, `credentials.*`, `*.credentials`, `.netrc`,
+`.git-credentials`, `.npmrc`, `.pypirc`, `.htpasswd`) and kubeconfigs
+(`kubeconfig`, `*.kubeconfig`). Validation refuses a `repo_files` entry
+that could name one (so `*` is refused), and the broker skips them in its
+walk whatever the manifest says. The list is short on purpose and is no
+promise that nothing else in a repo is sensitive: `repo_files` is what
+limits a pack to the files it needs.
+
+A pack that reads files itself (change-control reads the CODEOWNERS file of
+the directory it is pointed at) does not go through this scope, and the
+laptop sandbox does not stop it (see below): that is part of what signing
+vouches for.

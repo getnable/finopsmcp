@@ -13,11 +13,27 @@ capability is one nobody can review, so it is one nobody can approve.
     read_data     nable data scopes (READ_DATA_SCOPES)
     read_cloud    provider:service:Action, read verbs only, no credential or
                   secret services (aws:ce:GetCostAndUsage, k8s:pods:list)
-    secrets       environment-variable names the core passes in from the
-                  pack's own vault namespace (`nable pack secret set`);
-                  nable's own (FINOPS_*, NABLE_*) are never grantable, and
-                  cloud credential names (AWS_*, GOOGLE_*, AZURE_CLIENT_SECRET,
-                  ...) only to a first-party pack (is_cloud_credential)
+    secrets       credentials (tokens, keys, passwords): environment-variable
+                  names the core passes in from the pack's own vault
+                  namespace (`nable pack secret set`). Their values are
+                  redacted from everything the pack returns and logs, and a
+                  proposal or a row that carries one is refused. nable's own
+                  (FINOPS_*, NABLE_*) are never grantable, and cloud
+                  credential names (AWS_*, GOOGLE_*, AZURE_CLIENT_SECRET, ...)
+                  only to a first-party pack (is_cloud_credential)
+    settings      non-secret configuration (an org name, an API URL), passed
+                  in the same way from the same vault namespace (`nable pack
+                  setting set`) but not treated as credentials: a pack may
+                  put a setting's value in what it proposes. A setting name
+                  that looks like a credential (*_TOKEN, *_KEY, *PASSWORD*,
+                  *SECRET*, ...) is refused, and so is a name declared as both
+    repo_files    the files a pack reads through the repo.files data scope:
+                  plain names (found anywhere in the repo), relative paths
+                  (.github/CODEOWNERS), or simple globs of either with * and
+                  ?. Required with repo.files and only with it. A name that
+                  is sensitive (state files, private keys, .env, credentials
+                  files: SENSITIVE_FILES) is refused even when declared, and
+                  the broker never hands one over
     network       host[:port] egress allowlist; empty means none
     write_org     "proposals" only: a pack may propose org facts, never confirm
     act           "pr" and "ticket"; "execute" is first-party only
@@ -47,9 +63,13 @@ READ_DATA_SCOPES: dict[str, str] = {
     "org.owners": "who owns which accounts, repositories and services",
     "org.environments": "which accounts and clusters are prod, staging or dev",
     "org.teams": "teams and their members",
+    "org.approvals": ("approval chains and change freezes from the org model, with the people "
+                      "they name (logins, emails) and who confirmed them"),
     "budgets": "budgets and month-to-date spend against them",
     "recommendations": "open savings recommendations",
     "ledger.guard": "the guard's decision ledger (redacted commands and verdicts)",
+    "repo.files": ("files it names (such as catalog-info.yaml) in the repositories `nable org "
+                   "init` reads, read on this machine by nable and handed to it as text"),
 }
 
 WRITE_ORG: dict[str, str] = {
@@ -126,14 +146,18 @@ _METADATA_HOSTS = frozenset({
     "metadata", "instance-data", "instance-data.ec2.internal",
 })
 
-LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "network", "write_org",
-                              "act", "pricing")
+LIST_KEYS: tuple[str, ...] = ("read_data", "read_cloud", "secrets", "settings", "repo_files",
+                              "network", "write_org", "act", "pricing")
 SCALAR_KEYS: tuple[str, ...] = ("guard", "max_autonomy")
 KEYS: tuple[str, ...] = LIST_KEYS + SCALAR_KEYS
 
 _SERVICE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,62}$")
 _ACTION = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,127}\*?$")
 _SECRET = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+# A setting's value is not redacted, so a name that reads as a credential is
+# refused as a setting: declare it under secrets. Plain words, on purpose.
+_CREDENTIAL_WORDS = re.compile(r"(?:^|_)(?:TOKEN|KEY|PAT|PASS)(?:$|_)|SECRET|PASSWORD|PASSWD|"
+                               r"CREDENTIAL|PRIVATE|APIKEY")
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -212,6 +236,96 @@ def check_secret(value: str, *, first_party: bool = False) -> str | None:
     return None
 
 
+# repo_files: what no pack reads from a repository, declared or not. Short on
+# purpose: file names that hold credentials or state whatever the repo is
+# (Terraform state, private keys, dotenv files, credential and token files).
+# Matched, lowercased, against a file's name; a declared glob that could
+# match one of SENSITIVE_EXAMPLES is refused too, so `*` is.
+SENSITIVE_FILES: tuple[str, ...] = (
+    "*.tfstate", "*.tfstate.*", ".env", ".env.*", "*.env", "id_rsa*", "id_dsa*", "id_ecdsa*",
+    "id_ed25519*", "*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "credentials",
+    "credentials.*", "*.credentials", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
+    "kubeconfig", "*.kubeconfig", ".htpasswd")
+SENSITIVE_EXAMPLES: tuple[str, ...] = (
+    "terraform.tfstate", "terraform.tfstate.backup", ".env", ".env.local", "prod.env", "id_rsa",
+    "id_ed25519", "server.pem", "server.key", "cert.p12", "credentials", "credentials.json",
+    ".netrc", ".git-credentials", ".npmrc", ".pypirc", "kubeconfig", ".htpasswd")
+MAX_REPO_FILES = 32
+_REPO_PART = re.compile(r"^[A-Za-z0-9._*?-]{1,128}$")
+
+
+def is_sensitive_file(name: str) -> bool:
+    """Whether a file name (the last part of a path) is one no pack reads."""
+    base = name.rsplit("/", 1)[-1].lower()
+    return any(fnmatch.fnmatchcase(base, pat) for pat in SENSITIVE_FILES)
+
+
+def repo_file_syntax(value: str) -> str | None:
+    """Why `value` is not a repo_files pattern, or None: a relative POSIX
+    path of plain parts, each letters, digits, `.`, `_`, `-` and the globs
+    `*` and `?`; no `..`, no `**`."""
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return "must be a file name, a relative path or a simple glob, 1 to 256 characters"
+    parts = value.split("/")
+    if value.startswith("/") or any(p in ("", ".", "..") for p in parts) \
+            or not all(_REPO_PART.match(p) for p in parts):
+        return ("must be a file name or a relative path inside the repo (catalog-info.yaml, "
+                ".github/CODEOWNERS), with only * and ? as globs and no .. or empty parts")
+    if any("**" in p for p in parts):
+        return "** is not a glob here: name the directory, or use a plain name for anywhere"
+    return None
+
+
+def check_repo_file(value: str) -> str | None:
+    """Why a repo_files entry is refused, or None: repo_file_syntax, and
+    never a name or a glob that could name a sensitive file."""
+    why = repo_file_syntax(value)
+    if why:
+        return why
+    last = value.split("/")[-1]
+    if is_sensitive_file(last) or any(fnmatch.fnmatchcase(x, last)
+                                      for x in SENSITIVE_EXAMPLES):
+        return (f"{value!r} could name a sensitive file (Terraform state, a private key, "
+                ".env, a credentials file), which no pack reads")
+    return None
+
+
+def repo_file_matches(pattern: str, path: str) -> bool:
+    """Whether a repo-relative POSIX `path` matches a repo_files pattern: a
+    pattern without a / matches the file's name anywhere; one with a /
+    matches the path part by part (a * never crosses a /)."""
+    if "/" not in pattern:
+        return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pattern)
+    pp, parts = pattern.split("/"), path.split("/")
+    return len(pp) == len(parts) and all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, pp))
+
+
+def repo_file_covered(request: str, declared: tuple[str, ...] | list[str]) -> bool:
+    """Whether a pack's request for `request` stays inside what it declared:
+    the request is a declared entry, or a name or path with no glob that a
+    declared entry matches."""
+    if request in declared:
+        return True
+    if any(c in request for c in "*?"):
+        return False
+    return any(("/" not in d or "/" in request) and repo_file_matches(d, request)
+               for d in declared)
+
+
+def check_setting(value: str, *, first_party: bool = False) -> str | None:
+    """Why a settings name is refused, or None. The same names as a secret,
+    minus any that reads as a credential and every cloud credential name."""
+    why = check_secret(value, first_party=first_party)
+    if why:
+        return why
+    if is_cloud_credential(value):
+        return f"{value} is a cloud credential (or points a cloud SDK at one), never a setting"
+    if _CREDENTIAL_WORDS.search(value):
+        return (f"{value} reads as a credential, and a setting's value is not redacted: "
+                "declare it under secrets")
+    return None
+
+
 def validate(raw: Any, *, first_party: bool) -> tuple[dict[str, Any], list[Problem]]:
     """Normalize `[capabilities]` and list what is wrong with it.
 
@@ -260,6 +374,22 @@ def validate(raw: Any, *, first_party: bool) -> tuple[dict[str, Any], list[Probl
                                     f"{a} is above {ceiling}, the ceiling for {who}"))
         else:
             out["max_autonomy"] = a
+    if "repo.files" in out.get("read_data", ()) and not out.get("repo_files"):
+        problems.append(Problem("capabilities.repo_files",
+                                "read_data lists repo.files, so repo_files must list the files it "
+                                "reads (names, relative paths or simple globs, e.g. "
+                                '["catalog-info.yaml", ".github/CODEOWNERS"])'))
+    elif out.get("repo_files") and "repo.files" not in out.get("read_data", ()):
+        problems.append(Problem("capabilities.repo_files",
+                                "lists files, but read_data does not list repo.files"))
+    if len(out.get("repo_files", ())) > MAX_REPO_FILES:
+        problems.append(Problem("capabilities.repo_files",
+                                f"lists more than {MAX_REPO_FILES} entries"))
+    both = set(out.get("secrets", ())) & set(out.get("settings", ()))
+    if both:
+        problems.append(Problem("capabilities.settings",
+                                f"{', '.join(sorted(both))} is declared both as a secret and as "
+                                "a setting; a credential is declared under secrets only"))
     if out.get("act") and _level(out.get("max_autonomy", "L0")) < _level(MIN_AUTONOMY_TO_ACT):
         problems.append(Problem("capabilities.max_autonomy",
                                 f"act lists {', '.join(out['act'])}, which is proposing "
@@ -276,8 +406,12 @@ def _check_value(key: str, v: str, *, first_party: bool) -> str | None:
         return check_read_cloud(v)
     if key == "secrets":
         return check_secret(v, first_party=first_party)
+    if key == "settings":
+        return check_setting(v, first_party=first_party)
     if key == "network":
         return check_network(v)
+    if key == "repo_files":
+        return check_repo_file(v)
     if key == "write_org":
         return None if v in WRITE_ORG else "the only value is \"proposals\""
     if key == "pricing":
@@ -300,10 +434,18 @@ def describe(key: str, value: str) -> str:
     if key == "network":
         return f"{value}: may connect to this host"
     if key == "secrets":
-        return (f"{value}: receives this secret from its own vault entry (`nable pack secret "
-                f"set <pack> {value}`), never from your environment or nable's own keys")
+        return (f"{value}: receives this credential from its own vault entry (`nable pack "
+                f"secret set <pack> {value}`), never from your environment or nable's own keys; "
+                "its value is redacted from everything the pack returns")
+    if key == "settings":
+        return (f"{value}: receives this setting, not a credential, from its own vault entry "
+                f"(`nable pack setting set <pack> {value} VALUE`); it may appear in what the "
+                "pack proposes")
     if key == "read_cloud":
         return f"{value}: may call this read-only cloud API"
+    if key == "repo_files":
+        return (f"{value}: may read files matching this from the repositories it is run for "
+                "(nable reads them and hands over the text)")
     if key == "max_autonomy":
         return f"{value}: the most autonomy any action it proposes can have"
     return value
@@ -346,10 +488,13 @@ def exceeds(caps: dict[str, Any], ceiling: dict[str, Any]) -> list[Problem]:
     The ceiling is strict: a key the ceiling does not list allows nothing.
     read_cloud and network entries in the ceiling may be glob patterns
     ("aws:ce:*", "*.corp.internal:443"); a pack value is covered when it
-    matches one. max_autonomy is a level; guard is a value."""
+    matches one. A ceiling with no `settings` reads its `secrets` for them: a
+    name an org allows as a credential it allows as a setting. max_autonomy
+    is a level; guard is a value."""
     problems: list[Problem] = []
     for k in LIST_KEYS:
-        allowed = [str(x) for x in (ceiling.get(k) or [])]
+        src = "secrets" if k == "settings" and "settings" not in ceiling else k
+        allowed = [str(x) for x in (ceiling.get(src) or [])]
         for v in caps.get(k, ()):
             if not any(fnmatch.fnmatchcase(v, pat) for pat in allowed):
                 problems.append(Problem(f"capabilities.{k}",

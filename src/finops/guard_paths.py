@@ -724,11 +724,30 @@ def match(path: str, cwd: str | None = None, *, entries: list[Protected] | None 
     return None
 
 
+def match_file(path: str, cwd: str | None = None) -> Protected | None:
+    """The protected entry a file nable itself is about to write is, or is
+    inside: `path` as open() reads it (`~` expanded, relative to `cwd`,
+    symlinks resolved, case folded where the disk folds it), with no shell
+    variables or globs read into it. None when it is none of them."""
+    if not isinstance(path, str) or not path or "\0" in path:
+        return None
+    p = os.path.join(os.path.expanduser(cwd or os.getcwd()), os.path.expanduser(path))
+    try:
+        real = _real(p)
+    except (OSError, ValueError):
+        return None
+    return _match_real(real, protected(cwd), False)
+
+
 def _match_one(path: str, cwd: str | None, env: Mapping[str, str] | None,
                entries: list[Protected], ancestors: bool) -> Protected | None:
     real = resolve(path, cwd, env=env)
     if real is None:
         return None
+    return _match_real(real, entries, ancestors)
+
+
+def _match_real(real: str, entries: list[Protected], ancestors: bool) -> Protected | None:
     for e in entries:
         if e.whole:
             if ancestors and _under(e.path, real) and os.path.lexists(e.path):

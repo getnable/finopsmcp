@@ -12,6 +12,7 @@ import json
 import re
 import signal
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,12 @@ MAX_MATCH_INPUT = 4096
 MATCH_BUDGET_S = 0.05
 GUARD_TARGETS = ("command", "mcp")
 GUARD_VERDICTS = ("ask", "deny")
+# When a rule applies at all. Absent: always. "freeze": only while an org
+# model change freeze (org facts of kind freeze) covers what the call touches.
+# A condition only narrows when a rule fires, so it can never loosen anything;
+# and a freeze nobody confirmed caps the rule at ask (a guess may restrict,
+# never stop a command outright).
+GUARD_DURING = ("freeze",)
 # Most permissive first. tighten() only ever moves right.
 VERDICT_ORDER = ("allow", "warn", "ask", "deny")
 
@@ -86,6 +93,7 @@ class GuardRule:
     reason: str
     price_hint: dict[str, Any] | None = None
     pack: str = ""
+    during: str | None = None
 
     def matches_command(self, command: str) -> bool:
         """True when the rule matches, or its pattern ran out of time."""
@@ -115,21 +123,24 @@ class GuardRule:
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "pack": self.pack, "target": self.target,
                 "pattern": self.pattern.pattern, "verdict": self.verdict,
-                "reason": self.reason, "price_hint": self.price_hint}
+                "reason": self.reason, "price_hint": self.price_hint, "during": self.during}
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GuardRule:
         """The inverse of to_dict, for a cache of rules content.py validated.
         Raises on anything that is not that shape, and on a verdict that could
         loosen: a cache cannot carry what a pack could not."""
-        if d["target"] not in GUARD_TARGETS or d["verdict"] not in GUARD_VERDICTS:
+        if d["target"] not in GUARD_TARGETS or d["verdict"] not in GUARD_VERDICTS \
+                or d.get("during") not in (None, *GUARD_DURING):
             raise ValueError(f"not a guard rule: {d.get('id')!r}")
         return cls(str(d["id"]), d["target"], re.compile(d["pattern"]), d["verdict"],
-                   str(d["reason"]), d.get("price_hint"), str(d.get("pack") or ""))
+                   str(d["reason"]), d.get("price_hint"), str(d.get("pack") or ""),
+                   d.get("during"))
 
 
 def tighten(verdict: str, rules: list[GuardRule], *, command: str | None = None,
-            tool: str | None = None, args: Any = None) -> dict[str, Any]:
+            tool: str | None = None, args: Any = None,
+            freeze: Callable[[], dict[str, Any] | None] | None = None) -> dict[str, Any]:
     """The verdict after pack guard rules, which is never looser than `verdict`.
 
     For the guard's later wiring: it passes its own verdict in and takes the
@@ -139,11 +150,33 @@ def tighten(verdict: str, rules: list[GuardRule], *, command: str | None = None,
 
     A rule whose pattern runs past MATCH_BUDGET_S counts as a match that asks,
     with a reason naming the rule: the guard cannot tell whether it matched,
-    so a person decides, and the pack's author learns which rule to fix."""
-    out = {"verdict": verdict, "rules": []}
+    so a person decides, and the pack's author learns which rule to fix.
+
+    A rule with `during: freeze` applies only while a change freeze covers the
+    call. `freeze` is called, at most once and only when such a rule matches,
+    and returns the freeze in force ({"sure", "words", "key", ...}, as
+    guard_org.freeze does) or None. With None the rule does not apply. A
+    freeze that is not sure (a proposal, or a repo's nobody trusted) caps the
+    rule at ask. When `freeze` is missing or raises, nobody can tell whether a
+    freeze is in force, so the rule asks: never an allow, never a deny."""
+    out: dict[str, Any] = {"verdict": verdict, "rules": []}
     if verdict not in VERDICT_ORDER:
         return out
     best = VERDICT_ORDER.index(verdict)
+    memo: list[tuple[dict[str, Any] | None, bool]] = []
+
+    def freeze_state() -> tuple[dict[str, Any] | None, bool]:
+        """(the freeze in force or None, whether that could be told)."""
+        if not memo:
+            try:
+                if freeze is None:
+                    raise LookupError("no freeze lookup was given")
+                got = freeze()
+                memo.append((got if isinstance(got, dict) else None, True))
+            except Exception:  # noqa: BLE001 - not knowing asks; it never allows
+                memo.append((None, False))
+        return memo[0]
+
     for r in rules:
         hit: bool | None = False
         if command is not None:
@@ -152,6 +185,20 @@ def tighten(verdict: str, rules: list[GuardRule], *, command: str | None = None,
             hit = r.match_tool(tool, args)
         if hit is False:
             continue
+        fz: dict[str, Any] | None = None
+        if r.during == "freeze":
+            fz, known = freeze_state()
+            if not known:
+                out["rules"].append({
+                    "id": r.id, "pack": r.pack, "verdict": "ask", "during": r.during,
+                    "reason": (f"{r.reason.rstrip(' .')} (rule {r.id} applies during a change "
+                               "freeze, and the guard could not tell whether one is in force, "
+                               "so it asks)"),
+                    "price_hint": None})
+                best = max(best, VERDICT_ORDER.index("ask"))
+                continue
+            if fz is None:
+                continue
         if hit is None:
             out["rules"].append({
                 "id": r.id, "pack": r.pack, "verdict": "ask", "timed_out": True,
@@ -162,8 +209,17 @@ def tighten(verdict: str, rules: list[GuardRule], *, command: str | None = None,
                 "price_hint": None})
             best = max(best, VERDICT_ORDER.index("ask"))
             continue
-        out["rules"].append({"id": r.id, "pack": r.pack, "verdict": r.verdict,
-                             "reason": r.reason, "price_hint": r.price_hint})
-        best = max(best, VERDICT_ORDER.index(r.verdict))
+        give, said = r.verdict, r.reason
+        entry: dict[str, Any] = {"id": r.id, "pack": r.pack}
+        if fz is not None:
+            if give == "deny" and not fz.get("sure"):
+                give = "ask"             # a guess may restrict, never stop outright
+            said = f"{r.reason.rstrip()} {fz.get('words') or 'A change freeze is in force.'}"
+            entry["during"] = r.during
+            entry["freeze"] = {k: fz[k] for k in ("key", "subject", "reason", "end", "mode",
+                                                  "sure") if k in fz}
+        entry.update(verdict=give, reason=said, price_hint=r.price_hint)
+        out["rules"].append(entry)
+        best = max(best, VERDICT_ORDER.index(give))
     out["verdict"] = VERDICT_ORDER[best]
     return out

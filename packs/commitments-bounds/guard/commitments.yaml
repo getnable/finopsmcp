@@ -1,0 +1,33 @@
+# Any commitment purchase an agent tries asks a person, and the reason names
+# the bound it would breach (policies/bounds.yaml: coverage at most 80% of
+# eligible spend, a term of at most 12 months, no money up front, no term
+# running into a migration blackout). nable's guard already asks about the
+# AWS purchases as one-way doors; these rules add the bounds to that ask and
+# reach the Google Cloud and Azure purchases too. nable never buys a
+# commitment itself. Keep the figures here in step with bounds.yaml.
+version: 1
+rules:
+  - id: commitment-term-over-bound
+    pattern: '\bgcloud\s+(?:beta\s+|alpha\s+)?compute\s+commitments\s+create\b[^;&|\n]*--plan[=\s]+(?:36-month|thirty[-_]six[-_]month)\b|\baz\s+reservations\s+reservation-order\s+purchase\b[^;&|\n]*--term[=\s]+P[2-9]Y\b'
+    verdict: ask
+    reason: >-
+      This commitment's term is longer than the bound max_term_months (at
+      most 12 months). A person decides whether to go past it; nable never
+      buys commitments.
+  - id: commitment-payment-over-bound
+    pattern: '\baws\s+savingsplans\s+create-savings-plan\b[^;&|\n]*--upfront-payment-amount\b|\baz\s+reservations\s+reservation-order\s+purchase\b[^;&|\n]*--billing-plan[=\s]+Upfront\b'
+    verdict: ask
+    reason: >-
+      This commitment pays money up front, outside the bound payment_options
+      (no-upfront only). A person decides whether to go past it; nable never
+      buys commitments.
+  - id: commitment-purchase-check-bounds
+    pattern: '\baws\s+(?:savingsplans\s+create-savings-plan|\S+\s+purchase-(?:reserved|host-reservation)\S*)\b|\bgcloud\s+(?:beta\s+|alpha\s+)?compute\s+commitments\s+create\b|\baz\s+reservations\s+reservation-order\s+purchase\b'
+    verdict: ask
+    reason: >-
+      A commitment purchase must stay within the commitment bounds: coverage
+      at most 80% of eligible spend (coverage_target_pct), a term of at most
+      12 months (max_term_months), no money up front (payment_options), and
+      no term running into a migration blackout. The guard cannot see
+      coverage or an offering's term from the command, so a person checks
+      them; nable never buys commitments.

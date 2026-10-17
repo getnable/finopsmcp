@@ -1,0 +1,23 @@
+{
+  "total_count": 2,
+  "environments": [
+    {
+      "name": "production",
+      "protection_rules": [
+        {"type": "wait_timer", "wait_timer": 10},
+        {"type": "required_reviewers", "reviewers": [
+          {"type": "Team", "reviewer": {"slug": "release-managers", "name": "Release managers"}},
+          {"type": "User", "reviewer": {"login": "maria"}}
+        ]}
+      ]
+    },
+    {
+      "name": "preview-42",
+      "protection_rules": [
+        {"type": "required_reviewers", "reviewers": [
+          {"type": "User", "reviewer": {"login": "dana"}}
+        ]}
+      ]
+    }
+  ]
+}

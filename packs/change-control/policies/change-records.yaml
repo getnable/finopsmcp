@@ -1,0 +1,101 @@
+# Rules over change records: what the CC8.1 evidence report lists as
+# exceptions for a person to review. A change record is one guard verdict
+# the report read from the ledger (finops.change_evidence):
+#   {id, ledger_line, chain_ok, ts, harness, command, action_type, door,
+#    decision, outcome (approved | allowed_out_of_band | declined | unknown |
+#    denied | not_examined), approved, approved_by, approved_at, approved_via,
+#    approved_out_of_band, under_freeze, freeze {key, mode, sure, end},
+#    policy {policy_version, rule, pack_rules}, approval_chain_named, error}
+# Effects only flag or escalate: an exception is a question for a reviewer,
+# never a verdict about the change.
+version: 1
+rules:
+  - id: approved-during-freeze
+    description: A change a person approved while a change freeze covered it.
+    applies_to: action
+    match:
+      all:
+        - {field: under_freeze, op: eq, value: true}
+        - {field: approved, op: eq, value: true}
+    effect:
+      action: escalate
+      severity: high
+      message: >-
+        Approved during change freeze ${freeze.key} (${freeze.mode} mode): the
+        change record should say why it could not wait until ${freeze.end}.
+  - id: approver-not-named
+    description: An ask approved at the agent's prompt, where the harness does not record who.
+    applies_to: action
+    match:
+      all:
+        - {field: outcome, op: eq, value: approved}
+        - {field: approved_by, op: eq, value: null}
+    effect:
+      action: flag
+      severity: medium
+      message: >-
+        Approved at the ${harness} prompt at ${approved_at}; the harness does
+        not record who answered. Name the approver in the change ticket.
+  - id: approved-out-of-band
+    description: A call a person approved once from their own terminal.
+    applies_to: action
+    match:
+      all:
+        - {field: approved_out_of_band, op: eq, value: true}
+    effect:
+      action: flag
+      severity: low
+      message: >-
+        Approved out of band by ${approved_by} at ${approved_at}; check that
+        it was the person the approval chain names.
+  - id: answer-unknown
+    description: An ask whose answer the ledger cannot tell.
+    applies_to: action
+    match:
+      all:
+        - {field: outcome, op: eq, value: unknown}
+    effect:
+      action: flag
+      severity: medium
+      message: >-
+        Nobody can tell from the ledger whether this ask was approved (the
+        harness's post hook did not report it). Confirm it from the change
+        ticket or the deploy log.
+  - id: not-examined
+    description: A guard error let a call through unexamined.
+    applies_to: action
+    match:
+      all:
+        - {field: outcome, op: eq, value: not_examined}
+    effect:
+      action: escalate
+      severity: high
+      message: >-
+        A guard error let this call through without a verdict (${error}):
+        review what it changed.
+  - id: no-approval-chain
+    description: An ask no confirmed approval chain covers.
+    applies_to: action
+    match:
+      all:
+        - {field: decision, op: eq, value: ask}
+        - {field: approval_chain_named, op: eq, value: false}
+    effect:
+      action: flag
+      severity: low
+      message: >-
+        No confirmed approval chain in the org model names who reviews
+        ${action_type} changes in this scope (`nable org review` lists the
+        proposed ones).
+  - id: record-off-the-chain
+    description: A record whose hash does not chain to the one before it.
+    applies_to: action
+    match:
+      all:
+        - {field: chain_ok, op: eq, value: false}
+    effect:
+      action: escalate
+      severity: critical
+      message: >-
+        Ledger line ${ledger_line} does not chain to the line before it: a
+        record was edited, removed or reordered, so this one is not evidence.

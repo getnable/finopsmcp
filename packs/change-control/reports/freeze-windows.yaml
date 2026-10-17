@@ -1,0 +1,62 @@
+# nable org model v1
+# Freeze-window templates from ${pack}. Every window is a proposal: it lands
+# in the org model as proposed, a proposed freeze only ever makes the guard
+# ask, and a person confirms the ones the org keeps (`nable org review`, then
+# `nable org confirm KEY`). Render with the year, the following year and your
+# UTC offset, then add the entries you want to nable.org/freezes.yaml:
+#
+#   nable pack report ${pack} freeze-windows \
+#     --set year=2026 --set next_year=2027 --set offset=-05:00
+#
+# Move the dates to your own calendar before confirming. The peak-season
+# window asks for deny mode, which holds only once a person confirms it.
+- fact: freeze
+  subject: {kind: org, id: org}
+  value:
+    start: "${year}-12-19T00:00:00${offset}"
+    end: "${next_year}-01-05T00:00:00${offset}"
+    reason: Year-end change freeze (template); changes wait for the new year
+    mode: ask
+  source: pack:${pack}:freeze-windows:year-end
+  confidence: 0.5
+  status: proposed
+- fact: freeze
+  subject: {kind: org, id: org}
+  value:
+    start: "${year}-03-27T00:00:00${offset}"
+    end: "${year}-04-03T00:00:00${offset}"
+    reason: First quarter close (template); finance systems stay stable
+    mode: ask
+  source: pack:${pack}:freeze-windows:q1-close
+  confidence: 0.5
+  status: proposed
+- fact: freeze
+  subject: {kind: org, id: org}
+  value:
+    start: "${year}-06-26T00:00:00${offset}"
+    end: "${year}-07-03T00:00:00${offset}"
+    reason: Second quarter close (template); finance systems stay stable
+    mode: ask
+  source: pack:${pack}:freeze-windows:q2-close
+  confidence: 0.5
+  status: proposed
+- fact: freeze
+  subject: {kind: org, id: org}
+  value:
+    start: "${year}-09-25T00:00:00${offset}"
+    end: "${year}-10-02T00:00:00${offset}"
+    reason: Third quarter close (template); finance systems stay stable
+    mode: ask
+  source: pack:${pack}:freeze-windows:q3-close
+  confidence: 0.5
+  status: proposed
+- fact: freeze
+  subject: {kind: environment, id: prod}
+  value:
+    start: "${year}-11-20T00:00:00${offset}"
+    end: "${year}-12-02T00:00:00${offset}"
+    reason: Peak-season production freeze (template); move it to your own peak
+    mode: deny
+  source: pack:${pack}:freeze-windows:peak-season
+  confidence: 0.5
+  status: proposed

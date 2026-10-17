@@ -1,0 +1,55 @@
+# Rules that apply only during a change freeze (`during: freeze`): while a
+# freeze in the org model covers what a command touches, deploys ask and
+# destroys are denied. Outside a freeze they do nothing. A freeze nobody has
+# confirmed (a proposal, or a repo's nable.org/ nobody trusted) only ever
+# asks, even for the deny rule. The guard adds the freeze's own sentence
+# (scope, reason, end) to each reason below.
+#
+# nable's guard already asks about a priced change or a one-way door during
+# a freeze. These rules reach the changes it does not price: a Kubernetes
+# rollout, a Helm upgrade, an IaC apply, a merge to a release branch.
+version: 1
+rules:
+  - id: kubernetes-change-during-freeze
+    during: freeze
+    pattern: '\b(?:kubectl|oc)\b[^;&|\n]*\s(?:apply|create|replace|patch|scale|edit|set\s+(?:image|env|resources)|rollout\s+(?:restart|undo))\b'
+    verdict: ask
+    reason: >-
+      A Kubernetes change during a change freeze needs a person's yes, and the
+      change record should say why it could not wait.
+  - id: helm-change-during-freeze
+    during: freeze
+    pattern: '\bhelm\b[^;&|\n]*\s(?:install|upgrade|rollback)\b'
+    verdict: ask
+    reason: >-
+      A Helm release change during a change freeze needs a person's yes, and
+      the change record should say why it could not wait.
+  - id: iac-apply-during-freeze
+    during: freeze
+    pattern: '\b(?:terraform|tofu|terragrunt)\b[^;&|\n]*\s(?:apply|import|taint|untaint)\b|\bpulumi\s+(?:up|update|import)\b|\bcdk\s+deploy\b|\bsam\s+deploy\b|\b(?:serverless|sls)\s+deploy\b|\baws\s+cloudformation\s+(?:deploy|create-stack|update-stack|execute-change-set|create-stack-set|update-stack-set)\b|\baz\s+deployment\s+(?:group|sub|mg|tenant)\s+create\b|\bgcloud\s+(?:run\s+deploy|app\s+deploy|deployment-manager\s+deployments\s+(?:create|update))\b'
+    verdict: ask
+    reason: >-
+      An infrastructure apply during a change freeze needs a person's yes, and
+      the change record should say why it could not wait.
+  - id: destroy-during-freeze
+    during: freeze
+    pattern: '\b(?:terraform|tofu|terragrunt)\b[^;&|\n]*\s(?:destroy\b|apply\b[^;&|\n]*\s-destroy\b)|\bpulumi\s+destroy\b|\bcdk\s+destroy\b|\bhelm\b[^;&|\n]*\s(?:uninstall|delete)\b|\bkubectl\b[^;&|\n]*\sdelete\s+(?:ns|namespace|namespaces)\b|\baws\s+cloudformation\s+delete-stack\b'
+    verdict: deny
+    reason: >-
+      Tearing infrastructure down waits until the change freeze ends. A person
+      can end the freeze early, or run it themselves with a change record.
+  - id: merge-during-freeze
+    during: freeze
+    pattern: '\bgh\s+pr\s+merge\b|\bgit\b[^;&|\n]*\spush\b[^;&|\n]*[\s:+](?:refs/heads/)?(?:main|master|production|release/[\w.-]+)(?:[\s;&|)]|$)'
+    verdict: ask
+    reason: >-
+      Merging or pushing to a release branch during a change freeze ships a
+      change; it needs a person's yes.
+  - id: merge-during-freeze-mcp
+    during: freeze
+    target: mcp
+    pattern: '^mcp__[\w-]*github[\w-]*__merge_pull_request\b'
+    verdict: ask
+    reason: >-
+      Merging a pull request during a change freeze ships a change; it needs a
+      person's yes.

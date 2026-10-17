@@ -2,6 +2,74 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.11.0
+
+- **First-party packs.** Four packs in `packs/`, in the `io.github.getnable`
+  namespace, each declaring `support = "first-party"`: releases are signed
+  with nable's first-party key, and install refuses an unsigned copy.
+  - `packs/change-control` (Change control, SOC 2): guard rules that ask
+    about deploys and deny teardowns during a change freeze, and always deny
+    admin merges, force pushes to protected branches and branch protection
+    changes; freeze-window templates; approval chains proposed from
+    CODEOWNERS and exported GitHub settings; CC8.1 change-management
+    evidence and change tickets from the guard ledger, as markdown and JSON.
+  - `packs/commitments-bounds` (Commitments with bounds): a coverage target,
+    a longest term, payment options and migration blackouts that cut
+    commitment advice to them, and guard rules that ask before every
+    commitment purchase and name the bound it would breach.
+  - `packs/ai-spend` (AI spend): a policy that flags AI spend without
+    feature or customer tags, guard rules that make every GPU or accelerator
+    launch ask on AWS, Google Cloud and Azure, a `check-ai-budget` skill, and
+    a report of AI spend by vendor, model, feature and customer.
+  - `packs/org-bootstrap` (Org bootstrap): two `nable org init` adapters
+    that propose owners and teams from Backstage `catalog-info.yaml` files
+    (and, when configured, the catalog API) and from GitHub teams. The
+    week-one questions name the pack and the reader that proposed a fact.
+- **Pack SDK.** Guard rules may apply `during: freeze` only. A pack rule at
+  the guard's own verdict adds its reason to it. Policy files may declare
+  `commitment_bounds`. `nable pack report <ns/name> [<report>]` renders a
+  pack's report template over the data scopes it declares (`ledger.guard`
+  evidence, `ai` spend from `focus.cost`), with `--since`/`--until` or
+  `--days N`, `--set`, `--each`, `--json` and `--out`; a template that reads
+  an undeclared scope is refused. The `repo.files` data scope hands an
+  adapter files it names from the repos it is run for. Adapters get context:
+  `cwd`, and `nable pack run --context key=value` for their inputs.
+- **Pack credentials and settings.** `[capabilities].secrets` now means
+  credentials: besides the pack's log, their values are kept out of
+  everything it returns. A proposal or a FOCUS row that carries one in any
+  field is refused (the problem names the credential, never the value), and
+  sink receipts, problems, `nable pack run` output and pack reports have
+  them redacted, so a pack can no longer write its token into `nable.org/`
+  YAML. The new `settings` list declares configuration that is not a
+  credential (an org name, an API URL), passed the same way and set with
+  `nable pack setting set <ns/name> NAME VALUE`; its values may appear in
+  proposals. A setting name that reads as a credential is refused. Both are
+  shown at install and in audit, and an added name in either waits for
+  approval again. A manifest with only `secrets` works as before.
+  `org-bootstrap` declares `GITHUB_TOKEN` and `BACKSTAGE_TOKEN` as secrets
+  and `GITHUB_ORG`, `GITHUB_API_URL` and `BACKSTAGE_URL` as settings (set
+  `GITHUB_ORG` with `nable pack setting set`; a value stored earlier with
+  `nable pack secret set` keeps working).
+- **`repo.files` reads only what a pack declares.** A pack that declares the
+  `repo.files` data scope now names the files it reads in
+  `[capabilities].repo_files` (plain names, repo-relative paths such as
+  `.github/CODEOWNERS`, or simple `*` and `?` globs), shown at install and in
+  audit and diffed on update; the broker refuses a request for anything
+  else. Terraform state, private keys, `.env` files, credential files and
+  kubeconfigs are never read, declared or not, and a `repo_files` entry
+  that could name one is refused at validation. `org-bootstrap` declares
+  `catalog-info.yaml` and `catalog-info.yml`.
+- **`nable org` output cannot drive the terminal.** `nable org status`,
+  `review`, `questions` and `export` (and the confirm, reject and init
+  output that lists facts) print control and invisible format characters in
+  a fact's subject, value, source or reason as visible escapes, as `nable
+  pack` already did. `--json` output was already escaped and is unchanged.
+- **The `org.approvals` data scope.** The `ledger.guard` evidence in a pack
+  report carries the org model's approval chains and change freezes (the
+  logins and emails they name, and who confirmed them) only when the pack
+  also declares `org.approvals`; otherwise those tables say they are not
+  shown. `change-control` declares it.
+
 ## 0.10.0
 
 Decisions become policy: nable stops asking the same thing twice.
