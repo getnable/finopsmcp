@@ -63,7 +63,7 @@ def test_doctor_names_a_misspelled_setting_and_what_is_in_effect(tmp_path):
     r = nable(tmp_path, "doctor", "--json",
               env={"FINOPS_AIRGAPP": "1", "FINOPS_DATA_DIR": str(data),
                    "FINOPS_ENABLE_SCHEDULER": "1",
-                   "FINOPS_SMTP_PASSWORD": "not-a-real-password-7c1e"})
+                   "FINOPS_SMTP_PASSWORD": "not-a-real-password-7c1e"})  # pragma: allowlist secret
     env = _env_check(r)
     assert {"name": "FINOPS_AIRGAPP", "did_you_mean": "FINOPS_AIRGAP", "note": None} in env["unknown"]
     hosted = next(u for u in env["unknown"] if u["name"] == "FINOPS_ENABLE_SCHEDULER")

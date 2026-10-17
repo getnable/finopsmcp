@@ -21,7 +21,7 @@ from finops import config
 @pytest.fixture
 def airgapped(monkeypatch):
     monkeypatch.setattr(config, "AIRGAP", True)
-    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T0/B0/x")
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T0/B0/x")  # pragma: allowlist secret
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-not-a-real-token")
     monkeypatch.setenv("TEAMS_WEBHOOK_URL", "https://example.webhook.office.com/x")
     for k, v in (("FINOPS_SMTP_HOST", "smtp.example.com"), ("FINOPS_SMTP_USER", "u"),
