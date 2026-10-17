@@ -263,3 +263,20 @@ def test_upgrade_help_says_what_it_repins(tmp_path):
                    "nable guard install", "Codex CLI", "Gemini CLI", "Cline",
                    "finops-mcp==", "left as it is"):
         assert needle in text, needle
+
+
+def test_under_airgap_upgrade_does_not_ask_pypi(machine, monkeypatch, capsys):
+    """FINOPS_AIRGAP turns off every version check nable makes on its own;
+    `nable upgrade` with no version still asked PyPI for the latest release.
+    Under air-gap it asks nothing and says to name the version, which pip and
+    uvx then fetch from the index the machine is configured for."""
+    import finops.config as config
+
+    monkeypatch.setattr(config, "AIRGAP", True)
+
+    def _no_pypi():
+        raise AssertionError("asked PyPI under FINOPS_AIRGAP")
+    monkeypatch.setattr(sw, "_latest_pypi_version", _no_pypi)
+    assert sw._run_upgrade("") == 1
+    err = capsys.readouterr().err
+    assert "FINOPS_AIRGAP" in err and "upgrade <version>" in err

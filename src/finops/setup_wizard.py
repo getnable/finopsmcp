@@ -5565,6 +5565,16 @@ def _run_upgrade(target: str = "") -> int:
 
     explicit = bool(target)
     if not target:
+        from .config import is_airgap
+        if is_airgap():
+            # Asking PyPI for its latest release is the version check air-gap
+            # turns off. A named version is fetched by pip and uvx from the
+            # index this machine is configured for (PIP_INDEX_URL, UV_INDEX_URL).
+            _err("FINOPS_AIRGAP is set, so nable does not ask PyPI for the latest release.")
+            print(f"  You are on {current}. Name the version to install from your own",
+                  file=sys.stderr)
+            print("  package index:  nable upgrade <version>", file=sys.stderr)
+            return 1
         target = _latest_pypi_version() or ""
         if not target:
             _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
