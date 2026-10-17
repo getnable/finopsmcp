@@ -240,3 +240,31 @@ def test_intelligent_tiering_advice_does_not_opt_into_the_archive_tier():
     assert "put-bucket-intelligent-tiering-configuration" not in f["detail"]
     assert "lifecycle" in f["detail"].lower()
     assert f["one_time_transition_cost"] == 0.01
+
+
+def test_a_bucket_whose_metrics_were_denied_is_recorded_not_skipped():
+    """Each bucket's storage metrics are read in its own region. On a
+    two-region fixture account with cloudwatch:GetMetricStatistics denied in
+    eu-west-1, the 1 TB eu-west-1 bucket (a $9.75/mo tiering finding when
+    read) was left out of the scan with no partial-failure record, so the scan
+    reported the S3 check as fully run. A metric read that fails is now
+    recorded the way the NAT, EC2 and load balancer checks record theirs."""
+    from botocore.exceptions import ClientError
+
+    class _Denied:
+        def get_metric_statistics(self, **kw):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}},
+                              "GetMetricStatistics")
+
+    class _TwoRegions:
+        def list_buckets(self):
+            return {"Buckets": [{"Name": "hot-bucket", "BucketRegion": "us-east-1"},
+                                {"Name": "eu-archive", "BucketRegion": "eu-west-1"}]}
+
+    us = _s3_cw([5.0] * 30)
+    out = waste.check_s3_storage_class(
+        _TwoRegions(), us, "us-east-1",
+        cw_client_for_region=lambda r: us if r == "us-east-1" else _Denied())
+    assert [f["resource_id"] for f in out] == ["hot-bucket"]
+    assert [(p["error_code"], p["count"], p["unit"]) for p in out.partial_failures] == [
+        ("AccessDenied", 1, "buckets")], out.partial_failures

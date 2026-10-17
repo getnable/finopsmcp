@@ -931,7 +931,12 @@ def check_s3_storage_class(
     INTELLIGENT-TIERING: $0.023/GB-mo (frequent) / $0.0125/GB-mo (infrequent)
                          + $0.0025/1000 objects/mo monitoring
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
+    # Bucket -> error code for a metric read that failed. Such a bucket is
+    # skipped, never called low-access, and recorded as unread: it was skipped
+    # in silence, so a CloudWatch denial in one bucket region left the check
+    # reporting itself fully run.
+    unread: dict[str, str] = {}
 
     try:
         resp = s3_client.list_buckets()
@@ -966,7 +971,12 @@ def check_s3_storage_class(
         for name in names:
             by_region.setdefault(bucket_regions[name], []).append(
                 MetricQuery(name, "AWS/S3", metric, (("BucketName", name), dim), stat, 86400))
-        return fetch_metric_values_by_region(_cw_for, by_region, start, now)
+        failed: dict = {}
+        out = fetch_metric_values_by_region(_cw_for, by_region, start, now,
+                                            failures=failed)
+        for name, code in failed.items():
+            unread.setdefault(name, code)
+        return out
 
     # Three rounds, each only for the buckets the last one kept: the same reads
     # the per-bucket loop made, so the free path spends no more requests.
@@ -1110,6 +1120,8 @@ def check_s3_storage_class(
             "avg_object_kb": round(avg_object_kb, 1),
         })
 
+    _note_unread(findings, unread, "buckets",
+                 "S3 storage and request metrics (BucketSizeBytes, GetRequests, NumberOfObjects)")
     return findings
 
 
