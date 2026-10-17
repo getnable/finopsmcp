@@ -270,7 +270,7 @@ def test_under_airgap_upgrade_does_not_ask_pypi(machine, monkeypatch, capsys):
     `nable upgrade` with no version still asked PyPI for the latest release.
     Under air-gap it asks nothing and says to name the version, which pip and
     uvx then fetch from the index the machine is configured for."""
-    import finops.config as config
+    from finops import config
 
     monkeypatch.setattr(config, "AIRGAP", True)
 

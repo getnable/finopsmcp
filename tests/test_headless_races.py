@@ -109,7 +109,7 @@ def test_a_new_database_is_never_open_to_other_users(tmp_path, monkeypatch):
     of eight concurrent `nable doctor --json` runs exited 1."""
     import stat
 
-    import finops.storage.db as db
+    from finops.storage import db
 
     path = tmp_path / "finops.db"
     monkeypatch.setenv("FINOPS_DB_PATH", str(path))

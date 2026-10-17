@@ -259,7 +259,7 @@ def test_air_gap_pushes_the_brief_nowhere(monkeypatch):
     """FINOPS_AIRGAP promises provider traffic only, and send_report_now
     already skips Slack, Teams and email under it. `nable brief --deliver`
     went around that and posted the brief's cost figures anyway."""
-    import finops.config as config
+    from finops import config
 
     monkeypatch.setattr(config, "AIRGAP", True)
     got = []

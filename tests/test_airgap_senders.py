@@ -15,7 +15,7 @@ import smtplib
 import httpx
 import pytest
 
-import finops.config as config
+from finops import config
 
 
 @pytest.fixture
