@@ -2362,9 +2362,17 @@ def get_nable_roi(
         # report, get_savings_summary and the ledger read the same figures. Summed
         # raw, two fixes on one instance and a row written twice by an older
         # release both counted in full here.
-        from ..recommendations.savings_tracker import headline_totals, row_dict
+        from ..recommendations.savings_tracker import (
+            headline_totals,
+            recoverable_block,
+            row_dict,
+        )
         totals = headline_totals([row_dict(r) for r in rows])
         found_total = totals["found"]
+        # Found, split as the scan and the sweep split a total: what was
+        # measured (recoverable) and what rests on an inference (to confirm).
+        found_split = recoverable_block(totals["found_recoverable"], totals["found_to_confirm"],
+                                        totals["found_to_confirm_count"])
         acted_total = totals["acted_pending"]
         # Verified = changes confirmed against live cloud state, priced on the best
         # basis available: the bill itself (CUR before and after), else the
@@ -2418,7 +2426,11 @@ def get_nable_roi(
             f"(${monthly_cost:,.0f}/mo · {plan_name(plan)} plan)",
             "",
             "### Savings pipeline",
-            f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
+            (f"- Found (predicted): ${found_total:,.0f}/mo in opportunities "
+             f"({len(rows)} recommendations): "
+             f"${found_split['monthly_usd']:,.0f}/mo recoverable, "
+             f"${found_split['to_confirm_monthly_usd']:,.0f}/mo to confirm "
+             f"({found_split['to_confirm_findings']} resting on an inference)"),
             f"- Acted on (predicted, pending verification): ${acted_total:,.0f}/mo",
             f"- Verified (change confirmed): ${verified_total:,.0f}/mo, of which "
             f"${verified_bill:,.0f}/mo measured on the bill",
@@ -2502,6 +2514,7 @@ def get_nable_roi(
             "plan": plan,
             "monthly_cost_usd": monthly_cost,
             "found_monthly_usd": round(found_total, 2),
+            "recoverable": found_split,
             "acted_monthly_usd": round(acted_total, 2),
             "verified_monthly_usd": round(verified_total, 2),
             # Banked: money measured leaving the bill, and only that. A change

@@ -9,6 +9,17 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _waste_evidence(finding: dict) -> str:
+    """"measured" or "inferred", as analyzers.waste_evidence classes the
+    finding's waste type (and a finding whose metric could not be read is an
+    inference whatever its type)."""
+    from ..analyzers.waste_evidence import INFERRED, spec_for
+
+    if finding.get("metrics_unavailable"):
+        return "inferred"
+    return "inferred" if spec_for(finding.get("waste_type", "")).evidence == INFERRED else "measured"
+
+
 async def _price_on_customer_rates(findings: list[dict], resource_type: str) -> dict:
     """Re-price list-price findings on the customer's measured rate, and say so.
 
@@ -172,6 +183,10 @@ async def get_rightsizing_recommendations(
                         },
                         description=rec.title,
                         estimated_monthly_savings_usd=rec.monthly_savings,
+                        # Compute Optimizer measured it (waste_evidence MEASURED);
+                        # the CPU-only fallback is an inference.
+                        evidence=("measured" if rec.source == "compute_optimizer"
+                                  else "inferred"),
                     )
         except Exception:
             pass  # never block the main response
@@ -544,6 +559,7 @@ async def get_rds_rightsizing_recommendations(
                         description=(f.get("detail", "") or "")[:500],
                         estimated_monthly_savings_usd=f["estimated_monthly_savings"],
                         region=f.get("region", "") or "",
+                        evidence=_waste_evidence(f),
                     )
         except Exception as exc:
             _srv.log.debug("RDS rec tracking skipped: %s", exc)
@@ -964,6 +980,7 @@ async def list_idle_resources(
         # Persist for savings tracking
         try:
             from ..recommendations.savings_tracker import record_recommendation
+            from ..recommendations.sweep import _idle_is_inferred
             for r in resources:
                 if r.monthly_cost_usd > 0:
                     record_recommendation(
@@ -978,6 +995,9 @@ async def list_idle_resources(
                         recommended_config={"action": "delete_or_release"},
                         description=r.reason,
                         estimated_monthly_savings_usd=r.monthly_cost_usd,
+                        # The class the deep audit gives the same claim (an old
+                        # snapshot is an inference, an unattached volume measured).
+                        evidence="inferred" if _idle_is_inferred(r.resource_type) else "measured",
                     )
         except Exception:
             pass

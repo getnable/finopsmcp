@@ -456,6 +456,9 @@ async def scan_graviton_migration_opportunities(
                         },
                         description=f"Migrate {r['instance_type']} to Graviton {r['graviton_equivalent']}",
                         estimated_monthly_savings_usd=r["savings_estimate"],
+                        # The Graviton scanner files every move as an inference
+                        # (arm64 support is not checked).
+                        evidence="inferred",
                     )
         except Exception:
             pass  # never block the main response

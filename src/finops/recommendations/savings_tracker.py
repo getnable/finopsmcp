@@ -166,10 +166,15 @@ def record_recommendation(
     account_id: str = "",
     region: str = "",
     environment: str | None = None,
+    evidence: str | None = None,
 ) -> int | None:
     """
     Persist a recommendation. Returns the row ID, or None if it already exists.
     Existing open/acted_on records are NOT overwritten — we only insert new ones.
+
+    evidence is what its scanner filed it on, "measured" or "inferred", for the
+    recoverable / to-confirm split (headline_totals). An existing row takes it
+    too, so rows written before it was recorded pick it up on the next scan.
     """
     key = _dedup(source, resource_id, recommended_config)
     engine = get_engine()
@@ -181,6 +186,10 @@ def record_recommendation(
         ).first()
 
         if existing:
+            if evidence is not None:
+                conn.execute(update(savings_recommendations)
+                             .where(savings_recommendations.c.id == existing.id)
+                             .values(evidence=evidence))
             # The fix was applied (or measured) and the detector is flagging the
             # same resource again: it came undone. This is the drift case, and it
             # is the one thing a point-in-time scanner cannot tell you. Every other
@@ -247,6 +256,7 @@ def record_recommendation(
                 generated_at=datetime.now(timezone.utc),
                 dedup_key=key,
                 environment_bucket=_bucket(resource_type, environment),
+                evidence=evidence,
             )
         )
         return result.inserted_primary_key[0]
@@ -373,6 +383,64 @@ def _best_per_resource(rows: list[dict], value) -> tuple[list[dict], float]:
 
 _FOUND_STATUSES = ("open", "acted_on", "verified")
 
+# Sources whose scanner always files its finding as an inference (an
+# envelope.Finding with INFERRED evidence), for rows written before the
+# ledger recorded evidence; and the idle types the deep audit classes as one.
+_LEGACY_INFERRED_SOURCES = frozenset({"graviton", "spot", "nonprod", "commitment"})
+_LEGACY_INFERRED_IDLE_TYPES = frozenset({"snapshot"})
+
+
+def _inferred(row: dict) -> bool:
+    """Whether a ledger row rests on an inference ("to confirm"). Recorded
+    evidence decides; a row with none is classified by its source, and
+    anything else counts as measured, as an unclassified finding does in
+    `nable scan`."""
+    evidence = row.get("evidence")
+    if evidence in ("measured", "inferred"):
+        return evidence == "inferred"
+    if row.get("source") in _LEGACY_INFERRED_SOURCES:
+        return True
+    return row.get("source") == "idle" and row.get("resource_type") in _LEGACY_INFERRED_IDLE_TYPES
+
+
+def _recoverable_split(rows: list[dict]) -> tuple[float, float, int]:
+    """(recoverable, to confirm, how many to confirm), one fix per resource.
+
+    The rule the sweep uses (collapse_per_resource): a resource counts its
+    largest measured saving as recoverable, and its largest inferred saving
+    only for what it claims beyond that. A row with no resource id is its own
+    claim. recoverable + to confirm is the best-per-resource figure."""
+    by_resource: dict[tuple, tuple[float, float]] = {}
+    recoverable = to_confirm = 0.0
+    n = 0
+    for r in rows:
+        rid = str(r.get("resource_id") or "").strip()
+        usd = _est(r)
+        if not rid:
+            if _inferred(r):
+                to_confirm += usd
+                n += 1 if usd > 0 else 0
+            else:
+                recoverable += usd
+            continue
+        key = (r.get("provider") or "", rid)
+        m, i = by_resource.get(key, (0.0, 0.0))
+        by_resource[key] = (m, max(i, usd)) if _inferred(r) else (max(m, usd), i)
+    for m, i in by_resource.values():
+        recoverable += m
+        extra = max(0.0, i - m)
+        to_confirm += extra
+        n += 1 if extra > 0 else 0
+    return recoverable, to_confirm, n
+
+
+def recoverable_block(recoverable: float, to_confirm: float, n: int) -> dict[str, Any]:
+    """The scan's keys for the split (cli_scan: recoverable.monthly_usd,
+    to_confirm_monthly_usd, to_confirm_findings)."""
+    return {"monthly_usd": round(recoverable, 2),
+            "to_confirm_monthly_usd": round(to_confirm, 2),
+            "to_confirm_findings": n}
+
 
 def headline_totals(rows: list[dict]) -> dict[str, float]:
     """The ledger's money figures, the one way every surface computes them.
@@ -400,12 +468,25 @@ def headline_totals(rows: list[dict]) -> dict[str, float]:
     def _pick(statuses, value):
         return _best_per_resource([r for r in deduped if r.get("status") in statuses], value)
 
+    def _split(statuses):
+        return _recoverable_split([r for r in deduped if r.get("status") in statuses])
+
     open_rows, open_folded = _pick(("open",), _est)
     verified_rows, verified_folded = _pick(("verified",), _ver)
     verified = sum(_ver(r) for r in verified_rows)
     bill = sum(_ver(r) for r in verified_rows if r.get("verified_basis") == "bill_measured")
+    pot_rec, pot_conf, pot_n = _split(("open",))
+    found_rec, found_conf, found_n = _split(_FOUND_STATUSES)
     return {
         "potential": sum(_est(r) for r in open_rows),
+        # potential and found, split as the scan and the sweep split them:
+        # recoverable plus to confirm, which add up to the figure itself.
+        "potential_recoverable": pot_rec,
+        "potential_to_confirm": pot_conf,
+        "potential_to_confirm_count": pot_n,
+        "found_recoverable": found_rec,
+        "found_to_confirm": found_conf,
+        "found_to_confirm_count": found_n,
         "potential_overlap_excluded": open_folded,
         "found": sum(_est(r) for r in _pick(_FOUND_STATUSES, _est)[0]),
         "acted_pending": sum(_est(r) for r in _pick(("acted_on",), _est)[0]),
@@ -427,6 +508,8 @@ def row_dict(r: Any) -> dict:
         "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
         "verified_monthly_savings_usd": r.verified_monthly_savings_usd,
         "verified_basis": getattr(r, "verified_basis", None),
+        "evidence": getattr(r, "evidence", None),
+        "resource_type": getattr(r, "resource_type", None),
     }
 
 
@@ -455,7 +538,7 @@ def get_summary() -> dict[str, Any]:
             select(
                 sr.c.status, sr.c.source, sr.c.provider, sr.c.resource_id, sr.c.description,
                 sr.c.estimated_monthly_savings_usd, sr.c.verified_monthly_savings_usd,
-                sr.c.verified_basis,
+                sr.c.verified_basis, sr.c.evidence, sr.c.resource_type,
             )
         ).fetchall()
 
@@ -490,6 +573,11 @@ def get_summary() -> dict[str, Any]:
     verified = totals["verified"]
     return {
         "potential_monthly_usd": round(totals["potential"], 2),
+        # The same figure split as the scan splits it: measured savings
+        # (recoverable) and what rests on an inference (to confirm).
+        "recoverable": recoverable_block(totals["potential_recoverable"],
+                                         totals["potential_to_confirm"],
+                                         totals["potential_to_confirm_count"]),
         # Alternatives on a resource that already counts once above.
         "overlap_excluded_monthly_usd": round(totals["potential_overlap_excluded"], 2),
         "acted_on_monthly_usd": round(totals["acted_pending"], 2),   # estimated, not yet verified

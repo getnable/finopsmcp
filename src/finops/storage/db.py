@@ -442,6 +442,10 @@ savings_recommendations = Table(
     # Learning loop: coarse env/workload bucket so the signal can roll up per
     # (source, bucket), e.g. spot is fine for nonprod-batch but not prod-steady.
     Column("environment_bucket", String(64), nullable=True),
+    # The evidence its scanner filed it on: "measured" or "inferred" (the
+    # scan's recoverable / to-confirm split). NULL on rows written before it
+    # was recorded; savings_tracker classifies those by source.
+    Column("evidence", String(16), nullable=True),
 )
 
 # ── Learned cost context — the operating model nable remembers ────────────────
@@ -891,6 +895,8 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         # inferred from a re-opened row.
         ("savings_recommendations", "regressed_at"),
         ("savings_recommendations", "regression_count"),
+        # Recoverable vs to-confirm in the ledger totals: the evidence class.
+        ("savings_recommendations", "evidence"),
         # Dashboards: a saved card now belongs to one. Nullable on purpose, so
         # cards pinned before dashboards existed keep working and stay on the
         # overview instead of vanishing into a dashboard nobody created.
