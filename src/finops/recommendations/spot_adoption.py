@@ -2,13 +2,16 @@
 Spot Instance Adoption Recommender.
 
 Identifies on-demand EC2 instances that are good candidates for spot
-migration. Spot instances save 60-80% for eligible workloads like
-batch jobs, dev/staging environments, and stateless services in ASGs.
+migration: batch jobs, dev/staging environments, and stateless services in
+ASGs.
 
 Uses CloudWatch CPU variance (14 days) as a staleness signal, instance
 tags to detect environment, and ASG membership to assess interruption
-tolerance. Spot Advisor interruption frequencies are hardcoded from
-public AWS data.
+tolerance. Savings and interruption bands are a dated snapshot of the public
+Spot Instance Advisor data for us-east-1 Linux, used only for us-east-1
+instances of the types it covers. Anywhere else the interruption band is
+unknown and the saving is the median of the figures held, and each row says
+which (savings_basis, savings_basis_note).
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
-from ..aws_prices import EC2_HOURLY
+from ..aws_prices import EC2_HOURLY, ec2_hourly_in_region
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
@@ -35,20 +38,51 @@ _LOOKBACK_DAYS  = 14
 # Shared with every other module that prices an EC2 instance; see aws_prices.
 _HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
-# Spot discount relative to on-demand (fraction saved). Source: AWS Spot pricing.
+# AWS Spot Instance Advisor public data (the file behind its console,
+# spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json, object
+# Last-Modified 2026-03-20), us-east-1, Linux. Savings are its "s" figure, the
+# saving over on-demand. The interruption band is its "r" range: the share of
+# capacity Spot reclaimed over the trailing month, published as a band, not a
+# point. These tables used to hold point values the source does not support:
+# m5.large at 72% saving and 2% interruption, where it reads 59% and >20%.
+# The bands differ by region more than by type (c5.large is <5% in eu-west-1
+# and >20% in us-east-2), so they are read for us-east-1 instances only.
+SPOT_ADVISOR_REGION = "us-east-1"
+SPOT_ADVISOR_AS_OF = "2026-03-20"
+
 SPOT_DISCOUNT: dict[str, float] = {
-    "m5.large":   0.72,  "m5.xlarge":  0.71,  "m5.2xlarge": 0.70,
-    "m6i.large":  0.68,  "m6i.xlarge": 0.69,
-    "c5.large":   0.75,  "c5.xlarge":  0.74,
-    "r5.large":   0.65,  "r5.xlarge":  0.64,
-    "_default":   0.65,
+    "m5.large":   0.59,  "m5.xlarge":  0.68,  "m5.2xlarge": 0.64,
+    "m6i.large":  0.61,  "m6i.xlarge": 0.59,
+    "c5.large":   0.61,  "c5.xlarge":  0.58,
+    "r5.large":   0.62,  "r5.xlarge":  0.70,
+}
+# For every type and region the snapshot does not cover: the median of the
+# Spot Advisor savings above, computed from them, so it moves when they do.
+# It was an assumed 0.65, above seven of the nine figures. Rows priced on it
+# say savings_basis "spot_advisor_median" and whose figures it is.
+SPOT_DISCOUNT["_default"] = statistics.median(SPOT_DISCOUNT.values())
+
+SPOT_INTERRUPTION_BAND: dict[str, str] = {
+    "m5.large":   ">20%",   "m5.xlarge":  ">20%",   "m5.2xlarge": ">20%",
+    "m6i.large":  ">20%",   "m6i.xlarge": ">20%",
+    "c5.large":   "10-15%", "c5.xlarge":  "10-15%",
+    "r5.large":   ">20%",   "r5.xlarge":  ">20%",
 }
 
-# Interruption frequency per hour (fraction). Source: AWS Spot Advisor public data.
+# The lower edge of each Spot Advisor band, the figure the thresholds below
+# compare, so a band classifies exactly as its range does.
+_BAND_FLOOR: dict[str, float] = {
+    "<5%": 0.0, "5-10%": 0.05, "10-15%": 0.10, "15-20%": 0.15, ">20%": 0.20,
+}
+
+# Interruption frequency (fraction) per type: the lower edge of its band in
+# SPOT_INTERRUPTION_BAND (tests hold the two together). The default is not a
+# measurement; it keeps an unknown rate at POSSIBLE at best.
 SPOT_INTERRUPTION_FREQ: dict[str, float] = {
-    "m5.large":   0.02,  "m5.xlarge":  0.03,
-    "m6i.large":  0.01,  "m6i.xlarge": 0.02,
-    "c5.large":   0.05,  "c5.xlarge":  0.04,
+    "m5.large":   0.20,  "m5.xlarge":  0.20,  "m5.2xlarge": 0.20,
+    "m6i.large":  0.20,  "m6i.xlarge": 0.20,
+    "c5.large":   0.10,  "c5.xlarge":  0.10,
+    "r5.large":   0.20,  "r5.xlarge":  0.20,
     "_default":   0.10,
 }
 
@@ -60,16 +94,56 @@ _THRESHOLD_possible    = 0.15   # <15% -> POSSIBLE, else NOT_RECOMMENDED
 _HIGH_VARIANCE_STDDEV = 25.0
 
 
-def _get_interruption_freq(instance_type: str) -> float:
-    return SPOT_INTERRUPTION_FREQ.get(instance_type, SPOT_INTERRUPTION_FREQ["_default"])
+def _from_advisor(instance_type: str, region: str | None) -> bool:
+    """Whether the Spot Advisor snapshot speaks for this instance. A region of
+    None (a caller that does not know it) keeps the old type-only lookup."""
+    return instance_type in SPOT_INTERRUPTION_BAND and region in (None, SPOT_ADVISOR_REGION)
 
 
-def _get_spot_discount(instance_type: str) -> float:
-    return SPOT_DISCOUNT.get(instance_type, SPOT_DISCOUNT["_default"])
+def _get_interruption_freq(instance_type: str, region: str | None = None) -> float:
+    if _from_advisor(instance_type, region):
+        return SPOT_INTERRUPTION_FREQ[instance_type]
+    return SPOT_INTERRUPTION_FREQ["_default"]
 
 
-def _monthly_ondemand_cost(instance_type: str) -> float:
-    return round(_HOURLY_PRICE.get(instance_type, 0.0) * _HOURS_PER_MONTH, 2)
+def _get_interruption_band(instance_type: str, region: str | None = None) -> str:
+    if _from_advisor(instance_type, region):
+        return SPOT_INTERRUPTION_BAND[instance_type]
+    return "unknown"
+
+
+def spot_saving(instance_type: str, region: str | None = None) -> tuple[float, str]:
+    """(the fraction saved on Spot, which Spot Advisor figure it is).
+
+    The type's own figure where the snapshot covers its region; otherwise the
+    median of the figures held, and the basis says they are us-east-1's and
+    what is missing."""
+    if _from_advisor(instance_type, region):
+        return SPOT_DISCOUNT[instance_type], (
+            f"Spot Advisor {SPOT_ADVISOR_REGION} figure for {instance_type} "
+            f"({SPOT_ADVISOR_AS_OF})")
+    held = len(SPOT_DISCOUNT) - 1
+    missing = (f"no {region} figure is held" if region and region != SPOT_ADVISOR_REGION
+               else f"no {instance_type} figure is held")
+    return SPOT_DISCOUNT["_default"], (
+        f"median of the {held} Spot Advisor {SPOT_ADVISOR_REGION} figures held "
+        f"({SPOT_ADVISOR_AS_OF}); {missing}")
+
+
+def _get_spot_discount(instance_type: str, region: str | None = None) -> float:
+    return spot_saving(instance_type, region)[0]
+
+
+def _monthly_ondemand_cost(instance_type: str, region: str | None = None) -> float:
+    return _ondemand_in_region(instance_type, region)[0]
+
+
+def _ondemand_in_region(instance_type: str, region: str | None) -> tuple[float, str]:
+    """(monthly on-demand cost, its basis): the region's EC2 floor where nable
+    holds one (aws_prices.ec2_hourly_in_region), the us-east-1 list rate and
+    a word on why everywhere else."""
+    hourly, basis = ec2_hourly_in_region(_HOURLY_PRICE.get(instance_type, 0.0), region)
+    return round(hourly * _HOURS_PER_MONTH, 2), basis
 
 
 def _get_cpu_variance(cw_client: Any, instance_id: str, days: int) -> float:
@@ -259,10 +333,11 @@ def _analyze_region(
 
         in_asg       = iid in asg_members
         is_stateless = _is_stateless(inst)
-        freq         = _get_interruption_freq(itype)
-        discount     = _get_spot_discount(itype)
+        freq         = _get_interruption_freq(itype, region)
+        band         = _get_interruption_band(itype, region)
+        discount, discount_basis = spot_saving(itype, region)
 
-        ondemand_cost = _monthly_ondemand_cost(itype)
+        ondemand_cost, ondemand_basis = _ondemand_in_region(itype, region)
         spot_cost     = round(ondemand_cost * (1.0 - discount), 2)
         savings       = round(ondemand_cost - spot_cost, 2)
         savings_pct   = round(discount * 100, 1)
@@ -277,11 +352,18 @@ def _analyze_region(
             "environment":           env,
             "in_asg":                in_asg,
             "interruption_freq_pct": round(freq * 100, 1),
+            # The Spot Advisor band the figure above is the floor of, or
+            # "unknown" when the snapshot does not cover this type and region.
+            "interruption_band":     band,
             "recommendation":        recommendation,
             "monthly_ondemand_cost": ondemand_cost,
+            "ondemand_basis":        ondemand_basis,
             "monthly_spot_estimate": spot_cost,
             "monthly_savings":       savings,
             "savings_pct":           savings_pct,
+            "savings_basis":         ("spot_advisor" if _from_advisor(itype, region)
+                                      else "spot_advisor_median"),
+            "savings_basis_note":    discount_basis,
             "cpu_variance_stddev":   round(cpu_var, 1),
         })
     return results
@@ -330,8 +412,8 @@ def recommend_spot_adoption(
 
     # Regions are independent; scan them concurrently (blocking boto3 I/O
     # releases the GIL) instead of paying the sum of every region's latency.
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
+    from ..aws_read_failures import ScopedThreadPool
+    with ScopedThreadPool(max_workers=min(8, max(1, len(regions)))) as pool:
         for region_results in pool.map(_one_region, regions):
             all_results.extend(region_results)
 
@@ -368,16 +450,23 @@ def recommend_spot_adoption(
             why_unsure=(
                 "Whether spot is safe here depends on how the workload tolerates "
                 "interruption, which I infer from tags and ASG membership, not from "
-                "observed behavior. The discount and interruption frequency are public "
-                "AWS averages, and real spot prices vary by AZ and capacity pool, so I "
-                "cannot put a precise saving on it until spot is actually running."
+                "observed behavior. The discount and interruption band come from a "
+                f"{SPOT_ADVISOR_AS_OF} Spot Instance Advisor snapshot for us-east-1 where "
+                "it covers the type; elsewhere the band is unknown and the discount is the "
+                "median of that snapshot's figures. Real spot prices "
+                "vary by AZ and capacity pool, so I cannot put a precise saving on it until "
+                "spot is actually running."
             ),
             assumptions=[
                 "The workload tolerates a 2-minute interruption notice and can be "
                 "rescheduled by its ASG.",
                 "Env tags correctly indicate a stateless or non-prod instance.",
-                f"Spot discount of about {top['savings_pct']:.0f}% holds (public average; "
-                "actual price moves with capacity).",
+                f"Spot discount of about {top['savings_pct']:.0f}% holds ("
+                + ("Spot Advisor us-east-1 figure" if top.get("savings_basis") == "spot_advisor"
+                   else top.get("savings_basis_note") or "the median of the Spot Advisor figures held")
+                + "; actual price moves with capacity).",
+                f"On-demand cost is the {top['ondemand_basis']}; a Reserved Instance or "
+                "Savings Plan already covering the instance makes the real saving smaller.",
             ] + ([
                 f"{len(unread)} on-demand instance(s) were not assessed: their CloudWatch "
                 "CPU read failed, so they are not in this list or its total."

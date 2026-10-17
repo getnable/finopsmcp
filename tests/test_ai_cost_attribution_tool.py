@@ -130,6 +130,17 @@ def test_gateway_and_biller_together_do_not_add_up(monkeypatch):
     assert "count the same call twice" in out["note"]
 
 
+def test_two_observers_together_do_not_add_up(monkeypatch):
+    """LiteLLM ships a Langfuse callback: one proxied call is logged by both.
+    With no biller read, their totals used to be added: $10 of calls read $20."""
+    _stub(monkeypatch,
+          litellm=_read("api", ("ada@example.com", 10.0)),
+          langfuse=_read("api", ("ada@example.com", 10.0)))
+    out = attr.get_ai_cost_attribution("user", start_date=D0, end_date=D1)
+    assert out["total_usd"] is None
+    assert "count the same call twice" in out["note"]
+
+
 def test_overlapping_tags_do_not_add_up(monkeypatch):
     _stub(monkeypatch, langfuse=_read("api", ("a", 4.0), ("b", 4.0), total=4.0,
                                       groups_overlap=True))

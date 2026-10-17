@@ -22,13 +22,115 @@ two literals in two files. Detecting it needs a place where they cannot be two.
 Prices that more than one module needs belong here.
 
 Rates are us-east-1 on-demand list, the basis every estimate in nable is quoted
-on. Regional variation is real but small for these fixed hourly charges, and a
-per-region table would be a false precision on top of an estimate the customer
-is told is an estimate.
+on, and every figure built from them says so. That label matters because the
+regional spread is not small. In the AWS Price List (AmazonEC2 offer, version
+20261012193925, read 2026-10-13) m5.large is $0.096/hr in us-east-1 and
+us-west-2, $0.107 in eu-west-1 (11% more) and $0.12 in ap-southeast-1 (25%
+more); p3.2xlarge is $4.234 in ap-southeast-1, 38% over us-east-1; a NAT
+gateway hour is $0.059 there against $0.045. A us-east-1 figure is therefore a
+floor for most other regions, never a quote for them.
+
+PRICE_SOURCES below names the offer file, version and filter each table was
+read from, and the date it was read. tests/test_price_sources.py fails on a
+priced constant here that has no entry, and on an entry without a date.
 """
 from __future__ import annotations
 
 import math
+
+# The date every AWS row below was last compared with the public Price List
+# (https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/index.json).
+AS_OF = "2026-10-13"
+
+_EC2_OFFER = "AWS Price List, AmazonEC2 us-east-1 offer, version 20261012193925"
+_RDS_OFFER = "AWS Price List, AmazonRDS us-east-1 offer, version 20261006224050"
+
+# Where each priced constant came from. "source" is the offer file and the
+# filter or SKU; "as_of" is the day it was compared with that file. A value
+# that is a billing rule rather than a Price List row says where the rule is
+# written down instead.
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "ALB_HOURLY": {"source": "AWS Price List, AWSELB us-east-1 offer, version "
+                             "20260911124544, SKU 37CUWUT8GSNQEPUV (LoadBalancerUsage)",
+                   "as_of": AS_OF},
+    "NLB_HOURLY": {"source": "AWSELB us-east-1 offer 20260911124544, SKU YKBGGP5EBGDU9T5W",
+                   "as_of": AS_OF},
+    "CLB_HOURLY": {"source": "AWSELB us-east-1 offer 20260911124544, SKU 6XT9C7FFNQ3T39YK",
+                   "as_of": AS_OF},
+    "GWLB_HOURLY": {"source": "AWSELB us-east-1 offer 20260911124544, SKU 4XCKHVEY2F7FVHE3",
+                    "as_of": AS_OF},
+    "NAT_GATEWAY_HOURLY": {"source": f"{_EC2_OFFER}, SKU M2YSHUBETB3JX4M4 (NatGateway-Hours)",
+                           "as_of": AS_OF},
+    "NAT_GATEWAY_PER_GB": {"source": f"{_EC2_OFFER}, SKU 59S5R83GFPUAGVR5 (NatGateway-Bytes)",
+                           "as_of": AS_OF},
+    "COST_EXPLORER_PER_REQUEST": {"source": "AWS Price List, AWSCostExplorer us-east-1 offer, "
+                                            "version 20260911124538, SKU BX68HKNBJP73AFBV "
+                                            "(USE1-APIRequest)", "as_of": AS_OF},
+    "ATHENA_PER_TB_SCANNED": {"source": "AWS Price List, AmazonAthena us-east-1 offer, version "
+                                        "20260911124408, SKU B6WHE3FUNCDQVVX4 "
+                                        "(USE1-DataScannedInTB)", "as_of": AS_OF},
+    "ATHENA_MIN_BYTES_BILLED": {"source": "the same Athena SKU's description: a minimum 10MB "
+                                          "for each successful or cancelled query",
+                                "as_of": AS_OF},
+    "S3_LIST_PER_1000": {"source": "AWS Price List, AmazonS3 us-east-1 offer, version "
+                                   "20261012231102, SKU E9YHNFENF4XQBZR6 (Requests-Tier1)",
+                         "as_of": AS_OF},
+    "S3_GET_PER_1000": {"source": "AmazonS3 us-east-1 offer 20261012231102, SKU "
+                                  "ZWQ6Q48CRJXX4FXE (Requests-Tier2)", "as_of": AS_OF},
+    "CLOUDWATCH_PER_1000_METRICS": {"source": "AWS Price List, AmazonCloudWatch us-east-1 "
+                                              "offer, version 20261007115540, SKU "
+                                              "ST83NCNZMVRKWEVJ (CW:GMD-Metrics)",
+                                    "as_of": AS_OF},
+    "CLOUDWATCH_FREE_REQUESTS_PER_MONTH": {"source": "AmazonCloudWatch us-east-1 offer "
+                                                     "20261007115540, SKU VE63M6QDRWUAS2VN "
+                                                     "(Global-CW:Requests, 0 to 1,000,000 free)",
+                                           "as_of": AS_OF},
+    "S3_EGRESS_PER_GB": {"source": "AWS Price List, AWSDataTransfer us-east-1 offer, version "
+                                   "20260916132208, SKU HQEH3ZWJVT46JHRG (DataTransfer-Out-"
+                                   "Bytes, first 10 TB)", "as_of": AS_OF},
+    "PUBLIC_IPV4_HOURLY": {"source": "AWS Price List, AmazonVPC us-east-1 offer, version "
+                                     "20260917190528, SKUs 4GQUNXTFWVSGPUZK (InUseAddress) and "
+                                     "T6YDQKTMVWKNJFJ8 (IdleAddress)", "as_of": AS_OF},
+    "EBS_PER_GB_MONTH": {"source": f"{_EC2_OFFER}, Product Family Storage, "
+                                   "EBS:VolumeUsage.* (gp2 HY3BZPP2B6K8MSJF, gp3 "
+                                   "JG3KUJMBRGHV3N8G, io1 JR4AM7VS63CTEPMN, io2 "
+                                   "6V576P37PS7K7KYU, st1 YQT3C842QHBG6XCU, sc1 "
+                                   "6U5VMCFHHMTH3QW6, standard 269VXUCZZ7E6JNXT)",
+                         "as_of": AS_OF},
+    "EBS_SNAPSHOT_PER_GB_MONTH": {"source": f"{_EC2_OFFER}, SKU 7U7TWP44UP36AT3R "
+                                            "(EBS:SnapshotUsage)", "as_of": AS_OF},
+    "EBS_GP3_FREE_IOPS": {"source": "not in the Price List: the gp3 baseline in the EBS "
+                                    "volume-types documentation, not re-read in this audit",
+                          "as_of": AS_OF, "verified": "no"},
+    "EBS_GP3_PER_IOPS_MONTH": {"source": f"{_EC2_OFFER}, SKU 7Q58NR58VQEASA4W "
+                                         "(EBS:VolumeP-IOPS.gp3)", "as_of": AS_OF},
+    "EBS_GP3_FREE_MIBPS": {"source": "not in the Price List: the gp3 baseline in the EBS "
+                                     "volume-types documentation, not re-read in this audit",
+                           "as_of": AS_OF, "verified": "no"},
+    "EBS_GP3_PER_MIBPS_MONTH": {"source": f"{_EC2_OFFER}, SKU SQUFRQX4K92S4SBB "
+                                          "(EBS:VolumeP-Throughput.gp3, $40.96 per GiBps-mo)",
+                                "as_of": AS_OF},
+    "EBS_IO1_PER_IOPS_MONTH": {"source": f"{_EC2_OFFER}, SKU D8RDVC722HKNR55G "
+                                         "(EBS:VolumeP-IOPS.piops)", "as_of": AS_OF},
+    "EBS_IO2_IOPS_TIERS": {"source": f"{_EC2_OFFER}, SKUs X9AGQNCQXFA9Q8XZ, KDKG2R3W4NMV7CHP "
+                                     "(32001-64000) and AX8G343U7JZBRKJB (over 64000)",
+                           "as_of": AS_OF},
+    "EC2_HOURLY": {"source": f"{_EC2_OFFER}, OnDemand, Linux, Shared tenancy, No License "
+                             "required, Pre Installed S/W NA, CapacityStatus Used; all 174 "
+                             "rows matched", "as_of": AS_OF},
+    "RDS_HOURLY": {"source": f"{_RDS_OFFER}, OnDemand, Single-AZ, MySQL and MariaDB, No "
+                             "license required", "as_of": AS_OF},
+    "RDS_HOURLY_POSTGRES": {"source": f"{_RDS_OFFER}, OnDemand, Single-AZ, PostgreSQL",
+                            "as_of": AS_OF},
+}
+
+# Constants here that are not read from a price source: a convention, or a
+# figure computed from the sourced ones above.
+DERIVED = frozenset({
+    "HOURS_PER_MONTH", "LB_HOURLY_BY_TYPE", "ALB_PER_MONTH", "NLB_PER_MONTH",
+    "CLB_PER_MONTH", "NAT_GATEWAY_PER_MONTH", "PUBLIC_IPV4_PER_MONTH", "EC2_MONTHLY",
+    "RDS_MONTHLY",
+})
 
 # AWS's own convention for a "month" in pricing examples: 365 * 24 / 12. Using
 # 720 (30 days) instead understates every monthly figure by 1.4%, which is
@@ -200,8 +302,10 @@ def ebs_volume_monthly(vol_type: str | None, size_gb: float,
 # and AmazonRDS us-east-1 offer files, version 20260924211011). That check
 # found the P4/P5 rows still at pre-cut prices (p5.48xlarge 98.32, now 55.04),
 # i4i ten percent low and the Graviton RDS classes wrong; p5e.48xlarge has no
-# us-east-1 on-demand listing and is left out rather than guessed. Monthly
-# is never typed in; EC2_MONTHLY and RDS_MONTHLY below are derived. A new type
+# us-east-1 on-demand listing and is left out rather than guessed. Re-read on
+# 2026-10-13 (AmazonEC2 offer 20261012193925, AmazonRDS 20261006224050): all
+# 174 EC2 rows still match, in us-west-2 as well; the one RDS row off was
+# db.m5.8xlarge (see RDS_HOURLY). Monthly is never typed in; EC2_MONTHLY and RDS_MONTHLY below are derived. A new type
 # goes here, not in the module that first needs it:
 # tests/test_instance_price_tables.py fails on an instance-keyed price dict
 # anywhere else.
@@ -292,7 +396,10 @@ EC2_HOURLY: dict[str, float] = {
 
 # RDS, single-AZ, MySQL / MariaDB (the two are priced identically). Multi-AZ
 # is twice this, applied by the caller, which is the one that knows whether the
-# instance is Multi-AZ. Callers that do not know the engine use this table;
+# instance is Multi-AZ. The offer lists Multi-AZ at two Single-AZ hours to
+# within its third decimal, not exactly: db.t4g.medium Multi-AZ is $0.129
+# against 2 x $0.065, db.r6g.xlarge $0.859 against 2 x $0.43, db.t4g.small
+# $0.065 against 2 x $0.032. Doubling is within 0.8% either way. Callers that do not know the engine use this table;
 # PostgreSQL has its own rates below (rds_hourly picks between them).
 RDS_HOURLY: dict[str, float] = {
     "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
@@ -300,7 +407,11 @@ RDS_HOURLY: dict[str, float] = {
     "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
     "db.t4g.large": 0.129,
     "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
-    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.736, "db.m5.12xlarge": 4.104,
+    # db.m5.8xlarge is listed at $2.74, not the $2.736 that 16x the large's
+    # $0.171 gives: AmazonRDS offer 20261006224050, SKU D5NU4Q3STSENKMSM (MySQL)
+    # and K9FM4VKJBEDZ49XX (MariaDB), read 2026-10-13. RDS sizes are not exact
+    # multiples, so each row is the listed one, never scaled from another.
+    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.74, "db.m5.12xlarge": 4.104,
     "db.m6i.large": 0.171, "db.m6i.xlarge": 0.342, "db.m6i.2xlarge": 0.684,
     "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
     "db.r5.large": 0.24, "db.r5.xlarge": 0.48, "db.r5.2xlarge": 0.96,
@@ -351,3 +462,60 @@ EC2_MONTHLY: dict[str, float] = {
 RDS_MONTHLY: dict[str, float] = {
     t: round(h * HOURS_PER_MONTH, 2) for t, h in RDS_HOURLY.items()
 }
+
+
+# For each region, the least and the most it charges over us-east-1 for any
+# EC2 type nable lists (Linux on-demand, AWS Price List regional offer files,
+# October 2026). The guard added it to judge a command in its region; it lives
+# here so a scanner prices an instance from the same table. eu-west-1 was
+# checked on 2026-10-17 against AmazonEC2 eu-west-1 20261012193925 over the
+# 150 EC2_HOURLY types it lists: least 1.0689x (c7g.medium, $0.0388 against
+# $0.0363), most 1.25x (inf2.24xlarge). A region not listed has no figure.
+EC2_REGION_RANGE: dict[str, tuple[float, float]] = {
+    "af-south-1": (1.286, 1.428), "ap-east-1": (1.253, 1.595), "ap-east-2": (1.052, 1.178),
+    "ap-northeast-1": (1.169, 1.5), "ap-northeast-2": (1.124, 1.45),
+    "ap-northeast-3": (1.169, 1.45), "ap-south-1": (0.611, 1.3), "ap-south-2": (0.611, 1.201),
+    "ap-southeast-1": (1.149, 1.45), "ap-southeast-2": (1.198, 1.45),
+    "ap-southeast-3": (1.149, 1.45), "ap-southeast-4": (1.198, 1.45),
+    "ap-southeast-5": (0.975, 1.305), "ap-southeast-7": (0.975, 1.305),
+    "ca-central-1": (1.088, 1.15), "ca-west-1": (1.088, 1.115), "eu-central-1": (1.135, 1.5),
+    "eu-central-2": (1.251, 1.54), "eu-north-1": (1.024, 1.14), "eu-south-1": (1.143, 1.26),
+    "eu-south-2": (1.054, 1.2), "eu-west-1": (1.069, 1.25), "eu-west-2": (1.119, 1.5),
+    "eu-west-3": (1.119, 1.4), "il-central-1": (1.121, 1.296), "me-central-1": (1.18, 1.247),
+    "me-south-1": (1.19, 1.375), "mx-central-1": (1.047, 1.058), "sa-east-1": (1.529, 1.95),
+    "us-east-2": (0.994, 1.0), "us-gov-east-1": (1.167, 1.267),
+    "us-gov-west-1": (1.167, 1.267), "us-west-1": (1.099, 1.3), "us-west-2": (1.0, 1.0),
+}
+
+_LIST = "us-east-1 Linux on-demand list rate"
+
+
+def ec2_hourly_in_region(hourly: float, region: str | None) -> tuple[float, str]:
+    """(one EC2 instance's hourly rate in `region`, the basis to print).
+
+    `hourly` is the us-east-1 list rate. Where the region charges more than
+    us-east-1 for every listed type, the rate is that rate times the least it
+    charges over us-east-1: a floor for every listed type, as the guard judges
+    a command. Anywhere else the us-east-1 figure stands and the basis says
+    why. A difference between two types is not bounded by a floor on each
+    side, so a caller pricing one (a Graviton move) uses us_east_1_list_note.
+    """
+    if not region or region == "us-east-1":
+        return hourly, _LIST
+    span = EC2_REGION_RANGE.get(region)
+    if span is None:
+        return hourly, f"{_LIST}; nable holds no {region} rate"
+    low, high = span
+    if low <= 1.0:
+        return hourly, (f"{_LIST}; {region} lists EC2 at {low:g}x to {high:g}x "
+                        "us-east-1, so this is the us-east-1 figure")
+    return hourly * low, (f"{region} floor: the {_LIST} x{low:g}, the least {region} "
+                          f"charges over us-east-1 for the EC2 types nable lists (its rates "
+                          f"run {low:g}x to {high:g}x)")
+
+
+def us_east_1_list_note(region: str | None) -> str | None:
+    """What a figure priced on a us-east-1 rate says outside us-east-1, or None."""
+    if not region or region in ("us-east-1", "global"):
+        return None
+    return f"priced at us-east-1 list rates; nable holds no {region} rate for it"

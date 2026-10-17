@@ -39,7 +39,11 @@ def _fake_config(tmp_path, args):
 
 
 def _run_upgrade_with(monkeypatch, cfg, target, warm_rc=0):
-    monkeypatch.setattr(sw, "_claude_config_file", lambda: cfg)
+    # The config under test is the only one upgrade sees: never the real
+    # HOME's editor configs or guard hooks, and never this checkout's.
+    monkeypatch.setenv("HOME", str(cfg.parent))
+    monkeypatch.chdir(cfg.parent)
+    monkeypatch.setattr(sw, "_editor_config_paths", lambda: [("Claude Desktop", cfg)])
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/uvx" if name == "uvx" else None)
     calls = []
 
@@ -63,11 +67,15 @@ def test_upgrade_moves_the_pin(tmp_path, monkeypatch, capsys):
     assert "Restart Claude Desktop" in capsys.readouterr().out
 
 
-def test_upgrade_pins_legacy_unpinned_entry(tmp_path, monkeypatch):
+def test_upgrade_leaves_an_unpinned_entry_as_written(tmp_path, monkeypatch, capsys):
+    """`finops-mcp` with no version is what the README's manual config and
+    Cursor's one-click link write: the user chose "latest", so upgrade names
+    the entry and leaves it (tests/test_upgrade_everywhere.py)."""
     cfg = _fake_config(tmp_path, ["finops-mcp"])
     _run_upgrade_with(monkeypatch, cfg, "9.9.9")
     saved = json.loads(cfg.read_text())
-    assert saved["mcpServers"]["nable"]["args"] == ["finops-mcp==9.9.9"]
+    assert saved["mcpServers"]["nable"]["args"] == ["finops-mcp"]
+    assert "left as it is" in capsys.readouterr().out
 
 
 def test_failed_cache_warm_leaves_config_untouched(tmp_path, monkeypatch, capsys):

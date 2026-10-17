@@ -5,6 +5,11 @@ name: Budget Gate (copy this to your own repo)
 # It will check spend against your budget.yml on every PR.
 #
 # Add budget.yml to your repo root (see format below).
+#
+# This runs the budget-check action at the 0.8.216 commit. It counts a budget
+# with no cost data as on track, so on a fresh runner, with no cost history,
+# it passes having checked nothing. budget-gate.yml runs the CLI's
+# `nable budget ci-gate --fail-on-breach`, which fails with exit 2 instead.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -26,7 +31,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: nable Budget Check
         uses: getnable/finopsmcp/.github/actions/budget-check@3f0b1db0168029fb49d808331c51a99a24c2c18f # v0.8.216

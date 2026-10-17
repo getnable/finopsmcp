@@ -66,6 +66,16 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+# How the AI block names a provider: the provider's own spelling, not
+# str.capitalize() of its key ("Openai", "Openrouter", "Litellm").
+_AI_LABELS = {"openai": "OpenAI", "anthropic": "Anthropic", "bedrock": "Bedrock",
+              "vertex": "Vertex", "openrouter": "OpenRouter", "litellm": "LiteLLM"}
+
+
+def _ai_label(provider: str) -> str:
+    return _AI_LABELS.get(provider, provider.capitalize())
+
+
 def _short(v: float) -> str:
     if v >= 1000:
         return f"${v / 1000:.1f}k".replace(".0k", "k")
@@ -84,12 +94,22 @@ def _gather_ai(spend: bool, days: int = 30) -> ProviderBlock:
 
     blk = ProviderBlock(family="ai", label="AI & GPU", estimated=True,
                         early_recoverable=True, by_provider=by_provider)
+    # A connected provider whose read failed is missing from the total. The
+    # block dropped it without a word: with Anthropic's key refused the scan
+    # printed OpenAI and Bedrock as the AI bill, and with Anthropic the only
+    # provider it printed no AI block at all, the same as an account with none.
+    failed = sorted((data.get("failed_providers") or {}).keys())
+    not_read = f"not read: {', '.join(failed)}, so not in this total" if failed else None
     # Under --spend the cloud-native legs are always asked, so Bedrock (and
     # Vertex) came back as {"bedrock": 0.0} on every AWS account, and a scan
     # of an account with no AI anywhere printed "AI & GPU $0.00/mo [estimated]"
     # and "across 2 providers". Zero from only those legs is the same false
     # positive as no data.
     only_cloud_native = set(by_provider) <= {"bedrock", "vertex"}
+    if total == 0.0 and (not by_provider or only_cloud_native) and failed:
+        blk.status = "errored"
+        blk.note = f"not read: {', '.join(failed)}"
+        return blk
     if total == 0.0 and (not by_provider or only_cloud_native):
         # "llm" is in connected_families() for every AWS user (Bedrock rides on
         # AWS), so an empty AI result is usually that false positive, not a real
@@ -100,11 +120,13 @@ def _gather_ai(spend: bool, days: int = 30) -> ProviderBlock:
 
     top = sorted(by_provider.items(), key=lambda kv: kv[1], reverse=True)[:2]
     blk.spend_usd = total
-    blk.detail = " · ".join(f"{p.capitalize()} {_short(a)}" for p, a in top if a > 0)
+    blk.detail = " · ".join(f"{_ai_label(p)} {_short(a)}" for p, a in top if a > 0)
     if not spend:
         # The cloud-native AI legs are gated; say so, so the number is not read
         # as the whole AI bill when Bedrock/Vertex are in play.
         blk.note = "usage-API providers; Bedrock/Vertex under --spend"
+    if not_read:
+        blk.note = f"{blk.note}; {not_read}" if blk.note else not_read
     # AI recoverable stays qualitative (model routing / idle GPU), never a headline $.
     recs = data.get("recommendations") or []
     if recs:
@@ -260,26 +282,52 @@ def gather_extra_providers(
 
 
 def demo_extra_blocks(spend: bool) -> list[ProviderBlock]:
-    """Fixed cross-provider blocks for `nable scan --demo` (StreamCo sample), so
-    the no-account demo showcases the whole cross-provider frame deterministically.
-    Mirrors the real free/--spend boundary: without --spend the AI block shows
-    usage-API providers only (Bedrock waits for --spend)."""
-    if spend:
-        ai = ProviderBlock(
-            family="ai", label="AI & GPU", status="ok", spend_usd=18400.0,
-            estimated=True, early_recoverable=True,
-            detail="OpenAI $9.2k · Bedrock $5.1k · Modal $4.1k",
-            by_provider={"openai": 9200.0, "bedrock": 5100.0, "modal": 4100.0})
-    else:
-        ai = ProviderBlock(
-            family="ai", label="AI & GPU", status="ok", spend_usd=13300.0,
-            estimated=True, early_recoverable=True,
-            detail="OpenAI $9.2k · Modal $4.1k",
-            note="usage-API providers; Bedrock/Vertex under --spend",
-            by_provider={"openai": 9200.0, "modal": 4100.0})
-    gcp = ProviderBlock(family="gcp", label="GCP", status="ok",
-                        recoverable_usd=410.0, detail="3 waste findings")
-    azure = ProviderBlock(family="azure", label="Azure", status="ok",
-                          spend_usd=6300.0, recoverable_usd=220.0,
-                          detail="AKS $2.1k · Blob Storage $1.4k")
+    """The AI, GCP and Azure blocks for `nable scan --demo`, read from the
+    StreamCo sample every other demo answers from (demo_data), the way the
+    real gathers above read a live account.
+
+    They used to be fixed figures of their own: AI $13,300/mo and Azure
+    $6,300/mo, for a company whose `welcome --demo` spends $5,147,600 a month
+    and whose AWS line in `scan --demo --spend` is over a million dollars
+    month to date. Two demos of one sample disagreed 260 times over. Now:
+
+    AI     llm_costs() over the 30 days ending yesterday. Without --spend, the
+           usage-API providers (OpenAI, Anthropic), as _gather_ai does;
+           Bedrock joins under --spend, and cli_scan dedups it out of the
+           AWS total. Its two routing ideas are [early], never a $ figure.
+    GCP    recoverable only, as _gather_gcp: the sample's GCP opportunities.
+           GCP spend lives in the billing export.
+    Azure  spend and recoverable, both free in the real gather: the sample's
+           Azure services over the same 30 days, and its Azure opportunity.
+    """
+    from . import demo_data
+
+    llm = demo_data.llm_costs()
+    by_provider = {p: float(v) for p, v in llm["by_provider"].items()
+                   if spend or p not in ("bedrock", "vertex")}
+    total = round(sum(by_provider.values()), 2)
+    top = sorted(by_provider.items(), key=lambda kv: kv[1], reverse=True)[:2]
+    ai = ProviderBlock(
+        family="ai", label="AI & GPU", status="ok", spend_usd=total,
+        estimated=True, early_recoverable=True, by_provider=by_provider,
+        detail=" · ".join(f"{_ai_label(p)} {_short(a)}" for p, a in top))
+    if not spend:
+        ai.note = "usage-API providers; Bedrock/Vertex under --spend"
+    recs = llm.get("recommendations") or []
+    if recs:
+        ai.detail += f"   routing/idle: {len(recs)} idea{'s' if len(recs) != 1 else ''} [early]"
+
+    gcp_opps = demo_data._PROVIDER_OPPS["gcp"]
+    gcp = ProviderBlock(
+        family="gcp", label="GCP", status="ok",
+        recoverable_usd=round(sum(o["monthly_saving"] for o in gcp_opps), 2),
+        detail=f"{len(gcp_opps)} recommendation{'s' if len(gcp_opps) != 1 else ''}")
+
+    az = demo_data.cost_summary({"provider": "azure"})
+    az_top = sorted(az["by_service"].items(), key=lambda kv: kv[1], reverse=True)[:2]
+    azure = ProviderBlock(
+        family="azure", label="Azure", status="ok", spend_usd=az["total_usd"],
+        recoverable_usd=round(sum(o["monthly_saving"]
+                                  for o in demo_data._PROVIDER_OPPS["azure"]), 2),
+        detail=" · ".join(f"{name} {_short(amt)}" for name, amt in az_top))
     return [ai, gcp, azure]

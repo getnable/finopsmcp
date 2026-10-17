@@ -2,8 +2,9 @@
 Graviton migration opportunity scanner.
 
 Identifies x86_64 EC2 instances that have a direct Graviton (arm64)
-equivalent. Graviton instances typically cost 20-40% less than x86
-equivalents and deliver equal or better performance for most workloads.
+equivalent of the same vCPU and memory. For the mapped types the us-east-1
+on-demand list price of the Graviton type is 5% (m5a, m6a, c6a) to 19% (t3,
+m7i) below the x86 type; the saving reported is that gap, at list price.
 
 Usage:
     from finops.recommendations.graviton import scan_graviton_opportunities
@@ -17,7 +18,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 from .envelope import INFERRED, Finding
-from .graviton_prices import HOURLY_PRICE, HOURS_PER_MONTH, GRAVITON_SAVINGS_PCT
+from .graviton_prices import HOURLY_PRICE, HOURS_PER_MONTH
 
 # Mapping from common x86_64 instance types to their Graviton equivalents.
 # Targets m7g (general), c7g (compute), r7g (memory), t4g (burstable).
@@ -30,7 +31,9 @@ GRAVITON_MAP: dict[str, str] = {
     "m5.8xlarge":    "m7g.8xlarge",
     "m5.12xlarge":   "m7g.12xlarge",
     "m5.16xlarge":   "m7g.16xlarge",
-    "m5.24xlarge":   "m7g.16xlarge",
+    # m5.24xlarge (96 vCPU, 384 GiB) has no same-size m7g: m7g stops at 64 vCPU.
+    # It used to map to m7g.16xlarge, which is a third smaller, so the
+    # "Graviton saving" was mostly a downsize nobody had checked the load for.
     # General purpose: m5a family
     "m5a.large":     "m7g.large",
     "m5a.xlarge":    "m7g.xlarge",
@@ -57,8 +60,9 @@ GRAVITON_MAP: dict[str, str] = {
     "c5.xlarge":     "c7g.xlarge",
     "c5.2xlarge":    "c7g.2xlarge",
     "c5.4xlarge":    "c7g.4xlarge",
-    "c5.9xlarge":    "c7g.8xlarge",
-    "c5.18xlarge":   "c7g.16xlarge",
+    # c5.9xlarge (36 vCPU) and c5.18xlarge (72 vCPU) have no same-size c7g
+    # (32, 48 and 64 vCPU sizes only). Mapping them to c7g.8xlarge and
+    # c7g.16xlarge cut capacity by a ninth and quoted it as Graviton saving.
     # Compute optimized: c6i family
     "c6i.large":     "c7g.large",
     "c6i.xlarge":    "c7g.xlarge",
@@ -117,8 +121,9 @@ def _compute_savings(
     """
     Return (current_monthly_cost, savings_estimate, savings_pct).
 
-    If both types are in the price table, uses exact prices.
-    Falls back to the GRAVITON_SAVINGS_PCT ratio for unknowns.
+    If both types are in the price table, uses exact prices. When either is
+    not, there is no saving to report: a flat ratio stood in here, and the
+    price list puts the real gap anywhere from 5% to 19% by family.
     """
     current_monthly = _estimate_monthly_cost(current_type)
     graviton_monthly = _estimate_monthly_cost(graviton_type)
@@ -128,13 +133,7 @@ def _compute_savings(
         pct = round(savings / current_monthly * 100, 1)
         return current_monthly, max(savings, 0.0), max(pct, 0.0)
 
-    if current_monthly > 0:
-        # Graviton type not in price table; apply fallback ratio
-        savings = round(current_monthly * GRAVITON_SAVINGS_PCT, 2)
-        return current_monthly, savings, round(GRAVITON_SAVINGS_PCT * 100, 1)
-
-    # Neither type is priced; return zeros
-    return 0.0, 0.0, round(GRAVITON_SAVINGS_PCT * 100, 1)
+    return current_monthly, 0.0, 0.0
 
 
 def _graviton_finding(

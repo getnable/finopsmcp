@@ -138,9 +138,17 @@ def test_returns_empty_when_no_it_buckets():
     assert result == []
 
 
-# ── integration: small-object bucket flagged as waste ─────────────────────────
+# ── integration: objects under 128 KB are not monitored ──────────────────────
+#
+# AWS S3 API reference (botocore s3 service model, IntelligentTieringConfiguration):
+# "If the size of an object is less than 128 KB, it is not monitored and not
+# eligible for auto-tiering. Smaller objects can be stored, but they are always
+# charged at the Frequent Access tier rates". The monitoring fee is per object
+# monitored, so a bucket of 10 KB objects pays no fee and saves nothing: IT costs
+# what S3 Standard does. This test used to assert the opposite, that the bucket
+# was LIKELY_WASTE because 1M objects would pay $2.50/mo in monitoring.
 
-def test_small_object_bucket_flagged_as_likely_waste():
+def test_small_object_bucket_pays_no_monitoring_fee_and_is_not_waste():
     aws_client = _make_aws_client()
 
     with patch("boto3.Session") as mock_cls:
@@ -154,7 +162,7 @@ def test_small_object_bucket_flagged_as_likely_waste():
         s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
-        # 1M objects, 10 KB each = 10 GB total — avg 10 KB (well below 128 KB)
+        # 1M objects, 10 KB each = 10 GB total, avg 10 KB (below 128 KB)
         cw_client.get_metric_statistics.side_effect = _metric_statistics({
             ("NumberOfObjects", "AllStorageTypes"): 1_000_000,
             ("BucketSizeBytes", "StandardStorage"): 10 * 1024 ** 3,
@@ -164,15 +172,47 @@ def test_small_object_bucket_flagged_as_likely_waste():
 
     assert len(result) == 1
     finding = result[0]
+    assert finding["avg_object_size_kb"] < IT_BREAKEVEN_SIZE_KB
+    assert finding["monthly_monitoring_cost"] == 0.0
+    assert finding["estimated_storage_savings"] == 0.0
+    assert finding["net_monthly_cost"] == 0.0
+    assert not finding["recommendation"].startswith("LIKELY_WASTE")
+    assert finding["finding"] is None
+
+
+def test_objects_just_over_128kb_pay_more_to_monitor_than_tiering_saves():
+    """The real small-object band: a 150 KiB object is monitored ($0.0025 per
+    1,000 a month) and the most moving it to Infrequent Access can save is
+    150 KiB x $0.0105/GB = $0.0000015, under the $0.0000025 fee."""
+    aws_client = _make_aws_client()
+
+    with patch("boto3.Session") as mock_cls:
+        session = MagicMock()
+        mock_cls.return_value = session
+        s3_client = MagicMock()
+        cw_client = MagicMock()
+        session.client.side_effect = lambda svc, **kw: s3_client if svc == "s3" else cw_client
+
+        s3_client.list_buckets.return_value = {"Buckets": [_make_bucket("tiny-objects-bucket")]}
+        s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
+            "IntelligentTieringConfigurationList": [{"Id": "default"}]
+        }
+        cw_client.get_metric_statistics.side_effect = _metric_statistics({
+            ("NumberOfObjects", "AllStorageTypes"): 1_000_000,
+            ("BucketSizeBytes", "StandardStorage"): 1_000_000 * 150 * 1024,
+        })
+
+        result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
+
+    assert len(result) == 1
+    finding = result[0]
     assert finding["bucket_name"] == "tiny-objects-bucket"
     assert finding["it_enabled"] is True
-    assert finding["avg_object_size_kb"] < IT_BREAKEVEN_SIZE_KB
-    # Monitoring ($2.50/mo on 1M objects) dwarfs the ~$0.11/mo storage savings,
-    # so the ROI verdict is waste.
+    assert finding["monthly_monitoring_cost"] == 2.5
+    # Monitoring ($2.50/mo on 1M objects) exceeds the ~$1.50/mo storage savings
+    # upper bound, so the ROI verdict is waste.
     assert finding["recommendation"] == "LIKELY_WASTE_monitoring_exceeds_savings"
     assert finding["monitoring_pct_of_savings"] >= 100
-    assert finding["monthly_monitoring_cost"] is not None
-    assert finding["monthly_monitoring_cost"] > 0
     # Contract guard: the three consolidated reports in server.py
     # (run_full_cost_audit, export_cost_report_csv, publish_cost_report_to_notion)
     # filter S3 IT waste with recommendation.startswith("LIKELY_WASTE"). If the

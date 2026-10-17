@@ -43,6 +43,15 @@ def set_budget(
     """
     if err := _srv.require_role("analyst"):
         return err
+    # Refused before anything is saved. A period the checker does not know was
+    # stored as given and then read as a rolling 30 days, and an alert above the
+    # block made a budget that blocks before it ever warns.
+    if period not in ("monthly", "weekly"):
+        return {"error": f"period must be 'monthly' or 'weekly' (got {period!r}). "
+                         "Nothing was saved."}
+    if not 0 < alert_at_pct <= block_at_pct:
+        return {"error": (f"alert_at_pct ({alert_at_pct:g}) must be above 0 and at most "
+                          f"block_at_pct ({block_at_pct:g}). Nothing was saved.")}
     try:
         from ..budget.enforcer import create_budget
         b = create_budget(
@@ -78,7 +87,27 @@ def check_budget_status(budget_name: str = "") -> dict:
         from ..budget.enforcer import check_all_budgets, list_budgets, check_budget
         results = check_all_budgets()
         if budget_name:
+            names = [str(r["name"]) for r in results]
             results = [r for r in results if budget_name.lower() in r["name"].lower()]
+            if not results:
+                # A filter that matched nothing checked nothing. It used to fall
+                # through to "All budgets on track" about a budget that does
+                # not exist.
+                return {
+                    "error": f"No budget matches '{budget_name}', so nothing was checked.",
+                    "budgets_available": names,
+                    "hint": ("Call check_budget_status() with no name for every budget, "
+                             "or set_budget to create this one."),
+                }
+        if not results:
+            return {
+                "summary": {"total_budgets": 0, "exceeded": 0, "warnings": 0,
+                            "on_track": 0, "cannot_check": 0},
+                "budgets": [],
+                "no_budgets": True,
+                "alert": ("No budgets are set, so there is nothing to check. Create one "
+                          "with set_budget (or sync_budgets_from_yaml)."),
+            }
 
         exceeded = [r for r in results if r["status"] == "exceeded"]
         warnings  = [r for r in results if r["status"] == "warning"]

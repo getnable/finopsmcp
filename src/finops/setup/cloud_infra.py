@@ -70,28 +70,41 @@ def _print(msg: str, indent: int = 0) -> None:
     print("  " * indent + msg)
 
 
+# The CLI's colour helpers (finops.welcome): colour only on a terminal, and
+# never under NO_COLOR or TERM=dumb. These printed raw escape codes into every
+# pipe, CI log and file `nable aws-cur` and `nable infra` were sent to.
+
 def _ok(msg: str) -> None:
-    print(f"  \033[32m✓\033[0m  {msg}")
+    from ..welcome import green
+    print(f"  {green('✓')}  {msg}")
 
 
 def _warn(msg: str) -> None:
-    print(f"  \033[33m!\033[0m  {msg}")
+    from ..welcome import amber
+    print(f"  {amber('!')}  {msg}")
 
 
 def _err(msg: str) -> None:
-    print(f"  \033[31m✗\033[0m  {msg}")
+    from ..welcome import red
+    print(f"  {red('✗')}  {msg}")
 
 
 def _header(msg: str) -> None:
-    print(f"\n  \033[1m{msg}\033[0m")
+    from ..welcome import bold
+    print(f"\n  {bold(msg)}")
 
 
-def _prompt(msg: str, default: str = "") -> str:
+def _prompt(msg: str, default: str = "", on_eof: str | None = None) -> str:
+    """The answer, or `default` for an empty one. on_eof is what a closed
+    input means where taking the default would make a decision nobody made."""
     suffix = f" [{default}]" if default else ""
     try:
         val = input(f"  {msg}{suffix}: ").strip()
         return val or default
     except (KeyboardInterrupt, EOFError):
+        if on_eof is not None:
+            print()
+            return on_eof
         return default
 
 
@@ -258,8 +271,11 @@ def _open_cf_console(template_body: str, account_id: str) -> dict[str, str]:
     _print(f"  2. Upload template: {tmp}", 2)
     _print("  3. Click through defaults and deploy", 2)
 
+    # A closed stdin (a script, cron, an agent) is no answer, and creating a
+    # stack of AWS resources is a decision a person makes: it used to take
+    # the default and deploy.
     try_deploy = _prompt(
-        "\nDeploy now via AWS CLI? [Y/n]", default="y"
+        "\nDeploy now via AWS CLI? [Y/n]", default="y", on_eof="n"
     ).lower()
 
     if try_deploy in ("y", "yes", ""):

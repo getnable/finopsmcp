@@ -22,7 +22,6 @@ get_llm_costs, by model.
 """
 from __future__ import annotations
 
-import concurrent.futures
 import importlib
 import logging
 from datetime import date, timedelta
@@ -126,7 +125,8 @@ def get_ai_cost_attribution(
         start_date = end_date - timedelta(days=max(1, days) - 1)
 
     answers: dict[str, dict[str, Any]] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(providers)) as pool:
+    from ..aws_read_failures import ScopedThreadPool
+    with ScopedThreadPool(max_workers=len(providers)) as pool:
         futs = {p: pool.submit(_fetch, p, dim, start_date, end_date) for p in providers}
         for p, fut in futs.items():
             try:
@@ -178,13 +178,17 @@ def get_ai_cost_attribution(
         out["dimension_note"] = dim_note
 
     notes: list[str] = []
-    overlap_across = bool(set(read) & _BILLERS and set(read) & _OBSERVERS)
+    # Two observers overlap as well: LiteLLM ships a Langfuse callback, so one
+    # proxied call is logged by both. Only a biller next to an observer used to
+    # count, and LiteLLM plus Langfuse were added into one total.
+    observers_read = set(read) & _OBSERVERS
+    overlap_across = bool((set(read) & _BILLERS and observers_read) or len(observers_read) > 1)
     overlap_within = any(a.get("groups_overlap") for a in read.values())
     if overlap_across:
         notes.append(
-            "LiteLLM and Langfuse record calls that OpenAI and Anthropic also bill. Read "
-            "each provider's groups on their own: adding them across providers can count "
-            "the same call twice.")
+            "LiteLLM and Langfuse record calls that OpenAI and Anthropic also bill, and "
+            "LiteLLM can log to Langfuse. Read each provider's groups on their own: adding "
+            "them across providers can count the same call twice.")
     if read and not overlap_across and not overlap_within:
         out["total_usd"] = round(sum(a.get("total_usd") or 0.0 for a in read.values()), 4)
     else:

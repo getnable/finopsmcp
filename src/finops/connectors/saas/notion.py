@@ -109,6 +109,19 @@ class NotionConnector:
             f"Total estimated saving: ${monthly:,.2f}/mo  "
             f"${annual:,.2f}/yr"
         )
+        if report.get("to_confirm_findings"):
+            # The rows their check filed as an inference, beside the total and
+            # not in it, as `nable scan` prints them.
+            from ...recommendations.sweep import to_confirm_line
+            callout_text += (" recoverable\n" + to_confirm_line(
+                float(report.get("to_confirm_monthly_usd") or 0.0),
+                int(report["to_confirm_findings"])))
+        if report.get("partial_note"):
+            # Said where the total is, not only in the chat reply.
+            callout_text += f"\n{report['partial_note']}"
+        if report.get("scope_note"):
+            # What the total leaves out on purpose, said where the total is.
+            callout_text += f"\n{report['scope_note']}"
 
         blocks: list[dict[str, Any]] = []
 
@@ -161,8 +174,19 @@ class NotionConnector:
 
         # Data rows
         for f in findings:
-            monthly_s = f.get("monthly_savings", 0.0)
-            annual_s = monthly_s * 12
+            monthly_s = f.get("monthly_savings")
+            if monthly_s is None:
+                # An investigation, or a claim the critique retracted: no figure to
+                # print, and None * 12 used to fail the whole publish.
+                monthly_txt = f"{f.get('magnitude') or 'unconfirmed'} (needs confirming)"
+                annual_txt = ""
+            else:
+                above = f.get("to_confirm_above_usd")
+                tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                        (f"+${above or 0:,.2f} to confirm", above),
+                                        ("us-east-1 list", f.get("us_east_1_list"))) if on]
+                monthly_txt = f"${monthly_s:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
+                annual_txt = f"${monthly_s * 12:,.2f}"
             table_rows.append({
                 "object": "block",
                 "type": "table_row",
@@ -170,8 +194,8 @@ class NotionConnector:
                     "cells": [
                         [{"type": "text", "text": {"content": f.get("title", "")}}],
                         [{"type": "text", "text": {"content": f.get("category", "")}}],
-                        [{"type": "text", "text": {"content": f"${monthly_s:,.2f}"}}],
-                        [{"type": "text", "text": {"content": f"${annual_s:,.2f}"}}],
+                        [{"type": "text", "text": {"content": monthly_txt}}],
+                        [{"type": "text", "text": {"content": annual_txt}}],
                     ]
                 },
             })

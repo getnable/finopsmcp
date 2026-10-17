@@ -3,7 +3,7 @@ Non-production environment scheduler recommendations.
 
 Dev, staging, test, and sandbox EC2 instances typically run 24/7 but only
 need to run during business hours (Monday-Friday 08:00-18:00 UTC). Scheduling
-them saves 60-70% of their compute cost.
+them saves at most 70% of their compute cost (118 of 168 hours).
 
 Logic:
   1. Find instances tagged with common non-prod environment tag values.
@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
-from ..aws_prices import EC2_HOURLY
+from ..aws_prices import EC2_HOURLY, ec2_hourly_in_region
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
@@ -31,17 +31,28 @@ except ImportError:  # pragma: no cover
 
 _BUSINESS_HOURS_PER_WEEK = 50.0   # Mon-Fri 08:00-18:00 = 10 hrs * 5 days
 _TOTAL_HOURS_PER_WEEK = 168.0
+# What the recommended schedule stops: 118 of 168 hours, 70.2% of the week.
+_SCHEDULED_OFF_HOURS_PER_WEEK = _TOTAL_HOURS_PER_WEEK - _BUSINESS_HOURS_PER_WEEK
 _IDLE_CPU_THRESHOLD = 5.0          # % CPU below which hour is considered idle
 _LOOKBACK_DAYS = 7
 
-# Tag keys to inspect for environment labels
-_ENV_TAG_KEYS = ["Environment", "Env", "environment", "Stage", "stage"]
+# Tag keys to inspect for environment labels, in order of preference, compared
+# case-insensitively: env, Env, ENV, environment and Environment all match. An
+# exact comparison missed env=dev, the common lower-case spelling.
+_ENV_TAG_KEYS = ["environment", "env", "stage"]
+
+
+def _tag_key(tag: dict) -> str:
+    return str(tag.get("Key", "")).lower()
+
 
 # Values that indicate a non-production environment (matched case-insensitively)
 _NONPROD_VALUES = {
     "dev", "development", "staging", "stage", "test", "testing",
     "qa", "sandbox", "nonprod", "non-prod",
 }
+# The same list, for the weekend-waste pattern (ml.patterns).
+NONPROD_VALUES = _NONPROD_VALUES
 
 # On-demand hourly prices (us-east-1) for cost estimation when no billing data.
 # Shared with every other module that prices an EC2 instance; see aws_prices.
@@ -52,16 +63,22 @@ def _get_env_tag(tags: list[dict]) -> str | None:
     """Return the non-prod environment value from a list of EC2 tag dicts, or None."""
     for key in _ENV_TAG_KEYS:
         for tag in tags:
-            if tag.get("Key") == key:
+            if _tag_key(tag) == key:
                 value = tag.get("Value", "")
                 if value.lower() in _NONPROD_VALUES:
                     return value
     return None
 
 
-def _monthly_cost_estimate(instance_type: str) -> float:
-    hourly = _HOURLY_PRICE.get(instance_type, 0.0)
-    return round(hourly * _HOURS_PER_MONTH, 2)
+def _monthly_cost_estimate(instance_type: str, region: str | None = None) -> float:
+    return _cost_in_region(instance_type, region)[0]
+
+
+def _cost_in_region(instance_type: str, region: str | None) -> tuple[float, str]:
+    """(monthly on-demand cost, its basis): the region's EC2 floor where nable
+    holds one, the us-east-1 list rate and why everywhere else."""
+    hourly, basis = ec2_hourly_in_region(_HOURLY_PRICE.get(instance_type, 0.0), region)
+    return round(hourly * _HOURS_PER_MONTH, 2), basis
 
 
 def _batch_get_hourly_cpu_max(
@@ -182,7 +199,7 @@ async def identify_nonprod_resources(
                         # Override nonprod_values for matching when caller extended the set
                         if env_value is None and extra_values:
                             for tag in tags:
-                                if tag.get("Key") in _ENV_TAG_KEYS:
+                                if _tag_key(tag) in _ENV_TAG_KEYS:
                                     v = tag.get("Value", "").lower()
                                     if v in nonprod_values:
                                         env_value = tag.get("Value", "")
@@ -218,12 +235,16 @@ async def identify_nonprod_resources(
                     continue
                 total_samples = len(cpu_samples)
                 if total_samples == 0:
-                    # No CloudWatch data: assume worst-case 70% idle (nights + weekends)
+                    # No CloudWatch data: assume idle for all of nights and
+                    # weekends (118 hours), the largest saving the schedule
+                    # offers, and mark the row so it is not read as measured.
                     region_assumed += 1
+                    idle_basis = "assumed"
                     idle_hrs_per_week = round(
                         (_TOTAL_HOURS_PER_WEEK - _BUSINESS_HOURS_PER_WEEK), 1
                     )
                 else:
+                    idle_basis = "measured"
                     idle_count = _idle_hours(cpu_samples)
                     # Scale from 7-day sample to weekly estimate
                     idle_hrs_per_week = round(
@@ -234,8 +255,13 @@ async def identify_nonprod_resources(
                 if idle_hrs_per_week < 20:
                     continue
 
-                monthly_cost = _monthly_cost_estimate(itype)
-                idle_fraction = idle_hrs_per_week / _TOTAL_HOURS_PER_WEEK
+                monthly_cost, price_basis = _cost_in_region(itype, region)
+                # The schedule stops the instance for its 118 off-hours and no
+                # more, so that is the most it can save however idle the rest
+                # of the week is. Dividing all idle hours by 168 promised an
+                # instance idle around the clock its whole bill.
+                stopped_hrs = min(idle_hrs_per_week, _SCHEDULED_OFF_HOURS_PER_WEEK)
+                idle_fraction = stopped_hrs / _TOTAL_HOURS_PER_WEEK
                 potential_savings = round(monthly_cost * idle_fraction, 2)
 
                 region_schedulable.append({
@@ -245,7 +271,11 @@ async def identify_nonprod_resources(
                     "environment": inst_info["environment"],
                     "region": region,
                     "monthly_cost_estimate": monthly_cost,
+                    "price_basis": price_basis,
                     "idle_hours_per_week": idle_hrs_per_week,
+                    # "measured" from the week's hourly maximum CPU, or "assumed"
+                    # (nights and weekends) when CloudWatch held no datapoints.
+                    "idle_basis": idle_basis,
                     "potential_monthly_savings": potential_savings,
                     "schedule_recommendation": "Mon-Fri 08:00-18:00 UTC",
                     "aws_scheduler_command": _scheduler_command(iid, region),
@@ -284,8 +314,9 @@ async def identify_nonprod_resources(
         ]
         if assumed_idle_count > 0:
             _assumptions.append(
-                f"{assumed_idle_count} instance(s) had no CloudWatch CPU data, so idle "
-                "time was assumed at the nights-plus-weekends worst case, not measured.")
+                f"{assumed_idle_count} instance(s) had no CloudWatch CPU data, so they were "
+                "assumed idle for all of nights and weekends, the most the schedule can "
+                "save, not measured (rows marked idle_basis: assumed).")
         if unread_count > 0:
             _assumptions.append(
                 f"{unread_count} non-prod instance(s) were not assessed: their CloudWatch "
@@ -301,8 +332,12 @@ async def identify_nonprod_resources(
             confidence="low" if all_assumed else "medium",
             why_unsure=("Idle CPU shows the instances are quiet, but it does not prove they "
                         "are safe to stop: some non-prod boxes run nightly builds, hold a "
-                        "database, or back a shared service. The dollar figure also assumes "
-                        "on-demand pricing, so if these are on RIs or Savings Plans the real "
+                        "database, or back a shared service. Idle hours are counted across "
+                        "the whole week (hourly maximum CPU under 5%), not only inside the "
+                        "hours the schedule stops. The dollar figure also assumes on-demand "
+                        "list pricing (us-east-1's, or the region's floor where nable holds "
+                        "one; each row's price_basis says which), so if these are on RIs or "
+                        "Savings Plans the real "
                         "saving is smaller. We have not confirmed either, so this is a range."),
             assumptions=_assumptions,
             rough_monthly=total_waste,

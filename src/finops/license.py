@@ -406,9 +406,10 @@ def _keyring_disabled() -> bool:
     disguised entry, and prompt. Also disabled when no macOS login keychain
     exists, to avoid the blocking 'cannot be found' modal. Mirrors
     security/vault.py."""
+    from .telemetry import env_flag_set  # stdlib only; the one rule for FINOPS_AIRGAP
     return (
         os.environ.get("FINOPS_NO_KEYRING", "") == "1"
-        or os.environ.get("FINOPS_AIRGAP", "") == "1"
+        or env_flag_set("FINOPS_AIRGAP")
         or _macos_keychain_missing()
     )
 

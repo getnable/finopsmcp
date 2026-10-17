@@ -132,3 +132,44 @@ def test_split_totals_on_empty_input():
     totals = we.split_totals([])
     assert totals["measured_monthly_savings"] == 0.0
     assert totals["unconfirmed_band"] is None
+
+
+# ── unattached is what the scan saw, not how long it has been so ────────────
+
+
+def test_an_unattached_volume_and_an_unused_eip_are_what_the_scan_saw():
+    """EC2 reports a volume's State and an address's association, never when a
+    volume was detached or an address disassociated. One scan sees a moment: a
+    volume between a stop and a start, or an address mid-failover, is
+    unattached then too. Both were MEASURED/high with nothing saying so. The
+    finding stays, with its figure, at medium confidence, and says it was
+    unattached at scan time."""
+    from finops.analyzers.waste import check_ebs_volumes, check_elastic_ips
+
+    for wt in ("unattached_ebs_volume", "unassociated_elastic_ip"):
+        [f] = we.annotate([{"waste_type": wt, "estimated_monthly_savings": 10.0}])
+        assert f["kind"] == "recommendation", f"{wt} was dropped to an investigation"
+        assert f["estimated_monthly_savings"] == 10.0
+        assert f["confidence"] == "medium", f"{wt} is one observation, not high confidence"
+        said = " ".join(f.get("assumptions", []))
+        assert "at scan time" in said and "detach" in said, (wt, said)
+
+    class _EC2:
+        def get_paginator(self, name):
+            class _P:
+                def paginate(self, **kw):
+                    return [{"Volumes": [{"VolumeId": "vol-1", "Size": 100,
+                                          "VolumeType": "gp3", "State": "available",
+                                          "Attachments": []}]}]
+            return _P()
+
+        def describe_addresses(self):
+            return {"Addresses": [{"AllocationId": "eipalloc-1", "PublicIp": "203.0.113.9"}]}
+
+    [vol] = check_ebs_volumes(_EC2(), "us-east-1")
+    assert "unattached at scan time" in vol["detail"], vol["detail"]
+    # 100 GB gp3 at the us-east-1 list $0.08/GB-month (AmazonEC2 offer,
+    # usage type EBS:VolumeUsage.gp3).
+    assert vol["estimated_monthly_savings"] == 8.0
+    [eip] = check_elastic_ips(_EC2(), "us-east-1")
+    assert "at scan time" in eip["detail"], eip["detail"]

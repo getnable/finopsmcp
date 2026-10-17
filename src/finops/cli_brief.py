@@ -91,6 +91,14 @@ def run(args) -> int:
               file=sys.stdout if as_json else sys.stderr)
         return EXIT_ERROR
 
+    # The audit logs one warning per check that fails; on an account it cannot
+    # read that is a screen of the same line, which the brief's own "could
+    # not check" section already says once. FINOPS_DEBUG=1 keeps them.
+    import logging
+    analyzers = logging.getLogger("finops.analyzers")
+    was = analyzers.level
+    if os.getenv("FINOPS_DEBUG") != "1":
+        analyzers.setLevel(logging.ERROR)
     try:
         result = run_overnight(
             deliver_to=None if getattr(args, "deliver", False) else (),
@@ -102,6 +110,11 @@ def run(args) -> int:
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
         return EXIT_ERROR
+    except PermissionError:
+        # A data directory this user cannot write: the CLI says which one and
+        # how to fix it (setup_wizard.main), which "failed (PermissionError)"
+        # did not. A local path, never an account id.
+        raise
     except Exception as exc:
         # The type, never the message: it can carry account ids and ARNs.
         if as_json:
@@ -112,9 +125,28 @@ def run(args) -> int:
         if os.getenv("FINOPS_DEBUG") == "1":
             raise
         return EXIT_ERROR
+    finally:
+        analyzers.setLevel(was)
 
     brief = result["brief"]
     delivered = result.get("delivered") or {}
+    # --deliver is a request to push, so a push that did not land is a failed
+    # run: a channel that failed, or no valid channel to push to at all. A cron
+    # job sending the morning brief has only the exit code to notice that by.
+    asked = bool(getattr(args, "deliver", False))
+    undelivered = asked and (not delivered or not all(delivered.values()))
+    code = EXIT_ERROR if undelivered else EXIT_OK
+    if undelivered:
+        from .briefing.run import DELIVER_ENV
+        from .config import is_airgap
+        failed = [k for k, v in delivered.items() if not v]
+        why = (f"delivery failed: {', '.join(failed)}" if failed else
+               f"nothing was delivered: {DELIVER_ENV} names no channel "
+               "(slack, teams or email)")
+        if failed and is_airgap():
+            why = (f"nothing was sent to {', '.join(failed)}: FINOPS_AIRGAP is set, and "
+                   "air-gap allows traffic to your cost providers only")
+        print(f"nable brief --deliver: {why}", file=sys.stderr)
 
     if getattr(args, "html", False):
         from .briefing.render import to_html
@@ -126,10 +158,13 @@ def run(args) -> int:
             webbrowser.open(out.as_uri())
         except Exception:
             pass
-        return EXIT_OK
+        return code
 
     if as_json:
-        print(json.dumps(result["summary"], indent=2))
+        summary = dict(result["summary"])
+        if asked:
+            summary["delivered"] = delivered
+        print(json.dumps(summary, indent=2))
     else:
         from .briefing.render import to_markdown
         print(to_markdown(brief))
@@ -138,4 +173,44 @@ def run(args) -> int:
             print(f"\nDelivered to: {landed}")
         if result.get("path"):
             print(f"Saved: {result['path']}")
-    return EXIT_OK
+    # An account the credentials could not read prints the fix either way. A
+    # --deliver that did not land exits 1, the code a cron job sending the
+    # brief checks; otherwise the unreadable account exits with `nable scan`'s
+    # code for it (3 expired, 6 none).
+    unreadable = _unreadable_account(brief)
+    return code if code != EXIT_OK else unreadable
+
+
+# AWS error codes that mean the credentials, not the account, are the problem,
+# and the exit code `nable scan` gives each (cli_scan's pinned contract).
+_EXPIRED_CODES = frozenset({"TokenRetrievalError", "UnauthorizedSSOTokenError",
+                            "SSOTokenLoadError", "ExpiredToken", "ExpiredTokenException",
+                            "RequestExpired"})
+_NO_CREDS_CODES = frozenset({"NoCredentialsError", "PartialCredentialsError",
+                             "InvalidClientTokenId", "UnrecognizedClientException",
+                             "SignatureDoesNotMatch", "AuthFailure"})
+
+
+def _unreadable_account(brief) -> int:
+    """EXIT_OK, or, when the AWS audit could not read anything because of
+    the credentials, the fix and the exit code `nable scan` gives the same
+    failure (3 expired, 6 none or rejected). The brief above it already
+    lists every check that failed; this says what to do about it."""
+    from .cli_scan import EXIT_EXPIRED, EXIT_NO_CREDS
+    codes = set((getattr(brief, "scanned", None) or {}).get("aws_unreadable") or [])
+    if not codes or not codes <= (_EXPIRED_CODES | _NO_CREDS_CODES):
+        return EXIT_OK
+    profile = os.environ.get("AWS_PROFILE") or "default"
+    if codes <= _EXPIRED_CODES:
+        lines = ["nable brief: your AWS session has expired, so nothing was read.",
+                 (f"  fix: `aws sso login --profile {profile}`  (or refresh your temporary "
+                  "credentials), then run `nable brief` again")]
+        code = EXIT_EXPIRED
+    else:
+        lines = ["nable brief: no usable AWS credentials, so nothing was read.",
+                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                 "  then: `nable connect` waits and connects the moment they appear",
+                 "  no account at hand? `nable scan --demo` shows nable on sample data"]
+        code = EXIT_NO_CREDS
+    print("\n".join(lines), file=sys.stderr)
+    return code

@@ -112,10 +112,58 @@ def test_instance_exists_terminated():
     assert _instance_exists(ec2, "i-abc") is False
 
 
+def _client_error(code: str, op: str = "DescribeInstances"):
+    from botocore.exceptions import ClientError
+    return ClientError({"Error": {"Code": code, "Message": "x"}}, op)
+
+
 def test_instance_exists_api_error():
     ec2 = MagicMock()
-    ec2.describe_instances.side_effect = Exception("InvalidInstanceID.NotFound")
+    ec2.describe_instances.side_effect = _client_error("InvalidInstanceID.NotFound")
     assert _instance_exists(ec2, "i-missing") is False
+
+
+def test_instance_exists_is_unknown_when_the_read_fails():
+    """A denied or throttled describe_instances says nothing about the
+    instance. It used to return False, and the alarm became 'confirmed dead',
+    a measured, high-confidence delete recommendation."""
+    for code in ("UnauthorizedOperation", "RequestLimitExceeded"):
+        ec2 = MagicMock()
+        ec2.describe_instances.side_effect = _client_error(code)
+        assert _instance_exists(ec2, "i-abc") is None
+
+
+def test_queue_exists_is_unknown_when_the_read_fails():
+    from finops.recommendations.cloudwatch_alarms import _queue_exists
+
+    sqs = MagicMock()
+    sqs.get_queue_url.side_effect = _client_error("AccessDenied", "GetQueueUrl")
+    assert _queue_exists(sqs, "q", "us-east-1") is None
+    for code in ("AWS.SimpleQueueService.NonExistentQueue", "QueueDoesNotExist"):
+        sqs.get_queue_url.side_effect = _client_error(code, "GetQueueUrl")
+        assert _queue_exists(sqs, "q", "us-east-1") is False
+
+
+def test_a_denied_instance_read_does_not_confirm_an_alarm_dead():
+    alarms = [
+        _make_alarm(
+            "maybe-dead", state="INSUFFICIENT_DATA", state_updated_days_ago=10,
+            namespace="AWS/EC2", dimensions=[{"Name": "InstanceId", "Value": "i-abc"}],
+        )
+    ]
+    ec2_mock = MagicMock()
+    ec2_mock.describe_instances.side_effect = _client_error("UnauthorizedOperation")
+    cw_mock = _make_cw_mock(metric_alarms=alarms)
+    with patch("finops.recommendations.cloudwatch_alarms._make_cw", return_value=cw_mock), \
+         patch("finops.recommendations.cloudwatch_alarms._make_ec2", return_value=ec2_mock), \
+         patch("finops.recommendations.cloudwatch_alarms._make_sqs", return_value=MagicMock()):
+        result = _run(audit_cloudwatch_orphaned_alarms(_make_aws_client(), regions=["us-east-1"]))
+
+    orphan = result["orphaned_alarms"][0]
+    assert orphan["resource_exists"] is None
+    assert orphan["resource_check_error"] == "UnauthorizedOperation"
+    assert result["finding"]["kind"] == "investigation"
+    assert result["finding"]["est_monthly_savings"] is None
 
 
 # ── integration tests ──────────────────────────────────────────────────────────

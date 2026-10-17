@@ -478,6 +478,11 @@ _EXPORT_SCANNERS = {
     "bedrock_routing": "recommend_bedrock_model_routing",
     "commitments": "analyze_commitments",
 }
+# The two the sweep imports from outside recommendations/, by module path.
+_EXPORT_SCANNERS_ELSEWHERE = {
+    "finops.cleanup.idle": "scan_idle_resources",
+    "finops.analyzers.waste": "scan_all_regions_rds_idle",
+}
 
 
 def _install_scanner_fakes(monkeypatch, block_s: float) -> None:
@@ -487,8 +492,10 @@ def _install_scanner_fakes(monkeypatch, block_s: float) -> None:
     """
     import importlib
 
-    for mod_name, attr in _EXPORT_SCANNERS.items():
-        mod = importlib.import_module(f"finops.recommendations.{mod_name}")
+    scanners = {f"finops.recommendations.{m}": a for m, a in _EXPORT_SCANNERS.items()}
+    scanners.update(_EXPORT_SCANNERS_ELSEWHERE)
+    for mod_name, attr in scanners.items():
+        mod = importlib.import_module(mod_name)
         if inspect.iscoroutinefunction(getattr(mod, attr)):
             async def fake(*a, _b=block_s, **kw):
                 await asyncio.sleep(_b)
@@ -498,6 +505,38 @@ def _install_scanner_fakes(monkeypatch, block_s: float) -> None:
                 time.sleep(_b)
                 return []
         monkeypatch.setattr(mod, attr, fake)
+
+
+def _refuse_every_aws_call(monkeypatch) -> list[str]:
+    """Answer every botocore API call here, before it is signed or sent, and
+    return the operations that were attempted. The export's own account lookup
+    gets a fixed identity; anything else is refused. Placeholder credentials
+    keep client construction off the credential chain (and IMDS)."""
+    import boto3
+    from botocore import handlers
+    from botocore.awsrequest import AWSResponse
+
+    reached: list[str] = []
+
+    def _before_call(model=None, **_kw):
+        op = f"{model.service_model.endpoint_prefix}:{model.name}"
+        if op == "sts:GetCallerIdentity":
+            return AWSResponse(None, 200, {}, None), {
+                "Account": "111122223333", "Arn": "arn:aws:iam::111122223333:user/t",
+                "UserId": "AIDATEST", "ResponseMetadata": {"HTTPStatusCode": 200}}
+        reached.append(op)
+        return AWSResponse(None, 403, {}, None), {
+            "Error": {"Code": "AccessDenied", "Message": "test: no AWS here"},
+            "ResponseMetadata": {"HTTPStatusCode": 403}}
+
+    monkeypatch.setattr(handlers, "BUILTIN_HANDLERS",
+                        [*handlers.BUILTIN_HANDLERS, ("before-call", _before_call)])
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    return reached
 
 
 async def test_export_cost_report_csv_runs_without_freezing_the_loop(monkeypatch, tmp_path):
@@ -528,6 +567,7 @@ async def test_export_cost_report_csv_runs_without_freezing_the_loop(monkeypatch
 
     monkeypatch.setattr(aws, "is_configured", _configured)
     _install_scanner_fakes(monkeypatch, SCANNER_BLOCK_S)
+    reached = _refuse_every_aws_call(monkeypatch)
 
     dest = tmp_path / "nable-report.csv"
     # Freeze what the rest of the suite left on the heap. A full collection over
@@ -547,6 +587,10 @@ async def test_export_cost_report_csv_runs_without_freezing_the_loop(monkeypatch
 
     assert isinstance(out, str) and str(dest) in out, f"export did not write a CSV: {out!r}"
     assert dest.exists(), "export reported success without writing the file"
+    # Every scanner is faked at the cloud boundary, so no scanner reached an
+    # AWS API. idle_resources and idle_rds were left real, and on a machine
+    # with credentials read the developer's own account from this test.
+    assert reached == [], f"a scanner reached AWS: {sorted(set(reached))}"
     assert hb.max_stall < 0.2, (
         f"export_cost_report_csv held the event loop for {hb.max_stall:.2f}s. "
         f"Its synchronous scanners run inline on the loop, and the gather has no "

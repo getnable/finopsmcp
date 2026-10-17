@@ -44,7 +44,7 @@ def _format_ledger(rows, days: int = 30) -> str:
     found_total = sum(r["estimated"] or 0 for r in found_rows)
     acted_total = sum(r["estimated"] or 0 for r in acted_rows)
     verified_total = sum(
-        r.get("verified") or r["estimated"] or 0
+        r.get("verified") or 0
         for r in verified_rows
     )
 
@@ -181,10 +181,14 @@ def test_verified_uses_verified_amount_over_estimated():
     assert "1 confirmed" in result
 
 
-def test_verified_falls_back_to_estimated_when_no_verified():
+def test_verified_without_a_measured_value_counts_zero_not_the_estimate():
+    # A verified row realizes its measured value only. The ledger used to fall
+    # back to the estimate here, and with `or` it did so for a measured $0 too.
     rows = [_row("verified", "EC2 downsize", estimated=300.0, verified=None)]
     result = _format_ledger(rows)
-    assert "$300/mo" in result
+    assert "VERIFIED: $0/mo" in result
+    rows = [_row("verified", "EC2 downsize", estimated=300.0, verified=0.0)]
+    assert "VERIFIED: $0/mo" in _format_ledger(rows)
 
 
 # ---------------------------------------------------------------------------

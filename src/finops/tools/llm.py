@@ -9,6 +9,18 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _llm_unread(data: dict) -> dict:
+    """get_all_llm_costs says when it read nothing (no provider connected, or
+    every one failed). The tools below summarised its total_usd 0.0 anyway:
+    "$0 of AI spend", "Token spend is small. Stay on pay-as-you-go"."""
+    out = {"error": data["error"],
+           "note": "No AI spend was read. This is not a finding of zero AI spend."}
+    for key in ("not_configured", "failed_providers"):
+        if data.get(key):
+            out[key] = data[key]
+    return out
+
+
 @_srv.mcp.tool()
 async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = None,
                                     unit: str = "auto") -> dict:
@@ -58,8 +70,10 @@ async def get_llm_costs(
     end_date: str | None = None,
 ) -> dict:
     """
-    Aggregate AI/LLM spend across all configured providers, OpenAI, Anthropic,
-    AWS Bedrock, Azure OpenAI, and Vertex AI.
+    Aggregate AI/LLM spend across all configured providers: OpenAI, Anthropic,
+    AWS Bedrock, Vertex AI, OpenRouter and a LiteLLM proxy. Azure OpenAI is not
+    read. A LiteLLM proxy's spend is listed under gateway_overlap, not added to
+    total_usd, when a provider it forwards to is also read.
 
     Shows total spend, breakdown by provider, breakdown by model, daily trend,
     and model-switching recommendations to reduce costs.
@@ -206,6 +220,8 @@ async def get_llm_commitment_analysis(days: int = 30) -> dict:
             load_contracts, analyze_portfolio, recommend_commitment,
             total_tokens, EXAMPLE_CONTRACTS)
         data = await _srv.asyncio.to_thread(get_all_llm_costs, None, None, days)
+        if data.get("error"):
+            return _llm_unread(data)
         contracts = load_contracts()
 
         if not contracts:
@@ -305,6 +321,8 @@ async def get_ai_spend_monitor(days: int = 30) -> dict:
         from ..analytics.llm_commitments import load_contracts, analyze_portfolio, total_tokens
         from ..anomaly.detector import detect_for_series
         data = await _srv.asyncio.to_thread(get_all_llm_costs, None, None, days)
+        if data.get("error"):
+            return _llm_unread(data)
         series = [float(d.get("total_usd", 0.0)) for d in (data.get("daily") or [])
                   if isinstance(d, dict)]
 
@@ -636,6 +654,8 @@ async def get_ai_kpis(
         from ..analytics.ai_kpis import full_kpi_report
 
         llm_result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
+        if llm_result.get("error"):
+            return _llm_unread(llm_result)
 
         # Fetch Anthropic data separately for cache analysis
         anthropic_data = None
@@ -710,6 +730,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         from ..analytics.ai_optimizer import build_optimization_plan
 
         llm_result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
+        if llm_result.get("error"):
+            return _llm_unread(llm_result)
 
         anthropic_data = None
         if await anth_configured():

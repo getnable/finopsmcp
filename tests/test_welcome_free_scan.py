@@ -100,3 +100,26 @@ def test_no_cost_explorer_line_without_aws(monkeypatch, capsys):
     assert W._value_moment_body(demo=False) is False
     assert "Cost Explorer" not in capsys.readouterr().out
     assert called == []
+
+
+def test_the_free_scan_calls_recoverable_only_what_it_measured(_aws, monkeypatch, capsys):
+    """The first number someone sees. It was the audit's whole total, the
+    findings the audit files as inferences included: a CPU-only "idle"
+    m5.large ($70.08) beside an unattached volume ($50) read "Recoverable
+    $120.08/mo". `nable scan` and `nable brief` say $50 of that is measured."""
+    from finops import server
+
+    async def summary():
+        return {"error": "AccessDeniedException"}
+
+    report = _report(total_estimated_monthly_savings=120.08, findings=[
+        {"waste_type": "unattached_ebs_volume", "region": "us-east-1",
+         "estimated_monthly_savings": 50.0, "kind": "recommendation"},
+        {"waste_type": "idle_ec2_low_cpu", "region": "us-east-1",
+         "estimated_monthly_savings": 70.08, "kind": "investigation"}])
+    monkeypatch.setattr(server, "get_cost_summary", summary)
+    monkeypatch.setattr(W, "_free_waste_scan", lambda: report)
+    assert W._value_moment_body(demo=False) is True
+    out = capsys.readouterr().out
+    assert "$120.08/mo" not in out, out
+    assert "$50.00/mo" in out and "$70.08/mo to confirm" in out, out

@@ -1,7 +1,7 @@
 """
 CloudWatch orphaned alarm audit.
 
-Standard alarms cost $0.10/alarm/month. Composite alarms cost $0.30/alarm/month.
+Standard alarms cost $0.10/alarm/month. Composite alarms cost $0.50/alarm/month.
 Alarms on deleted resources (terminated EC2 instances, deleted SQS queues,
 deprovisioned endpoints) stay in INSUFFICIENT_DATA state and keep billing.
 
@@ -109,27 +109,54 @@ def _get_dimension_value(alarm: dict, name: str) -> str | None:
     return None
 
 
-def _instance_exists(ec2: Any, instance_id: str) -> bool:
+# The error codes that mean the resource is gone. Any other failure (denied,
+# throttled, a network error) says nothing about it: both checks used to
+# return False on every exception, and a denied ec2:DescribeInstances made
+# each EC2 alarm "confirmed dead", a measured, high-confidence delete.
+_INSTANCE_GONE_CODES = frozenset({"InvalidInstanceID.NotFound", "InvalidInstanceID.Malformed"})
+_QUEUE_GONE_CODES = frozenset({"AWS.SimpleQueueService.NonExistentQueue", "QueueDoesNotExist"})
+
+
+def _error_code(exc: Exception) -> str:
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code")
+        if code:
+            return str(code)
+    return type(exc).__name__
+
+
+def _instance_exists(ec2: Any, instance_id: str) -> bool | None:
+    """True if the instance exists, False if it is gone, None if unknown."""
+    return _check_instance(ec2, instance_id)[0]
+
+
+def _check_instance(ec2: Any, instance_id: str) -> tuple[bool | None, str | None]:
     try:
         resp = ec2.describe_instances(InstanceIds=[instance_id])
-        reservations = resp.get("Reservations", [])
-        for r in reservations:
-            for inst in r.get("Instances", []):
-                state = inst.get("State", {}).get("Name", "")
-                if state not in ("terminated", ""):
-                    return True
-        return False
-    except Exception:
-        return False
+    except Exception as exc:
+        code = _error_code(exc)
+        return (False, None) if code in _INSTANCE_GONE_CODES else (None, code)
+    for r in resp.get("Reservations", []):
+        for inst in r.get("Instances", []):
+            state = inst.get("State", {}).get("Name", "")
+            if state not in ("terminated", ""):
+                return True, None
+    return False, None
 
 
-def _queue_exists(sqs: Any, queue_name: str, region: str, account_id: str = "") -> bool:
-    """Check if an SQS queue exists by trying to get its URL."""
+def _queue_exists(sqs: Any, queue_name: str, region: str, account_id: str = "") -> bool | None:
+    """Check if an SQS queue exists by trying to get its URL. None if unknown."""
+    return _check_queue(sqs, queue_name)[0]
+
+
+def _check_queue(sqs: Any, queue_name: str) -> tuple[bool | None, str | None]:
     try:
         sqs.get_queue_url(QueueName=queue_name)
-        return True
-    except Exception:
-        return False
+        return True, None
+    except Exception as exc:
+        code = _error_code(exc)
+        return (False, None) if code in _QUEUE_GONE_CODES else (None, code)
 
 
 def _audit_region(session_or_none: Any, region: str) -> dict:
@@ -155,28 +182,34 @@ def _audit_region(session_or_none: Any, region: str) -> dict:
         days_insufficient = None
         likely_orphaned = False
         resource_exists: bool | None = None
+        check_error: str | None = None
 
         if state == "INSUFFICIENT_DATA":
             days_insufficient = _days_in_state(alarm, now)
             if days_insufficient is not None and days_insufficient >= _INSUFFICIENT_DATA_THRESHOLD_DAYS:
                 likely_orphaned = True
 
-                # Verify resource existence for known namespaces
+                # Verify resource existence for known namespaces. A check that
+                # could not be read leaves resource_exists None: unknown, not gone.
                 if namespace == _EC2_NAMESPACE:
                     instance_id = _get_dimension_value(alarm, "InstanceId")
                     if instance_id:
-                        resource_exists = _instance_exists(ec2, instance_id)
-                        if not resource_exists:
-                            likely_orphaned = True
+                        resource_exists, check_error = _check_instance(ec2, instance_id)
 
                 elif namespace == _SQS_NAMESPACE:
                     queue_name = _get_dimension_value(alarm, "QueueName")
                     if queue_name:
-                        resource_exists = _queue_exists(sqs, queue_name, region)
-                        if not resource_exists:
-                            likely_orphaned = True
+                        resource_exists, check_error = _check_queue(sqs, queue_name)
+
+        if check_error:
+            # Keyed on the alarm, so a reader can tell "could not check" from
+            # "not an EC2 or SQS alarm".
+            alarm_extra = {"resource_check_error": check_error}
+        else:
+            alarm_extra = {}
 
         results.append({
+            **alarm_extra,
             "alarm_name": alarm_name,
             "namespace": namespace,
             "metric_name": metric_name,
@@ -235,7 +268,7 @@ async def audit_cloudwatch_orphaned_alarms(
     orphaned. For EC2 and SQS metric alarms, verifies the backing resource still
     exists. Returns a safe-to-delete assessment per alarm.
 
-    Pricing: $0.10/alarm/month (standard), $0.30/alarm/month (composite).
+    Pricing: $0.10/alarm/month (standard), $0.50/alarm/month (composite).
 
     Args:
         aws_client: AWSConnector instance (provides boto3 session).
@@ -256,18 +289,17 @@ async def audit_cloudwatch_orphaned_alarms(
     """
     import asyncio
 
-    loop = asyncio.get_event_loop()
     session = getattr(aws_client, "_session", None)
 
     if not regions:
         try:
-            regions = await loop.run_in_executor(None, _get_opted_in_regions, session)
+            regions = await asyncio.to_thread(_get_opted_in_regions, session)
         except Exception as exc:
             log.warning("Could not list regions, falling back to us-east-1: %s", exc)
             regions = ["us-east-1"]
 
     tasks = [
-        loop.run_in_executor(None, _audit_region, session, region)
+        asyncio.to_thread(_audit_region, session, region)
         for region in regions
     ]
     region_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -314,7 +346,7 @@ async def audit_cloudwatch_orphaned_alarms(
             title="Delete CloudWatch alarms whose target resource is gone",
             why=(f"{len(confirmed_dead)} alarm(s) point at an EC2 instance or SQS queue that no "
                  "longer exists. They sit in INSUFFICIENT_DATA, can never recover, and still "
-                 "bill at $0.10/alarm/mo (standard) or $0.30/alarm/mo (composite). That is pure "
+                 "bill at $0.10/alarm/mo (standard resolution). That is pure "
                  "waste."),
             evidence=MEASURED,
             confidence="high",

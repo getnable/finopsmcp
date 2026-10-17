@@ -4,6 +4,10 @@ Banked = money that actually left the bill (verified rows, measured amount only)
 kept clearly distinct from predicted/found opportunity. get_nable_roi leads with
 it, verify_savings surfaces the cumulative figure, quality_signal exposes an
 explicit banked alias.
+
+"Left the bill" means measured on it: verified_basis == "bill_measured" (CUR
+before and after). A verified change priced at the effective rate or list price
+is verified, not banked, so the fixtures that mean banked say so.
 """
 from __future__ import annotations
 
@@ -37,7 +41,7 @@ def ledger(monkeypatch):
 _seq = [0]
 
 
-def _seed(source, status, est=100.0, ver=None, n=1):
+def _seed(source, status, est=100.0, ver=None, n=1, basis=None):
     from finops.storage.db import get_engine, savings_recommendations
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
@@ -46,6 +50,7 @@ def _seed(source, status, est=100.0, ver=None, n=1):
             conn.execute(savings_recommendations.insert().values(
                 source=source, provider="aws", status=status,
                 estimated_monthly_savings_usd=est, verified_monthly_savings_usd=ver,
+                verified_basis=basis,
                 generated_at=now, dedup_key=f"vb{_seq[0]}", resource_id=f"vb{_seq[0]}",
             ))
 
@@ -58,7 +63,7 @@ def _free_plan(monkeypatch):
 
 def test_roi_leads_with_verified_banked(ledger, monkeypatch):
     _free_plan(monkeypatch)
-    _seed("rightsizing", "verified", est=120.0, ver=100.0, n=1)
+    _seed("rightsizing", "verified", est=120.0, ver=100.0, n=1, basis="bill_measured")
     out = asyncio.run(server.get_nable_roi())
     # hero line appears before the pipeline breakdown
     summary = out["summary"]
@@ -72,7 +77,8 @@ def test_roi_leads_with_verified_banked(ledger, monkeypatch):
 def test_roi_banked_uses_measured_not_estimate(ledger, monkeypatch):
     """A verified row banks its MEASURED amount, never the (larger) predicted estimate."""
     _free_plan(monkeypatch)
-    _seed("idle", "verified", est=500.0, ver=300.0, n=1)   # predicted 500, banked 300
+    _seed("idle", "verified", est=500.0, ver=300.0, n=1,   # predicted 500, banked 300
+          basis="bill_measured")
     out = asyncio.run(server.get_nable_roi())
     assert out["verified_banked_monthly_usd"] == 300.0     # measured, not 500
     assert out["found_monthly_usd"] >= 500.0               # predicted still shown separately
@@ -115,17 +121,35 @@ def test_verify_savings_reports_banked(ledger, monkeypatch):
 
     out = asyncio.run(server.verify_savings())
     assert out["verified_count"] == 1
-    assert out["verified_banked_monthly_usd"] == 42.5
+    # The deletion is confirmed, but with no CUR there is no bill before and
+    # after: the $42.50 is the volume priced at list rate. Verified, not banked.
+    # This used to report it as banked and "confirmed off your bill".
+    assert out["newly_verified"][0]["verified_basis"] != "bill_measured"
+    assert out["cumulative_verified_monthly_usd"] == 42.5
+    assert out["verified_estimated_monthly_usd"] == 42.5
+    assert out["verified_banked_monthly_usd"] == 0.0
     assert "banked" in out["message"].lower()
+    assert "confirmed off your bill" not in out["message"]
 
 
 # ── quality_signal exposes an explicit banked alias ───────────────────────────
 
 def test_quality_signal_has_banked_alias(ledger):
     from finops.recommendations.savings_tracker import quality_signal
-    _seed("rightsizing", "verified", est=100.0, ver=80.0, n=1)
+    _seed("rightsizing", "verified", est=100.0, ver=80.0, n=1, basis="bill_measured")
     q = quality_signal()
     assert q["verified_banked_monthly_usd"] == 80.0
     assert q["verified_banked_annual_usd"] == 960.0
-    # banked alias matches the existing verified figure exactly
+    # banked alias matches the existing verified figure exactly when all of it
+    # was measured on the bill
     assert q["verified_banked_monthly_usd"] == q["verified_monthly_usd"]
+
+
+def test_quality_signal_banks_only_what_the_bill_measured(ledger):
+    from finops.recommendations.savings_tracker import quality_signal
+    _seed("rightsizing", "verified", est=100.0, ver=80.0, n=1, basis="bill_measured")
+    _seed("graviton", "verified", est=30.0, ver=30.0, n=1, basis="list_price")
+    q = quality_signal()
+    assert q["verified_monthly_usd"] == 110.0
+    assert q["verified_banked_monthly_usd"] == 80.0
+    assert q["verified_estimated_monthly_usd"] == 30.0

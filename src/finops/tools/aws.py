@@ -143,14 +143,17 @@ def get_data_transfer_costs(
             end=ed.isoformat(),
             threshold_usd=threshold_usd,
         )
-        findings.sort(key=lambda x: x.get("monthly_cost", 0), reverse=True)
-        total_cost = sum(f.get("monthly_cost", 0) for f in findings)
-        total_potential_savings = sum(f.get("estimated_monthly_savings", 0) for f in findings)
+        findings.sort(key=lambda x: x.get("period_cost", 0), reverse=True)
+        total_cost = sum(f.get("period_cost", 0) for f in findings)
 
+        # No savings total: this used to report 30% of the spend as
+        # estimated_reducible_savings, a figure with no source.
         return {
             "period": {"start": sd.isoformat(), "end": ed.isoformat()},
             "total_transfer_cost": round(total_cost, 2),
-            "estimated_reducible_savings": round(total_potential_savings, 2),
+            "savings_note": ("Spend over the period, not a saving. Reducing transfer is an "
+                             "architecture change (VPC endpoints, same-AZ placement, "
+                             "CloudFront); its saving is not estimated here."),
             "count": len(findings),
             "findings": findings,
         }

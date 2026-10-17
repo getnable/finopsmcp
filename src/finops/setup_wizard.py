@@ -27,6 +27,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 
 def _parse_combined_aws_paste(combined: str) -> tuple[str, str] | None:
@@ -1898,9 +1899,23 @@ settings:
 """
 
 
-def setup_slack_bot() -> None:
+def setup_slack_bot() -> bool | None:
     """Configure the conversational Slack bot (Socket Mode, two-way)."""
     _section("Slack: Conversational Bot (questions, RCA, draft PRs and tickets)")
+
+    # The bot left this package for nable-enterprise (9c08084): no slack_bot
+    # module, no finops-slack console script, no [slack] extra. This used to
+    # collect three tokens anyway and end with "Start it: finops-slack", a
+    # command that does not exist here.
+    import importlib.util
+    if importlib.util.find_spec("finops.slack_bot") is None:
+        print("  The two-way @nable bot runs in hosted nable and in the self-hosted")
+        print("  deployment (https://getnable.com/docs, docs/DEPLOY.md), not in this")
+        print("  open-source package, so nothing is set up here.")
+        print("  From this install, choose 1 or 2 for the cost alerts and reports you")
+        print("  send from nable:  nable setup slack")
+        print()
+        return False
 
     # Surface the tier up front so the user learns it BEFORE the 2-minute OAuth
     # setup, not on the first @mention. Cost queries, anomalies and one-way
@@ -2024,7 +2039,7 @@ def _print_delivery_note() -> None:
     print(f"  {DELIVERY_NOTE}\n")
 
 
-def setup_slack() -> None:
+def setup_slack() -> bool | None:
     _section("Slack: cost alerts and reports, sent when you ask")
     _print_delivery_note()
     print("  Choose method:")
@@ -2035,8 +2050,7 @@ def setup_slack() -> None:
     from .security.vault import Vault
     vault = Vault.default()
     if choice == "3":
-        setup_slack_bot()
-        return
+        return setup_slack_bot()
     import httpx
     text = "nable test message: this channel will get the cost alerts and reports you send from nable."
     if choice == "1":
@@ -2505,6 +2519,17 @@ def _run_guard(parsed) -> None:
             "hook_form": guard.hook_form(),
         })
         print()
+        dead = guard.broken_hook_command(path)
+        if dead and guard.hook_pin(dead) is not None:
+            # No `finops` stays on PATH, so the hook is the uvx form, and there
+            # is no uvx: Claude Code would skip it on every call, silently.
+            print(f"  {amber('✗')} Hook written to {path}, but it cannot start here: it runs")
+            print("    uvx, and uvx is not on PATH, so Claude Code would skip it, silently.")
+            print("    Install uv (https://docs.astral.sh/uv/) and it starts as written, or")
+            print("    install nable so a `finops` stays on PATH (pipx install finops-mcp)")
+            print("    and run this again.")
+            print()
+            return
         if was_broken:
             print(f"  {green('✓')} Guard repaired: the hooked command no longer existed → {path}")
         elif was_unpinned:
@@ -2662,6 +2687,43 @@ def _run_guard(parsed) -> None:
                   file=sys.stderr)
             raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
+        # An explicit check says when the policy it judged with is not the one
+        # written down. The hook judges with the defaults silently, on every
+        # tool call (its fail-safe); here a broken nable.policy.yaml or a bad
+        # FINOPS_POLICY_* value is named, with the fix and what applied
+        # instead, on stderr, and the check exits 1.
+        from .policy import in_effect_text, policy_report
+        report = policy_report()
+        if report["broken"]:
+            def _lines(text: str) -> list[str]:
+                # Paths stay whole: a copied path must work when pasted.
+                return textwrap.wrap(text, 74, break_on_hyphens=False,
+                                     break_long_words=False)
+            print(f"\n  {amber('The guard policy could not be used as written:')}",
+                  file=sys.stderr)
+            for problem in report["problems"]:
+                for i, line in enumerate(_lines(problem)):
+                    print(f"  {'- ' if i == 0 else '  '}{line}", file=sys.stderr)
+            for i, line in enumerate(_lines(f"Fix: {report['fix']}.")):
+                print(f"  {line}" if i == 0 else f"       {line}", file=sys.stderr)
+            for i, line in enumerate(_lines(
+                    f"In effect for this check: {in_effect_text(report)}.")):
+                print(f"  {line}" if i == 0 else f"    {line}", file=sys.stderr)
+        if getattr(parsed, "guard_json", False):
+            # The verdict as data, for a pipeline vetting a command. "allow" is
+            # the guard having no opinion; infra says whether it classified it.
+            hit = guard.classify_command(cmd) if verdict is None else None
+            doc = ({"command": cmd, **verdict} if verdict is not None else
+                   {"command": cmd, "decision": "allow", "infra": hit is not None,
+                    "action_type": hit[1] if hit else None,
+                    "reason": ("reversible and in policy: the guard stays silent" if hit
+                               else "not an infra-mutating command: the guard stays silent")})
+            doc.setdefault("infra", True)
+            doc["policy"] = report
+            print(json.dumps(doc, indent=2, default=str))
+            if report["broken"]:
+                raise SystemExit(1)
+            return
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
@@ -2673,6 +2735,8 @@ def _run_guard(parsed) -> None:
         else:
             print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
         print()
+        if report["broken"]:
+            raise SystemExit(1)
         return
 
     # status (default)
@@ -2691,6 +2755,12 @@ def _run_guard(parsed) -> None:
     blocking: list[bool] = []
     narrow: list[bool] = []
     no_edits: list[bool] = []
+    unfetchable: list[tuple[bool, str, str]] = []
+    from .guard_adapters import release_problem
+
+    def _checking(line: str) -> None:
+        # The one slow case: uvx installing a release it has not cached yet.
+        print(dim(f"  ({line} ...)"), file=sys.stderr, flush=True)
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2699,9 +2769,16 @@ def _run_guard(parsed) -> None:
             # Claude Code, so reporting a plain "installed" here would tell
             # someone they are guarded at the moment they stopped being.
             broken = guard.broken_hook_command(p)
+            stuck = None if broken else release_problem("claude", is_global, _checking)
             if broken:
                 stale.append(is_global)
                 state = amber("installed, but broken")
+            elif stuck:
+                # The same silence with uvx present: the release it pins cannot
+                # be installed, so the hook exits 0 and checks nothing.
+                unfetchable.append((is_global, stuck[0], stuck[1]))
+                state = amber(f"installed, but uvx cannot install finops-mcp {stuck[0]}, "
+                              "so the hook cannot start")
             elif guard.unpinned_hook_command(p):
                 unpinned.append(is_global)
                 state = amber("installed, unpinned")
@@ -2723,12 +2800,18 @@ def _run_guard(parsed) -> None:
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
+    plugin_stuck = None
     if plugin["enabled"]:
         # The plugin's hook is in no settings file; enabledPlugins is where
         # Claude Code records it.
+        from .guard_release import plugin_problem
+        plugin_stuck = plugin_problem(_checking) if plugin["runs"] else None
         if not plugin["runs"]:
             state = amber("on (via the Claude Code plugin), but uvx is not on PATH, "
                           "so it cannot start")
+        elif plugin_stuck:
+            state = amber(f"on (via the Claude Code plugin), but its hook cannot start "
+                          f"finops-mcp {plugin_stuck[0]}")
         elif any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
             state = green("on (via the Claude Code plugin)") + dim(
                 ", standing aside wherever the settings hook above judges")
@@ -2736,7 +2819,7 @@ def _run_guard(parsed) -> None:
             state = green("on (via the Claude Code plugin)")
         print(f"  {'plugin':<8} {state}   {dim(str(plugin['enabled']))}")
     from .guard_adapters import status_lines
-    other_agents = status_lines()
+    other_agents = status_lines(_checking)
     if other_agents:
         print()
         for line in other_agents:
@@ -2750,6 +2833,43 @@ def _run_guard(parsed) -> None:
             print(f"  {cyan('nable guard install' + (' --global' if is_global else ''))}")
         print()
 
+    if plugin_stuck:
+        print("  " + amber(f"The plugin's guard hook runs finops-mcp {plugin_stuck[0]}, which "
+                           "uvx cannot install here,"))
+        print("  " + amber("so it checks nothing. uvx says:"))
+        for line in textwrap.wrap(plugin_stuck[1], 72):
+            print(dim(f"    {line}"))
+        print(dim("  The hook exits 0 when it cannot start, so Claude Code never blocks on it"))
+        print(dim("  and shows nothing; the plugin's MCP server pins the same release, so"))
+        print(dim("  /mcp lists nable as failed. Until the plugin pins a release uvx can"))
+        print(dim("  install (/plugin marketplace update nable), a settings hook judges in"))
+        print(dim("  its place:"))
+        from .guard_adapters import settings_hook_fix
+        print(f"  {cyan(settings_hook_fix(plugin_stuck[0], ' --global --force'))}")
+        print()
+    if unfetchable:
+        from .guard_adapters import settings_hook_fix
+        for is_global, release, why in unfetchable:
+            where = "global" if is_global else "project"
+            print("  " + amber(f"The Claude Code {where} hook runs finops-mcp {release}, which "
+                               "uvx cannot install here,"))
+            print("  " + amber("so the guard is not running there. uvx says:"))
+            for line in textwrap.wrap(why, 72):
+                print(dim(f"    {line}"))
+            print(dim("  Claude Code lets each call through when a hook cannot start, "
+                      "silently. Fix:"))
+            print(f"  {cyan(settings_hook_fix(release, ' --global' if is_global else ''))}")
+            print()
+    no_uvx = [g for g in stale
+              if guard.hook_pin(guard.broken_hook_command(guard._settings_path(g)) or "")]
+    stale = [g for g in stale if g not in no_uvx]
+    if no_uvx:
+        # A reinstall would write the same uvx hook: uv is the fix.
+        print(f"  {amber('The hook runs uvx, and uvx is not on PATH, so the guard is not running.')}")
+        print(dim("  Claude Code skips a hook it cannot execute, silently. Install uv"))
+        print(dim("  (https://docs.astral.sh/uv/) and it starts as written, or install nable so"))
+        print(dim("  a `finops` stays on PATH (pipx install finops-mcp), then:"))
+        _fix(no_uvx)
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))
@@ -2784,10 +2904,10 @@ def _run_guard(parsed) -> None:
     print(dim("  Pause:    nable guard off / nable guard on (every hook, the plugin's too)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
-    print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
-    print(dim("  In Claude Code the hook sees Bash and MCP tool calls; in Cursor and Codex, shell"))
-    print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
-    print(dim("  check_action_policy before acting."))
+    print(dim("            nable guard install --all       (every supported agent found here)"))
+    print(dim("  In Claude Code, Cursor and Codex CLI the hook sees shell commands and MCP tool"))
+    print(dim("  calls; in Copilot, Gemini CLI and Cline, shell commands. Other MCP agents get"))
+    print(dim("  the same gate as a tool: the agent calls check_action_policy before acting."))
     print()
 
 
@@ -2908,10 +3028,16 @@ def _guard_doctor(parsed) -> None:
         name = f"{labels.get(r['harness'], r['harness']):<{width}} {r['scope']:<8}"
         if not r["installed"]:
             state = dim("not installed")
+        elif r.get("via") == "plugin" and r.get("problem"):
+            state = amber(f"on (via the Claude Code plugin), but its hook cannot start "
+                          f"finops-mcp {r['release']}: uvx cannot install it")
         elif r.get("via") == "plugin":
             state = (green("on (via the Claude Code plugin)") + ", sees Bash + MCP"
                      + (" + file edits" if r.get("editor") else "") if r["runs"]
                      else amber("on (via the Claude Code plugin), but uvx is not on PATH"))
+        elif r.get("problem"):
+            state = amber(f"installed, but uvx cannot install finops-mcp {r['release']}, "
+                          "so the hook cannot start")
         elif not r.get("runs"):
             state = amber("installed, but the hooked command no longer exists")
         elif r["harness"] == "claude-code":
@@ -2924,6 +3050,8 @@ def _guard_doctor(parsed) -> None:
             state = green("installed")
             if "mcp" in r:
                 state += ", sees shell" + (" + MCP" if r["mcp"] else "")
+            elif r["harness"] in ("copilot", "gemini", "cline"):
+                state += ", sees shell only, " + amber("not MCP tool calls")
             pin = {"pinned": "pinned to this release", "other": "pinned to another release",
                    "unpinned": amber("unpinned"), "binary": "installed binary"}.get(r.get("pin"))
             if pin:
@@ -3350,6 +3478,17 @@ def _guard_export(parsed) -> None:
         sys.stdout.write(body)
 
 
+# The exit status of a command whose feature is not in this package (`serve`,
+# the hosted dashboard; `credits`, managed-AI credits): 1, with the reason on
+# stderr and nothing on stdout. docs/HEADLESS.md documents it.
+EXIT_NOT_IN_THIS_PACKAGE = 1
+
+
+def _not_in_this_package(message: str) -> NoReturn:
+    print(message, file=sys.stderr)
+    raise SystemExit(EXIT_NOT_IN_THIS_PACKAGE)
+
+
 def _run_credits(parsed) -> None:
     """`finops credits` - the box-side half of the hosting-credit purchase flow.
 
@@ -3362,11 +3501,12 @@ def _run_credits(parsed) -> None:
     try:
         from .billing import credits as _credits
     except ImportError:
-        print(
+        # The same answer as `serve`: nothing was shown or granted, so a
+        # script must not read this as a balance it can act on.
+        _not_in_this_package(
             "Managed-AI credits are a hosted/enterprise feature and aren't part of the\n"
             "open-source nable package. See https://getnable.com."
         )
-        return
     action = getattr(parsed, "action", "show")
     usd = getattr(parsed, "usd", None)
     if action == "grant":
@@ -3497,6 +3637,101 @@ def _post_connect_message(provider: str | None) -> str:
     return f'Done. Restart Claude Desktop, then ask:  "{q}"'
 
 
+def _nable_dirs() -> list[Path]:
+    """The directories nable keeps its own files in, without creating any."""
+    raw = os.environ.get("FINOPS_DATA_DIR", "")
+    dirs = [Path(raw).expanduser()] if raw else []
+    return dirs + [Path.home() / ".finops", Path.home() / ".finops-mcp", Path.home() / ".nable"]
+
+
+def _user_name(uid: int) -> str:
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError):
+        return f"uid {uid}"
+
+
+def _owner_of(path: Path) -> tuple[int, str] | None:
+    """(uid, name) of the nearest existing path at or above `path`, or None
+    where the platform has no uids."""
+    if not hasattr(os, "getuid"):
+        return None
+    for p in (path, *path.parents):
+        try:
+            uid = p.stat().st_uid
+        except OSError:
+            continue
+        return uid, _user_name(uid)
+    return None
+
+
+def _as_refusal(e: BaseException) -> OSError | None:
+    """The file system refusal behind `e`, or None when it is something else.
+
+    A data directory this user cannot write surfaces two ways: as the
+    PermissionError itself, or, when SQLite meets it first, as "unable to
+    open database file" (which is only a refusal when the directory is there
+    and is not this user's to write)."""
+    import errno as _errno
+    if isinstance(e, PermissionError) or (isinstance(e, OSError) and e.errno == _errno.EROFS):
+        return e
+    if type(e).__name__ == "OperationalError" and "unable to open database file" in str(e):
+        for d in _nable_dirs():
+            owner = _owner_of(d) if d.is_dir() else None
+            if owner is not None and (owner[0] != os.getuid() or not os.access(d, os.W_OK)):
+                return PermissionError(_errno.EACCES, "Permission denied", str(d / "finops.db"))
+    return None
+
+
+def _cannot_write_message(e: OSError) -> str:
+    """What a permission refusal means and the one step that fixes it.
+
+    The common cause is a `sudo nable ...` run that left nable's data
+    directory owned by root: from then on every command that writes there
+    (doctor, org init, learn, brief) ended in a Python traceback."""
+    raw = e.filename or ""
+    path = Path(raw).expanduser() if raw else None
+    why = e.strerror or type(e).__name__
+    lines = [f"nable cannot write {raw or 'a file it needs'}: {why}."]
+    home = next((d for d in _nable_dirs() if path is not None
+                 and (path == d or d in path.parents)), None)
+    if home is not None:
+        owner = _owner_of(home)
+        me = _user_name(os.getuid()) if hasattr(os, "getuid") else "$USER"
+        if owner is not None and owner[0] != os.getuid():
+            lines.append(f"  {home} belongs to {owner[1]}, not to you; a `sudo nable ...` "
+                         "run leaves it that way.")
+        lines.append(f"  fix: sudo chown -R {me} {home}")
+        lines.append("  or:  point FINOPS_DATA_DIR at a directory you own, "
+                     "then run the command again")
+    else:
+        parent = path.parent if path is not None else Path.cwd()
+        lines.append(f"  fix: check who owns it (ls -ld {parent}) and that you can write "
+                     "there, then run the command again")
+    return "\n".join(lines)
+
+
+def _explains_refusals(fn):
+    """The CLI's entry: a file system refusal ends in what it means and how
+    to fix it rather than a traceback; FINOPS_DEBUG=1 keeps the traceback.
+    A decorator, so `main` stays the function the CLI's own tests read."""
+    import functools
+
+    @functools.wraps(fn)
+    def run(args: list[str] | None = None) -> None:
+        try:
+            fn(args)
+        except Exception as e:
+            refusal = _as_refusal(e)
+            if refusal is None or os.environ.get("FINOPS_DEBUG") == "1":
+                raise
+            print(_cannot_write_message(refusal), file=sys.stderr)
+            raise SystemExit(1) from None
+    return run
+
+
+@_explains_refusals
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -3620,7 +3855,10 @@ def main(args: list[str] | None = None) -> None:
 
         def format_help(self) -> str:
             sub = self._sub_action()
-            if sub is None:
+            # The grouped layout is the top level's. Subparsers inherit this
+            # class, so `nable org --help` (learn, pack) printed its actions
+            # under "other" beside the top level's `setup` and --version.
+            if sub is None or self.prog != "nable":
                 return super().format_help()
             helps = {c.dest: (c.help or "") for c in sub._choices_actions}
             registered = list(sub.choices.keys())
@@ -3757,9 +3995,35 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
     sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
-    up_p = sub.add_parser("upgrade", help="Upgrade nable: the finops CLI, plus the editor/Claude Desktop MCP pin")
+    up_p = sub.add_parser(
+        "upgrade",
+        help="Upgrade nable: the CLI, the finops-mcp pin in your editors' MCP configs, "
+             "and the guard hooks",
+        description=(
+            "Upgrade nable to the latest finops-mcp on PyPI (or VERSION), in three places:\n"
+            "\n"
+            "  1. the finops/nable CLI in this Python environment (pip install -U). A uv\n"
+            "     tool, pipx or editable install is left alone and gets the command to run.\n"
+            "  2. the finops-mcp==<version> pin in the MCP configs nable setup writes:\n"
+            "     Claude Desktop (claude_desktop_config.json), Cursor (~/.cursor/mcp.json)\n"
+            "     and Claude Code (~/.claude.json, user and per-project entries). The new\n"
+            "     release is cached with uvx first, so no editor waits on a download.\n"
+            "  3. the guard hooks `nable guard install` wrote with a finops-mcp==<version>\n"
+            "     pin: Claude Code, Cursor, Codex CLI, GitHub Copilot CLI, Gemini CLI and\n"
+            "     Cline, user-level and this project's. The new release's own\n"
+            "     `guard install` re-pins each one in place.\n"
+            "\n"
+            "An entry or hook with no finops-mcp==<version> pin (one you wrote by hand,\n"
+            "an unpinned uvx line, a binary path) is left as it is. The Claude Code\n"
+            "plugin's hook belongs to the plugin: /plugin marketplace update nable.\n"
+            "\n"
+            "Exit status: 0 upgraded or nothing to do; 1 PyPI did not answer, the new\n"
+            "release could not be cached (nothing was re-pinned), or a pin did not move."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
-    cr_p = sub.add_parser("credits", help="Managed-AI credit balance for this instance (show / grant / budget)")
+    cr_p = sub.add_parser("credits", help="Managed-AI credit balance (hosted nable only; exits 1 here)")
     cr_p.add_argument("action", nargs="?", default="show", choices=["show", "grant", "budget"],
                       help="show = balance, grant = add a purchased top-up, budget = set the monthly allowance")
     cr_p.add_argument("usd", nargs="?", type=float, default=None, help="Dollar amount for grant/budget")
@@ -3787,11 +4051,12 @@ def main(args: list[str] | None = None) -> None:
 
     serve_p = sub.add_parser(
         "serve",
-        help="Start the web dashboard (hosted nable only; see --help)",
+        help="Start the web dashboard (hosted nable only; exits 1 here)",
         description=(
             "Start the team web dashboard. The dashboard, the scheduler that pushes "
             "digests on a timer and the two-way Slack bot are part of hosted nable, "
-            "not the open-source package: here this command says so and exits. The "
+            "not the open-source package: here this command says so on stderr and "
+            "exits 1. The "
             "open-source product is the MCP server in your editor; it sends reports "
             "and alerts to Slack or email when you ask (send_report_now, "
             "send_digest_now)."
@@ -3811,7 +4076,18 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
-    sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
+    doctor_p = sub.add_parser("doctor", help="Check all connectors and credentials (alias for finops-doctor)")
+    # The same flags finops-doctor takes: `nable doctor --json` was refused as
+    # an unrecognized argument while every other read command accepts --json.
+    # --hours and --limit default to None so doctor.main keeps the one default.
+    doctor_p.add_argument("--json", dest="doctor_json", action="store_true",
+                          help="One JSON list of checks on stdout; exit 1 when any check failed")
+    doctor_p.add_argument("--audit", dest="doctor_audit", action="store_true",
+                          help="Print vault audit log entries instead of running health checks")
+    doctor_p.add_argument("--hours", dest="doctor_hours", type=int, default=None,
+                          help="With --audit: hours of audit log to show (default: 24)")
+    doctor_p.add_argument("--limit", dest="doctor_limit", type=int, default=None,
+                          help="With --audit: max entries to show (default: 50)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
@@ -3845,8 +4121,8 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
-                              "print JSON")
+                         help="With 'check', 'report', 'verify-log', 'doctor' or "
+                              "'reconcile': print JSON")
     guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
                          help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
     guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
@@ -4091,8 +4367,16 @@ def main(args: list[str] | None = None) -> None:
         print("\n  Checking AWS credential scope...\n")
         result = check_credential_scope()
         if "error" in result:
+            # A check that could not run is not a pass: a script gating on
+            # this read exit 0 as "the key is read-only".
             _err(result["error"])
-            return
+            print("  Nothing was checked: this needs AWS credentials that resolve here.",
+                  file=sys.stderr)
+            print("  Next: `nable setup aws` to connect a key, or `aws configure sso` /",
+                  file=sys.stderr)
+            print("  `aws configure` (or set AWS_PROFILE), then run "
+                  "`nable setup aws --check-scope` again.", file=sys.stderr)
+            raise SystemExit(1)
         print(f"  Account:      {result['account_id']}")
         print(f"  Identity:     {result['identity_arn']}")
         print(f"  Correctly scoped: {'✓ Yes' if result['scoped_correctly'] else '✗ No'}")
@@ -4109,15 +4393,23 @@ def main(args: list[str] | None = None) -> None:
         elif not result.get("required_denied"):
             print("\n  ✓ Credentials are read-only and correctly scoped for nable.")
         print()
+        if not result.get("scoped_correctly"):
+            # Missing permissions or write access: the answer to "is this key
+            # read-only and enough?" is no, and a pipeline reads the exit code.
+            raise SystemExit(1)
         return
     elif parsed.cmd == "claude":
         _configure_claude_desktop()
         return
     elif parsed.cmd == "upgrade":
-        _run_upgrade(getattr(parsed, "version", ""))
+        _code = _run_upgrade(getattr(parsed, "version", ""))
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "aws-cur":
-        _run_aws_cur_setup()
+        _code = _run_aws_cur_setup()
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "license":
         raise SystemExit(_run_license_setup(getattr(parsed, "key", "")))
@@ -4131,7 +4423,9 @@ def main(args: list[str] | None = None) -> None:
                                         getattr(parsed, "yes", False),
                                         getattr(parsed, "dry_run", False)))
     elif parsed.cmd in ("license-status", "whoami", "plan"):
-        _run_license_status()
+        _code = _run_license_status()
+        if _code:
+            raise SystemExit(_code)
         return
     elif parsed.cmd == "serve":
         if getattr(parsed, "demo", False):
@@ -4148,13 +4442,15 @@ def main(args: list[str] | None = None) -> None:
         try:
             from .server_web import run_server, set_connectors
         except ImportError:
-            print(
+            # Nothing was served. This is the container image's default
+            # command, and exit 0 read as "finished cleanly" to `docker run`,
+            # to a supervisor and to any script that started it.
+            _not_in_this_package(
                 "The local web dashboard has been removed from the open-source nable package.\n"
                 "It's now a hosted/enterprise feature. The local product is the MCP server that\n"
                 "runs inside your editor (Claude, Cursor, etc.). For a hosted dashboard, see\n"
                 "https://getnable.com."
             )
-            return
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
         # canonical connector set. Without this the serve process ran with an empty
@@ -4225,10 +4521,17 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
-        # Pass empty args: doctor.main() defaults to parsing sys.argv, which still
-        # contains the consumed "doctor" token and would error. For flags
-        # (--json/--audit), use the standalone `finops-doctor` command.
-        _doctor_main([])
+        # Pass the flags explicitly: doctor.main() defaults to parsing sys.argv,
+        # which still contains the consumed "doctor" token and would error.
+        _doc_args: list[str] = []
+        if getattr(parsed, "doctor_json", False):
+            _doc_args.append("--json")
+        if getattr(parsed, "doctor_audit", False):
+            _doc_args.append("--audit")
+        for _flag, _dest in (("--hours", "doctor_hours"), ("--limit", "doctor_limit")):
+            if getattr(parsed, _dest, None) is not None:
+                _doc_args += [_flag, str(getattr(parsed, _dest))]
+        _doctor_main(_doc_args)
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
@@ -4238,10 +4541,18 @@ def main(args: list[str] | None = None) -> None:
             _print_aws_accounts()
         elif getattr(parsed, "org", False):
             setup_aws_org()
-        elif getattr(parsed, "add", False):
-            setup_aws_account()
         else:
+            # Every way setup_aws_account connects ends in add_account, so a
+            # run that added no account connected nothing. That exited 0
+            # after "No key entered", where `nable setup openai` exits 1.
+            from .accounts import list_accounts
+            before = {a.name for a in list_accounts()}
             setup_aws_account()
+            if not {a.name for a in list_accounts()} - before:
+                print("\n  No AWS account was connected. Run `nable setup aws` in a terminal, or "
+                      "set AWS credentials (AWS_PROFILE, or the access key variables) and run "
+                      "`nable connect`.\n")
+                raise SystemExit(1)
         return
     elif parsed.cmd in dispatch:
         _result = dispatch[parsed.cmd]()
@@ -4252,7 +4563,8 @@ def main(args: list[str] | None = None) -> None:
             from .welcome import _cli
             print(f"\n  Nothing was connected, so there is nothing to restart. Run "
                   f"{_cli('setup ' + parsed.cmd)} again when you have the key.\n")
-            return
+            # Not a success: a script piping a key in (or none) reads this.
+            raise SystemExit(1)
     else:
         # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
         # the editor, ambient-credential scan, value moment, never dead-ends), so
@@ -4473,16 +4785,19 @@ def _run_license_setup(key: str = "") -> int:
     return 0
 
 
-def _run_license_status() -> None:
+def _run_license_status() -> int:
     """
     Print current license status without restarting anything.
     Called by: finops setup license-status
                finops license-status
+    Returns the exit code: 1 when the configured key is invalid (a pipeline
+    checking its FINOPS_LICENSE_KEY secret has only that to go on), else 0.
     """
     from .license import (
         _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
         trial_last_day, trial_line,
     )
+    from .welcome import _c
 
     status = check_license()
 
@@ -4491,7 +4806,9 @@ def _run_license_status() -> None:
     color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
              "free": "90", "invalid": "31"}.get(status.mode)
     label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
-    mode_display = f"\033[{color}m{label}\033[0m" if color else label
+    # welcome._c colours only on a terminal (and honours NO_COLOR), so a pipe
+    # or a log gets the plain word.
+    mode_display = _c(color, label) if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
@@ -4518,6 +4835,7 @@ def _run_license_status() -> None:
         print("  Then run:   finops login\n")
     else:
         print()
+    return 1 if status.mode == "invalid" else 0
 
 
 def _run_login(email: str = "") -> int:
@@ -4995,17 +5313,21 @@ def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str
         print("  Credentials are saved in the vault and will load at MCP server startup.")
 
 
-def _run_aws_cur_setup() -> None:
+def _run_aws_cur_setup() -> int:
     """
     Interactive AWS CUR CloudFormation deployment.
     Called by: finops setup aws-cur
+
+    Returns the exit code: 1 when no pipeline outputs came back (no or bad
+    credentials, a failed or declined deploy), so a script that runs this
+    never reads "nothing deployed" as a success; 0 otherwise.
     """
     from .setup.cloud_infra import setup_aws_cur
     from .security.vault import Vault
 
     env_vars = setup_aws_cur()
     if not env_vars:
-        return
+        return 1
 
     # Offer to store the outputs in the nable vault
     store = _prompt(
@@ -5029,6 +5351,7 @@ def _run_aws_cur_setup() -> None:
             pass
     else:
         print("\n  Add the env vars above to your Claude Desktop config or .env manually.\n")
+    return 0
 
 
 def _run_infra_overview(provider: str = "") -> None:
@@ -5148,19 +5471,6 @@ def _pinned_package(target: str = "") -> str:
     return f"{base}=={v}" if v else base
 
 
-def _claude_config_file() -> "Path | None":
-    """Return the existing claude_desktop_config.json, or None."""
-    candidates = [
-        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
-        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
-        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return None
-
-
 def _upgrade_running_cli(current: str, target: str) -> bool:
     """Upgrade the `finops` command in the environment running right now.
 
@@ -5234,16 +5544,22 @@ def _version_tuple(v: str) -> tuple:
         return ()
 
 
-def _run_upgrade(target: str = "") -> None:
-    """Upgrade nable, deliberately, in two places.
+def _run_upgrade(target: str = "") -> int:
+    """Upgrade nable, deliberately, everywhere it was pinned. Returns the exit code.
 
     (1) The `finops` CLI in the current environment, the command you type.
-    (2) The MCP server that editors/Claude Desktop launch via uvx: wizard-written
-        configs pin finops-mcp==X so a PyPI release never slows a working client, so
-        this warms the new version into the uvx cache now (outside any startup
-        window) and moves the pin. One Claude Desktop restart picks it up.
+    (2) The MCP server editors launch via uvx: wizard-written configs pin
+        finops-mcp==X so a PyPI release never slows a working client. The new
+        release is warmed into the uvx cache first (outside any startup window),
+        then the pin moves in every config `nable setup` writes: Claude Desktop,
+        Cursor and Claude Code (_repin_editor_configs).
+    (3) The guard hooks `nable guard install` wrote with a uvx pin, in every
+        agent it supports, re-pinned by the guard's own install
+        (_repin_guard_hooks).
+
+    0: upgraded, or nothing to do. 1: PyPI did not answer, the new release could
+    not be cached (nothing was re-pinned), or a pin could not be moved.
     """
-    import json
     import shutil
     import subprocess
 
@@ -5252,12 +5568,22 @@ def _run_upgrade(target: str = "") -> None:
 
     explicit = bool(target)
     if not target:
+        from .config import is_airgap
+        if is_airgap():
+            # Asking PyPI for its latest release is the version check air-gap
+            # turns off. A named version is fetched by pip and uvx from the
+            # index this machine is configured for (PIP_INDEX_URL, UV_INDEX_URL).
+            _err("FINOPS_AIRGAP is set, so nable does not ask PyPI for the latest release.")
+            print(f"  You are on {current}. Name the version to install from your own",
+                  file=sys.stderr)
+            print("  package index:  nable upgrade <version>", file=sys.stderr)
+            return 1
         target = _latest_pypi_version() or ""
         if not target:
             _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
             print(f"  You are on {current}. When you are online, run this again, or pass a")
             print("  version newer than that explicitly:  finops upgrade <version>")
-            return
+            return 1
 
     print(f"  Installed: {current}")
     print(f"  {'Target' if explicit else 'Latest'}:    {target}\n")
@@ -5267,18 +5593,18 @@ def _run_upgrade(target: str = "") -> None:
         # A source or pre-release install can be ahead of PyPI. "Upgrading" to
         # latest would be a downgrade, and this command never does one unasked.
         _ok(f"You are on {current}, newer than PyPI's latest ({target}). Nothing to do.")
-        return
+        return 0
     if explicit and cur_t and tgt_t and tgt_t < cur_t:
         _warn(f"{target} is older than the installed {current}: this is a downgrade, as asked.")
 
     # 1. The CLI you are typing right now.
     _upgrade_running_cli(current, target)
 
-    # 2. The MCP server editors launch via uvx.
+    # 2. The MCP server editors launch via uvx, and the guard hooks that use it.
     uvx_bin = shutil.which("uvx")
     if not uvx_bin:
-        print("\n  No uvx found, so there is no editor/Claude Desktop cache to warm.")
-        return
+        print("\n  No uvx found, so there is no editor or guard hook pin to warm and move.")
+        return 0
 
     print("\n  Caching the new version for editors (so Claude never waits on it)...")
     try:
@@ -5289,48 +5615,166 @@ def _run_upgrade(target: str = "") -> None:
         if res.returncode != 0:
             _err(f"Could not cache finops-mcp {target}: {(res.stderr or res.stdout).strip()[:300]}")
             _warn("Your config was NOT changed. You are still on the working version.")
-            return
+            return 1
     except Exception as e:
         _err(f"Could not cache finops-mcp {target}: {e}")
         _warn("Your config was NOT changed. You are still on the working version.")
-        return
+        return 1
     _ok(f"finops-mcp {target} cached")
 
-    # Move the pin in the Claude Desktop config (nable key, legacy finops key too).
-    config_path = _claude_config_file()
-    if not config_path:
-        _warn("Claude Desktop config not found. Nothing to repin.")
-        print("  If you use another MCP client, update its nable entry to:")
-        print(f"    {uvx_bin} {_pinned_package(target)}")
-        return
-    try:
-        config = json.loads(config_path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        _err(f"Could not parse {config_path}: {e}")
-        return
+    print()
+    configs_ok = _repin_editor_configs(target)
+    print()
+    hooks_ok = _repin_guard_hooks(target, uvx_bin)
+    return 0 if configs_ok and hooks_ok else 1
 
-    moved = False
-    for server_key in ("nable", "finops"):
-        entry = config.get("mcpServers", {}).get(server_key)
-        if not entry:
+
+# A finops-mcp pin as nable writes it into an MCP config's args: the package,
+# any extras, and one exact version. Anything else is not a pin of ours.
+_PIN_ARG_RE = re.compile(r"^(finops-mcp(?:\[[A-Za-z0-9_,.-]*\])?)==([A-Za-z0-9.+!_-]+)$")
+
+
+def _repin_editor_configs(target: str) -> bool:
+    """Move the finops-mcp==X pin to `target` in every MCP config nable setup
+    writes (_editor_config_paths: Claude Desktop, Cursor, Claude Code).
+
+    Only an argument that already pins finops-mcp to a version moves, keeping
+    its extras; every other entry, and every other argument, stays as written.
+    An entry with no pin (the README's manual config, Cursor's one-click link,
+    a binary path) is the user's choice and is named, not changed. A file is
+    rewritten only when a pin in it moved. False when one could not be written."""
+    import json
+
+    moved: list[tuple[str, Path, str]] = []
+    unpinned: list[tuple[str, Path]] = []
+
+    def _edit_for(client: str, path: Path):
+        def edit(servers: dict) -> bool:
+            hit = False
+            for name, entry in servers.items():
+                if not isinstance(entry, dict) or not isinstance(entry.get("args"), list):
+                    if _is_nable_entry(name, entry):
+                        unpinned.append((client, path))
+                    continue
+                pinned = False
+                new_args = []
+                for a in entry["args"]:
+                    m = _PIN_ARG_RE.match(a) if isinstance(a, str) else None
+                    if m:
+                        pinned = True
+                        if m.group(2) != target:
+                            moved.append((client, path, m.group(2)))
+                            a = f"{m.group(1)}=={target}"
+                            hit = True
+                    new_args.append(a)
+                if pinned:
+                    entry["args"] = new_args
+                elif _is_nable_entry(name, entry):
+                    unpinned.append((client, path))
+            return hit
+        return edit
+
+    ok = True
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            if path.exists():
+                _warn(f"{client}: could not read {path} as JSON, so its pin was not checked.")
             continue
-        args = entry.get("args") or []
-        new_args = [
-            _pinned_package(target) if isinstance(a, str) and a.split("==")[0] == "finops-mcp" else a
-            for a in args
-        ]
-        if new_args != args:
-            entry["args"] = new_args
-            moved = True
+        if not isinstance(doc, dict):
+            continue
+        before = len(moved)
+        edit = _edit_for(client, path)
+        hit = False
+        for servers in _server_maps(doc):
+            hit = edit(servers) or hit
+        if not hit:
+            continue
+        try:
+            _atomic_write_json(path, doc)
+        except OSError as e:
+            del moved[before:]
+            _err(f"{client}: could not write {path}: {e.strerror or e}")
+            ok = False
+
+    for client, path, old in moved:
+        _ok(f"{client}: finops-mcp {old} -> {target}  ({path})")
+    for client, path in dict.fromkeys(unpinned):
+        print(f"  {client}: {path} runs nable with no finops-mcp==<version> pin; left as it is.")
     if moved:
-        config_path.write_text(json.dumps(config, indent=2) + "\n")
-        config_path.chmod(0o600)
-        _ok(f"Claude Desktop pinned to finops-mcp=={target}")
-        print("\n  Restart Claude Desktop once to pick it up. The new version is already")
-        print("  cached, so the restart is instant.")
-    else:
-        _warn("No finops-mcp pin found in the Claude Desktop config (nothing changed).")
-        print("  Re-run 'finops setup claude' to write a pinned entry.")
+        clients = sorted({c for c, _p, _o in moved})
+        print(f"\n  Restart {', '.join(clients)} once to pick it up. The new version is")
+        print("  already cached, so the restart is instant.")
+    elif not unpinned:
+        print("  No MCP config pins finops-mcp to another release; nothing to repin there.")
+    return ok
+
+
+def _repin_guard_hooks(target: str, uvx_bin: str) -> bool:
+    """Re-pin the guard hooks `nable guard install` wrote with a uvx pin, by
+    running the guard's own install, which re-pins a hook in place
+    (guard.install for Claude Code, guard_adapters.install for the rest).
+
+    At the running release that install runs in this process. At any other
+    release this process would pin its own version, so the target release's
+    `finops guard install`, from the uvx cache just warmed, runs instead.
+    A hook with no pin (a binary path, an unpinned uvx) is left as found, and
+    so is every hook that is not nable's. False when a hook did not move."""
+    import subprocess
+
+    from . import guard
+    from . import guard_adapters as ga
+
+    names = [h for h in ga.HARNESSES if not (h == "cline" and sys.platform == "win32")]
+    stale: list[tuple[str, bool, str]] = []
+    for h in names:
+        for global_scope in (True, False):
+            pins = {r for r in ga.hook_releases(h, global_scope) if r}
+            if pins and pins != {target}:
+                stale.append((h, global_scope, ", ".join(sorted(pins))))
+    if not stale:
+        print("  No guard hook pins finops-mcp to another release; nothing to repin there.")
+        return True
+
+    ok = True
+    for h, global_scope, old in stale:
+        label = ga.LABELS.get(h, h)
+        path = ga.hooks_path(h, global_scope)
+        where = "global" if global_scope else "this project"
+        try:
+            if target == guard.__version__:
+                ga.install(h, global_scope)
+            else:
+                cmd = [uvx_bin, "--from", f"finops-mcp=={target}", "finops", "guard",
+                       "install", "--harness", h]
+                cmd += ["--global"] if global_scope else []
+                # The settings hook exists already: re-pin it even where the
+                # nable plugin also runs the guard (install skips that case).
+                cmd += ["--force"] if h == "claude" else []
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                                     check=False)
+                if res.returncode != 0:
+                    raise RuntimeError((res.stderr or res.stdout).strip()[:300] or
+                                       f"exit {res.returncode}")
+        except (SystemExit, RuntimeError, OSError, subprocess.SubprocessError) as e:
+            _err(f"Guard hook, {label} ({where}): could not repin {path}: {e}")
+            ok = False
+            continue
+        now = ga.hook_releases(h, global_scope)
+        if {r for r in now if r} - {target}:
+            _warn(f"Guard hook, {label} ({where}): still pins finops-mcp {old} after the "
+                  f"install ({path}). Run: nable guard install --harness {h}"
+                  + (" --global" if global_scope else ""))
+            ok = False
+        else:
+            _ok(f"Guard hook, {label} ({where}): finops-mcp {old} -> {target}  ({path})")
+    if ok:
+        print(f"\n  Restart {', '.join(sorted({ga.LABELS.get(h, h) for h, _g, _o in stale}))} "
+              "to load the re-pinned hooks.")
+    return ok
 
 
 def _build_mcp_server_entry() -> "tuple[dict, str]":

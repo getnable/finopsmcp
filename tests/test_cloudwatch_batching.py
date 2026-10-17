@@ -486,14 +486,15 @@ def _nat_run():
     return cw
 
 
+# Two series per gateway: traffic out (requests) and in (responses).
 def test_nat_gateways_stay_on_the_free_api_by_default():
     cw = _nat_run()
-    assert (cw.data_calls, cw.statistics_calls) == (0, 600)
+    assert (cw.data_calls, cw.statistics_calls) == (0, 2 * 600)
 
 
 def test_nat_gateways_batch_when_opted_in(opted_in):
     cw = _nat_run()
-    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(600 / 500), 0)
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(2 * 600 / 500), 0)
 
 
 def _ec2_pages(n: int) -> list[dict]:
@@ -962,7 +963,7 @@ class _S3WithTiering(_S3):
         return {"IntelligentTieringConfigurationList": [{"Id": "default"}]}
 
 
-def _it_series(names, objects=1_000_000.0, size=10 * 1024 ** 3) -> dict:
+def _it_series(names, objects=1_000_000.0, size=1_000_000 * 150 * 1024) -> dict:
     out = {}
     for n in names:
         out[("NumberOfObjects", n, "AllStorageTypes")] = [objects]
@@ -994,7 +995,9 @@ def _it_run():
     results = asyncio.run(audit_s3_intelligent_tiering(_Connector()))
 
     assert len(results) == 140
-    # 1M objects of 10 KB each: monitoring outweighs tiering, in both regions.
+    # 1M objects of 150 KiB each: monitored (128 KB and up), and the fee
+    # outweighs tiering, in both regions. Objects under 128 KB, which this
+    # fixture used, are not monitored and pay no fee.
     assert {r["recommendation"] for r in results} == {
         "LIKELY_WASTE_monitoring_exceeds_savings"}
     return cws

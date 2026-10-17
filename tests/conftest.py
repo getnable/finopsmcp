@@ -12,9 +12,43 @@ Every test gets an in-memory keyring stub. Tests that assert keyring behavior
 stubs on top via monkeypatch, which override this one for their duration.
 """
 import sys
+import tempfile
 import types
+from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="session")
+def _sandbox_base(tmp_path_factory) -> Path:
+    """The one directory every test's sandboxes below are made in.
+
+    tmp_path_factory.mktemp numbers each directory it makes by listing the
+    whole basetemp for the highest suffix taken so far, on every call. The
+    six sandboxes below called it six times per test, so each test paid for
+    a listing of every directory the tests before it had made, and fixture
+    setup grew to most of a full run: 1,316 s on Python 3.12, against 324 s
+    with this base (measured 2026-10-14, 8,300 tests). One numbered directory
+    per session, and tempfile.mkdtemp inside it, never lists anything. It
+    sits in basetemp, so pytest's retention of old basetemps removes it
+    exactly as it removed the numbered directories."""
+    return tmp_path_factory.mktemp("sandboxes")
+
+
+@pytest.fixture
+def _sandbox(_sandbox_base):
+    """make(name): a new, empty directory for this test only.
+
+    One mkdtemp per test (a unique name, without listing the base), and one
+    plain subdirectory per sandbox inside it, so no two tests and no two
+    sandboxes ever share a directory."""
+    root = Path(tempfile.mkdtemp(prefix="test-", dir=_sandbox_base))
+
+    def make(name: str) -> Path:
+        path = root / name
+        path.mkdir()
+        return path
+    return make
 
 
 @pytest.fixture(autouse=True)
@@ -37,18 +71,18 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _guard_ledger_sandbox(monkeypatch, tmp_path_factory):
+def _guard_ledger_sandbox(monkeypatch, _sandbox):
     """Every guard verdict is appended to a decision ledger under the user's
     data dir. A suite full of `terraform destroy` fixtures must not land in the
     developer's real audit log, so each test writes to a throwaway one (tests
     that read it back take its path from guard_ledger.ledger_path())."""
     import finops.guard_ledger as ledger
     monkeypatch.setattr(ledger, "_path_override",
-                        tmp_path_factory.mktemp("guard-ledger") / ledger.LEDGER_NAME)
+                        _sandbox("guard-ledger") / ledger.LEDGER_NAME)
 
 
 @pytest.fixture(autouse=True)
-def _guard_switch_sandbox(monkeypatch, tmp_path_factory):
+def _guard_switch_sandbox(monkeypatch, _sandbox):
     """The guard's off switch (`nable guard off`, FINOPS_GUARD=off) and the
     Claude Code plugin's enabled state are read from the machine: nable's data
     directory and Claude Code's user settings. A developer who paused the
@@ -57,29 +91,43 @@ def _guard_switch_sandbox(monkeypatch, tmp_path_factory):
     reset the overrides themselves."""
     import finops.guard_plugin as gp
     monkeypatch.delenv("FINOPS_GUARD", raising=False)
-    monkeypatch.setattr(gp, "_data_root_override", tmp_path_factory.mktemp("finops-data"))
-    monkeypatch.setattr(gp, "_user_dir_override", tmp_path_factory.mktemp("claude-user"))
+    monkeypatch.setattr(gp, "_data_root_override", _sandbox("finops-data"))
+    monkeypatch.setattr(gp, "_user_dir_override", _sandbox("claude-user"))
 
 
 @pytest.fixture(autouse=True)
-def _org_model_sandbox(monkeypatch, tmp_path_factory):
+def _guard_release_sandbox(monkeypatch):
+    """Status and doctor ask uvx whether the release a guard hook pins can
+    start (guard_release), which installs it from the package index. The
+    suite must never run uvx or reach an index, and the developer's uv cache
+    must not change what it sees, so every release reads as "cannot tell",
+    here and in the CLI subprocesses tests start. Tests of that check set
+    their own answer."""
+    from finops import guard_release
+    monkeypatch.setenv(guard_release.CHECK_ENV, "0")
+    monkeypatch.setattr(guard_release, "_probe_override", lambda release, python: None)
+    monkeypatch.setattr(guard_release, "_answers", {})
+
+
+@pytest.fixture(autouse=True)
+def _org_model_sandbox(monkeypatch, _sandbox):
     """The guard, tickets, findings, attribution and the workload classifier
     read the org model (finops.org), which lives in the developer's data dir
     or a repo's nable.org/. A developer with one must not change what the
     suite sees, so FINOPS_ORG_DIR points at an empty directory. Tests of the
     org model set or clear it themselves."""
-    monkeypatch.setenv("FINOPS_ORG_DIR", str(tmp_path_factory.mktemp("org-model")))
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(_sandbox("org-model")))
 
 
 @pytest.fixture(autouse=True)
-def _packs_sandbox(monkeypatch, tmp_path_factory):
+def _packs_sandbox(monkeypatch, _sandbox):
     """The guard reads installed packs (guard rules, price books) on every
     verdict. A developer with packs installed must not change what the suite
     sees, so the packs root is an empty directory; the packs tests point it
     elsewhere themselves (tests/packs_support.py)."""
     from finops import guard_packs
     from finops.packs import runtime, store
-    monkeypatch.setattr(store, "_root_override", tmp_path_factory.mktemp("packs") / "packs")
+    monkeypatch.setattr(store, "_root_override", _sandbox("packs") / "packs")
     runtime.invalidate()
     guard_packs.invalidate()
     yield
@@ -101,7 +149,7 @@ def _no_ambient_service_creds(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_agent_usage(monkeypatch, tmp_path_factory):
+def _no_ambient_agent_usage(monkeypatch, _sandbox):
     """The AI budget reads every agent harness on the machine: Claude Code's
     transcripts (tests point CLAUDE_CONFIG_DIR at a sandbox), Codex CLI's
     rollouts under CODEX_HOME, and Cursor's Admin API when a key is set. A dev
@@ -110,7 +158,7 @@ def _no_ambient_agent_usage(monkeypatch, tmp_path_factory):
     Tests that exercise those readers set their own values on top. The guard's
     background refresh (background_refresh) is off under pytest unless a test
     turns it on, so a developer's own setting is cleared too."""
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home")))
+    monkeypatch.setenv("CODEX_HOME", str(_sandbox("codex-home")))
     for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL",
                 "FINOPS_CURSOR_API_URL", "FINOPS_GUARD_BACKGROUND_REFRESH",
                 "FINOPS_GUARD_AUTO_REFRESH_BUDGET"):

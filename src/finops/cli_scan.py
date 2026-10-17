@@ -16,12 +16,13 @@ Output contract (the design doc is the source of truth):
     nable scan · profile default                       <- first print, <2s, no network
     account 352112345678 · this account only           <- after STS returns
     scanning 4 regions ...
-      us-east-1 ......... 3 findings
+      us-east-1 ......... 17 findings
       eu-west-1 ......... 1 finding
     ────────────────────────────────────────────
-    $2,140/mo recoverable
-      $1,200/mo  3 idle RDS instances (db.r5.xlarge), us-east-1
-      ...
+    $659/mo recoverable
+           $350/mo  1 idle RDS instance, eu-west-1
+           $210/mo  14 unattached EBS volumes, us-east-1
+         $98.55/mo  3 idle NAT gateways, us-east-1
 
     (with --spend, a headline is added above the recoverable line:)
     $48,210 on AWS this month. Top: Bedrock $19.2k · EC2 $11.4k · S3 $4.1k
@@ -63,6 +64,9 @@ import threading
 import time
 
 DOCS_LINE = "docs: https://getnable.com/docs/cli"
+# The line `nable brief` ends its no-credentials answer with: someone with no
+# account at hand can still see what a scan prints.
+_DEMO_HINT = "  no account at hand? `nable scan --demo` shows nable on sample data"
 
 # Staleness check state. The network call runs in a daemon thread started at
 # scan start so it overlaps the AWS work and costs the user nothing; the exit
@@ -346,6 +350,36 @@ def _spend_window(today) -> tuple[str, str, str]:
     return first_of_month.isoformat(), today.isoformat(), "month-to-date"
 
 
+def _monthly_spend_base(spend: dict | None) -> tuple[float | None, str | None]:
+    """The spend a per-month figure can be compared with, and what it is.
+
+    Recoverable is a monthly figure; the spend snapshot is month to date. On the
+    13th that is twelve days, and dividing a month of savings by twelve days of
+    spend printed "% of spend" 2.6 times too high (about 30 times on the 2nd).
+    Month to date is scaled to the whole month at its own daily rate; a closed
+    month is already whole. Returns (None, None) when the window cannot be read,
+    so the caller shows no percentage rather than a wrong one.
+    """
+    import calendar
+    from datetime import date
+
+    if not spend or not spend.get("total"):
+        return None, None
+    try:
+        start_s, end_s = str(spend.get("period", "")).split(" to ")
+        start, end = date.fromisoformat(start_s.strip()), date.fromisoformat(end_s.strip())
+    except ValueError:
+        return None, None
+    days = (end - start).days  # Cost Explorer end dates are exclusive
+    if days <= 0:
+        return None, None
+    total = float(spend["total"])
+    if spend.get("covers") == "last month":
+        return total, "last_month"
+    days_in_month = calendar.monthrange(start.year, start.month)[1]
+    return total / days * days_in_month, "month_to_date_run_rate"
+
+
 def _region_catalog(session) -> dict[str, str]:
     """Every region AWS knows, with its opt-in status for this account, from
     ec2:DescribeRegions (AllRegions=True). Raises when the call fails; the
@@ -456,12 +490,19 @@ def _demo_payload() -> tuple[dict, dict]:
         "services": services[:3],
         "regions": {},
     }
+    # Priced the way the engine prices the same findings (aws_prices), so the
+    # sample cannot claim more than a real scan would. It used to: 4 idle NAT
+    # gateways at $12,960/mo ($3,240 each, where the engine's fixed charge is
+    # $32.85) and 3 idle db.r5.xlarge at $2,840/mo (the engine: $1,051.20 single-AZ).
+    from .aws_prices import HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH, rds_hourly
+
+    rds_monthly = round(3 * (rds_hourly("db.r5.xlarge", "mysql") or 0.0) * HOURS_PER_MONTH, 2)
     findings = [
         {
             "waste_type": "idle_nat_gateway",
-            "description": "4 NAT gateways with no traffic in 30 days",
+            "description": "4 NAT gateways with no traffic in 7 days",
             "region": "us-east-1",
-            "estimated_monthly_savings": 12960.0,
+            "estimated_monthly_savings": round(4 * NAT_GATEWAY_PER_MONTH, 2),
         },
         {
             "waste_type": "unattached_ebs",
@@ -474,18 +515,23 @@ def _demo_payload() -> tuple[dict, dict]:
             "description": "1,900 EBS snapshots older than a year",
             "region": "us-west-2",
             "estimated_monthly_savings": 3120.0,
+            # The engine files old snapshots as an investigation
+            # (old_unmanaged_snapshot), so a real scan shows them to confirm.
+            "kind": "investigation",
         },
         {
             "waste_type": "idle_rds",
-            "description": "3 idle RDS instances (db.r5.xlarge, <2% CPU)",
+            "description": "3 idle RDS instances (db.r5.xlarge MySQL, no connections in 14 days)",
             "region": "eu-west-1",
-            "estimated_monthly_savings": 2840.0,
+            "estimated_monthly_savings": rds_monthly,
         },
         {
             "waste_type": "oversized_ec2",
             "description": "9 EC2 instances under 8% peak CPU (m5.2xlarge)",
             "region": "us-east-1",
             "estimated_monthly_savings": 2210.0,
+            # Judged on CPU alone, an investigation in the engine (idle_ec2_low_cpu).
+            "kind": "investigation",
         },
     ]
     total = sum(f["estimated_monthly_savings"] for f in findings)
@@ -539,7 +585,9 @@ _WASTE_LABELS: dict[str, tuple[str, str]] = {
     "idle_nat_gateway": ("idle NAT gateway", "idle NAT gateways"),
     "idle_load_balancer": ("idle load balancer", "idle load balancers"),
     "unassociated_elastic_ip": ("unused Elastic IP", "unused Elastic IPs"),
-    "idle_ec2_low_cpu": ("idle EC2 instance", "idle EC2 instances"),
+    # Low CPU, not idle: the finding is CPU alone, and its own why_unsure says
+    # a memory-, disk- or network-bound host sits at low CPU doing real work.
+    "idle_ec2_low_cpu": ("low-CPU EC2 instance", "low-CPU EC2 instances"),
     "oversized_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
     "compute_optimizer_overprovisioned_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
     "idle_rds": ("idle RDS instance", "idle RDS instances"),
@@ -573,20 +621,46 @@ _WASTE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+def _to_confirm(f: dict) -> bool:
+    """A finding the audit filed as an investigation (waste_evidence): an
+    inference with steps to confirm it, not a measured saving."""
+    return f.get("kind") == "investigation"
+
+
+def _recoverable_split(report: dict) -> tuple[float, float, int]:
+    """(measured, to confirm, how many to confirm), per month.
+
+    run_deep_audit classifies every finding, and only a recommendation is a
+    saving it measured. The scan used to print the sum of both as
+    "recoverable", where `nable brief`, from the same findings, totals the
+    measured ones only. A finding with no classification (the demo's, a
+    caller's own) counts as measured, as it always did."""
+    total = float(report.get("total_estimated_monthly_savings") or 0.0)
+    unconfirmed = [f for f in report.get("findings") or [] if _to_confirm(f)]
+    to_confirm = sum(float(f.get("estimated_monthly_savings") or 0.0) for f in unconfirmed)
+    return max(0.0, total - to_confirm), to_confirm, len(unconfirmed)
+
+
 def _group_findings(findings: list[dict]) -> list[dict]:
     """Findings summed by waste_type, largest first. A group of one keeps the
-    finding's own description when it has one (the demo's do)."""
-    groups: dict[str, dict] = {}
+    finding's own description when it has one (the demo's do). Findings to
+    confirm are grouped apart from measured ones and marked so."""
+    groups: dict[tuple[str, bool], dict] = {}
     for f in findings:
         wt = f.get("waste_type") or "finding"
-        g = groups.setdefault(wt, {"n": 0, "monthly": 0.0, "regions": set(),
-                                   "description": f.get("description")})
+        g = groups.setdefault((wt, _to_confirm(f)), {
+            "n": 0, "monthly": 0.0, "regions": set(), "description": f.get("description"),
+            "listed": set()})
         g["n"] += 1
         g["monthly"] += float(f.get("estimated_monthly_savings") or 0)
         if f.get("region"):
             g["regions"].add(f["region"])
+            # Outside us-east-1 and priced from nable's us-east-1 tables
+            # (optimizer._label_rate_region): the line says where.
+            if f.get("rate_region") == "us-east-1" and f["region"] != "us-east-1":
+                g["listed"].add(f["region"])
     rows = []
-    for wt, g in groups.items():
+    for (wt, confirm), g in groups.items():
         if g["n"] == 1 and g["description"]:
             desc = g["description"]
         else:
@@ -594,7 +668,9 @@ def _group_findings(findings: list[dict]) -> list[dict]:
             desc = f"{g['n']} {one if g['n'] == 1 else many}"
         regions = sorted(g["regions"])
         where = regions[0] if len(regions) == 1 else (f"{len(regions)} regions" if regions else "")
-        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"]})
+        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"],
+                     **({"to_confirm": True} if confirm else {}),
+                     **({"us_east_1_list_in": sorted(g["listed"])} if g["listed"] else {})})
     rows.sort(key=lambda r: -r["monthly"])
     return rows
 
@@ -653,16 +729,33 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
 
     total_spend = 0.0
     total_recoverable = 0.0
+    total_to_confirm = 0.0
     providers_ok = 0
     _has_aws = report is not None
+    aws_scaled = False
 
     if _has_aws:
         providers_ok += 1
-        recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+        # Recoverable is what the audit measured; what rests on an inference
+        # is shown beside it, to confirm, and not added in (_recoverable_split).
+        found = float(report.get("total_estimated_monthly_savings") or 0.0)
+        recoverable, to_confirm, n_to_confirm = _recoverable_split(report)
         total_recoverable += recoverable
+        total_to_confirm += to_confirm
+        confirm_line = (
+            f"{_usd(to_confirm)}/mo to confirm, not counted as recoverable: "
+            f"{n_to_confirm} finding{'s' if n_to_confirm != 1 else ''} rest"
+            f"{'s' if n_to_confirm == 1 else ''} on an inference "
+            "(`nable scan --json` says what to check)"
+        ) if to_confirm >= _FINDING_FLOOR_USD else None
 
         if spend and spend["total"] > 0:
-            total_spend += spend["total"]
+            # Every other figure on this screen is per month, so AWS joins the
+            # cross-provider total as a month too, not as however many days of
+            # this month have passed.
+            monthly_base, basis = _monthly_spend_base(spend)
+            total_spend += monthly_base if monthly_base is not None else spend["total"]
+            aws_scaled = basis == "month_to_date_run_rate"
             top = " · ".join(f"{name} {_short_usd(v)}" for name, v in spend["services"])
             # "this month" is a lie on the 1st, when the snapshot falls back to the
             # month that just closed. Say which window the number covers.
@@ -672,8 +765,14 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                 file=out,
             )
             if recoverable >= _FINDING_FLOOR_USD:
-                pct = f" ({recoverable / spend['total'] * 100:.1f}% of spend)" if spend["total"] else ""
+                pct = ""
+                if monthly_base:
+                    against = ("last month's spend" if basis == "last_month"
+                               else "monthly spend at this month's rate")
+                    pct = f" ({recoverable / monthly_base * 100:.1f}% of {against})"
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable{pct}")) + demo_tag, file=out)
+            if confirm_line:
+                print(confirm_line + demo_tag, file=out)
         else:
             if ce_denied:
                 print(
@@ -690,6 +789,8 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                 print(_dim(spend_note), file=out)
             if recoverable >= _FINDING_FLOOR_USD:
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
+            if confirm_line:
+                print(confirm_line + demo_tag, file=out)
 
         findings = report.get("findings") or []
         groups = _group_findings(findings)
@@ -697,13 +798,13 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         incomplete = bool(report.get("checks_failed") or report.get("regions_timed_out")
                           or report.get("regions_unlisted"))
 
-        if recoverable < _FINDING_FLOOR_USD:
+        if found < _FINDING_FLOOR_USD:
             if findings:
                 # Below the line this summary shows, but not nothing: a $20/mo
                 # account with $4.61/mo of findings used to read "no material
                 # waste found, nice" and hide all of them.
                 n = len(findings)
-                print(f"{n} small finding{'s' if n != 1 else ''}, {_usd(recoverable)}/mo total"
+                print(f"{n} small finding{'s' if n != 1 else ''}, {_usd(found)}/mo total"
                       + demo_tag + _dim(" · `nable scan --json` lists every one"), file=out)
             elif incomplete:
                 # Nothing found is only a verdict on what was read.
@@ -714,8 +815,12 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         else:
             for g in shown:
                 region = g["region"]
+                listed = g.get("us_east_1_list_in")
                 print(f"  {_usd(g['monthly']) + '/mo':>12}  {g['description']}"
-                      + (f", {region}" if region else ""), file=out)
+                      + (f", {region}" if region else "")
+                      + ("  (to confirm)" if g.get("to_confirm") else "")
+                      + (f"  ({', '.join(listed)} priced at us-east-1 list)" if listed else ""),
+                      file=out)
             rest_n = sum(g["n"] for g in groups) - sum(g["n"] for g in shown)
             rest_usd = sum(g["monthly"] for g in groups) - sum(g["monthly"] for g in shown)
             if rest_n > 0:
@@ -771,9 +876,13 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         if total_spend > 0:
             parts.append(f"{_usd(total_spend)}/mo visible")
         parts.append(_green(f"{_usd(total_recoverable)}/mo recoverable"))
+        if total_to_confirm >= _FINDING_FLOOR_USD:
+            parts.append(f"{_usd(total_to_confirm)}/mo to confirm")
         print(
             _bold(" · ".join(parts))
-            + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"),
+            + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"
+                   + ("; AWS at this month's daily rate" if aws_scaled and total_spend > 0
+                      else "")),
             file=out,
         )
 
@@ -797,9 +906,13 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
                   credentials: str = "profile"):
     extra_blocks = extra_blocks or []
     report = report or {}
-    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    # What the audit measured; findings it files as investigations are beside
+    # it, not in it, as in the text output and `nable brief`.
+    recoverable, to_confirm, n_to_confirm = _recoverable_split(report)
     findings = report.get("findings") or []
     spend_has_data = bool(spend) and spend.get("has_data", True)
+    # The same monthly base the text output divides by (see _monthly_spend_base).
+    monthly_base, pct_basis = _monthly_spend_base(spend) if spend_has_data else (None, None)
     return {
         "schema_version": 1,
         "command": "scan",
@@ -828,11 +941,17 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
         "recoverable": {
             "monthly_usd": round(recoverable, 2),
             "annual_usd": round(recoverable * 12, 2),
+            # Against a month of spend, never against month to date: recoverable
+            # is per month. pct_of_spend_basis says which month: the closed one,
+            # or this one at its daily rate so far.
             "pct_of_spend": (
-                round(recoverable / spend["total"] * 100, 2)
-                if spend and spend["total"]
-                else None
+                round(recoverable / monthly_base * 100, 2) if monthly_base else None
             ),
+            "pct_of_spend_basis": pct_basis if monthly_base else None,
+            # Findings that rest on an inference (kind "investigation"), with
+            # the steps to confirm them on each finding. Not in monthly_usd.
+            "to_confirm_monthly_usd": round(to_confirm, 2),
+            "to_confirm_findings": n_to_confirm,
         },
         # Every finding. This was capped at 20 while the text output promised
         # `nable scan --json` "lists every one", and the listed ones then did
@@ -1130,6 +1249,7 @@ def run(args, t0: float | None = None) -> int:
                 "  looked in: env vars, ~/.aws/credentials, ~/.aws/config (SSO), instance metadata",
                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
                 "  then: `nable connect` waits and connects the moment they appear",
+                _DEMO_HINT,
             ], "no-creds", t0, props={"n_extra": len(blocks)})
             return _finish(code, abandoned)
         _render(out, None, None, demo=False, ce_denied=False, extra_blocks=blocks)
@@ -1160,6 +1280,7 @@ def run(args, t0: float | None = None) -> int:
                 # rather than only at how to hand over access.
                 "  evaluating first? `nable scan --dry-run` lists every API call "
                 "and permission a scan needs, without running one",
+                _DEMO_HINT,
             ], "no-creds", t0)
         sts = session.client("sts")
         ident = sts.get_caller_identity()
@@ -1178,6 +1299,7 @@ def run(args, t0: float | None = None) -> int:
                 "no usable AWS credentials found",
                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
                 "  then: `nable connect` waits and connects the moment they appear",
+                _DEMO_HINT,
             ], "no-creds", t0, exc=exc)
         if klass == "denied":
             return _fail(out, EXIT_DENIED, [

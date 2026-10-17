@@ -11,7 +11,8 @@ Calculates:
   - Coverage gap (on-demand that commitments could cover)
   - Recommended purchase: type, term, payment, projected ROI
 
-All figures come directly from the Cost Explorer API — no estimates.
+Coverage, utilization and on-demand spend come from the Cost Explorer API. A
+projected purchase saving is an estimate at the listed discount below.
 """
 from __future__ import annotations
 
@@ -23,9 +24,98 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_COMPUTE_SP_DISCOUNT = 0.66   # ~34% off on-demand (1yr no-upfront compute SP)
-_EC2_SP_DISCOUNT = 0.72       # ~28% off on-demand (1yr no-upfront EC2 SP)
-_RI_DISCOUNT = 0.60           # ~40% off on-demand (1yr no-upfront RI)
+# What a 1-year no-upfront commitment costs as a fraction of on-demand, us-east-1
+# Linux, so the discount is 1 minus it. AWS Price List (AWSComputeSavingsPlan
+# us-east-1, version 20261013035015, which carries the EC2 Instance SP rates too,
+# and the AmazonEC2 offer 20261012193925 for Reserved Instances), read 2026-10-13:
+#   Compute SP      m5.large 26.0% off (SKU BB7BKBSC6NZW7P5B), m6i, m7i and m7g
+#                   26.5%, c and r families 27.5 to 28.3%, GPU 21 to 24%. Over
+#                   the 168 instance types aws_prices.EC2_HOURLY holds it runs
+#                   18.6% to 29.1%, median 27.1%; Fargate is 20.0%.
+#   EC2 Instance SP m6i, m7i, r6i, c6i 33.8 to 33.9% off (m6i SKU
+#                   DC4GCSR3H4S43EMU), m5 and t3 37.5%
+#   Standard RI     the same as the EC2 Instance SP, type for type
+# These used to say 34%, 28% and 40%: the Compute and EC2 Instance figures were
+# the wrong way round (a Compute SP never beats an EC2 Instance SP on the same
+# type), 34% was above every type in the table, and 40% is the 1-year
+# all-upfront rate, not no-upfront. The Compute SP figure is the m5.large rate,
+# 26%, a point under the 27.1% median, so a projected saving is not above what
+# the plan lists for the common general-purpose types; COMPUTE_SP_DISCOUNT_RANGE
+# is what the text quotes around it. Nothing prices with the EC2 Instance SP or
+# RI figures; they stay, corrected and sourced, as the listed rates the price
+# audit tests pin (and the ordering they show against the Compute SP).
+_COMPUTE_SP_DISCOUNT = 0.74   # 26% off on-demand (1yr no-upfront Compute SP)
+# The same plan on Fargate: 20% off x86 vCPU and memory, which is what a
+# Fargate dollar saves, not the EC2 rate above. (Graviton Fargate lists 21.3%,
+# so 20% is not above any Fargate rate.)
+_COMPUTE_SP_FARGATE_DISCOUNT = 0.80   # 20% off on-demand (1yr no-upfront Compute SP)
+COMPUTE_SP_DISCOUNT_RANGE = "19-29% by EC2 instance type, 20% on Fargate"
+_EC2_SP_DISCOUNT = 0.662      # 33.8% off on-demand (1yr no-upfront EC2 Instance SP)
+_RI_DISCOUNT = 0.662          # 33.8% off on-demand (1yr no-upfront Standard RI)
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_COMPUTE_SP_DISCOUNT": {
+        "source": "AWS Price List, AWSComputeSavingsPlan us-east-1 20261013035015, "
+                  "ComputeSavingsPlans 1yr No Upfront: m5.large $0.071 vs $0.096 "
+                  "(BB7BKBSC6NZW7P5B), m6i.large $0.07053 vs $0.096",
+        "as_of": "2026-10-13"},
+    "_COMPUTE_SP_FARGATE_DISCOUNT": {
+        "source": "AWS Price List, AWSComputeSavingsPlan us-east-1 20261013035015, "
+                  "ComputeSavingsPlans 1yr No Upfront (BB7BKBSC6NZW7P5B): "
+                  "USE1-Fargate-vCPU-Hours:perCPU $0.032384 and USE1-Fargate-GB-Hours "
+                  "$0.003556, against AmazonECS us-east-1 20260911124425 on demand "
+                  "$0.04048 and $0.004445",
+        "as_of": "2026-10-14"},
+    "_EC2_SP_DISCOUNT": {
+        "source": "AWSComputeSavingsPlan us-east-1 20261013035015, EC2InstanceSavingsPlans "
+                  "1yr No Upfront: m6i.large $0.0635 vs $0.096 (DC4GCSR3H4S43EMU), "
+                  "m7i.large $0.06668 vs $0.1008 (XGZ84KZ7PE29FA8C)",
+        "as_of": "2026-10-13"},
+    "_RI_DISCOUNT": {
+        "source": "AWS Price List, AmazonEC2 us-east-1 20261012193925, Reserved standard "
+                  "1yr No Upfront Linux: m6i.large $0.0635/hr vs $0.096 on demand",
+        "as_of": "2026-10-13"},
+}
+
+
+# Cost Explorer SERVICE values for Fargate. Fargate is priced in the AmazonECS
+# offer (USE1-Fargate-vCPU-Hours:perCPU), and the codebase names ECS spend
+# "Amazon Elastic Container Service" (connectors/universal.py,
+# anomaly/root_cause.py); "AWS Fargate" is kept as an alias. Neither is
+# verified against a live Cost Explorer response: nothing in the repo records
+# one that names Fargate. A value Cost Explorer does not use matches no rows.
+FARGATE_CE_SERVICES = ("Amazon Elastic Container Service", "AWS Fargate")
+_EC2_COMPUTE_CE_SERVICE = "Amazon Elastic Compute Cloud - Compute"
+# Savings Plans eligible compute, as Cost Explorer services.
+SP_COMPUTE_CE_SERVICES = (_EC2_COMPUTE_CE_SERVICE, *FARGATE_CE_SERVICES)
+
+
+def blended_compute_sp_rate(split: dict[str, float] | None) -> tuple[float, str]:
+    """(what a Compute Savings Plan bills per on-demand dollar, why that rate).
+
+    GetSavingsPlansCoverage's OnDemandCost is one pool of EC2 and Fargate
+    spend, and the plan bills them at different rates: 0.74 of EC2 on demand
+    (the m5.large rate), 0.80 of Fargate. The pool is priced at the two blended
+    by their share of compute spend over the window (_compute_spend_split).
+    Pricing all of it at the EC2 rate overstated the saving on every Fargate
+    dollar by six points. With no split read, the whole pool takes the
+    Fargate rate, the lower saving of the two, and the basis says so.
+    """
+    split = split or {}
+    ec2 = float(split.get(_EC2_COMPUTE_CE_SERVICE) or 0.0)
+    fargate = sum(float(split.get(s) or 0.0) for s in FARGATE_CE_SERVICES)
+    total = ec2 + fargate
+    if total <= 0:
+        return _COMPUTE_SP_FARGATE_DISCOUNT, (
+            "the EC2 and Fargate split of compute spend was not read, so the whole "
+            f"uncovered pool is priced at Fargate's {1 - _COMPUTE_SP_FARGATE_DISCOUNT:.0%}, "
+            "the lower of the plan's two rates")
+    rate = (ec2 * _COMPUTE_SP_DISCOUNT + fargate * _COMPUTE_SP_FARGATE_DISCOUNT) / total
+    return rate, (
+        f"blended from the window's compute spend: {ec2 / total:.0%} EC2 at "
+        f"{1 - _COMPUTE_SP_DISCOUNT:.0%} (the m5.large rate, under the median of the AWS "
+        f"rate card, {COMPUTE_SP_DISCOUNT_RANGE}) and {fargate / total:.0%} Fargate at "
+        f"{1 - _COMPUTE_SP_FARGATE_DISCOUNT:.0%}")
 
 
 @dataclass
@@ -67,6 +157,33 @@ class TaggedCoverageEstimate:
     confidence_note: str
 
 
+def combine_coverage(sp: float | None, ri: float | None) -> tuple[float | None, str]:
+    """(one coverage figure, what it is) from Savings Plans and RI coverage.
+
+    The two are percentages of different things. Savings Plans coverage is a
+    share of eligible SPEND (SpendCoveredBySavingsPlans / TotalCost); RI
+    coverage is a share of running HOURS (CoverageHoursPercentage). Averaging
+    them, as this did, told an account whose plan covers 18.6% of its spend and
+    which has no RIs that 9.3% of its compute was committed. A spend-weighted
+    combination needs spend for both, and the RI read reports hours, so: when
+    only one instrument covers anything, or only one could be read, that one is
+    the figure; when both cover something, the Savings Plans figure is the
+    headline and RI coverage is reported apart. None when neither was read.
+    """
+    if sp is None and ri is None:
+        return None, "not read: neither Savings Plans nor RI coverage"
+    if ri is None:
+        return sp, "Savings Plans coverage of eligible spend (RI coverage not read)"
+    if sp is None:
+        return ri, "RI coverage of running hours (Savings Plans coverage not read)"
+    if not ri:
+        return sp, "Savings Plans coverage of eligible spend (no RI coverage)"
+    if not sp:
+        return ri, "RI coverage of running hours (no Savings Plans coverage)"
+    return sp, ("Savings Plans coverage of eligible spend; RI coverage is a share of "
+                "running hours and is reported separately, not combined")
+
+
 @dataclass
 class CommitmentAnalysis:
     # Current state. Coverage is None when the call was denied or failed:
@@ -79,8 +196,9 @@ class CommitmentAnalysis:
     ri_utilization_pct: float
     ri_unused_usd: float
 
-    # On-demand that commitments could cover
-    uncovered_on_demand_usd: float
+    # On-demand that commitments could cover, over the whole window (three
+    # months), or None when it could not be read.
+    uncovered_on_demand_usd: float | None
 
     # Recommendations
     recommendations: list[dict[str, Any]] = field(default_factory=list)
@@ -90,28 +208,28 @@ class CommitmentAnalysis:
     cut_by_bounds: list[dict[str, Any]] = field(default_factory=list)
     bounds: dict[str, Any] | None = None
 
+    # What a Compute Savings Plan bills per on-demand dollar of the uncovered
+    # pool (blended_compute_sp_rate), and why. analyze_commitments sets both;
+    # the default is the EC2 rate an analysis built by hand has always used.
+    compute_sp_rate: float = _COMPUTE_SP_DISCOUNT
+    compute_sp_rate_basis: str = ""
+    # Inputs that could not be read, and why ({"savings_plan_coverage": ...}).
+    not_read: dict[str, str] = field(default_factory=dict)
+
     @property
     def total_waste_usd(self) -> float:
         return self.savings_plan_unused_usd + self.ri_unused_usd
 
     @property
     def combined_coverage_pct(self) -> float | None:
-        """Average of the instruments that answered, or None if neither did.
+        """One commitment coverage figure, or None if neither instrument was
+        read. Never an average: see combine_coverage."""
+        return combine_coverage(self.savings_plan_coverage_pct, self.ri_coverage_pct)[0]
 
-        Every consumer wanted this and each rolled its own, as
-        `(sp + ri) / 2`, which raises the moment either is None. Three of them
-        did: tools/commitments, notifications/reports and tools/attribution. That
-        was live for any customer missing ce:GetSavingsPlansCoverage, which is a
-        separate IAM action from the Cost Explorer reads most people grant, so
-        the crash needed no unusual setup at all.
-
-        Averaging only the instruments that answered is the honest reading: if RI
-        coverage is 40% and SP coverage could not be read, "40%" is a better
-        answer than "20%", which silently assumes the unreadable half is zero.
-        """
-        values = [v for v in (self.savings_plan_coverage_pct, self.ri_coverage_pct)
-                  if v is not None]
-        return sum(values) / len(values) if values else None
+    @property
+    def coverage_basis(self) -> str:
+        """What combined_coverage_pct is (combine_coverage)."""
+        return combine_coverage(self.savings_plan_coverage_pct, self.ri_coverage_pct)[1]
 
     @property
     def coverage_score(self) -> str:
@@ -139,9 +257,7 @@ def _ec2_spend_for_tag(
             Granularity="MONTHLY",
             Filter={
                 "And": [
-                    {"Dimensions": {"Key": "SERVICE", "Values": [
-                        "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-                    ]}},
+                    {"Dimensions": {"Key": "SERVICE", "Values": list(SP_COMPUTE_CE_SERVICES)}},
                     {"Tags": {"Key": tag_key, "Values": [tag_value]}},
                 ]
             },
@@ -162,9 +278,7 @@ def _total_ec2_spend(ce_client: Any, start: str, end: str) -> float:
         resp = ce_client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
-            Filter={"Dimensions": {"Key": "SERVICE", "Values": [
-                "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-            ]}},
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": list(SP_COMPUTE_CE_SERVICES)}},
             Metrics=["UnblendedCost"],
         )
         return sum(
@@ -174,6 +288,49 @@ def _total_ec2_spend(ce_client: Any, start: str, end: str) -> float:
     except Exception as e:
         log.warning("Total EC2 spend fetch failed: %s", e)
         return 0.0
+
+
+def _compute_spend_split(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict | None = None,
+) -> dict[str, float] | None:
+    """Savings Plans eligible compute spend per Cost Explorer SERVICE over the
+    window, every page of GetCostAndUsage grouped by SERVICE (Groups[].Keys,
+    Groups[].Metrics), or None when it could not be read."""
+    flt: dict[str, Any] = {"Dimensions": {"Key": "SERVICE",
+                                          "Values": list(SP_COMPUTE_CE_SERVICES)}}
+    if tag_filter:
+        tag_key, tag_val = next(iter(tag_filter.items()))
+        flt = {"And": [flt, {"Tags": {"Key": tag_key, "Values": [tag_val]}}]}
+    kwargs: dict[str, Any] = {
+        "TimePeriod": {"Start": start, "End": end},
+        "Granularity": "MONTHLY",
+        "Filter": flt,
+        "Metrics": ["UnblendedCost"],
+        "GroupBy": [{"Type": "DIMENSION", "Key": "SERVICE"}],
+    }
+    try:
+        out: dict[str, float] = {}
+        token: str | None = None
+        for _ in range(_MAX_COVERAGE_PAGES):
+            call = dict(kwargs)
+            if token:
+                call["NextPageToken"] = token
+            resp = ce_client.get_cost_and_usage(**call)
+            for period in resp.get("ResultsByTime") or []:
+                for g in period.get("Groups") or []:
+                    key = (g.get("Keys") or [""])[0]
+                    amount = ((g.get("Metrics") or {}).get("UnblendedCost") or {}).get("Amount")
+                    out[key] = out.get(key, 0.0) + float(amount or 0)
+            token = resp.get("NextPageToken")
+            if not token:
+                break
+        return out
+    except Exception as e:  # noqa: BLE001 - a failed read is "not read", never a crash
+        log.warning("Compute spend by service fetch failed: %s", e)
+        return None
 
 
 # Lookback for analyze_commitments. The utilization and waste figures Cost
@@ -257,14 +414,26 @@ def _sp_coverage_pct_from_pages(ce_client: Any, kwargs: dict[str, Any]) -> float
     return covered / total * 100 if total > 0 else 0.0
 
 
+def _error_code(exc: Exception) -> str:
+    return (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "") \
+        or type(exc).__name__
+
+
 def _savings_plan_coverage(
     ce_client: Any,
     start: str,
     end: str,
     tag_filter: dict | None = None,
+    why: list[str] | None = None,
 ) -> float | None:
     """
     Coverage % for the account — or for a specific tag slice when tag_filter is set.
+
+    botocore documents GetSavingsPlansCoverage's Filter as LINKED_ACCOUNT,
+    REGION, SERVICE, INSTANCE_FAMILY and cost category, with no tags. The tag
+    slice still asks with a Tags filter; when the API refuses it, the reason
+    goes in `why` (the caller says it was not read, and why) and the result is
+    None, never 0%.
 
     tag_filter examples:
         {"team": "platform"}   → coverage for instances tagged team=platform
@@ -285,6 +454,15 @@ def _savings_plan_coverage(
 
         return _sp_coverage_pct_from_pages(ce_client, kwargs)
     except Exception as e:
+        if why is not None:
+            code = _error_code(e)
+            if tag_filter:
+                tag_key, tag_val = next(iter(tag_filter.items()))
+                why.append(f"GetSavingsPlansCoverage refused the tag filter "
+                           f"{tag_key}={tag_val} ({code}); it documents filters by "
+                           "LINKED_ACCOUNT, REGION, SERVICE and INSTANCE_FAMILY only")
+            else:
+                why.append(f"GetSavingsPlansCoverage failed ({code})")
         # None, not 0.0. "We could not read your coverage" and "you have no
         # coverage" are opposite facts, and 0.0 conflated them into the one that
         # triggers a purchase: a missing ce:GetSavingsPlansCoverage permission
@@ -356,45 +534,128 @@ def _ri_coverage(
         return None
 
 
+def _is_on_demand(purchase_type: str) -> bool:
+    """"On Demand Instances", "On-Demand Instances" and "On Demand" alike."""
+    return purchase_type.lower().replace(" ", "").replace("-", "").startswith("ondemand")
+
+
+def _tagged_on_demand_monthly(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict,
+    why: list[str] | None = None,
+) -> list[float] | None:
+    """Per-month on-demand spend on the Savings Plans eligible services for one
+    tag slice, oldest first, or None when it was not read.
+
+    GetCostAndUsage filtered by the tag and SERVICE and grouped by
+    PURCHASE_TYPE, every page; the on-demand groups are the ones _is_on_demand
+    names. Spend with no such group could not be identified, so it is None
+    with the group names in `why`, never $0. No tagged compute spend at all is
+    a real $0."""
+    tag_key, tag_val = next(iter(tag_filter.items()))
+    kwargs: dict[str, Any] = {
+        "TimePeriod": {"Start": start, "End": end},
+        "Granularity": "MONTHLY",
+        "Filter": {"And": [
+            {"Dimensions": {"Key": "SERVICE", "Values": list(SP_COMPUTE_CE_SERVICES)}},
+            {"Tags": {"Key": tag_key, "Values": [tag_val]}}]},
+        "Metrics": ["UnblendedCost"],
+        "GroupBy": [{"Type": "DIMENSION", "Key": "PURCHASE_TYPE"}],
+    }
+    try:
+        by_period: dict[str, float] = {}
+        spend = 0.0
+        keys: set[str] = set()
+        token: str | None = None
+        for _ in range(_MAX_COVERAGE_PAGES):
+            call = dict(kwargs)
+            if token:
+                call["NextPageToken"] = token
+            resp = ce_client.get_cost_and_usage(**call)
+            for period in resp.get("ResultsByTime") or []:
+                start_of = (period.get("TimePeriod") or {}).get("Start", "")
+                by_period.setdefault(start_of, 0.0)
+                for g in period.get("Groups") or []:
+                    key = (g.get("Keys") or [""])[0]
+                    amount = float(((g.get("Metrics") or {}).get("UnblendedCost") or {})
+                                   .get("Amount") or 0)
+                    spend += amount
+                    keys.add(key)
+                    if _is_on_demand(key):
+                        by_period[start_of] += amount
+            token = resp.get("NextPageToken")
+            if not token:
+                break
+    except Exception as e:  # noqa: BLE001 - a failed read is "not read", never a crash
+        if why is not None:
+            why.append(f"GetCostAndUsage by PURCHASE_TYPE for {tag_key}={tag_val} failed "
+                       f"({_error_code(e)})")
+        log.warning("Tagged on-demand fetch failed: %s", e)
+        return None
+    if spend > 0 and not any(_is_on_demand(k) for k in keys):
+        if why is not None:
+            why.append(f"on-demand could not be identified among the PURCHASE_TYPE groups "
+                       f"for {tag_key}={tag_val} ({', '.join(sorted(keys))})")
+        return None
+    return [by_period[k] for k in sorted(by_period)]
+
+
 def _uncovered_on_demand_monthly(
     ce_client: Any,
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> list[float]:
-    """Per-month on-demand EC2 + Fargate spend not covered by any commitment.
+    why: list[str] | None = None,
+) -> list[float] | None:
+    """Per-month Savings Plans eligible spend no plan covered, oldest first, or
+    None when it could not be read.
+
+    Read from GetSavingsPlansCoverage at MONTHLY granularity: per period,
+    Coverage.OnDemandCost is AWS's own figure for the eligible spend left
+    uncovered, the same call _savings_plan_coverage reads. This used
+    GetCostAndUsage filtered to SERVICE ["Amazon Elastic Compute Cloud -
+    Compute", "AWS Fargate"] and PURCHASE_TYPE ["On Demand"], two filter values
+    nothing here could check against a live Cost Explorer (botocore's model
+    gives PURCHASE_TYPE only as "Examples include On-Demand Instances"); a value
+    Cost Explorer does not use matches no rows, which read as $0 uncovered.
 
     The per-month series is what lets us size a commitment to the CONSISTENT
-    BASELINE (the floor uncovered every month) instead of a single average or peak.
-    """
-    try:
-        base_filter: dict = {
-            "And": [
-                {"Dimensions": {"Key": "SERVICE", "Values": [
-                    "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-                ]}},
-                {"Dimensions": {"Key": "PURCHASE_TYPE", "Values": ["On Demand"]}},
-            ]
-        }
-        if tag_filter:
-            tag_key, tag_val = next(iter(tag_filter.items()))
-            base_filter["And"].append(
-                {"Tags": {"Key": tag_key, "Values": [tag_val]}}
-            )
+    BASELINE (the floor uncovered every month) instead of a single average or
+    peak. A failed read is None, never an empty series that sums to $0.
 
-        resp = ce_client.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Filter=base_filter,
-            Metrics=["UnblendedCost"],
-        )
-        return [
-            float(p["Total"]["UnblendedCost"]["Amount"])
-            for p in resp.get("ResultsByTime", [])
-        ]
+    A tag slice is not read here: GetSavingsPlansCoverage documents no tag
+    filter, so it comes from _tagged_on_demand_monthly.
+    """
+    if tag_filter:
+        return _tagged_on_demand_monthly(ce_client, start, end, tag_filter, why)
+    try:
+        kwargs: dict[str, Any] = {
+            "TimePeriod": {"Start": start, "End": end},
+            "Granularity": "MONTHLY",
+        }
+        by_period: dict[str, float] = {}
+        token: str | None = None
+        for _ in range(_MAX_COVERAGE_PAGES):
+            call = dict(kwargs)
+            if token:
+                call["NextToken"] = token
+            resp = ce_client.get_savings_plans_coverage(**call)
+            for row in resp.get("SavingsPlansCoverages") or []:
+                period = (row.get("TimePeriod") or {}).get("Start", "")
+                on_demand = float((row.get("Coverage") or {}).get("OnDemandCost") or 0)
+                by_period[period] = by_period.get(period, 0.0) + on_demand
+            token = resp.get("NextToken")
+            if not token:
+                break
+        return [by_period[k] for k in sorted(by_period)]
     except Exception as e:
-        log.warning("On-demand cost fetch failed: %s", e)
-        return []
+        if why is not None:
+            why.append(f"GetSavingsPlansCoverage OnDemandCost failed ({_error_code(e)})")
+        from .._logutil import note_sp_error
+        note_sp_error(log, "Uncovered on-demand (SP coverage)", e)
+        return None
 
 
 def _uncovered_on_demand(
@@ -402,19 +663,29 @@ def _uncovered_on_demand(
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> float:
-    """On-demand EC2 + Fargate spend not covered by any commitment (period total)."""
-    return round(sum(_uncovered_on_demand_monthly(ce_client, start, end, tag_filter)), 6)
+) -> float | None:
+    """Savings Plans eligible spend no plan covered (period total), or None
+    when it could not be read."""
+    monthly = _uncovered_on_demand_monthly(ce_client, start, end, tag_filter)
+    return None if monthly is None else round(sum(monthly), 6)
 
 
 def _build_recommendations(
     sp_coverage: float | None,
-    uncovered_od: float,
+    uncovered_od: float | None,
     sp_util: float,
     ri_util: float,
     monthly_uncovered_series: list[float] | None = None,
+    *,
+    sp_rate: float = _COMPUTE_SP_DISCOUNT,
+    rate_basis: str | None = None,
+    not_read: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Purchase and warning recommendations. sp_rate is what the plan bills per
+    on-demand dollar (blended_compute_sp_rate, which analyze_commitments
+    passes with its rate_basis); not_read carries why an input was not read."""
     recs: list[dict[str, Any]] = []
+    not_read = not_read or {}
 
     # sp_coverage is None when the coverage call was denied or failed. Every
     # commitment recommendation below is an argument about how much of the bill
@@ -424,6 +695,7 @@ def _build_recommendations(
     # ce:GetSavingsPlansCoverage permission produced a recommendation to commit
     # thousands of dollars a month.
     if sp_coverage is None:
+        why = not_read.get("savings_plan_coverage")
         return [{
             "type": "coverage_unavailable",
             "title": "Commitment advice unavailable: coverage could not be read",
@@ -431,17 +703,38 @@ def _build_recommendations(
                 "nable could not read your Savings Plans coverage, so it does not "
                 "know how much of your on-demand spend is already committed. "
                 "Recommending a purchase without that would be guessing with your "
-                "money. Grant ce:GetSavingsPlansCoverage and run this again."
+                "money. "
+                + (f"Not read: {why}." if why else
+                   "Grant ce:GetSavingsPlansCoverage and run this again.")
             ),
             "monthly_savings": None,
             "confidence": "none",
-            "blocked_reason": "coverage unavailable, missing ce:GetSavingsPlansCoverage",
+            "blocked_reason": (f"coverage not read: {why}" if why else
+                               "coverage unavailable, missing ce:GetSavingsPlansCoverage"),
+        }]
+    # Coverage read but the uncovered spend did not (it comes from the same
+    # call, so this is a transient failure): there is nothing to size a plan on.
+    if uncovered_od is None:
+        why = not_read.get("uncovered_on_demand") or (
+            "GetSavingsPlansCoverage OnDemandCost could not be read")
+        return [{
+            "type": "coverage_unavailable",
+            "title": "Commitment advice unavailable: uncovered on-demand could not be read",
+            "detail": ("nable could not read how much Savings Plans eligible spend is "
+                       f"uncovered ({why}), so it does not size a purchase. This is not "
+                       "$0 uncovered."),
+            "monthly_savings": None,
+            "confidence": "none",
+            "blocked_reason": f"uncovered on-demand not read: {why}",
         }]
 
     # Size to the CONSISTENT BASELINE: the floor of monthly uncovered on-demand (what
-    # is uncovered EVERY month), not the 3-month average or a peak. Committing to the
-    # floor is the safe amount, a quiet month never leaves you over-committed. Falls
-    # back to the 3-month average when no monthly series is available.
+    # is uncovered EVERY month), not the 3-month average or a peak, so a quiet month
+    # does not leave the plan over-committed. It is still a monthly figure: a Savings
+    # Plan commits per hour, and hours below the month's average (nights, weekends)
+    # leave commitment unused that no monthly total can show. The recommendation
+    # says so and stays at medium confidence. Falls back to the 3-month average when
+    # no monthly series is available.
     series = [m for m in (monthly_uncovered_series or []) if m and m > 0]
     if len(series) >= 2:
         baseline = min(series)
@@ -454,13 +747,23 @@ def _build_recommendations(
 
     # Recommend a Compute SP sized to the baseline when coverage is low and it's meaningful
     if sp_coverage < 60 and baseline > 500:
-        commitment_to_add = baseline * _COMPUTE_SP_DISCOUNT
-        monthly_savings = baseline * (1 - _COMPUTE_SP_DISCOUNT)
+        commitment_to_add = baseline * sp_rate
+        monthly_savings = baseline * (1 - sp_rate)
         spiky = peak > baseline * 1.5
+        discount_txt = (
+            f"{1 - sp_rate:.1%} discount, {rate_basis}" if rate_basis else
+            f"{1 - sp_rate:.0%} discount, the m5.large rate and under the median of the "
+            f"AWS rate card ({COMPUTE_SP_DISCOUNT_RANGE})")
         desc = (
             f"Your SP coverage is {sp_coverage:.0f}%. A 1-year no-upfront Compute SP at "
             f"${commitment_to_add:,.0f}/mo hourly commitment covers {basis} "
-            f"(${baseline:,.0f}/mo of on-demand)."
+            f"(${baseline:,.0f}/mo of on-demand). The saving assumes a "
+            f"{discount_txt}; your instance mix sets the real one. "
+            f"Sized from monthly totals, but the commitment is hourly: if usage dips "
+            f"at night or at weekends the plan sits partly unused in those hours, and "
+            f"below {sp_rate:.0%} average utilization it costs more than "
+            f"on-demand. Check the hourly floor (Cost Explorer's Savings Plans "
+            f"recommendations use hourly usage) before buying."
         )
         if spiky:
             desc += (f" Sized to the floor, not your ${peak:,.0f}/mo peak, so a slow month "
@@ -480,7 +783,11 @@ def _build_recommendations(
             # What the commitment bounds a pack declares read the rec against
             # (commitment_bounds.apply_compute): coverage before the purchase.
             "coverage_pct_now": round(sp_coverage, 1),
-            "confidence": "high" if baseline > 5000 else "medium",
+            "assumed_discount_pct": round((1 - sp_rate) * 100, 1),
+            "sizing_granularity": "monthly",
+            # Was "high" above 5,000 a month: dollar size is not evidence, and
+            # three monthly totals cannot show the hourly floor a plan needs.
+            "confidence": "medium",
         })
 
     # Warn about over-commitment (low utilization = waste)
@@ -546,9 +853,9 @@ def estimate_coverage_for_partial_tag(
         # concurrently (CE is 2-8s per call, so serial was ~6x the latency); the
         # botocore client is thread-safe for concurrent operations. Mirrors the pool
         # already used in analyze_commitments.
-        from concurrent.futures import ThreadPoolExecutor
+        from ..aws_read_failures import ScopedThreadPool
 
-        with ThreadPoolExecutor(max_workers=6) as _pool:
+        with ScopedThreadPool(max_workers=6) as _pool:
             f_tagged_sp    = _pool.submit(_savings_plan_coverage, ce, start, end, {tag_key: tag_value})
             f_tagged_ri    = _pool.submit(_ri_coverage, ce, start, end, {tag_key: tag_value})
             f_tagged_spend = _pool.submit(_ec2_spend_for_tag, ce, start, end, tag_key, tag_value)
@@ -587,7 +894,8 @@ def estimate_coverage_for_partial_tag(
 
         blended_sp = tagged_sp_cov * tagged_weight + inferred_untagged_sp * untagged_weight
         blended_ri = tagged_ri_cov * tagged_weight + inferred_untagged_ri * untagged_weight
-        blended    = (blended_sp + blended_ri) / 2
+        # Never an average of the two: combine_coverage.
+        blended    = combine_coverage(blended_sp, blended_ri)[0]
 
         # ── Step 5: confidence ────────────────────────────────────────────────
         if tag_coverage_pct >= 90:
@@ -660,23 +968,39 @@ def analyze_commitments(
         # rather than back-to-back: CE is 2-8s per call, so serial was 5x the
         # latency. botocore low-level clients are thread-safe for concurrent
         # operations, so one shared ce client across the pool is fine.
-        from concurrent.futures import ThreadPoolExecutor
+        from ..aws_read_failures import ScopedThreadPool
 
-        with ThreadPoolExecutor(max_workers=5) as _pool:
+        # Why an input was not read, filled by the readers that know.
+        cov_why: list[str] = []
+        unc_why: list[str] = []
+        with ScopedThreadPool(max_workers=6) as _pool:
             # Utilization is always account-level: AWS can't filter it by tag.
             f_sp_util = _pool.submit(_savings_plan_utilization, ce, start, end)
             f_ri_util = _pool.submit(_ri_utilization, ce, start, end)
             # Coverage and on-demand can be filtered by tag.
-            f_sp_cov = _pool.submit(_savings_plan_coverage, ce, start, end, tag_filter)
+            f_sp_cov = _pool.submit(_savings_plan_coverage, ce, start, end, tag_filter, cov_why)
             f_ri_cov = _pool.submit(_ri_coverage, ce, start, end, tag_filter)
-            f_unc = _pool.submit(_uncovered_on_demand_monthly, ce, start, end, tag_filter)
+            f_unc = _pool.submit(_uncovered_on_demand_monthly, ce, start, end, tag_filter,
+                                 unc_why)
+            # What the uncovered pool is made of, to price it (blended_compute_sp_rate).
+            f_split = _pool.submit(_compute_spend_split, ce, start, end, tag_filter)
 
         sp_util_data = f_sp_util.result()
         ri_util_data = f_ri_util.result()
         sp_coverage = f_sp_cov.result()
         ri_coverage = f_ri_cov.result()
         uncovered_monthly = f_unc.result()
-        uncovered_od = round(sum(uncovered_monthly), 2)
+        split = f_split.result()
+        sp_rate, rate_basis = blended_compute_sp_rate(split)
+        not_read: dict[str, str] = {}
+        if sp_coverage is None and cov_why:
+            not_read["savings_plan_coverage"] = cov_why[0]
+        if uncovered_monthly is None and unc_why:
+            not_read["uncovered_on_demand"] = unc_why[0]
+        if split is None:
+            not_read["compute_spend_split"] = "GetCostAndUsage by SERVICE could not be read"
+        # None when the read failed: unread, not $0 uncovered.
+        uncovered_od = None if uncovered_monthly is None else round(sum(uncovered_monthly), 2)
 
         recs = _build_recommendations(
             sp_coverage,
@@ -684,6 +1008,9 @@ def analyze_commitments(
             sp_util_data["utilization_pct"],
             ri_util_data["utilization_pct"],
             monthly_uncovered_series=uncovered_monthly,
+            sp_rate=sp_rate,
+            rate_basis=rate_basis,
+            not_read=not_read,
         )
         # Commitment bounds from installed packs: a post-filter that only
         # cuts or drops purchase advice, never adds to it.
@@ -706,10 +1033,13 @@ def analyze_commitments(
             ri_coverage_pct=(None if ri_coverage is None else round(ri_coverage, 1)),
             ri_utilization_pct=round(ri_util_data["utilization_pct"], 1),
             ri_unused_usd=round(ri_util_data["unused_usd"] / _LOOKBACK_MONTHS, 2),
-            uncovered_on_demand_usd=round(uncovered_od, 2),
+            uncovered_on_demand_usd=None if uncovered_od is None else round(uncovered_od, 2),
             recommendations=recs,
             cut_by_bounds=cut,
             bounds=bounds.to_dict() if bounds is not None else None,
+            compute_sp_rate=sp_rate,
+            compute_sp_rate_basis=rate_basis,
+            not_read=not_read,
         )
     except Exception as e:
         log.error("Commitment analysis failed: %s", e)

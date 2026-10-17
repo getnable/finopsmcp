@@ -10,10 +10,12 @@ to shared mode. All table definitions work on both backends.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import stat
 import threading
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -440,6 +442,10 @@ savings_recommendations = Table(
     # Learning loop: coarse env/workload bucket so the signal can roll up per
     # (source, bucket), e.g. spot is fine for nonprod-batch but not prod-steady.
     Column("environment_bucket", String(64), nullable=True),
+    # The evidence its scanner filed it on: "measured" or "inferred" (the
+    # scan's recoverable / to-confirm split). NULL on rows written before it
+    # was recorded; savings_tracker classifies those by source.
+    Column("evidence", String(16), nullable=True),
 )
 
 # ── Learned cost context — the operating model nable remembers ────────────────
@@ -717,6 +723,38 @@ def get_engine() -> Engine:
         return engine
 
 
+@contextlib.contextmanager
+def _schema_lock(db_path: Path) -> Iterator[None]:
+    """One PROCESS at a time brings a SQLite file's schema up to date.
+
+    _ENGINE_LOCK covers threads. Two processes are the headless case: two
+    cron jobs (or a cron job and an editor's MCP server) starting together on
+    a data dir nable has not used yet. create_all checks for each table and
+    then creates it, so both saw no table, both issued CREATE TABLE, and the
+    slower one died on "table cost_snapshots already exists" (exit 1). A new
+    release that adds a table or column reopens the same window.
+
+    A lock file of its own, never the database: an fd opened and closed on
+    the database file would drop SQLite's own POSIX locks in this process.
+    POSIX only (flock); elsewhere it is the single-writer best effort it
+    always was."""
+    try:
+        import fcntl
+    except ImportError:  # Windows
+        yield
+        return
+    try:
+        fd = os.open(db_path.with_name(f".{db_path.name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:      # an unwritable directory fails at the database anyway
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def _build_engine() -> Engine:
     """Create the engine and bring its schema up to date. Never publishes."""
     database_url = os.environ.get("DATABASE_URL", "")
@@ -760,8 +798,19 @@ def _build_engine() -> Engine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
-        metadata.create_all(engine)
-        _run_sqlite_migrations(engine)
+        # Make the file 0600 before SQLite opens it. SQLite creates a new
+        # database at the process umask (0644 on most machines), and its -wal
+        # and -shm files take the database's mode. The chmod below came only
+        # after the schema was built, outside the lock, so a second run that
+        # started meanwhile (two cron jobs, one beside `nable doctor`) found
+        # the cost history readable by every local user.
+        try:
+            os.close(os.open(db_path, os.O_RDWR | os.O_CREAT, 0o600))
+        except OSError:
+            pass    # an unusable path fails at the database, with its own message
+        with _schema_lock(db_path):
+            metadata.create_all(engine)
+            _run_sqlite_migrations(engine)
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         # WAL mode creates -wal/-shm sidecars under the process umask; they
         # briefly hold recently written rows, so clamp them too when present.
@@ -846,6 +895,8 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         # inferred from a re-opened row.
         ("savings_recommendations", "regressed_at"),
         ("savings_recommendations", "regression_count"),
+        # Recoverable vs to-confirm in the ledger totals: the evidence class.
+        ("savings_recommendations", "evidence"),
         # Dashboards: a saved card now belongs to one. Nullable on purpose, so
         # cards pinned before dashboards existed keep working and stay on the
         # overview instead of vanishing into a dashboard nobody created.
