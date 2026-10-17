@@ -21,8 +21,10 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from functools import partial
+
+from ..aws_read_failures import ScopedThreadPool
 
 log = logging.getLogger(__name__)
 
@@ -694,7 +696,7 @@ def run_deep_audit(
     _deadline_at = (
         time.monotonic() + deadline_seconds if deadline_seconds else None
     )
-    pool = ThreadPoolExecutor(max_workers=min(max_workers, len(regions)))
+    pool = ScopedThreadPool(max_workers=min(max_workers, len(regions)))
     try:
         future_to_region = {
             pool.submit(_audit_region, session, region, active_checks): region

@@ -35,6 +35,14 @@ _ROLE_NAME = os.environ.get("FINOPS_ORG_ROLE_NAME", "FinOpsReadOnly")
 _MAX_ACCOUNTS = int(os.environ.get("FINOPS_ORG_MAX_ACCOUNTS", "200"))
 
 
+class OrgReadError(RuntimeError):
+    """The organization (or its Cost Explorer data) could not be read.
+
+    Raised instead of returning [], which every caller read as an organization
+    with no accounts, no anomalies or no OUs. An organization that answers with
+    nothing in it still returns []."""
+
+
 # ── AWS client factories ──────────────────────────────────────────────────────
 
 def _org_client() -> Any:
@@ -129,7 +137,7 @@ def list_org_accounts(sync_to_db: bool = True) -> list[dict[str, Any]]:
         org = _org_client()
     except Exception as e:
         log.warning("AWS Organizations not available: %s", e)
-        return []
+        raise OrgReadError(f"AWS Organizations could not be reached: {e}") from e
 
     accounts = []
     paginator = org.get_paginator("list_accounts")
@@ -150,7 +158,7 @@ def list_org_accounts(sync_to_db: bool = True) -> list[dict[str, Any]]:
                     break
     except Exception as e:
         log.error("list_accounts failed: %s", e)
-        return []
+        raise OrgReadError(f"AWS Organizations ListAccounts failed: {e}") from e
 
     # Identify management account
     try:
@@ -379,7 +387,11 @@ def _org_cost_summary_uncached(
 
 def _fallback_per_account_rollup(start: str, end: str, days_back: int) -> dict[str, Any]:
     """Fall back to per-account CE queries via AssumeRole if management CE fails."""
-    accounts = list_org_accounts(sync_to_db=True)
+    try:
+        accounts = list_org_accounts(sync_to_db=True)
+    except OrgReadError as e:
+        return {"error": f"Could not list the organization's accounts: {e}",
+                "method": "per_account_assume_role"}
     if not accounts:
         return {"error": "No accounts found in organization", "org_total_usd": 0}
 
@@ -516,7 +528,7 @@ def account_anomalies(days_back: int = 30) -> list[dict[str, Any]]:
 
     except Exception as e:
         log.error("Account anomaly detection failed: %s", e)
-        return []
+        raise OrgReadError(f"Per-account spend could not be read from Cost Explorer: {e}") from e
 
 
 def ou_cost_breakdown(days_back: int = 30) -> list[dict[str, Any]]:
@@ -545,6 +557,8 @@ def ou_cost_breakdown(days_back: int = 30) -> list[dict[str, Any]]:
                 account_to_ou[acct["account_id"]] = "Root"
 
         summary = org_cost_summary(days_back=days_back)
+        if summary.get("error"):
+            raise OrgReadError(f"Account spend could not be read: {summary['error']}")
         ou_totals: dict[str, float] = {}
         ou_accounts: dict[str, list] = {}
 
@@ -567,6 +581,8 @@ def ou_cost_breakdown(days_back: int = 30) -> list[dict[str, Any]]:
             for ou, total in ou_totals.items()
         ], key=lambda x: x["total_usd"], reverse=True)
 
+    except OrgReadError:
+        raise
     except Exception as e:
         log.error("OU breakdown failed: %s", e)
-        return []
+        raise OrgReadError(f"The OU breakdown could not be read: {e}") from e

@@ -142,8 +142,11 @@ class GCPConnector(BaseConnector):
             FROM `{bq_table}`
             WHERE
                 billing_account_id = @billing_account_id
+                -- [start, end): end exclusive, as Cost Explorer reads it and
+                -- as every caller builds its window. `<=` read one day more
+                -- than AWS for the same request.
                 AND DATE(usage_start_time) >= @start_date
-                AND DATE(usage_start_time) <= @end_date
+                AND DATE(usage_start_time) < @end_date
             GROUP BY service, region, currency
             ORDER BY total_cost DESC
         """

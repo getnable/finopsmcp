@@ -62,6 +62,36 @@ _persona = get_persona()
 _persona_ctx = get_persona_mcp_context()
 
 
+# Tools that read every connected provider's spend and take no `provider`
+# argument, so the scope call_tool applies has nothing to fill in. A key scoped
+# to one provider is refused them: an "all sources" total or a provider
+# comparison cut down to one provider would still be labelled as the whole
+# picture, and a refusal cannot leak. get_cost_summary and the other tools
+# that take a provider answer for the key's provider.
+# tests/test_provider_scoped_key_cross_provider_tools.py finds every such tool
+# in the source and fails until it is listed here.
+PROVIDER_SCOPED_REFUSED: frozenset[str] = frozenset({
+    "compare_providers", "get_total_spend_all_sources", "get_saas_spend_summary",
+    "get_unit_economics", "explain_cost_change", "explain_recent_cost_drivers",
+    "audit_duplicate_spend", "export_cost_report",
+})
+
+
+def _refuse_cross_provider_tool_for_a_scoped_key(name: str) -> None:
+    if name not in PROVIDER_SCOPED_REFUSED:
+        return
+    scope = enforce_provider_scope(None)
+    if scope is None:
+        return
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    raise ToolError(
+        f"This API key is scoped to {scope}. {name} reads every connected "
+        f"provider's spend, so it is not available to a key scoped to one "
+        f"provider. Nothing was read. get_cost_summary answers for {scope}, as "
+        f"do the other cost tools that take a provider.")
+
+
 class _SurfacedFastMCP(FastMCP):
     """FastMCP that advertises only the tools this machine can actually use.
 
@@ -155,6 +185,7 @@ class _SurfacedFastMCP(FastMCP):
             # A scoping failure must not silently WIDEN access, so this re-raises
             # rather than falling through to the unscoped arguments.
             raise
+        _refuse_cross_provider_tool_for_a_scoped_key(name)
         _reject_dropped_write_arguments(self, name, arguments)
         return await super().call_tool(name, arguments, **kwargs)
 
@@ -578,7 +609,6 @@ def _instrumented_tool(*dargs, **dkwargs):
                 # Only await coroutines/awaitables, otherwise sync tools
                 # (whoami, *_api_key) raise "object dict can't be used in
                 # 'await' expression".
-                _aws_reads.carry_into_default_executor(asyncio.get_running_loop())
                 with _aws_reads.watching() as _reads:
                     if _demo is not None:
                         result = _demo

@@ -32,6 +32,26 @@ def _month_pair(today):
     return first_this, today, first_prev, last_prev, False
 
 
+def _month_windows(today):
+    """The windows the month views ask a provider for, and the days they name.
+
+    Returns (cur_start, cur_end, prev_start, prev_end, on_the_first) with each
+    end EXCLUSIVE, which is how Cost Explorer (and the GCP connector) read a
+    window. A closed month is asked for up to the 1st of the next month: asked
+    up to its last day, it was read without that day, and a flat bill showed a
+    pace change. Month to date ends today, which is not read.
+    """
+    one = _srv.timedelta(days=1)
+    cur_start, cur_end, prev_start, prev_end, on_the_first = _month_pair(today)
+    return (cur_start, cur_end + one if on_the_first else cur_end,
+            prev_start, prev_end + one, on_the_first)
+
+
+def _days(start, end_exclusive) -> str:
+    """The days [start, end_exclusive) covers, as a reader counts them."""
+    return f"{start} to {end_exclusive - _srv.timedelta(days=1)}"
+
+
 # Cloud providers federate in-chat through their own connect_* MCP tool: no
 # terminal, no secret ever typed into the conversation.
 _CLOUD_CONNECT_TOOL = {"aws": "connect_aws", "azure": "connect_azure", "gcp": "connect_gcp"}
@@ -1292,14 +1312,14 @@ async def get_view(
 
     # ── mom ──────────────────────────────────────────────────────────────────
     if view == "mom":
-        first_this, this_end, first_last, last_last, on_the_first = _month_pair(today)
+        first_this, this_end, first_last, last_end, on_the_first = _month_windows(today)
 
         active = await _srv._active()
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
         _, this_by, _  = await _srv._gather_costs(active, first_this, this_end)
-        _, last_by, _  = await _srv._gather_costs(active, first_last, last_last)
+        _, last_by, _  = await _srv._gather_costs(active, first_last, last_end)
         if (refusal := _view_refusal(active, this_by)) is not None:
             return refusal
 
@@ -1325,8 +1345,8 @@ async def get_view(
         total_pct = ((this_total - last_total) / last_total * 100) if last_total else None
         out = {
             "view": meta["name"],
-            "this_month": {"period": f"{first_this} to {this_end}", "total": _srv._fmt_usd(this_total)},
-            "last_month": {"period": f"{first_last} to {last_last}", "total": _srv._fmt_usd(last_total)},
+            "this_month": {"period": _days(first_this, this_end), "total": _srv._fmt_usd(this_total)},
+            "last_month": {"period": _days(first_last, last_end), "total": _srv._fmt_usd(last_total)},
             "total_change": f"{total_pct:+.1f}%" if total_pct is not None else "n/a",
             "by_provider": rows,
             # The keys stay this_month/last_month for consumers, so on the 1st say
@@ -1340,7 +1360,7 @@ async def get_view(
             # a flat bill read as -58% on the 13th. Say so, and give the daily
             # pace, which compares like with like.
             n_this = max(1, (this_end - first_this).days)
-            n_last = max(1, (last_last - first_last).days + 1)
+            n_last = max(1, (last_end - first_last).days)
             pace_this, pace_last = this_total / n_this, last_total / n_last
             out["comparison"] = (
                 f"Month to date ({n_this} days) against all of last month ({n_last} days): "
@@ -1376,8 +1396,8 @@ async def get_view(
         pct = ((this_total - last_total) / last_total * 100) if last_total else None
         out = {
             "view": meta["name"],
-            "this_week": {"period": f"{this_start} to {today}", "total": _srv._fmt_usd(this_total)},
-            "last_week": {"period": f"{last_start} to {last_end}", "total": _srv._fmt_usd(last_total)},
+            "this_week": {"period": _days(this_start, today), "total": _srv._fmt_usd(this_total)},
+            "last_week": {"period": _days(last_start, last_end), "total": _srv._fmt_usd(last_total)},
             "change_pct": f"{pct:+.1f}%" if pct is not None else "n/a",
             "by_provider": [
                 {
@@ -1434,7 +1454,7 @@ async def get_view(
         rows = [{"date": d, "spend": _srv._fmt_usd(v)} for d, v in sorted(daily.items())]
         out = {
             "view": meta["name"],
-            "period": f"{start} to {today}",
+            "period": _days(start, today),
             "daily_spend": rows if rows else {"note": (
                 "No connected provider offers a daily series: "
                 f"{', '.join(sorted(no_daily)) or 'none connected'}.")},
@@ -1450,14 +1470,14 @@ async def get_view(
 
     # ── by_service ───────────────────────────────────────────────────────────
     if view == "by_service":
-        first_this, this_end, first_last, last_last, on_the_first = _month_pair(today)
+        first_this, this_end, first_last, last_end, on_the_first = _month_windows(today)
 
         active = await _srv._active()
         if provider:
             active = {k: v for k, v in active.items() if k == provider}
 
         _, this_by, this_svc = await _srv._gather_costs(active, first_this, this_end)
-        _, last_by, last_svc = await _srv._gather_costs(active, first_last, last_last)
+        _, last_by, last_svc = await _srv._gather_costs(active, first_last, last_end)
         if (refusal := _view_refusal(active, this_by)) is not None:
             return refusal
 
@@ -1474,7 +1494,7 @@ async def get_view(
 
         out = {
             "view": meta["name"],
-            "period": f"{first_this} to {this_end}",
+            "period": _days(first_this, this_end),
             "services": rows,
             **({"note": "It is the 1st, so there is no month-to-date yet. "
                         "'this_month' is the month that just closed and 'last_month' "

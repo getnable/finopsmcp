@@ -10,10 +10,12 @@ import logging
 import os
 import time
 from collections.abc import Callable, Hashable, Sequence
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from ..aws_read_failures import ScopedThreadPool
 
 log = logging.getLogger(__name__)
 
@@ -194,7 +196,8 @@ def _fetch_with_get_metric_statistics(
     failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, MetricPoints | None]:
     out: dict[Hashable, MetricPoints | None] = {}
-    pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(queries))),
+    # Scoped: a read that fails here counts for the tool call that asked.
+    pool = ScopedThreadPool(max_workers=max(1, min(max_workers, len(queries))),
                               thread_name_prefix="cw-read")
     try:
         futures = {pool.submit(_read_statistics, cw_client, q, start, end, failures): q

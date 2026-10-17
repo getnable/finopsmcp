@@ -10,6 +10,13 @@ worse than an error.
 These tests drive the real views with the clock pinned, so the boundary is
 covered on any day of the year, and they assert against the windows the views
 actually ASK FOR, not just against the helper.
+
+The windows asked for are end-exclusive, as Cost Explorer reads them: a closed
+month is asked for up to the 1st of the next month. These pins used to be
+(1st, last day), which Cost Explorer reads without the last day, so July came
+back as July 1-30 under the label "2026-07-01 to 2026-07-31" (see
+tests/test_cost_windows_read_what_they_say.py). _month_pair still returns the
+months' first and last days, which is what the labels name.
 """
 from __future__ import annotations
 
@@ -84,8 +91,8 @@ def test_month_pair_mid_month_is_month_to_date_vs_last_month():
 async def test_mom_on_the_first_reports_real_dollars_not_a_100pct_collapse(monkeypatch):
     _pin_today(monkeypatch, date(2026, 8, 1))
     _stub_costs(monkeypatch, {
-        ("2026-07-01", "2026-07-31"): 48210.0,
-        ("2026-06-01", "2026-06-30"): 44000.0,
+        ("2026-07-01", "2026-08-01"): 48210.0,
+        ("2026-06-01", "2026-07-01"): 44000.0,
     })
     out = await meta.get_view("mom")
 
@@ -100,11 +107,14 @@ async def test_mom_mid_month_is_unchanged_and_carries_no_note(monkeypatch):
     _pin_today(monkeypatch, date(2026, 8, 14))
     _stub_costs(monkeypatch, {
         ("2026-08-01", "2026-08-14"): 20000.0,
-        ("2026-07-01", "2026-07-31"): 48210.0,
+        ("2026-07-01", "2026-08-01"): 48210.0,
     })
     out = await meta.get_view("mom")
 
-    assert out["this_month"]["period"] == "2026-08-01 to 2026-08-14"
+    # Month to date is Aug 1-13: today is not read (Cost Explorer's End is
+    # exclusive), and the answer's own comparison counts 13 days. The label
+    # used to say "to 2026-08-14".
+    assert out["this_month"]["period"] == "2026-08-01 to 2026-08-13"
     assert out["last_month"]["period"] == "2026-07-01 to 2026-07-31"
     assert "note" not in out
 
@@ -112,8 +122,8 @@ async def test_mom_mid_month_is_unchanged_and_carries_no_note(monkeypatch):
 async def test_by_service_on_the_first_still_names_services(monkeypatch):
     _pin_today(monkeypatch, date(2026, 8, 1))
     _stub_costs(monkeypatch, {
-        ("2026-07-01", "2026-07-31"): 48210.0,
-        ("2026-06-01", "2026-06-30"): 44000.0,
+        ("2026-07-01", "2026-08-01"): 48210.0,
+        ("2026-06-01", "2026-07-01"): 44000.0,
     })
     out = await meta.get_view("by_service")
 
@@ -129,8 +139,8 @@ async def test_views_never_query_an_empty_range_on_the_first(monkeypatch, view):
     # a cost provider for a range that starts and ends on the same day.
     _pin_today(monkeypatch, date(2026, 8, 1))
     asked = _stub_costs(monkeypatch, {
-        ("2026-07-01", "2026-07-31"): 48210.0,
-        ("2026-06-01", "2026-06-30"): 44000.0,
+        ("2026-07-01", "2026-08-01"): 48210.0,
+        ("2026-06-01", "2026-07-01"): 44000.0,
     })
     await meta.get_view(view)
 

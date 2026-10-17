@@ -464,12 +464,9 @@ async def get_rds_rightsizing_recommendations(
         import boto3
         from ..analyzers.waste import check_rds_rightsizing
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -484,8 +481,7 @@ async def get_rds_rightsizing_recommendations(
 
         async def _scan_region_rds_rs(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_rds_rightsizing(
                         boto3.client("rds", region_name=region),
                         boto3.client("cloudwatch", region_name=region),
@@ -598,12 +594,9 @@ async def get_idle_rds_instances(
         import boto3
         from ..analyzers.waste import check_rds_idle
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -616,8 +609,7 @@ async def get_idle_rds_instances(
 
         async def _scan_region_rds_idle(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_rds_idle(
                         boto3.client("rds", region_name=region),
                         boto3.client("cloudwatch", region_name=region),
@@ -686,12 +678,9 @@ async def get_idle_load_balancers(
         import boto3
         from ..analyzers.waste import check_idle_load_balancers
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -704,8 +693,7 @@ async def get_idle_load_balancers(
 
         async def _scan_region_elb(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_idle_load_balancers(
                         boto3.client("elbv2", region_name=region),
                         boto3.client("elb", region_name=region),

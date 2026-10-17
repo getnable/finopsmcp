@@ -273,8 +273,8 @@ def get_all_llm_costs(
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Already inside an async context (e.g. called from an MCP tool handler)
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                from ..aws_read_failures import ScopedThreadPool
+                with ScopedThreadPool(max_workers=1) as pool:
                     return pool.submit(asyncio.run, coro).result()
             return loop.run_until_complete(coro)
         except RuntimeError:
@@ -356,7 +356,6 @@ def get_all_llm_costs(
             return litellm_costs(start_date, end_date)
         return None
 
-    import concurrent.futures
     _fetchers = {
         "openai": _fetch_openai,
         "anthropic": _fetch_anthropic,
@@ -372,7 +371,8 @@ def get_all_llm_costs(
         for _cn in _CLOUD_NATIVE_LLM:
             _fetchers.pop(_cn, None)
     not_configured: list[str] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(_fetchers)) as _pool:
+    from ..aws_read_failures import ScopedThreadPool
+    with ScopedThreadPool(max_workers=len(_fetchers)) as _pool:
         _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
         for name, fut in _futs.items():
             try:

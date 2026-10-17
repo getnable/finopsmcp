@@ -29,7 +29,7 @@ from ..aws_prices import EBS_SNAPSHOT_PER_GB_MONTH as _SNAPSHOT_PER_GB_MONTH
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH as _EIP_PER_MONTH
 from ..aws_prices import ebs_volume_monthly, lb_hourly
-from ..aws_read_failures import carry
+from ..aws_read_failures import ScopedThreadPool
 
 RESOURCE_TYPES = ("ebs_volume", "elastic_ip", "snapshot", "stopped_ec2", "load_balancer")
 
@@ -461,9 +461,8 @@ def _scan_idle_load_balancers(
                 healthy = 1  # unknown health must never be flagged as idle
             return lb, healthy
 
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            checked = list(pool.map(carry(_healthy_targets), lbs))
+        with ScopedThreadPool(max_workers=8) as pool:
+            checked = list(pool.map(_healthy_targets, lbs))
 
         for lb, healthy in checked:
             if healthy > 0:
@@ -582,9 +581,8 @@ def scan_idle_resources(
     # concurrently so a many-region account finishes inside the value moment's
     # 10s cap instead of hitting it and showing partial idle data. Blocking I/O
     # releases the GIL, so threads give a real speedup here.
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(regions), 12) or 1) as pool:
-        for sub in pool.map(carry(_scan_region), regions):
+    with ScopedThreadPool(max_workers=min(len(regions), 12) or 1) as pool:
+        for sub in pool.map(_scan_region, regions):
             results.extend(sub)
 
     results.sort(key=lambda r: r.monthly_cost_usd, reverse=True)

@@ -85,15 +85,11 @@ def _call(name, fn, **kwargs):
     """Run one scanner. Returns (name, result, error, reads): the AWS reads it
     made are recorded, because most scanners swallow a failed region and return
     an empty result that is otherwise indistinguishable from a clean one."""
-    from ..aws_read_failures import carry_into_default_executor, watching
-
-    async def _on_this_loop():
-        carry_into_default_executor(asyncio.get_running_loop())
-        return await fn(**kwargs)
+    from ..aws_read_failures import watching
 
     with watching() as reads:
         try:
-            res = asyncio.run(_on_this_loop()) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
+            res = asyncio.run(fn(**kwargs)) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
             return name, res, None, reads
         except Exception as exc:
             log.warning("audit scanner %s failed: %s", name, exc)

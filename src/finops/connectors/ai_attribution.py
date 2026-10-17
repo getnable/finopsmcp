@@ -22,7 +22,6 @@ get_llm_costs, by model.
 """
 from __future__ import annotations
 
-import concurrent.futures
 import importlib
 import logging
 from datetime import date, timedelta
@@ -126,7 +125,8 @@ def get_ai_cost_attribution(
         start_date = end_date - timedelta(days=max(1, days) - 1)
 
     answers: dict[str, dict[str, Any]] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(providers)) as pool:
+    from ..aws_read_failures import ScopedThreadPool
+    with ScopedThreadPool(max_workers=len(providers)) as pool:
         futs = {p: pool.submit(_fetch, p, dim, start_date, end_date) for p in providers}
         for p, fut in futs.items():
             try:
