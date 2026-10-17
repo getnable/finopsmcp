@@ -36,8 +36,14 @@ _SCHEDULED_OFF_HOURS_PER_WEEK = _TOTAL_HOURS_PER_WEEK - _BUSINESS_HOURS_PER_WEEK
 _IDLE_CPU_THRESHOLD = 5.0          # % CPU below which hour is considered idle
 _LOOKBACK_DAYS = 7
 
-# Tag keys to inspect for environment labels
-_ENV_TAG_KEYS = ["Environment", "Env", "environment", "Stage", "stage"]
+# Tag keys to inspect for environment labels, in order of preference, compared
+# case-insensitively: env, Env, ENV, environment and Environment all match. An
+# exact comparison missed env=dev, the common lower-case spelling.
+_ENV_TAG_KEYS = ["environment", "env", "stage"]
+
+
+def _tag_key(tag: dict) -> str:
+    return str(tag.get("Key", "")).lower()
 
 # Values that indicate a non-production environment (matched case-insensitively)
 _NONPROD_VALUES = {
@@ -56,7 +62,7 @@ def _get_env_tag(tags: list[dict]) -> str | None:
     """Return the non-prod environment value from a list of EC2 tag dicts, or None."""
     for key in _ENV_TAG_KEYS:
         for tag in tags:
-            if tag.get("Key") == key:
+            if _tag_key(tag) == key:
                 value = tag.get("Value", "")
                 if value.lower() in _NONPROD_VALUES:
                     return value
@@ -186,7 +192,7 @@ async def identify_nonprod_resources(
                         # Override nonprod_values for matching when caller extended the set
                         if env_value is None and extra_values:
                             for tag in tags:
-                                if tag.get("Key") in _ENV_TAG_KEYS:
+                                if _tag_key(tag) in _ENV_TAG_KEYS:
                                     v = tag.get("Value", "").lower()
                                     if v in nonprod_values:
                                         env_value = tag.get("Value", "")
