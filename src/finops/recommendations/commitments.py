@@ -129,8 +129,9 @@ class CommitmentAnalysis:
     ri_utilization_pct: float
     ri_unused_usd: float
 
-    # On-demand that commitments could cover
-    uncovered_on_demand_usd: float
+    # On-demand that commitments could cover, over the whole window (three
+    # months), or None when it could not be read.
+    uncovered_on_demand_usd: float | None
 
     # Recommendations
     recommendations: list[dict[str, Any]] = field(default_factory=list)
@@ -411,40 +412,50 @@ def _uncovered_on_demand_monthly(
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> list[float]:
-    """Per-month on-demand EC2 + Fargate spend not covered by any commitment.
+) -> list[float] | None:
+    """Per-month Savings Plans eligible spend no plan covered, oldest first, or
+    None when it could not be read.
+
+    Read from GetSavingsPlansCoverage at MONTHLY granularity: per period,
+    Coverage.OnDemandCost is AWS's own figure for the eligible spend left
+    uncovered, the same call _savings_plan_coverage reads. This used
+    GetCostAndUsage filtered to SERVICE ["Amazon Elastic Compute Cloud -
+    Compute", "AWS Fargate"] and PURCHASE_TYPE ["On Demand"], two filter values
+    nothing here could check against a live Cost Explorer (botocore's model
+    gives PURCHASE_TYPE only as "Examples include On-Demand Instances"); a value
+    Cost Explorer does not use matches no rows, which read as $0 uncovered.
 
     The per-month series is what lets us size a commitment to the CONSISTENT
-    BASELINE (the floor uncovered every month) instead of a single average or peak.
+    BASELINE (the floor uncovered every month) instead of a single average or
+    peak. A failed read is None, never an empty series that sums to $0.
     """
     try:
-        base_filter: dict = {
-            "And": [
-                {"Dimensions": {"Key": "SERVICE", "Values": [
-                    "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-                ]}},
-                {"Dimensions": {"Key": "PURCHASE_TYPE", "Values": ["On Demand"]}},
-            ]
+        kwargs: dict[str, Any] = {
+            "TimePeriod": {"Start": start, "End": end},
+            "Granularity": "MONTHLY",
         }
         if tag_filter:
             tag_key, tag_val = next(iter(tag_filter.items()))
-            base_filter["And"].append(
-                {"Tags": {"Key": tag_key, "Values": [tag_val]}}
-            )
-
-        resp = ce_client.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Filter=base_filter,
-            Metrics=["UnblendedCost"],
-        )
-        return [
-            float(p["Total"]["UnblendedCost"]["Amount"])
-            for p in resp.get("ResultsByTime", [])
-        ]
+            kwargs["Filter"] = {"Tags": {"Key": tag_key, "Values": [tag_val]}}
+        by_period: dict[str, float] = {}
+        token: str | None = None
+        for _ in range(_MAX_COVERAGE_PAGES):
+            call = dict(kwargs)
+            if token:
+                call["NextToken"] = token
+            resp = ce_client.get_savings_plans_coverage(**call)
+            for row in resp.get("SavingsPlansCoverages") or []:
+                period = (row.get("TimePeriod") or {}).get("Start", "")
+                on_demand = float((row.get("Coverage") or {}).get("OnDemandCost") or 0)
+                by_period[period] = by_period.get(period, 0.0) + on_demand
+            token = resp.get("NextToken")
+            if not token:
+                break
+        return [by_period[k] for k in sorted(by_period)]
     except Exception as e:
-        log.warning("On-demand cost fetch failed: %s", e)
-        return []
+        from .._logutil import note_sp_error
+        note_sp_error(log, "Uncovered on-demand (SP coverage)", e)
+        return None
 
 
 def _uncovered_on_demand(
@@ -452,14 +463,16 @@ def _uncovered_on_demand(
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> float:
-    """On-demand EC2 + Fargate spend not covered by any commitment (period total)."""
-    return round(sum(_uncovered_on_demand_monthly(ce_client, start, end, tag_filter)), 6)
+) -> float | None:
+    """Savings Plans eligible spend no plan covered (period total), or None
+    when it could not be read."""
+    monthly = _uncovered_on_demand_monthly(ce_client, start, end, tag_filter)
+    return None if monthly is None else round(sum(monthly), 6)
 
 
 def _build_recommendations(
     sp_coverage: float | None,
-    uncovered_od: float,
+    uncovered_od: float | None,
     sp_util: float,
     ri_util: float,
     monthly_uncovered_series: list[float] | None = None,
@@ -486,6 +499,19 @@ def _build_recommendations(
             "monthly_savings": None,
             "confidence": "none",
             "blocked_reason": "coverage unavailable, missing ce:GetSavingsPlansCoverage",
+        }]
+    # Coverage read but the uncovered spend did not (it comes from the same
+    # call, so this is a transient failure): there is nothing to size a plan on.
+    if uncovered_od is None:
+        return [{
+            "type": "coverage_unavailable",
+            "title": "Commitment advice unavailable: uncovered on-demand could not be read",
+            "detail": ("nable could not read how much Savings Plans eligible spend is "
+                       "uncovered (GetSavingsPlansCoverage OnDemandCost), so it does not "
+                       "size a purchase. This is not $0 uncovered."),
+            "monthly_savings": None,
+            "confidence": "none",
+            "blocked_reason": "uncovered on-demand unavailable",
         }]
 
     # Size to the CONSISTENT BASELINE: the floor of monthly uncovered on-demand (what
@@ -741,7 +767,8 @@ def analyze_commitments(
         sp_coverage = f_sp_cov.result()
         ri_coverage = f_ri_cov.result()
         uncovered_monthly = f_unc.result()
-        uncovered_od = round(sum(uncovered_monthly), 2)
+        # None when the read failed: unread, not $0 uncovered.
+        uncovered_od = None if uncovered_monthly is None else round(sum(uncovered_monthly), 2)
 
         recs = _build_recommendations(
             sp_coverage,
@@ -771,7 +798,7 @@ def analyze_commitments(
             ri_coverage_pct=(None if ri_coverage is None else round(ri_coverage, 1)),
             ri_utilization_pct=round(ri_util_data["utilization_pct"], 1),
             ri_unused_usd=round(ri_util_data["unused_usd"] / _LOOKBACK_MONTHS, 2),
-            uncovered_on_demand_usd=round(uncovered_od, 2),
+            uncovered_on_demand_usd=None if uncovered_od is None else round(uncovered_od, 2),
             recommendations=recs,
             cut_by_bounds=cut,
             bounds=bounds.to_dict() if bounds is not None else None,

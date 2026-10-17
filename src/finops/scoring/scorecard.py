@@ -382,7 +382,7 @@ def _score_waste_reduction(
     )
 
 
-def _normalize_commitment_data(commitment_data: dict) -> tuple[float | None, float, float]:
+def _normalize_commitment_data(commitment_data: dict) -> tuple[float | None, float | None, float]:
     """Read (coverage_pct, on_demand_spend, potential_savings) from either
     shape a caller hands in.
 
@@ -418,7 +418,8 @@ def _normalize_commitment_data(commitment_data: dict) -> tuple[float | None, flo
         # zero coverage, and the caller reports it as not scored.
         coverage_pct = sum(parts) / len(parts) if parts else None
 
-    if commitment_data.get("on_demand_usd") is not None:
+    if "on_demand_usd" in commitment_data:
+        # None is a read that failed: unknown, never $0.
         on_demand_spend = commitment_data["on_demand_usd"]
     else:
         on_demand_spend = commitment_data.get("uncovered_on_demand_usd") or 0
@@ -495,7 +496,12 @@ def _score_commitment_coverage(
     # 70% coverage = 100 score; 0% = 0; penalise for high on-demand waste
     raw = _clamp(coverage_pct / 70 * 100)
 
-    if coverage_pct < 30:
+    if coverage_pct < 30 and on_demand_spend is None:
+        findings.append(
+            f"Only {coverage_pct:.0f}% of compute is under commitments; the uncovered "
+            f"on-demand spend could not be read, so it is not priced here"
+        )
+    elif coverage_pct < 30:
         findings.append(
             f"Only {coverage_pct:.0f}% of compute is under commitments — "
             f"${on_demand_spend:,.0f}/month at full on-demand rates"

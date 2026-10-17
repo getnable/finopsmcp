@@ -264,9 +264,12 @@ async def get_efficiency_scorecard(
                     # analysis window (three months), and the scorecard prints
                     # this as "$X/month": passing the total read three times
                     # the monthly figure.
-                    "on_demand_usd": raw_commits.uncovered_on_demand_usd / _LOOKBACK_MONTHS,
+                    # None when it could not be read, not $0.
+                    "on_demand_usd": (None if raw_commits.uncovered_on_demand_usd is None
+                                      else raw_commits.uncovered_on_demand_usd
+                                      / _LOOKBACK_MONTHS),
                     "potential_savings_usd": sum(
-                        r.get("monthly_savings", 0)
+                        r.get("monthly_savings") or 0
                         for r in raw_commits.recommendations
                         if r.get("type") != "warning"
                     ),
