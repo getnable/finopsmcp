@@ -63,6 +63,60 @@ COMMITMENTS_NOT_IN_TOTAL = (
     "same instance hours these per-resource savings already count.")
 
 
+# cleanup.idle files no evidence class of its own. Its rows are the claims
+# run_deep_audit classifies in analyzers.waste_evidence, so each takes that
+# class: an old snapshot priced at its full volume size is an inference there
+# (old_unmanaged_snapshot), and so it is here. A type not listed (a stopped
+# instance's attached storage) is a measured state.
+_IDLE_EVIDENCE_CLASS = {
+    "ebs_volume": "unattached_ebs_volume",
+    "snapshot": "old_unmanaged_snapshot",
+    "load_balancer": "idle_load_balancer",
+}
+
+
+def _idle_is_inferred(resource_type: str) -> bool:
+    from ..analyzers.waste_evidence import INFERRED, spec_for
+
+    cls = _IDLE_EVIDENCE_CLASS.get(resource_type)
+    return cls is not None and spec_for(cls).evidence == INFERRED
+
+
+def _filed_as_inference(data: Any) -> bool:
+    """Whether the scanner's own envelope (envelope.Finding, on its result or
+    on its rows) filed what it found as an investigation: an inference it
+    could not measure. A scanner that says nothing counts as measured, as a
+    finding with no classification does in `nable scan`."""
+    if isinstance(data, dict):
+        env = data.get("finding")
+        return isinstance(env, dict) and env.get("kind") == INVESTIGATION
+    if isinstance(data, list):
+        return any(isinstance(r, dict) and isinstance(r.get("finding"), dict)
+                   and r["finding"].get("kind") == INVESTIGATION for r in data)
+    return False
+
+
+def split_total(findings: list[dict]) -> tuple[float, float, int]:
+    """(recoverable, to confirm, how many to confirm), per month.
+
+    The same split `nable scan` makes (cli_scan._recoverable_split):
+    recoverable is the rows measured, and the rows their scanner filed as an
+    inference are "to confirm", shown beside it and not added in. A row with
+    no figure (an investigation, a retracted claim) is in neither."""
+    recoverable = sum(f.get("monthly_savings") or 0 for f in findings
+                      if not f.get("to_confirm"))
+    confirm = [f for f in findings
+               if f.get("to_confirm") and f.get("monthly_savings") is not None]
+    return recoverable, sum(f["monthly_savings"] for f in confirm), len(confirm)
+
+
+def to_confirm_line(to_confirm: float, n: int) -> str:
+    """The sentence every caller prints beside its recoverable total."""
+    return (f"${to_confirm:,.2f}/mo to confirm, not counted as recoverable: {n} "
+            f"finding{'s' if n != 1 else ''} rest{'s' if n == 1 else ''} on an inference "
+            "its check could not measure (marked \"to confirm\").")
+
+
 @dataclass
 class SweepResult:
     """What every caller gets: findings, and an honest account of what failed."""
@@ -321,7 +375,8 @@ def normalise(name, data) -> list[dict]:
                 # savings == the resource's own cost by construction (delete
                 # it, stop paying it); carrying the cost makes that invariant
                 # checkable by the critique instead of assumed.
-                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
+                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd,
+                            **({"to_confirm": True} if _idle_is_inferred(r.resource_type) else {})})
         elif name == "idle_rds" and isinstance(data, list):
             for r in data:
                 s = r.get("estimated_monthly_savings", 0) or 0
@@ -499,9 +554,14 @@ async def sweep(
         if gaps:
             out.partial[name] = "; ".join(gaps)
         raw[name] = data
+        inferred = _filed_as_inference(data)
         for f in found:
             f["source"] = SOURCE_MAP.get(name, name)
             f["_scanner"] = name
+            if inferred and f.get("monthly_savings") is not None:
+                # Its scanner filed it as an inference: a figure to confirm,
+                # not a recoverable one (split_total).
+                f["to_confirm"] = True
             out.findings.append(f)
 
     _net_database_plan_of_idle_rds(out.findings, raw.get("db_sp"), raw.get("idle_rds"))
