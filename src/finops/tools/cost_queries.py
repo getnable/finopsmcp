@@ -1995,7 +1995,9 @@ async def run_full_cost_audit(
             return f"{f.get('magnitude', 'unconfirmed')} (needs confirming)"
         # A row outside us-east-1 priced at us-east-1 list rates says so here,
         # where the figure is (sweep._listed).
+        above = f.get("to_confirm_above_usd")
         tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                (f"+${above or 0:,.2f} to confirm", above),
                                 ("us-east-1 list", f.get("us_east_1_list"))) if on]
         return f"${v:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
 

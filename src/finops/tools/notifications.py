@@ -831,6 +831,11 @@ async def export_cost_report_csv(
                 detail = f"needs confirming ({f.get('magnitude', 'unconfirmed')}); {detail}".strip("; ")
             elif f.get("to_confirm"):
                 detail = f"to confirm, not in the total; {detail}".strip("; ")
+            elif f.get("to_confirm_above_usd"):
+                # A larger inferred alternative on the same resource: its excess
+                # is in "To confirm monthly", this row's figure in the total.
+                detail = (f"plus ${f['to_confirm_above_usd']:,.2f}/mo to confirm from an "
+                          f"inferred alternative; {detail}").strip("; ")
             writer.writerow([i, _csv_safe(f["title"]), _csv_safe(f["category"]), mo, yr, _csv_safe(detail)])
 
     note = ""

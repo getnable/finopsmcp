@@ -107,7 +107,12 @@ def split_total(findings: list[dict]) -> tuple[float, float, int]:
                       if not f.get("to_confirm"))
     confirm = [f for f in findings
                if f.get("to_confirm") and f.get("monthly_savings") is not None]
-    return recoverable, sum(f["monthly_savings"] for f in confirm), len(confirm)
+    # A measured row whose resource also has a larger inferred alternative
+    # (collapse_per_resource): the excess is to confirm, the row recoverable.
+    above = [float(f["to_confirm_above_usd"]) for f in findings
+             if not f.get("to_confirm") and (f.get("to_confirm_above_usd") or 0) > 0]
+    return (recoverable, sum(f["monthly_savings"] for f in confirm) + sum(above),
+            len(confirm) + len(above))
 
 
 def to_confirm_line(to_confirm: float, n: int) -> str:
@@ -425,8 +430,19 @@ SOURCE_MAP = {
 }
 
 
+def _has_figure(f: dict) -> bool:
+    return f.get("monthly_savings") is not None
+
+
 def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
-    """Keep one finding per resource: the largest saving, alternatives attached.
+    """Keep one finding per resource, alternatives attached.
+
+    Per resource the kept row is the largest measured saving; the largest
+    inferred one counts only for what it claims beyond that, as
+    to_confirm_above_usd (split_total adds it to "to confirm"). Keeping the
+    largest saving whatever its evidence let an inferred $25 alternative push
+    a measured $10 fix out of recoverable. A resource with no measured row
+    keeps its largest inferred one, and one with no figure at all its first.
 
     Findings with no resource_id are aggregates ("delete 12 orphaned alarms") and
     cannot double count a single resource, so they pass through untouched.
@@ -435,26 +451,35 @@ def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
     which the caller reports rather than silently dropping: a total that quietly
     shrank is as hard to trust as one that was quietly inflated.
     """
-    best: dict[str, dict] = {}
-    passthrough: list[dict] = []
-    order: list[str] = []
-
+    groups: dict[str, list[dict]] = {}
     for f in findings:
         rid = (f.get("resource_id") or "").strip()
-        if not rid:
-            passthrough.append(f)
-            continue
-        cur = best.get(rid)
-        if cur is None:
-            best[rid] = dict(f)
-            order.append(rid)
-            continue
-        loser, winner = (cur, f) if (f.get("monthly_savings") or 0) > (cur.get("monthly_savings") or 0) else (f, cur)
+        if rid:
+            groups.setdefault(rid, []).append(f)
+
+    def _usd(f: dict) -> float:
+        return float(f.get("monthly_savings") or 0)
+
+    best: dict[str, dict] = {}
+    for rid, rows in groups.items():
+        measured = [f for f in rows if _has_figure(f) and not f.get("to_confirm")]
+        inferred = [f for f in rows if _has_figure(f) and f.get("to_confirm")]
+        top_m = max(measured, key=_usd) if measured else None
+        top_i = max(inferred, key=_usd) if inferred else None
+        winner = top_m or top_i or rows[0]
         merged = dict(winner)
-        alts = list(merged.get("alternatives") or []) + list(loser.get("alternatives") or [])
-        alts.append({"title": loser.get("title", ""),
-                     "monthly_savings": loser.get("monthly_savings")})
-        merged["alternatives"] = alts
+        if len(rows) > 1:
+            alts = list(winner.get("alternatives") or [])
+            for f in rows:
+                if f is winner:
+                    continue
+                alts += list(f.get("alternatives") or [])
+                alts.append({"title": f.get("title", ""),
+                             "monthly_savings": f.get("monthly_savings")})
+            merged["alternatives"] = alts
+        above = _usd(top_i) - _usd(top_m) if top_m is not None and top_i is not None else 0.0
+        if above > 0:
+            merged["to_confirm_above_usd"] = round(above, 2)
         best[rid] = merged
 
     collapsed = sum(len(b.get("alternatives") or []) for b in best.values())
