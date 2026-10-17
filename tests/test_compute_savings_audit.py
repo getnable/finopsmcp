@@ -342,11 +342,34 @@ def test_the_commitment_gap_ticket_uses_the_same_rate():
     from finops.integrations.ticketing import _commitment_gap_ticket
 
     title, body, _, _ = _commitment_gap_ticket(
-        {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0})
+        {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0, "compute_sp_rate": 0.74})
     # 10,000 a month uncovered, all of it covered at 26%: 10,000 x 0.26 =
-    # 2,600 a month, 31,200 a year.
-    assert "saves $31,200/yr" in title
+    # 2,600 a month, 31,200 a year, a ceiling because it commits the average.
+    assert "saves up to $31,200/yr" in title
+    assert "a ceiling" in body
     assert "no break-even period" not in body
+
+
+def test_the_commitment_gap_ticket_without_a_rate_takes_the_lower_saving():
+    from finops.integrations.ticketing import _commitment_gap_ticket
+
+    title, body, _, _ = _commitment_gap_ticket(
+        {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0})
+    # No blended rate supplied: Fargate's 20%, the plan's lower saving.
+    # 10,000 x 0.20 x 12 = 24,000.
+    assert "saves up to $24,000/yr" in title
+    assert "at a 20% discount" in body
+    assert "averages under 80%" in body
+
+
+def test_a_supplied_projection_is_not_called_a_ceiling():
+    from finops.integrations.ticketing import _commitment_gap_ticket
+
+    title, body, _, _ = _commitment_gap_ticket(
+        {"coverage_pct": 20, "uncovered_on_demand_usd": 30000.0,
+         "projected_annual_savings": 3597.36, "compute_sp_rate": 0.7515})
+    assert "saves $3,597/yr" in title
+    assert "a ceiling" not in body
 
 
 # ── a Database Savings Plan covers what AWS sells it for ────────────────────
