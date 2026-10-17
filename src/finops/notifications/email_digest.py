@@ -52,6 +52,7 @@ def _build_html(
     has_data: bool = True,
     delta_current: float | None = None,
     coverage_note: str = "",
+    recommendations_note: str = "",
 ) -> str:
     # delta_current/prev_total are the like-for-like pair when the two weeks do
     # not cover the same providers (job_weekly_email_digest); the headline total
@@ -94,7 +95,9 @@ def _build_html(
         f"<strong>{_esc(r['title'])}</strong>: {_esc(r['description'])} "
         f"<span style='color:#16a34a;font-weight:600'>Save ${r['monthly_savings']:,.0f}/mo</span></li>"
         for r in recommendations[:5]
-    ) or "<li style='color:#64748b'>No recommendations at this time.</li>"
+    ) or (f"<li style='color:#b45309'>{_esc(recommendations_note)}</li>" if recommendations_note
+          # A read that failed is not "no recommendations": the caller says so.
+          else "<li style='color:#64748b'>No recommendations at this time.</li>")
 
     return f"""<!DOCTYPE html>
 <html>
@@ -191,12 +194,14 @@ def send_weekly_digest(
     has_data: bool = True,
     delta_current: float | None = None,
     coverage_note: str = "",
+    recommendations_note: str = "",
 ) -> bool:
     """Send the weekly digest via SMTP. Returns True on success. Callers that
     report to a user want send_weekly_digest_result, which says why not."""
     return bool(send_weekly_digest_result(
         total_spend, prev_total, top_providers, anomalies, recommendations, period_label,
         has_data=has_data, delta_current=delta_current, coverage_note=coverage_note,
+        recommendations_note=recommendations_note,
     )["sent"])
 
 
@@ -210,6 +215,7 @@ def send_weekly_digest_result(
     has_data: bool = True,
     delta_current: float | None = None,
     coverage_note: str = "",
+    recommendations_note: str = "",
 ) -> dict:
     """
     Send the weekly digest via SMTP and say what happened:
@@ -239,7 +245,8 @@ def send_weekly_digest_result(
 
     html = _build_html(period_label, total_spend, prev_total, top_providers, anomalies,
                        recommendations, has_data=has_data, delta_current=delta_current,
-                       coverage_note=coverage_note)
+                       coverage_note=coverage_note,
+                       recommendations_note=recommendations_note)
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = _subject(total_spend, period_label, has_data)

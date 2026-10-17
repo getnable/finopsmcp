@@ -61,7 +61,8 @@ def _week(offset_days: int) -> list[date]:
 def _render(sent: dict) -> str:
     kw = {k: v for k, v in sent.items()
           if k in ("total_spend", "prev_total", "top_providers", "anomalies",
-                   "recommendations", "has_data", "delta_current", "coverage_note")}
+                   "recommendations", "has_data", "delta_current", "coverage_note",
+                   "recommendations_note")}
     return ed._build_html(sent.get("period_label") or "", **kw)
 
 
@@ -102,3 +103,49 @@ def test_the_period_label_names_the_days_that_were_summed():
     first, last = today - timedelta(days=7), today - timedelta(days=1)
     label = ed.default_period_label(today)
     assert label == f"{first.strftime('%b %d')} – {last.strftime('%b %d, %Y')}"
+
+
+# ── the digest's savings section ─────────────────────────────────────────────
+
+_CO_REC = {"instance_id": "i-0big01", "name": "analytics", "region": "us-east-1",
+           "resource_type": "ec2", "source": "compute_optimizer",
+           "current_type": "r5.2xlarge", "recommended_type": "r5.xlarge",
+           "monthly_savings": 183.96, "verdict": "review", "why": "over-provisioned",
+           "action": "Resize needs a stop/start (brief downtime); fully reversible."}
+
+
+def test_the_digest_carries_the_rightsizing_recommendations(digest_env, monkeypatch):
+    """analyze_rightsizing's rows (rightsizing_summary) carry no "title" or
+    "description" key, and the digest read r["title"] inside a try whose
+    except set the list to []. On a fixture account where
+    get_rightsizing_recommendations returns i-0big01, r5.2xlarge to r5.xlarge,
+    $183.96/mo (Compute Optimizer; (0.504 - 0.252) x 730 at the AmazonEC2
+    us-east-1 list), the weekly email said "No recommendations at this
+    time." """
+    import finops.recommendations.rightsizing as rs
+
+    monkeypatch.setattr(rs, "analyze_rightsizing", lambda *a, **k: ["one"])
+    monkeypatch.setattr(rs, "rightsizing_summary",
+                        lambda recs, **k: {"recommendations": [dict(_CO_REC)]})
+    _seed("aws", 100.0, _week(7))
+    _seed("aws", 100.0, _week(0))
+    jobs.job_weekly_email_digest()
+    html = _render(digest_env)
+    assert "No recommendations at this time" not in html, html
+    assert "i-0big01" in html or "analytics" in html, html
+    assert "r5.xlarge" in html and "Save $184/mo" in html, html
+
+
+def test_a_rightsizing_read_that_failed_is_not_no_recommendations(digest_env, monkeypatch):
+    import finops.recommendations.rightsizing as rs
+
+    def _denied(*a, **k):
+        raise RuntimeError("AccessDeniedException")
+
+    monkeypatch.setattr(rs, "analyze_rightsizing", _denied)
+    _seed("aws", 100.0, _week(7))
+    _seed("aws", 100.0, _week(0))
+    jobs.job_weekly_email_digest()
+    html = _render(digest_env)
+    assert "No recommendations at this time" not in html, html
+    assert "could not be read" in html, html
