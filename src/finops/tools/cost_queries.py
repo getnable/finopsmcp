@@ -387,18 +387,20 @@ async def get_cost_trends(
     granularity: str = "DAILY",
 ) -> dict:
     """
-    Cost trends over time broken down by day or month.
+    Spend over the last N days: one total per provider and per service for the
+    whole window, not a day-by-day or month-by-month series. For a series use
+    slice_costs with dimensions=["date"] and granularity "DAILY" or "MONTHLY".
 
     Args:
         provider: Specific provider. None = all.
         category: "cloud" or "saas". None = all.
-        days: Look-back window in days (default 30).
-        granularity: "DAILY" or "MONTHLY".
+        days: Look-back window in days ending today (default 30).
+        granularity: "DAILY" or "MONTHLY", how providers that support it are
+            queried. The totals are the same either way.
 
     Examples:
-        - "Is our AWS spend trending up or down?"
-        - "Show daily cloud costs for the last 2 weeks"
-        - "What did we spend each month this quarter?"
+        - "How much did we spend on AWS in the last 90 days?"
+        - "What did our SaaS tools cost over the last 2 weeks?"
     """
     if not 1 <= days <= _srv.MAX_LOOKBACK_DAYS:
         return {"error": (f"days must be between 1 and {_srv.MAX_LOOKBACK_DAYS} (got {days}): "
@@ -439,7 +441,8 @@ async def get_cost_trends(
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
-        "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
+        "note": ("Totals for the whole window. For a per-day or per-month series, call "
+                 'slice_costs with dimensions=["date"] and granularity "DAILY" or "MONTHLY".'),
     }
     result.update(_no_rows_flags(by_provider))
     if failed:

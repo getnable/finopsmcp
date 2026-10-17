@@ -480,7 +480,7 @@ _SERVICE_LEAVES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # regardless of what is at the top of it.
 _ALWAYS_NEXT: tuple[tuple[str, str], ...] = (
     ("get_costs_by_service", "the same period broken out per service"),
-    ("get_cost_trends", "how this moved day by day"),
+    ("get_cost_trends", "the last N days in one total, per provider and service"),
     ("get_tag_cost_breakdown_cur", "the same spend split by tag, from the CUR"),
 )
 
