@@ -253,3 +253,20 @@ def test_run_overnight_still_works_without_any_scheduler():
     out = brun.run_overnight(findings=FINDINGS, today=TODAY, now=NOW)
     assert out["summary"]["actionable_count"] == 1
     assert out["delivered"] == {}
+
+
+def test_air_gap_pushes_the_brief_nowhere(monkeypatch):
+    """FINOPS_AIRGAP promises provider traffic only, and send_report_now
+    already skips Slack, Teams and email under it. `nable brief --deliver`
+    went around that and posted the brief's cost figures anyway."""
+    import finops.config as config
+
+    monkeypatch.setattr(config, "AIRGAP", True)
+    got = []
+    for name in ("slack", "teams", "email"):
+        monkeypatch.setitem(brun._DELIVERERS, name,
+                            lambda b, u, n=name: got.append(n) or True)
+    monkeypatch.setenv(brun.DELIVER_ENV, "slack,email")
+    out = brun.run_overnight(findings=FINDINGS, today=TODAY, now=NOW)
+    assert got == [], f"pushed to {got} under FINOPS_AIRGAP"
+    assert out["delivered"] == {"slack": False, "email": False}

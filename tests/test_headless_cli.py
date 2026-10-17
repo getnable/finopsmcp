@@ -327,3 +327,16 @@ def test_setup_aws_that_connects_nothing_exits_1(tmp_path):
     r = nable(tmp_path, "setup", "aws")
     assert r.returncode == 1
     assert "No AWS account was connected" in r.stdout
+
+
+def test_brief_deliver_under_air_gap_says_why_nothing_was_sent(tmp_path):
+    r, doc = _brief_env(tmp_path, {"NABLE_BRIEF_DELIVER": "slack", "FINOPS_AIRGAP": "1",
+                                   "SLACK_WEBHOOK_URL": "http://127.0.0.1:9/hook"})
+    assert doc["delivered"] == {"slack": False}
+    assert r.returncode == 1
+    assert "FINOPS_AIRGAP" in r.stderr
+
+
+def _brief_env(tmp_path, env):
+    r = nable(tmp_path, "brief", "--json", "--deliver", "--no-save", env=env)
+    return r, json.loads(r.stdout)
