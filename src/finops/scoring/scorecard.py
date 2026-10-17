@@ -898,10 +898,13 @@ def build_scorecard(
     # go through _require_published: a .get() default here quietly turns a
     # producer that forgot to publish into a $0 component, which is exactly how
     # the commitment opportunity vanished from this total. A missing key now says
-    # so instead of costing the customer the sentence.
+    # so instead of costing the customer the sentence. The commitment saving
+    # is the figure the card's own action line prints: it used to be taken
+    # times 0.7 here, a haircut with no source, so the headline and the card
+    # disagreed.
     potential = (
         _require_published(waste, "total_waste_usd")
-        + _require_published(commits, "potential_savings_usd") * 0.7
+        + _require_published(commits, "potential_savings_usd")
     )
 
     # Top wins — pick the 3 lowest-scoring dimensions' top action
