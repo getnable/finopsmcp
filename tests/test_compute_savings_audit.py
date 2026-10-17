@@ -240,8 +240,10 @@ def test_the_waste_pattern_prices_a_savings_plan_at_the_same_rate():
     from finops.recommendations.commitments import _COMPUTE_SP_DISCOUNT
 
     ec2 = {"Amazon Elastic Compute Cloud - Compute": [100.0] * 30}
-    m = _check_savings_plans_coverage(PatternContext(daily_costs=ec2, by_resource=[],
-                                                     snapshots=[]))
+    # Nothing covered, as read: coverage that was not read is not priced
+    # (test_the_waste_pattern_does_not_assume_nothing_is_covered).
+    m = _check_savings_plans_coverage(PatternContext(
+        daily_costs=ec2, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 0.0}]))
     assert m.monthly_waste == pytest.approx(3000.0 * (1 - _COMPUTE_SP_DISCOUNT))
     assert m.monthly_waste == pytest.approx(780.0)
     assert m.annual_waste == 9360.0
@@ -251,6 +253,89 @@ def test_the_waste_pattern_prices_a_savings_plan_at_the_same_rate():
     half = _check_savings_plans_coverage(PatternContext(
         daily_costs=ec2, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 50.0}]))
     assert half.monthly_waste == pytest.approx(390.0)
+
+
+def test_the_waste_pattern_prices_fargate_at_the_fargate_rate():
+    """The pattern priced all uncovered compute at the EC2 rate, 26%, Fargate
+    included. Fargate's 1-year no-upfront Compute Savings Plan rate is 20%:
+    AWSComputeSavingsPlan us-east-1 20261013035015 lists 0.032384 a vCPU-hour
+    and 0.003556 a GB-hour (plan BB7BKBSC6NZW7P5B) against the AmazonECS
+    us-east-1 20260911124425 on-demand 0.04048 and 0.004445, both 20.0% off.
+    $100 a day of EC2 and $50 a day of Fargate, nothing covered: 3,000 x 0.26
+    + 1,500 x 0.20 = 780 + 300 = 1,080 a month, not 4,500 x 0.26 = 1,170.
+    Half covered: 390 + 150 = 540."""
+    import pytest
+
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+    from finops.recommendations.commitments import (
+        _COMPUTE_SP_DISCOUNT,
+        _COMPUTE_SP_FARGATE_DISCOUNT,
+    )
+
+    assert round(1 - _COMPUTE_SP_FARGATE_DISCOUNT, 3) == 0.20
+    assert round(0.04048 * _COMPUTE_SP_FARGATE_DISCOUNT, 6) == 0.032384
+    assert round(0.004445 * _COMPUTE_SP_FARGATE_DISCOUNT, 6) == 0.003556
+
+    costs = {"Amazon Elastic Compute Cloud - Compute": [100.0] * 30,
+             "AWS Fargate": [50.0] * 30}
+    m = _check_savings_plans_coverage(PatternContext(
+        daily_costs=costs, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 0.0}]))
+    assert m.monthly_waste == pytest.approx(
+        3000.0 * (1 - _COMPUTE_SP_DISCOUNT) + 1500.0 * (1 - _COMPUTE_SP_FARGATE_DISCOUNT))
+    assert m.monthly_waste == pytest.approx(1080.0)
+    assert m.annual_waste == 12960.0
+    said = " ".join(m.evidence)
+    assert "26%" in said and "20%" in said
+
+    half = _check_savings_plans_coverage(PatternContext(
+        daily_costs=costs, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 50.0}]))
+    assert half.monthly_waste == pytest.approx(540.0)
+
+
+def test_the_waste_pattern_does_not_assume_nothing_is_covered(monkeypatch, tmp_path):
+    """scan_waste_patterns builds its context from the daily cost history, and
+    nothing in that history carries Savings Plans coverage, so the pattern
+    read coverage as 0% on every account. On a fixture account whose Compute
+    Savings Plan covers 18.6% of eligible spend (get_commitment_analysis:
+    $239.73/mo more to save on $922 a month uncovered), it said "$1199/mo
+    EC2+Fargate spend with 0% Savings Plans coverage" and priced 26% of all
+    of it, $311.61/mo. Coverage that was not read is not 0%: the pattern is
+    not priced without it, says where the priced plan is, and a 0% that was
+    read is still priced."""
+    import asyncio
+
+    import pytest
+
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+
+    ec2 = {"Amazon Elastic Compute Cloud - Compute": [100.0] * 30}
+    unread = _check_savings_plans_coverage(PatternContext(daily_costs=ec2, by_resource=[],
+                                                          snapshots=[]))
+    assert unread is None, unread.evidence
+    zero = _check_savings_plans_coverage(PatternContext(
+        daily_costs=ec2, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 0.0}]))
+    assert zero.monthly_waste == pytest.approx(780.0)
+
+    from finops.storage import db as db_mod
+    from finops.storage.snapshots import store_snapshots
+    from finops.tools import aws_waste
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("FINOPS_DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.setattr(db_mod, "_ENGINE", None)
+    from datetime import UTC, datetime, timedelta
+    today = datetime.now(UTC).date()
+    store_snapshots([
+        {"provider": "aws", "service": "Amazon Elastic Compute Cloud - Compute",
+         "account_id": "111122223333", "region": "",
+         "snapshot_date": today - timedelta(days=d), "amount_usd": 100.0}
+        for d in range(1, 31)])
+    out = asyncio.run(getattr(aws_waste.scan_waste_patterns, "fn",
+                              aws_waste.scan_waste_patterns)(account_id="111122223333"))
+    monkeypatch.setattr(db_mod, "_ENGINE", None)
+    assert "no-savings-plans" not in {f["pattern_id"] for f in out["findings"]}, out
+    assert "0% Savings Plans coverage" not in str(out)
+    assert "get_commitment_analysis" in out["note"], out["note"]
 
 
 def test_the_commitment_gap_ticket_uses_the_same_rate():
@@ -410,7 +495,10 @@ def test_a_spot_figure_from_one_region_is_not_applied_to_another():
     [row] = _spot_rows("m5.large", "eu-west-1")
     assert row["interruption_band"] == "unknown"
     assert row["recommendation"] == "POSSIBLE"
-    assert row["savings_basis"] == "assumed"
+    # Not the us-east-1 m5.large figure (59%): the median of the figures held,
+    # computed (it was an assumed 65%), and the row says so.
+    assert row["savings_basis"] == "spot_advisor_median"
+    assert row["savings_pct"] == 61.0
     [row] = _spot_rows("c5.large", "us-east-1")
     assert row["interruption_band"] == "10-15%" and row["recommendation"] == "POSSIBLE"
     assert row["savings_basis"] == "spot_advisor"
@@ -690,7 +778,11 @@ def test_an_idle_instance_cost_names_its_price_basis():
 
     cw.get_metric_statistics.side_effect = stats
     got = {f["resource_id"]: f for f in waste.check_idle_ec2(ec2, cw, "eu-west-1")}
-    assert got["i-lin"]["estimated_monthly_savings"] == 140.16
+    # eu-west-1's floor, not the us-east-1 $140.16: 0.192 x 1.069 x 730, the
+    # least eu-west-1 charges over us-east-1 for a listed type (it lists
+    # m5.xlarge at $0.214, AmazonEC2 eu-west-1 20261012193925, SKU HNKY83Z77VRXC2UH).
+    assert got["i-lin"]["estimated_monthly_savings"] == 149.83
+    assert "eu-west-1 floor" in got["i-lin"]["detail"]
     assert "us-east-1 Linux on-demand list rate" in got["i-lin"]["detail"]
     assert "Red Hat Enterprise Linux" in got["i-rhel"]["detail"]
     assert "licence" in got["i-rhel"]["detail"]

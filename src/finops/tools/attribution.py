@@ -246,7 +246,7 @@ async def get_efficiency_scorecard(
             tag_filter = {"env": environment}
 
         try:
-            from ..recommendations.commitments import analyze_commitments
+            from ..recommendations.commitments import _LOOKBACK_MONTHS, analyze_commitments
             # Cost Explorer coverage and utilization reads; off the loop.
             raw_commits = await _srv.asyncio.to_thread(
                 analyze_commitments, tag_filter=tag_filter,
@@ -260,9 +260,16 @@ async def get_efficiency_scorecard(
                     # commitments". The scorecard now reports it as no data.
                     "coverage_pct": raw_commits.combined_coverage_pct,
                     "coverage_known": raw_commits.combined_coverage_pct is not None,
-                    "on_demand_usd": raw_commits.uncovered_on_demand_usd,
+                    # Per month. uncovered_on_demand_usd is the total over the
+                    # analysis window (three months), and the scorecard prints
+                    # this as "$X/month": passing the total read three times
+                    # the monthly figure.
+                    # None when it could not be read, not $0.
+                    "on_demand_usd": (None if raw_commits.uncovered_on_demand_usd is None
+                                      else raw_commits.uncovered_on_demand_usd
+                                      / _LOOKBACK_MONTHS),
                     "potential_savings_usd": sum(
-                        r.get("monthly_savings", 0)
+                        r.get("monthly_savings") or 0
                         for r in raw_commits.recommendations
                         if r.get("type") != "warning"
                     ),

@@ -556,19 +556,30 @@ def job_weekly_email_digest() -> dict:
 
         anomalies = get_active_anomalies(limit=10)
 
+        # rightsizing_summary's rows carry no "title" or "description": reading
+        # them raised KeyError inside this try, the except emptied the list, and
+        # every digest said "No recommendations at this time" whatever the
+        # account held. A read that fails is said to have failed, not to have
+        # found nothing.
+        recommendations_note = ""
         try:
             rs = analyze_rightsizing()
             recs = rightsizing_summary(rs)["recommendations"][:5]
             rec_list = [
                 {
-                    "title": r["title"],
-                    "description": r["description"],
+                    "title": (f"Resize {r.get('name') or r.get('instance_id', '?')} "
+                              f"({r.get('current_type', '?')} to "
+                              f"{r.get('recommended_type', '?')})"),
+                    "description": str(r.get("why") or r.get("action") or ""),
                     "monthly_savings": r["monthly_savings"],
                 }
                 for r in recs
             ]
-        except Exception:
+        except Exception as exc:
+            log.warning("weekly digest: rightsizing could not be read: %s", exc)
             rec_list = []
+            recommendations_note = (f"Rightsizing could not be read ({type(exc).__name__}), "
+                                    "so this is not a finding of no recommendations.")
 
         return send_weekly_digest_result(
             total_spend=current_week_total,
@@ -579,6 +590,7 @@ def job_weekly_email_digest() -> dict:
             has_data=bool(rows),
             delta_current=delta_current,
             coverage_note=coverage_note,
+            recommendations_note=recommendations_note,
         )
     except Exception as e:
         log.exception("Weekly email digest job failed")

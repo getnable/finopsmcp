@@ -109,9 +109,19 @@ class NotionConnector:
             f"Total estimated saving: ${monthly:,.2f}/mo  "
             f"${annual:,.2f}/yr"
         )
+        if report.get("to_confirm_findings"):
+            # The rows their check filed as an inference, beside the total and
+            # not in it, as `nable scan` prints them.
+            from ...recommendations.sweep import to_confirm_line
+            callout_text += (" recoverable\n" + to_confirm_line(
+                float(report.get("to_confirm_monthly_usd") or 0.0),
+                int(report["to_confirm_findings"])))
         if report.get("partial_note"):
             # Said where the total is, not only in the chat reply.
             callout_text += f"\n{report['partial_note']}"
+        if report.get("scope_note"):
+            # What the total leaves out on purpose, said where the total is.
+            callout_text += f"\n{report['scope_note']}"
 
         blocks: list[dict[str, Any]] = []
 
@@ -171,7 +181,9 @@ class NotionConnector:
                 monthly_txt = f"{f.get('magnitude') or 'unconfirmed'} (needs confirming)"
                 annual_txt = ""
             else:
-                monthly_txt = f"${monthly_s:,.2f}"
+                tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                        ("us-east-1 list", f.get("us_east_1_list"))) if on]
+                monthly_txt = f"${monthly_s:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
                 annual_txt = f"${monthly_s * 12:,.2f}"
             table_rows.append({
                 "object": "block",

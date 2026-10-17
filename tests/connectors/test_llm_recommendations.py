@@ -72,3 +72,15 @@ def test_bedrock_sku_display_name_sonnet_4_6_also_matches():
 
 def test_unknown_model_no_crash_no_rec():
     assert _generate_recommendations({"some-unpriced-model-x": 100.0}, {}) == []
+
+
+def test_the_saving_says_it_assumes_every_call_moves():
+    """"Consider gpt-4o-mini for lower-complexity tasks" priced the switch on
+    all of the model's spend: $600 of gpt-4o over 30 days read
+    estimated_savings_usd 564.0, 94% of it, as if every call were a
+    lower-complexity one. optimize_ai_spend reports the same figure as a
+    ceiling ("assumes every eligible call moves"); get_llm_costs gave it with
+    only the token-mix caveat. The figure stands and now says what it is."""
+    r = _rec_for("gpt-4o", 600.0)
+    assert r["estimated_savings_usd"] == 564.0
+    assert "ceiling" in r["basis"] and "every call" in r["basis"], r["basis"]

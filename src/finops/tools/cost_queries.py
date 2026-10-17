@@ -1922,7 +1922,12 @@ async def run_full_cost_audit(
     if aws is None or not await aws.is_configured():
         return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
-    from ..recommendations.sweep import sweep
+    from ..recommendations.sweep import (
+        COMMITMENTS_NOT_IN_TOTAL,
+        split_total,
+        sweep,
+        to_confirm_line,
+    )
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -1948,9 +1953,11 @@ async def run_full_cost_audit(
                 ("This is not a finding that the account is optimized: the checks above "
                  "did not look. Fix the access they name (the AWS permissions for those "
                  "services) and run the audit again."),
+                COMMITMENTS_NOT_IN_TOTAL,
             ])
         return ("No savings opportunities found by any of the "
-                f"{result.scanners_run} checks, and none of them reported a failed read.")
+                f"{result.scanners_run} checks, and none of them reported a failed read. "
+                + COMMITMENTS_NOT_IN_TOTAL)
 
     # A finding the critique retracted carries None, not a number, and it must not
     # be counted toward a total we are asking someone to believe. `or 0` keeps it
@@ -1967,21 +1974,30 @@ async def run_full_cost_audit(
     # alternatives stay attached to the winner so nothing is hidden.
     top, collapsed = _collapse_per_resource(top)
 
-    total_monthly = sum(f.get("monthly_savings") or 0 for f in top)
+    # Recoverable is what the checks measured; a row its check filed as an
+    # inference is to confirm, shown beside the total and not added in, the
+    # split `nable scan` makes. This added both into one figure.
+    total_monthly, to_confirm, n_to_confirm = split_total(top)
     total_annual = total_monthly * 12
     # The headline covers the rows shown. Say what the rest is worth, on the same
     # one-fix-per-resource basis, so it is not read as the whole sweep (the CSV
     # export of "these results" lists up to 50 and totalled a larger figure).
     everything, _ = _collapse_per_resource(findings)
     rest_rows = len(everything) - len(top)
-    rest_usd = max(0.0, sum(f.get("monthly_savings") or 0 for f in everything) - total_monthly)
+    all_recoverable, all_to_confirm, _ = split_total(everything)
+    rest_usd = max(0.0, all_recoverable - total_monthly)
+    rest_to_confirm = max(0.0, all_to_confirm - to_confirm)
 
     def _savings_cell(f: dict) -> str:
         """The dollar figure, or the band when the claim did not survive review."""
         v = f.get("monthly_savings")
         if v is None:
             return f"{f.get('magnitude', 'unconfirmed')} (needs confirming)"
-        return f"${v:,.2f}"
+        # A row outside us-east-1 priced at us-east-1 list rates says so here,
+        # where the figure is (sweep._listed).
+        tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                ("us-east-1 list", f.get("us_east_1_list"))) if on]
+        return f"${v:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
 
     # Show a Confidence column only when at least one shown finding carries real
     # learned signal, so a cold ledger keeps the original clean 4-column table.
@@ -2001,10 +2017,13 @@ async def run_full_cost_audit(
 
     lines = [
         f"## Cost Audit, Top {len(top)} Opportunities",
-        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}** (the {len(top)} shown)"
+        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}** (recoverable, the {len(top)} shown)"
+        + (f"  \n*{to_confirm_line(to_confirm, n_to_confirm)}*" if n_to_confirm else "")
         + (f"  \n*{rest_rows} more opportunit{'ies' if rest_rows != 1 else 'y'} worth ${rest_usd:,.2f}/mo "
-           f"are not shown (raise top_n, or export to CSV).*" if rest_rows > 0 else "")
-        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else ""),
+           + (f"recoverable and ${rest_to_confirm:,.2f}/mo to confirm " if rest_to_confirm else "")
+           + "are not shown (raise top_n, or export to CSV).*" if rest_rows > 0 else "")
+        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else "")
+        + f"  \n*{COMMITMENTS_NOT_IN_TOTAL}*",
         "",
     ]
     if show_confidence:

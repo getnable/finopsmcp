@@ -88,6 +88,14 @@ class PatternContext:
     lambda_funcs:  list[dict] = field(default_factory=list)
     elbs:          list[dict] = field(default_factory=list)
 
+    # Dated spend whose environment is known: [{date, service, environment,
+    # amount_usd}]. The cost history (cost_snapshots) carries no environment,
+    # so scan_waste_patterns has none and weekend waste is not checked there.
+    env_daily_costs: list[dict] = field(default_factory=list)
+    # DescribeLogGroups rows (logGroupName, storedBytes, retentionInDays,
+    # creationTime), or None when the log groups were not read.
+    log_groups: list[dict] | None = None
+
     # Account metadata
     account_id:  str = ""
     region:      str = "us-east-1"
@@ -174,6 +182,9 @@ class PatternMatch:
     remediation:     str
     resources:       list[str]      # affected resource IDs / addresses
     tags:            list[str]
+    # An investigation row: something to look at, with no dollar figure
+    # because the input that would price it was not read.
+    investigation:   bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -182,8 +193,9 @@ class PatternMatch:
             "category":      self.category,
             "severity":      self.severity,
             "confidence":    round(self.confidence, 2),
-            "monthly_waste": round(self.monthly_waste, 2),
-            "annual_waste":  round(self.annual_waste, 2),
+            "monthly_waste": None if self.investigation else round(self.monthly_waste, 2),
+            "annual_waste":  None if self.investigation else round(self.annual_waste, 2),
+            "investigation": self.investigation,
             "evidence":      self.evidence,
             "remediation":   self.remediation,
             "resources":     self.resources,
@@ -202,6 +214,7 @@ def _match(
     remediation: str,
     resources: list[str] | None = None,
     tags: list[str] | None = None,
+    investigation: bool = False,
 ) -> PatternMatch:
     return PatternMatch(
         pattern_id=pattern_id,
@@ -215,6 +228,7 @@ def _match(
         remediation=remediation,
         resources=resources or [],
         tags=tags or [],
+        investigation=investigation,
     )
 
 
@@ -328,10 +342,14 @@ def _check_gp2_volumes(ctx: PatternContext) -> PatternMatch | None:
         # Heuristic: if EC2 cost is significant and we have no metadata, flag it
         ec2_monthly = ctx.service_monthly("Amazon EC2")
         if ec2_monthly > 500:
+            # ~4% of EC2 is often EBS gp2, and gp3 is 20% under gp2 ($0.08 vs
+            # $0.10 per GB-month), so the saving is the 20% gap on that 4%.
+            # This priced the whole 4%, the gp2 bill itself, five times what
+            # its own premise gives.
             return _match(
                 "gp2-volumes", "gp2 EBS Volumes (migrate to gp3)", "storage", "low",
                 confidence=0.40,
-                monthly_waste=ec2_monthly * 0.04,   # ~4% of EC2 is often EBS gp2
+                monthly_waste=ec2_monthly * 0.04 * (1 - 0.08 / 0.10),
                 evidence=["Estimated based on EC2 spend — verify with `aws ec2 describe-volumes`"],
                 remediation="Migrate gp2 volumes to gp3: 20% cost reduction, same or better IOPS.",
                 tags=["ebs", "storage", "gp2", "gp3"],
@@ -391,20 +409,41 @@ def _check_unused_load_balancers(ctx: PatternContext) -> PatternMatch | None:
 
 def _check_weekend_waste(ctx: PatternContext) -> PatternMatch | None:
     """
-    Compute spend on weekends similar to weekdays — dev/staging should be stopped.
-    Weekend cost should ideally be <20% of weekday cost for non-prod workloads.
+    Non-production EC2 spend that runs through the weekend.
+
+    Counts only spend whose environment is known to be non-production
+    (ctx.env_daily_costs, values matched case-insensitively against the
+    non-prod scheduler's list): production and untagged spend are never
+    called dev. Weekend days are Saturday and Sunday by date.weekday(). This
+    used to read the whole EC2 series, with no environment, and took list
+    positions 5 and 6 of each week as the weekend, assuming a Monday start.
     """
-    # service_series, not daily_costs.get: the raw dict is keyed on the CE
-    # SERVICE value, and "Amazon EC2" is not one. This read returned [] on
-    # every real account.
-    ec2_series = ctx.service_series("Amazon EC2")
-    if len(ec2_series) < 14:
+    from ..recommendations.nonprod_scheduler import NONPROD_VALUES
+
+    ec2 = _ce_service_name("Amazon EC2")
+    if ec2 is None:
+        return None
+    by_day: dict[date, float] = {}
+    envs: set[str] = set()
+    for row in ctx.env_daily_costs:
+        env = str(row.get("environment") or "").strip()
+        service = str(row.get("service") or "")
+        if env.lower() not in NONPROD_VALUES:
+            continue
+        if service != ec2 and not service.startswith(ec2 + " "):
+            continue
+        day = row.get("date")
+        if isinstance(day, str):
+            day = date.fromisoformat(day[:10])
+        if not isinstance(day, date):
+            continue
+        by_day[day] = by_day.get(day, 0.0) + float(row.get("amount_usd") or 0.0)
+        envs.add(env)
+    if len(by_day) < 14:
         return None
 
-    # We don't have actual day-of-week data here — approximate from index
-    # Assumes series starts on a Monday (common for Cost Explorer exports)
-    weekday_costs = [ec2_series[i] for i in range(len(ec2_series)) if i % 7 not in (5, 6)]
-    weekend_costs = [ec2_series[i] for i in range(len(ec2_series)) if i % 7 in (5, 6)]
+    weekday_costs = [v for d, v in by_day.items() if d.weekday() < 5]
+    weekend_costs = [v for d, v in by_day.items() if d.weekday() >= 5]
 
     if not weekday_costs or not weekend_costs:
         return None
@@ -425,14 +464,16 @@ def _check_weekend_waste(ctx: PatternContext) -> PatternMatch | None:
     if saveable < 50:
         return None
 
+    named = ", ".join(sorted(envs))
     return _match(
         "weekend-waste", "Dev/Staging Compute Running on Weekends", "compute", "medium",
         confidence=0.65,
         monthly_waste=saveable,
         evidence=[
-            f"Weekend EC2 spend is {ratio*100:.0f}% of weekday spend",
-            f"Weekend daily avg: ${we_avg:.0f} vs weekday avg: ${wd_avg:.0f}",
-            "Dev/staging environments typically don't need 24/7 uptime",
+            f"Weekend EC2 spend tagged {named} is {ratio*100:.0f}% of its weekday spend",
+            (f"Weekend daily avg: ${we_avg:.0f} vs weekday avg: ${wd_avg:.0f} "
+             f"over {len(by_day)} days"),
+            "Only spend whose environment tag is a non-production value is counted",
         ],
         remediation=(
             "Use AWS Instance Scheduler or tag dev instances and apply "
@@ -563,32 +604,52 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
     commitment engine uses (recommendations.commitments, from the AWS Price
     List). Requires commitment metadata from the connectors.
     """
-    from ..recommendations.commitments import _COMPUTE_SP_DISCOUNT, COMPUTE_SP_DISCOUNT_RANGE
+    from ..recommendations.commitments import (
+        _COMPUTE_SP_DISCOUNT,
+        _COMPUTE_SP_FARGATE_DISCOUNT,
+        COMPUTE_SP_DISCOUNT_RANGE,
+        FARGATE_CE_SERVICES,
+    )
 
     ec2_monthly = ctx.service_monthly("Amazon EC2")
-    fargate_monthly = ctx.service_monthly("AWS Fargate")
+    # Fargate bills under ECS; "AWS Fargate" is kept as an alias. Both are
+    # unverified against a live account (commitments.FARGATE_CE_SERVICES).
+    fargate_monthly = sum(ctx.service_monthly(s) for s in FARGATE_CE_SERVICES)
     total = ec2_monthly + fargate_monthly
 
     if total < 200:
         return None
 
-    # Check if any savings plans coverage exists in the context
-    sp_coverage = 0.0
+    # The coverage the context carries, or None when it carries none. This
+    # defaulted to 0.0, and scan_waste_patterns builds its context from the
+    # daily cost history, which holds no coverage, so every account read as 0%
+    # covered and was priced 26% of all its compute, the part a plan already
+    # covers included. Coverage that was not read is not 0%: without it the
+    # saving is not priced here (get_commitment_analysis reads coverage and
+    # prices the plan). A 0% that was read is a real answer and is priced.
+    sp_coverage: float | None = None
     for snap in ctx.snapshots:
-        if snap.get("savings_plan_coverage_pct"):
-            sp_coverage = snap.get("savings_plan_coverage_pct", 0.0)
+        if snap.get("savings_plan_coverage_pct") is not None:
+            sp_coverage = float(snap["savings_plan_coverage_pct"])
             break
 
-    if sp_coverage > 70:
+    if sp_coverage is None or sp_coverage > 70:
         return None
 
     uncovered = total * (1 - sp_coverage / 100)
     # This read 32% ("Compute Savings Plans typically save 32%"), above every
     # EC2 type in the AWS rate card (19-29%) and Fargate's 20%. It is the
     # commitment engine's rate now, 26% (the m5.large rate, under the 27.1%
-    # median), so this finding and get_commitment_analysis agree.
+    # median), so this finding and get_commitment_analysis agree. Fargate's
+    # share is priced at Fargate's own rate, 20%: the EC2 rate on a Fargate
+    # dollar claimed 6 points more than the plan gives it.
     discount = 1 - _COMPUTE_SP_DISCOUNT
-    potential_saving = uncovered * discount
+    fargate_discount = 1 - _COMPUTE_SP_FARGATE_DISCOUNT
+    uncovered_share = 1 - sp_coverage / 100
+    potential_saving = (ec2_monthly * uncovered_share * discount
+                        + fargate_monthly * uncovered_share * fargate_discount)
+    rate_text = (f"saves about {discount:.0%} of the EC2 it covers"
+                 + (f" and {fargate_discount:.0%} of the Fargate" if fargate_monthly else ""))
 
     return _match(
         "no-savings-plans", "Compute Spend Without Savings Plans Coverage", "compute", "high",
@@ -597,7 +658,7 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
         evidence=[
             f"${total:.0f}/mo EC2+Fargate spend with {sp_coverage:.0f}% Savings Plans coverage",
             (f"${uncovered:.0f}/mo on-demand; a 1-year no-upfront Compute Savings Plan "
-             f"saves about {discount:.0%} of what it covers ({COMPUTE_SP_DISCOUNT_RANGE})"),
+             f"{rate_text} ({COMPUTE_SP_DISCOUNT_RANGE})"),
         ],
         remediation=(
             "Purchase 1-year Compute Savings Plans for your baseline compute spend. "
@@ -693,25 +754,62 @@ def _check_untagged_resources(ctx: PatternContext) -> PatternMatch | None:
 
 
 def _check_cloudwatch_log_retention(ctx: PatternContext) -> PatternMatch | None:
-    """CloudWatch Log Groups with no retention policy — logs accumulate forever at $0.03/GB."""
-    cw_monthly = ctx.service_monthly("AmazonCloudWatch")
-    if cw_monthly < 30:
+    """CloudWatch Log Groups with no retention policy, priced from their stored bytes.
+
+    The saving is the stored bytes of each never-expire group older than its
+    retention window, at $0.03/GB-month, priced by the same rule as
+    analyzers.waste.check_cloudwatch_logs: an upper bound, because the API does
+    not say how much of a group's volume is older than the window. This used
+    to take 40% of the CloudWatch bill without reading a byte. Without the log
+    groups (scan_waste_patterns reads only the cost history) it is an
+    investigation row with no dollar figure.
+    """
+    remediation = (
+        "Set retention policies on all CloudWatch Log Groups: "
+        "30 days for dev, 90 days for prod (or match your compliance requirement). "
+        "Use: aws logs put-retention-policy --retention-in-days 30"
+    )
+    tags = ["cloudwatch", "logs", "storage", "retention"]
+    if ctx.log_groups is None:
+        cw_monthly = ctx.service_monthly("AmazonCloudWatch")
+        if cw_monthly < 30:
+            return None
+        return _match(
+            "log-retention", "CloudWatch Log Groups Without Retention Policy", "storage", "low",
+            confidence=0.30,
+            monthly_waste=0.0,
+            evidence=[
+                f"CloudWatch spend: ${cw_monthly:.0f}/mo",
+                ("Log group stored bytes and retention were not read, so no saving is "
+                 "priced: the bill does not say how much of CloudWatch is log storage"),
+                "Read storedBytes and retentionInDays with aws logs describe-log-groups",
+            ],
+            remediation=remediation,
+            tags=tags,
+            investigation=True,
+        )
+
+    from ..analyzers.waste import log_group_retention_finding
+
+    priced = [f for f in (log_group_retention_finding(g, ctx.region) for g in ctx.log_groups)
+              if f is not None and f["estimated_monthly_savings"] > 0]
+    if not priced:
         return None
-    # Heuristic: 40% of CW cost is often storage from unbounded log groups
+    saving = sum(f["estimated_monthly_savings"] for f in priced)
+    stored_gb = sum(f["stored_gb"] for f in priced)
     return _match(
         "log-retention", "CloudWatch Log Groups Without Retention Policy", "storage", "low",
         confidence=0.60,
-        monthly_waste=cw_monthly * 0.40,
+        monthly_waste=saving,
         evidence=[
-            f"CloudWatch spend: ${cw_monthly:.0f}/mo",
-            "Log groups without retention policies accumulate indefinitely at $0.03/GB/mo",
+            (f"{len(priced)} never-expire log group(s) older than their retention window "
+             f"store {stored_gb:.1f} GB"),
+            (f"Saving: up to ${saving:.2f}/mo at $0.03/GB-month, the part of that storage "
+             f"older than the window, which the API does not break out"),
         ],
-        remediation=(
-            "Set retention policies on all CloudWatch Log Groups: "
-            "30 days for dev, 90 days for prod (or match your compliance requirement). "
-            "Use: aws logs put-retention-policy --retention-in-days 30"
-        ),
-        tags=["cloudwatch", "logs", "storage", "retention"],
+        remediation=remediation,
+        resources=[f["resource_id"] for f in priced],
+        tags=tags,
     )
 
 
@@ -758,7 +856,8 @@ def scan(
             match = checker(ctx)
             if match is None:
                 continue
-            if match.monthly_waste < min_monthly_waste:
+            # An investigation row has no dollar figure to fall below a threshold.
+            if not match.investigation and match.monthly_waste < min_monthly_waste:
                 continue
             if categories and match.category not in categories:
                 continue
@@ -788,7 +887,7 @@ def scan_dict(
         }
     """
     matches = scan(ctx, min_monthly_waste, categories)
-    total_monthly = sum(m.monthly_waste for m in matches)
+    total_monthly = sum(m.monthly_waste for m in matches if not m.investigation)
 
     by_category: dict[str, list] = {}
     by_severity: dict[str, list] = {}

@@ -60,6 +60,39 @@ def test_unreadable_commitment_coverage_is_not_graded_f(monkeypatch):
     assert not any("0% of compute" in f for f in dim["findings"]), dim["findings"]
 
 
+def test_the_scorecard_states_uncovered_on_demand_per_month(monkeypatch):
+    """CommitmentAnalysis.uncovered_on_demand_usd is the total over its three
+    month window (commitment_summary names it uncovered_on_demand_usd_3mo, and
+    get_commitment_analysis divides it by 3 for its monthly figure). The
+    scorecard passed it through as on_demand_usd and printed it per month:
+    $30,000 over three months read "$30,000/month at full on-demand rates",
+    three times the monthly figure, beside a $2,600/month plan saving that is
+    26% of $10,000, not of $30,000."""
+    import finops.server  # noqa: F401  (registers the tools module's server)
+    from finops.recommendations import commitments
+    from finops.recommendations.commitments import CommitmentAnalysis, _build_recommendations
+    from finops.tools import attribution
+
+    analysis = CommitmentAnalysis(
+        savings_plan_coverage_pct=10.0, savings_plan_utilization_pct=99.0,
+        savings_plan_unused_usd=0.0, ri_coverage_pct=10.0, ri_utilization_pct=99.0,
+        ri_unused_usd=0.0, uncovered_on_demand_usd=30000.0,
+        recommendations=_build_recommendations(
+            10.0, 30000.0, 99.0, 99.0, monthly_uncovered_series=[10000.0] * 3),
+    )
+    monkeypatch.setattr(commitments, "analyze_commitments",
+                        lambda tag_filter=None: analysis)
+
+    card = asyncio.run(attribution.get_efficiency_scorecard())
+
+    dim = _dim(card, "commitment_coverage")
+    said = " ".join(dim["findings"] + dim["actions"])
+    assert dim["metadata"]["on_demand_spend_usd"] == pytest.approx(10000.0), dim["metadata"]
+    assert "$10,000/month" in said, said
+    assert "$30,000" not in said, said
+    assert "$2,600/month" in said, said
+
+
 def test_commitment_dimension_treats_none_coverage_as_unknown():
     from finops.scoring.scorecard import _score_commitment_coverage
 

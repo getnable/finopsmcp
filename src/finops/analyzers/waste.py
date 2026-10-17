@@ -26,12 +26,14 @@ from typing import Any
 from ..aws_prices import (
     EBS_PER_GB_MONTH,
     EBS_SNAPSHOT_PER_GB_MONTH,
+    EC2_HOURLY,
     EC2_MONTHLY,
     HOURS_PER_MONTH,
     NAT_GATEWAY_PER_GB,
     NAT_GATEWAY_PER_MONTH,
     PUBLIC_IPV4_PER_MONTH,
     ebs_volume_monthly,
+    ec2_hourly_in_region,
     lb_hourly,
     rds_hourly,
 )
@@ -234,7 +236,8 @@ def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
                     "waste_type": "unattached_ebs_volume",
                     "estimated_monthly_savings": round(monthly_cost, 2),
                     "detail": (
-                        f"{size_gb} GB {vol_type} volume is unattached (state=available). "
+                        f"{size_gb} GB {vol_type} volume was unattached at scan time "
+                        f"(state=available); EC2 does not report when it was detached. "
                         f"Name: {name_tag or 'untagged'}. "
                         f"Delete it or snapshot+delete if needed as a backup."
                     ),
@@ -482,8 +485,9 @@ def check_elastic_ips(ec2_client: Any, region: str = "unknown") -> list[dict]:
                 "waste_type": "unassociated_elastic_ip",
                 "estimated_monthly_savings": _EIP_MONTHLY,
                 "detail": (
-                    f"Elastic IP {public_ip} is not associated with any instance "
-                    f"or network interface. AWS charges ${_EIP_MONTHLY:.2f}/mo for idle EIPs. "
+                    f"Elastic IP {public_ip} was not associated with any instance "
+                    f"or network interface at scan time; EC2 does not report when it was "
+                    f"detached. AWS charges ${_EIP_MONTHLY:.2f}/mo for idle EIPs. "
                     f"Release it if no longer needed."
                 ),
                 "severity": "low",
@@ -793,6 +797,89 @@ def check_cloudtrail_waste(
 
 # ── CloudWatch Log Groups (infinite retention) ────────────────────────────────
 
+_RETENTION_RECOMMENDATIONS = {
+    "vpc-flow": 30,
+    "flow-log": 30,
+    "/aws/lambda": 14,
+    "/aws/rds": 30,
+    "/aws/ecs": 30,
+    "/aws/eks": 30,
+    "/aws/codebuild": 30,
+    "cloudtrail": 90,
+    "access-log": 90,
+    "audit": 365,
+    "security": 365,
+}
+
+
+def log_group_retention_finding(lg: dict, region: str = "unknown") -> dict | None:
+    """The finding for one DescribeLogGroups row, or None when it has a retention policy.
+
+    Shared by check_cloudwatch_logs and the log-retention pattern, so both
+    price a never-expire group the same way: from its stored bytes, and only
+    when it is older than the retention it is told to keep.
+    """
+    group_name = lg.get("logGroupName", "")
+    retention_days = lg.get("retentionInDays")  # None = infinite
+    stored_bytes = lg.get("storedBytes", 0)
+
+    if retention_days is not None:
+        return None  # Has a retention policy — fine
+
+    # Estimate monthly cost from stored bytes
+    stored_gb = stored_bytes / (1024 ** 3)
+    monthly_cost = stored_gb * _CW_LOGS_STORAGE_PER_GB_MONTH
+
+    # Recommend retention period based on log group name patterns
+    recommended_days = 30  # default
+    for pattern, days in _RETENTION_RECOMMENDATIONS.items():
+        if pattern in group_name.lower():
+            recommended_days = days
+            break
+
+    # A retention of N days deletes only what is older than N days.
+    # The whole stored cost used to be the saving, so a group created
+    # ten days ago and told to keep thirty "saved" all its storage. A
+    # group no older than the retention loses nothing yet; an older
+    # one saves at most its stored cost (the API does not say how much
+    # of the volume is older than N days).
+    created_ms = lg.get("creationTime")
+    age_days = (
+        (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
+        if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
+    if age_days is not None and age_days <= recommended_days:
+        savings = 0.0
+        saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
+                      f"retention deletes nothing yet.")
+    else:
+        savings = monthly_cost
+        saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
+                      f"older than {recommended_days} days, which the API does not "
+                      f"break out.")
+
+    return {
+        "resource_id": group_name,
+        "resource_type": "CloudWatch Log Group",
+        "waste_type": "log_group_infinite_retention",
+        "estimated_monthly_savings": round(savings, 2),
+        "price_basis": "upper_bound_all_stored_bytes",
+        "age_days": age_days,
+        "detail": (
+            f"Log group '{group_name}' has no retention policy (infinite). "
+            f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
+            f"{saving_txt} "
+            f"Recommended retention: {recommended_days} days based on log type. "
+            f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
+            f"--retention-in-days {recommended_days}"
+        ),
+        "severity": _severity_from_savings(savings),
+        "region": region,
+        "account_id": None,
+        "stored_gb": round(stored_gb, 3),
+        "recommended_retention_days": recommended_days,
+    }
+
+
 def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dict]:
     """
     Detect CloudWatch Log Groups with no retention policy (infinite retention).
@@ -801,20 +888,6 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
 
     Recommends appropriate retention by log group name pattern.
     """
-    _RETENTION_RECOMMENDATIONS = {
-        "vpc-flow": 30,
-        "flow-log": 30,
-        "/aws/lambda": 14,
-        "/aws/rds": 30,
-        "/aws/ecs": 30,
-        "/aws/eks": 30,
-        "/aws/codebuild": 30,
-        "cloudtrail": 90,
-        "access-log": 90,
-        "audit": 365,
-        "security": 365,
-    }
-
     findings: list[dict] = []
 
     try:
@@ -826,65 +899,9 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
 
     for page in pages:
         for lg in page.get("logGroups", []):
-            group_name = lg.get("logGroupName", "")
-            retention_days = lg.get("retentionInDays")  # None = infinite
-            stored_bytes = lg.get("storedBytes", 0)
-
-            if retention_days is not None:
-                continue  # Has a retention policy — fine
-
-            # Estimate monthly cost from stored bytes
-            stored_gb = stored_bytes / (1024 ** 3)
-            monthly_cost = stored_gb * _CW_LOGS_STORAGE_PER_GB_MONTH
-
-            # Recommend retention period based on log group name patterns
-            recommended_days = 30  # default
-            for pattern, days in _RETENTION_RECOMMENDATIONS.items():
-                if pattern in group_name.lower():
-                    recommended_days = days
-                    break
-
-            # A retention of N days deletes only what is older than N days.
-            # The whole stored cost used to be the saving, so a group created
-            # ten days ago and told to keep thirty "saved" all its storage. A
-            # group no older than the retention loses nothing yet; an older
-            # one saves at most its stored cost (the API does not say how much
-            # of the volume is older than N days).
-            created_ms = lg.get("creationTime")
-            age_days = (
-                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
-                if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
-            if age_days is not None and age_days <= recommended_days:
-                savings = 0.0
-                saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
-                              f"retention deletes nothing yet.")
-            else:
-                savings = monthly_cost
-                saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
-                              f"older than {recommended_days} days, which the API does not "
-                              f"break out.")
-
-            findings.append({
-                "resource_id": group_name,
-                "resource_type": "CloudWatch Log Group",
-                "waste_type": "log_group_infinite_retention",
-                "estimated_monthly_savings": round(savings, 2),
-                "price_basis": "upper_bound_all_stored_bytes",
-                "age_days": age_days,
-                "detail": (
-                    f"Log group '{group_name}' has no retention policy (infinite). "
-                    f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
-                    f"{saving_txt} "
-                    f"Recommended retention: {recommended_days} days based on log type. "
-                    f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
-                    f"--retention-in-days {recommended_days}"
-                ),
-                "severity": _severity_from_savings(savings),
-                "region": region,
-                "account_id": None,
-                "stored_gb": round(stored_gb, 3),
-                "recommended_retention_days": recommended_days,
-            })
+            finding = log_group_retention_finding(lg, region)
+            if finding is not None:
+                findings.append(finding)
 
     return findings
 
@@ -929,7 +946,12 @@ def check_s3_storage_class(
     INTELLIGENT-TIERING: $0.023/GB-mo (frequent) / $0.0125/GB-mo (infrequent)
                          + $0.0025/1000 objects/mo monitoring
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
+    # Bucket -> error code for a metric read that failed. Such a bucket is
+    # skipped, never called low-access, and recorded as unread: it was skipped
+    # in silence, so a CloudWatch denial in one bucket region left the check
+    # reporting itself fully run.
+    unread: dict[str, str] = {}
 
     try:
         resp = s3_client.list_buckets()
@@ -964,7 +986,12 @@ def check_s3_storage_class(
         for name in names:
             by_region.setdefault(bucket_regions[name], []).append(
                 MetricQuery(name, "AWS/S3", metric, (("BucketName", name), dim), stat, 86400))
-        return fetch_metric_values_by_region(_cw_for, by_region, start, now)
+        failed: dict = {}
+        out = fetch_metric_values_by_region(_cw_for, by_region, start, now,
+                                            failures=failed)
+        for name, code in failed.items():
+            unread.setdefault(name, code)
+        return out
 
     # Three rounds, each only for the buckets the last one kept: the same reads
     # the per-bucket loop made, so the free path spends no more requests.
@@ -1108,6 +1135,8 @@ def check_s3_storage_class(
             "avg_object_kb": round(avg_object_kb, 1),
         })
 
+    _note_unread(findings, unread, "buckets",
+                 "S3 storage and request metrics (BucketSizeBytes, GetRequests, NumberOfObjects)")
     return findings
 
 
@@ -1382,18 +1411,25 @@ def check_idle_ec2(
         if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
             continue  # network-active: treat as in-use, not idle
 
-        monthly_savings = EC2_MONTHLY.get(inst_type)
-        if monthly_savings is None:
+        listed = EC2_MONTHLY.get(inst_type)
+        rate_region = "us-east-1"
+        if listed is None:
+            monthly_savings = None
             cost_txt = (f"Cost unknown ({inst_type} is not in nable's price table; "
                         f"check the real rate in Cost Explorer). ")
             severity = "unknown"
         else:
-            # EC2_MONTHLY is the us-east-1 Linux list rate. Say so, and say when
-            # the instance's OS carries a licence that rate leaves out.
+            # EC2_MONTHLY is the us-east-1 Linux list rate. Outside us-east-1
+            # the region's floor where nable holds one (the least it charges
+            # over us-east-1 for any listed type), and the basis says which.
+            # Say too when the instance's OS carries a licence it leaves out.
+            known = region if region not in ("", "unknown") else None
+            hourly, basis = ec2_hourly_in_region(EC2_HOURLY[inst_type], known)
+            if hourly != EC2_HOURLY[inst_type]:
+                rate_region = region
+            monthly_savings = round(hourly * HOURS_PER_MONTH, 2)
             platform = str(inst.get("PlatformDetails") or "")
-            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the us-east-1 Linux "
-                        f"on-demand list rate"
-                        + (f" (rates differ in {region})" if region != "us-east-1" else "")
+            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the {basis}"
                         + (f"; this is {platform}, whose licence makes the real cost higher"
                            if platform and platform != "Linux/UNIX" else "")
                         + ". ")
@@ -1405,6 +1441,8 @@ def check_idle_ec2(
             "waste_type": "idle_ec2_low_cpu",
             "estimated_monthly_savings": monthly_savings,
             "unpriced": monthly_savings is None,
+            # The region whose rate priced it; the detail says how.
+            "rate_region": rate_region,
             "detail": (
                 f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
                 f"(peak: {max_cpu:.1f}%) over {lookback_days} days "

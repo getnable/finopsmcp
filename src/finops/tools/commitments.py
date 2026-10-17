@@ -45,24 +45,34 @@ def get_commitment_analysis() -> dict:
         coverage_gap_pct = (None if combined_coverage is None or sp_unread
                             else max(0.0, coverage_target - combined_coverage))
 
-        # Monthly uncovered on-demand (3-month average)
-        monthly_uncovered = analysis.uncovered_on_demand_usd / 3 if analysis.uncovered_on_demand_usd > 0 else 0.0
+        # Monthly uncovered on-demand (3-month average), or None when it could
+        # not be read: unread is not $0.
+        uncovered_3mo = analysis.uncovered_on_demand_usd
+        monthly_uncovered = None if uncovered_3mo is None else max(0.0, uncovered_3mo) / 3
 
         actionable = {
             "combined_coverage_pct": (None if combined_coverage is None
                                       else round(combined_coverage, 1)),
+            "combined_coverage_basis": analysis.coverage_basis,
             "coverage_target_pct": coverage_target,
             "coverage_gap_pct": None if coverage_gap_pct is None else round(coverage_gap_pct, 1),
-            "monthly_uncovered_on_demand_usd": round(monthly_uncovered, 2),
+            "monthly_uncovered_on_demand_usd": (None if monthly_uncovered is None
+                                                else round(monthly_uncovered, 2)),
         }
         if sp_unread:
             actionable["note"] = (
                 "Savings Plans coverage could not be read (grant "
                 "ce:GetSavingsPlansCoverage), so there is no coverage gap to size and "
-                "no purchase projection. This is not 0% coverage.")
+                "no purchase projection. This is not 0% coverage."
+                + (" The uncovered on-demand spend, read from the same call, was not "
+                   "read either; it is not $0." if monthly_uncovered is None else ""))
+        elif monthly_uncovered is None:
+            actionable["note"] = (
+                "Uncovered on-demand spend was not read (GetSavingsPlansCoverage "
+                "OnDemandCost), so there is no purchase projection. This is not $0.")
 
         # "If you bought $X more in commitments" projection
-        if monthly_uncovered > 100 and not sp_unread:
+        if monthly_uncovered is not None and monthly_uncovered > 100 and not sp_unread:
             # One rate for every Compute SP figure: the 1-year no-upfront rate
             # recommendations.commitments documents against the AWS price list
             # (26% off, the m5.large rate). This used a local 34%, more than even
@@ -453,14 +463,19 @@ async def scan_graviton_migration_opportunities(
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
 
+        away = False
         for r in candidates:
             name = r["name_tag"] or r["instance_id"]
+            region = r.get("region") or ""
+            listed = region not in ("", "us-east-1")
+            away = away or listed
             lines.append(
                 f"| {r['instance_id']} "
                 f"| {name} "
                 f"| {r['instance_type']} "
                 f"| {r['graviton_equivalent']} "
-                f"| ${r['current_monthly_cost_estimate']:,.2f} "
+                f"| ${r['current_monthly_cost_estimate']:,.2f}"
+                f"{f' ({region}, priced at us-east-1 list)' if listed else ''} "
                 f"| ${r['savings_estimate']:,.2f} "
                 f"| {r['savings_pct']:.1f}% |"
             )
@@ -469,7 +484,10 @@ async def scan_graviton_migration_opportunities(
             "",
             "**Basis:** savings are the us-east-1 Linux on-demand list price gap between "
             "the two types. An RI or Savings Plan already covering the x86 instance makes "
-            "the real saving smaller.",
+            "the real saving smaller."
+            + (" Rows outside us-east-1 say so: nable holds no per-type rate for their "
+               "region, and its regional floor, a floor for one instance's price, does not "
+               "bound a gap between two types." if away else ""),
             "",
             "**How to migrate:** an x86_64 AMI does not boot on an arm64 instance type, so "
             "this is a relaunch from an arm64 image, not an in-place type change. Confirm "
@@ -502,7 +520,8 @@ def recommend_spot_adoption(
     Finds on-demand EC2 instances that could move to spot. Uses env tags, ASG
     membership, CPU variance, and a dated us-east-1 snapshot of Spot Instance
     Advisor savings and interruption bands; outside that snapshot the band is
-    unknown and the saving an assumed 65%, and each row says which.
+    unknown and the saving is the median of the snapshot's figures, and each
+    row says which.
     Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.
 
     Args:
@@ -563,7 +582,7 @@ def recommend_spot_adoption(
                 f"| {c['recommendation']} "
                 f"| ${c['monthly_savings']:,.2f} "
                 f"| {c['savings_pct']:.1f}%"
-                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (assumed)'} |"
+                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (median)'} |"
             )
 
         if unread_note:
@@ -571,9 +590,14 @@ def recommend_spot_adoption(
 
         lines += [
             "",
-            "**Basis:** on-demand cost is the us-east-1 Linux list rate. Interruption bands "
+            "**Basis:** on-demand cost is the us-east-1 Linux list rate, times the least "
+            "the instance's region charges over us-east-1 for the EC2 types nable lists "
+            "where that is more than 1 (a floor for the region); each row's ondemand_basis "
+            "says which. Interruption bands "
             "and savings are the Spot Instance Advisor's us-east-1 figures as of "
-            "2026-03-20 where nable has them; \"unknown\" and \"(assumed)\" mark the rest. "
+            "2026-03-20 where nable has them; \"unknown\" marks the rest, and \"(median)\" a "
+            "saving priced at the median of those us-east-1 figures, because nable holds no "
+            "figure for that type or region. "
             "Check the Spot Advisor for your region before sizing the saving.",
             "",
             "**How to migrate:** Use a Launch Template with a mixed instances policy. "

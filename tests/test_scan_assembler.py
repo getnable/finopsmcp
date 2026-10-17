@@ -88,6 +88,38 @@ def test_empty_ai_block_is_dropped():
     assert blocks == []
 
 
+_ANTHROPIC_401 = ("credential_invalid: Anthropic refused ANTHROPIC_ADMIN_KEY on the usage "
+                  "and cost reports (Client error '401 Unauthorized')")
+
+
+def test_an_ai_provider_that_could_not_be_read_is_named():
+    """A fixture account with OpenAI ($600), Anthropic ($450) and a LiteLLM
+    proxy connected, Anthropic's admin key refused: get_all_llm_costs said
+    partial, failed_providers {"anthropic": ...}, "Not read: anthropic". The
+    scan printed "AI & GPU $1,014/mo [estimated]  Openai $600 · Bedrock $414"
+    with no word that Anthropic was not read."""
+    sample = _llm_sample(total_usd=1014.25, by_provider={"openai": 600.0, "bedrock": 414.25},
+                         failed_providers={"anthropic": _ANTHROPIC_401}, partial=True)
+    with patch("finops.connectors.llm_costs.get_all_llm_costs", side_effect=lambda **kw: sample):
+        blocks, _ = sa.gather_extra_providers(frozenset({"llm"}), spend=True)
+    [ai] = [b for b in blocks if b.family == "ai"]
+    assert ai.status == "ok" and ai.spend_usd == 1014.25
+    assert "not read: anthropic" in (ai.note or ""), ai.note
+
+
+def test_ai_providers_that_all_failed_are_not_dropped_as_empty():
+    """Anthropic alone connected and refused: total 0 and nothing by provider,
+    which the empty-block rule above dropped, so the scan showed no AI at all,
+    the same as an account with none."""
+    sample = _llm_sample(total_usd=0.0, by_provider={},
+                         failed_providers={"anthropic": _ANTHROPIC_401}, partial=True)
+    with patch("finops.connectors.llm_costs.get_all_llm_costs", side_effect=lambda **kw: sample):
+        blocks, _ = sa.gather_extra_providers(frozenset({"llm"}), spend=False)
+    [ai] = [b for b in blocks if b.family == "ai"]
+    assert ai.status != "ok" and ai.spend_usd is None
+    assert "anthropic" in (ai.note or ""), ai.note
+
+
 def test_aws_only_families_gather_nothing():
     # "aws" is not an extra-provider gatherer; no work, no blocks.
     blocks, abandoned = sa.gather_extra_providers(frozenset({"aws"}), spend=False)

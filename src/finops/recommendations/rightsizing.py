@@ -105,6 +105,12 @@ class RightsizingRecommendation:
             parts.append(f"Saving ~${self.monthly_savings:,.0f}/mo.")
         if self.source == "cloudwatch_fallback":
             parts.append("(CPU-only estimate — enable Compute Optimizer for full analysis)")
+            # The gap between two types' us-east-1 rates; outside us-east-1
+            # nothing nable holds bounds it (Compute Optimizer prices in-region).
+            from ..aws_prices import us_east_1_list_note
+            note = us_east_1_list_note(self.region)
+            if note and self.monthly_savings:
+                parts.append(f"Saving {note}.")
         return " ".join(parts)
 
 

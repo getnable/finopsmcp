@@ -515,6 +515,9 @@ def _demo_payload() -> tuple[dict, dict]:
             "description": "1,900 EBS snapshots older than a year",
             "region": "us-west-2",
             "estimated_monthly_savings": 3120.0,
+            # The engine files old snapshots as an investigation
+            # (old_unmanaged_snapshot), so a real scan shows them to confirm.
+            "kind": "investigation",
         },
         {
             "waste_type": "idle_rds",
@@ -527,6 +530,8 @@ def _demo_payload() -> tuple[dict, dict]:
             "description": "9 EC2 instances under 8% peak CPU (m5.2xlarge)",
             "region": "us-east-1",
             "estimated_monthly_savings": 2210.0,
+            # Judged on CPU alone, an investigation in the engine (idle_ec2_low_cpu).
+            "kind": "investigation",
         },
     ]
     total = sum(f["estimated_monthly_savings"] for f in findings)
@@ -580,7 +585,9 @@ _WASTE_LABELS: dict[str, tuple[str, str]] = {
     "idle_nat_gateway": ("idle NAT gateway", "idle NAT gateways"),
     "idle_load_balancer": ("idle load balancer", "idle load balancers"),
     "unassociated_elastic_ip": ("unused Elastic IP", "unused Elastic IPs"),
-    "idle_ec2_low_cpu": ("idle EC2 instance", "idle EC2 instances"),
+    # Low CPU, not idle: the finding is CPU alone, and its own why_unsure says
+    # a memory-, disk- or network-bound host sits at low CPU doing real work.
+    "idle_ec2_low_cpu": ("low-CPU EC2 instance", "low-CPU EC2 instances"),
     "oversized_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
     "compute_optimizer_overprovisioned_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
     "idle_rds": ("idle RDS instance", "idle RDS instances"),
@@ -614,20 +621,46 @@ _WASTE_LABELS: dict[str, tuple[str, str]] = {
 }
 
 
+def _to_confirm(f: dict) -> bool:
+    """A finding the audit filed as an investigation (waste_evidence): an
+    inference with steps to confirm it, not a measured saving."""
+    return f.get("kind") == "investigation"
+
+
+def _recoverable_split(report: dict) -> tuple[float, float, int]:
+    """(measured, to confirm, how many to confirm), per month.
+
+    run_deep_audit classifies every finding, and only a recommendation is a
+    saving it measured. The scan used to print the sum of both as
+    "recoverable", where `nable brief`, from the same findings, totals the
+    measured ones only. A finding with no classification (the demo's, a
+    caller's own) counts as measured, as it always did."""
+    total = float(report.get("total_estimated_monthly_savings") or 0.0)
+    unconfirmed = [f for f in report.get("findings") or [] if _to_confirm(f)]
+    to_confirm = sum(float(f.get("estimated_monthly_savings") or 0.0) for f in unconfirmed)
+    return max(0.0, total - to_confirm), to_confirm, len(unconfirmed)
+
+
 def _group_findings(findings: list[dict]) -> list[dict]:
     """Findings summed by waste_type, largest first. A group of one keeps the
-    finding's own description when it has one (the demo's do)."""
-    groups: dict[str, dict] = {}
+    finding's own description when it has one (the demo's do). Findings to
+    confirm are grouped apart from measured ones and marked so."""
+    groups: dict[tuple[str, bool], dict] = {}
     for f in findings:
         wt = f.get("waste_type") or "finding"
-        g = groups.setdefault(wt, {"n": 0, "monthly": 0.0, "regions": set(),
-                                   "description": f.get("description")})
+        g = groups.setdefault((wt, _to_confirm(f)), {
+            "n": 0, "monthly": 0.0, "regions": set(), "description": f.get("description"),
+            "listed": set()})
         g["n"] += 1
         g["monthly"] += float(f.get("estimated_monthly_savings") or 0)
         if f.get("region"):
             g["regions"].add(f["region"])
+            # Outside us-east-1 and priced from nable's us-east-1 tables
+            # (optimizer._label_rate_region): the line says where.
+            if f.get("rate_region") == "us-east-1" and f["region"] != "us-east-1":
+                g["listed"].add(f["region"])
     rows = []
-    for wt, g in groups.items():
+    for (wt, confirm), g in groups.items():
         if g["n"] == 1 and g["description"]:
             desc = g["description"]
         else:
@@ -635,7 +668,9 @@ def _group_findings(findings: list[dict]) -> list[dict]:
             desc = f"{g['n']} {one if g['n'] == 1 else many}"
         regions = sorted(g["regions"])
         where = regions[0] if len(regions) == 1 else (f"{len(regions)} regions" if regions else "")
-        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"]})
+        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"],
+                     **({"to_confirm": True} if confirm else {}),
+                     **({"us_east_1_list_in": sorted(g["listed"])} if g["listed"] else {})})
     rows.sort(key=lambda r: -r["monthly"])
     return rows
 
@@ -694,14 +729,25 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
 
     total_spend = 0.0
     total_recoverable = 0.0
+    total_to_confirm = 0.0
     providers_ok = 0
     _has_aws = report is not None
     aws_scaled = False
 
     if _has_aws:
         providers_ok += 1
-        recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+        # Recoverable is what the audit measured; what rests on an inference
+        # is shown beside it, to confirm, and not added in (_recoverable_split).
+        found = float(report.get("total_estimated_monthly_savings") or 0.0)
+        recoverable, to_confirm, n_to_confirm = _recoverable_split(report)
         total_recoverable += recoverable
+        total_to_confirm += to_confirm
+        confirm_line = (
+            f"{_usd(to_confirm)}/mo to confirm, not counted as recoverable: "
+            f"{n_to_confirm} finding{'s' if n_to_confirm != 1 else ''} rest"
+            f"{'s' if n_to_confirm == 1 else ''} on an inference "
+            "(`nable scan --json` says what to check)"
+        ) if to_confirm >= _FINDING_FLOOR_USD else None
 
         if spend and spend["total"] > 0:
             # Every other figure on this screen is per month, so AWS joins the
@@ -725,6 +771,8 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                                else "monthly spend at this month's rate")
                     pct = f" ({recoverable / monthly_base * 100:.1f}% of {against})"
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable{pct}")) + demo_tag, file=out)
+            if confirm_line:
+                print(confirm_line + demo_tag, file=out)
         else:
             if ce_denied:
                 print(
@@ -741,6 +789,8 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                 print(_dim(spend_note), file=out)
             if recoverable >= _FINDING_FLOOR_USD:
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
+            if confirm_line:
+                print(confirm_line + demo_tag, file=out)
 
         findings = report.get("findings") or []
         groups = _group_findings(findings)
@@ -748,13 +798,13 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         incomplete = bool(report.get("checks_failed") or report.get("regions_timed_out")
                           or report.get("regions_unlisted"))
 
-        if recoverable < _FINDING_FLOOR_USD:
+        if found < _FINDING_FLOOR_USD:
             if findings:
                 # Below the line this summary shows, but not nothing: a $20/mo
                 # account with $4.61/mo of findings used to read "no material
                 # waste found, nice" and hide all of them.
                 n = len(findings)
-                print(f"{n} small finding{'s' if n != 1 else ''}, {_usd(recoverable)}/mo total"
+                print(f"{n} small finding{'s' if n != 1 else ''}, {_usd(found)}/mo total"
                       + demo_tag + _dim(" · `nable scan --json` lists every one"), file=out)
             elif incomplete:
                 # Nothing found is only a verdict on what was read.
@@ -765,8 +815,12 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         else:
             for g in shown:
                 region = g["region"]
+                listed = g.get("us_east_1_list_in")
                 print(f"  {_usd(g['monthly']) + '/mo':>12}  {g['description']}"
-                      + (f", {region}" if region else ""), file=out)
+                      + (f", {region}" if region else "")
+                      + ("  (to confirm)" if g.get("to_confirm") else "")
+                      + (f"  ({', '.join(listed)} priced at us-east-1 list)" if listed else ""),
+                      file=out)
             rest_n = sum(g["n"] for g in groups) - sum(g["n"] for g in shown)
             rest_usd = sum(g["monthly"] for g in groups) - sum(g["monthly"] for g in shown)
             if rest_n > 0:
@@ -822,6 +876,8 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         if total_spend > 0:
             parts.append(f"{_usd(total_spend)}/mo visible")
         parts.append(_green(f"{_usd(total_recoverable)}/mo recoverable"))
+        if total_to_confirm >= _FINDING_FLOOR_USD:
+            parts.append(f"{_usd(total_to_confirm)}/mo to confirm")
         print(
             _bold(" · ".join(parts))
             + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"
@@ -850,7 +906,9 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
                   credentials: str = "profile"):
     extra_blocks = extra_blocks or []
     report = report or {}
-    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    # What the audit measured; findings it files as investigations are beside
+    # it, not in it, as in the text output and `nable brief`.
+    recoverable, to_confirm, n_to_confirm = _recoverable_split(report)
     findings = report.get("findings") or []
     spend_has_data = bool(spend) and spend.get("has_data", True)
     # The same monthly base the text output divides by (see _monthly_spend_base).
@@ -890,6 +948,10 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
                 round(recoverable / monthly_base * 100, 2) if monthly_base else None
             ),
             "pct_of_spend_basis": pct_basis if monthly_base else None,
+            # Findings that rest on an inference (kind "investigation"), with
+            # the steps to confirm them on each finding. Not in monthly_usd.
+            "to_confirm_monthly_usd": round(to_confirm, 2),
+            "to_confirm_findings": n_to_confirm,
         },
         # Every finding. This was capped at 20 while the text output promised
         # `nable scan --json` "lists every one", and the listed ones then did
