@@ -33,6 +33,19 @@ def is_airgap() -> bool:
     return AIRGAP
 
 
+def airgap_blocks(channel: str) -> bool:
+    """True, with a warning, when FINOPS_AIRGAP forbids sending to `channel`.
+
+    Air-gap allows traffic to the cost providers nable reads and nothing else,
+    and Slack, Teams and SMTP are not providers. Each sender asks this before
+    it opens a connection, so no path to one (a digest, a report, a brief)
+    can send around the switch."""
+    if not AIRGAP:
+        return False
+    log.warning("FINOPS_AIRGAP is set; nothing is sent to %s", channel)
+    return True
+
+
 def is_fips_mode() -> bool:
     """
     Return True if the underlying OpenSSL is running in FIPS mode.
