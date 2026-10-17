@@ -181,7 +181,9 @@ class NotionConnector:
                 monthly_txt = f"{f.get('magnitude') or 'unconfirmed'} (needs confirming)"
                 annual_txt = ""
             else:
-                monthly_txt = f"${monthly_s:,.2f}" + (" (to confirm)" if f.get("to_confirm") else "")
+                tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                        ("us-east-1 list", f.get("us_east_1_list"))) if on]
+                monthly_txt = f"${monthly_s:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
                 annual_txt = f"${monthly_s * 12:,.2f}"
             table_rows.append({
                 "object": "block",

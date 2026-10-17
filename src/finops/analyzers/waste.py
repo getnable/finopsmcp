@@ -26,12 +26,14 @@ from typing import Any
 from ..aws_prices import (
     EBS_PER_GB_MONTH,
     EBS_SNAPSHOT_PER_GB_MONTH,
+    EC2_HOURLY,
     EC2_MONTHLY,
     HOURS_PER_MONTH,
     NAT_GATEWAY_PER_GB,
     NAT_GATEWAY_PER_MONTH,
     PUBLIC_IPV4_PER_MONTH,
     ebs_volume_monthly,
+    ec2_hourly_in_region,
     lb_hourly,
     rds_hourly,
 )
@@ -1409,18 +1411,25 @@ def check_idle_ec2(
         if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
             continue  # network-active: treat as in-use, not idle
 
-        monthly_savings = EC2_MONTHLY.get(inst_type)
-        if monthly_savings is None:
+        listed = EC2_MONTHLY.get(inst_type)
+        rate_region = "us-east-1"
+        if listed is None:
+            monthly_savings = None
             cost_txt = (f"Cost unknown ({inst_type} is not in nable's price table; "
                         f"check the real rate in Cost Explorer). ")
             severity = "unknown"
         else:
-            # EC2_MONTHLY is the us-east-1 Linux list rate. Say so, and say when
-            # the instance's OS carries a licence that rate leaves out.
+            # EC2_MONTHLY is the us-east-1 Linux list rate. Outside us-east-1
+            # the region's floor where nable holds one (the least it charges
+            # over us-east-1 for any listed type), and the basis says which.
+            # Say too when the instance's OS carries a licence it leaves out.
+            known = region if region not in ("", "unknown") else None
+            hourly, basis = ec2_hourly_in_region(EC2_HOURLY[inst_type], known)
+            if hourly != EC2_HOURLY[inst_type]:
+                rate_region = region
+            monthly_savings = round(hourly * HOURS_PER_MONTH, 2)
             platform = str(inst.get("PlatformDetails") or "")
-            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the us-east-1 Linux "
-                        f"on-demand list rate"
-                        + (f" (rates differ in {region})" if region != "us-east-1" else "")
+            cost_txt = (f"Running cost: ~${monthly_savings:,.2f}/mo at the {basis}"
                         + (f"; this is {platform}, whose licence makes the real cost higher"
                            if platform and platform != "Linux/UNIX" else "")
                         + ". ")
@@ -1432,6 +1441,8 @@ def check_idle_ec2(
             "waste_type": "idle_ec2_low_cpu",
             "estimated_monthly_savings": monthly_savings,
             "unpriced": monthly_savings is None,
+            # The region whose rate priced it; the detail says how.
+            "rate_region": rate_region,
             "detail": (
                 f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
                 f"(peak: {max_cpu:.1f}%) over {lookback_days} days "

@@ -646,11 +646,16 @@ def _group_findings(findings: list[dict]) -> list[dict]:
     for f in findings:
         wt = f.get("waste_type") or "finding"
         g = groups.setdefault((wt, _to_confirm(f)), {
-            "n": 0, "monthly": 0.0, "regions": set(), "description": f.get("description")})
+            "n": 0, "monthly": 0.0, "regions": set(), "description": f.get("description"),
+            "listed": set()})
         g["n"] += 1
         g["monthly"] += float(f.get("estimated_monthly_savings") or 0)
         if f.get("region"):
             g["regions"].add(f["region"])
+            # Outside us-east-1 and priced from nable's us-east-1 tables
+            # (optimizer._label_rate_region): the line says where.
+            if f.get("rate_region") == "us-east-1" and f["region"] != "us-east-1":
+                g["listed"].add(f["region"])
     rows = []
     for (wt, confirm), g in groups.items():
         if g["n"] == 1 and g["description"]:
@@ -661,7 +666,8 @@ def _group_findings(findings: list[dict]) -> list[dict]:
         regions = sorted(g["regions"])
         where = regions[0] if len(regions) == 1 else (f"{len(regions)} regions" if regions else "")
         rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"],
-                     **({"to_confirm": True} if confirm else {})})
+                     **({"to_confirm": True} if confirm else {}),
+                     **({"us_east_1_list_in": sorted(g["listed"])} if g["listed"] else {})})
     rows.sort(key=lambda r: -r["monthly"])
     return rows
 
@@ -806,9 +812,12 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
         else:
             for g in shown:
                 region = g["region"]
+                listed = g.get("us_east_1_list_in")
                 print(f"  {_usd(g['monthly']) + '/mo':>12}  {g['description']}"
                       + (f", {region}" if region else "")
-                      + ("  (to confirm)" if g.get("to_confirm") else ""), file=out)
+                      + ("  (to confirm)" if g.get("to_confirm") else "")
+                      + (f"  ({', '.join(listed)} priced at us-east-1 list)" if listed else ""),
+                      file=out)
             rest_n = sum(g["n"] for g in groups) - sum(g["n"] for g in shown)
             rest_usd = sum(g["monthly"] for g in groups) - sum(g["monthly"] for g in shown)
             if rest_n > 0:

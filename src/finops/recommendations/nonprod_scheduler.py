@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
-from ..aws_prices import EC2_HOURLY
+from ..aws_prices import EC2_HOURLY, ec2_hourly_in_region
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
@@ -45,6 +45,7 @@ _ENV_TAG_KEYS = ["environment", "env", "stage"]
 def _tag_key(tag: dict) -> str:
     return str(tag.get("Key", "")).lower()
 
+
 # Values that indicate a non-production environment (matched case-insensitively)
 _NONPROD_VALUES = {
     "dev", "development", "staging", "stage", "test", "testing",
@@ -69,9 +70,15 @@ def _get_env_tag(tags: list[dict]) -> str | None:
     return None
 
 
-def _monthly_cost_estimate(instance_type: str) -> float:
-    hourly = _HOURLY_PRICE.get(instance_type, 0.0)
-    return round(hourly * _HOURS_PER_MONTH, 2)
+def _monthly_cost_estimate(instance_type: str, region: str | None = None) -> float:
+    return _cost_in_region(instance_type, region)[0]
+
+
+def _cost_in_region(instance_type: str, region: str | None) -> tuple[float, str]:
+    """(monthly on-demand cost, its basis): the region's EC2 floor where nable
+    holds one, the us-east-1 list rate and why everywhere else."""
+    hourly, basis = ec2_hourly_in_region(_HOURLY_PRICE.get(instance_type, 0.0), region)
+    return round(hourly * _HOURS_PER_MONTH, 2), basis
 
 
 def _batch_get_hourly_cpu_max(
@@ -248,7 +255,7 @@ async def identify_nonprod_resources(
                 if idle_hrs_per_week < 20:
                     continue
 
-                monthly_cost = _monthly_cost_estimate(itype)
+                monthly_cost, price_basis = _cost_in_region(itype, region)
                 # The schedule stops the instance for its 118 off-hours and no
                 # more, so that is the most it can save however idle the rest
                 # of the week is. Dividing all idle hours by 168 promised an
@@ -264,6 +271,7 @@ async def identify_nonprod_resources(
                     "environment": inst_info["environment"],
                     "region": region,
                     "monthly_cost_estimate": monthly_cost,
+                    "price_basis": price_basis,
                     "idle_hours_per_week": idle_hrs_per_week,
                     # "measured" from the week's hourly maximum CPU, or "assumed"
                     # (nights and weekends) when CloudWatch held no datapoints.
@@ -326,8 +334,10 @@ async def identify_nonprod_resources(
                         "are safe to stop: some non-prod boxes run nightly builds, hold a "
                         "database, or back a shared service. Idle hours are counted across "
                         "the whole week (hourly maximum CPU under 5%), not only inside the "
-                        "hours the schedule stops. The dollar figure also assumes us-east-1 "
-                        "on-demand pricing, so if these are on RIs or Savings Plans the real "
+                        "hours the schedule stops. The dollar figure also assumes on-demand "
+                        "list pricing (us-east-1's, or the region's floor where nable holds "
+                        "one; each row's price_basis says which), so if these are on RIs or "
+                        "Savings Plans the real "
                         "saving is smaller. We have not confirmed either, so this is a range."),
             assumptions=_assumptions,
             rough_monthly=total_waste,

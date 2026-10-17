@@ -778,7 +778,11 @@ def test_an_idle_instance_cost_names_its_price_basis():
 
     cw.get_metric_statistics.side_effect = stats
     got = {f["resource_id"]: f for f in waste.check_idle_ec2(ec2, cw, "eu-west-1")}
-    assert got["i-lin"]["estimated_monthly_savings"] == 140.16
+    # eu-west-1's floor, not the us-east-1 $140.16: 0.192 x 1.069 x 730, the
+    # least eu-west-1 charges over us-east-1 for a listed type (it lists
+    # m5.xlarge at $0.214, AmazonEC2 eu-west-1 20261012193925, SKU HNKY83Z77VRXC2UH).
+    assert got["i-lin"]["estimated_monthly_savings"] == 149.83
+    assert "eu-west-1 floor" in got["i-lin"]["detail"]
     assert "us-east-1 Linux on-demand list rate" in got["i-lin"]["detail"]
     assert "Red Hat Enterprise Linux" in got["i-rhel"]["detail"]
     assert "licence" in got["i-rhel"]["detail"]

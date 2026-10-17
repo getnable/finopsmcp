@@ -463,14 +463,19 @@ async def scan_graviton_migration_opportunities(
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
 
+        away = False
         for r in candidates:
             name = r["name_tag"] or r["instance_id"]
+            region = r.get("region") or ""
+            listed = region not in ("", "us-east-1")
+            away = away or listed
             lines.append(
                 f"| {r['instance_id']} "
                 f"| {name} "
                 f"| {r['instance_type']} "
                 f"| {r['graviton_equivalent']} "
-                f"| ${r['current_monthly_cost_estimate']:,.2f} "
+                f"| ${r['current_monthly_cost_estimate']:,.2f}"
+                f"{f' ({region}, priced at us-east-1 list)' if listed else ''} "
                 f"| ${r['savings_estimate']:,.2f} "
                 f"| {r['savings_pct']:.1f}% |"
             )
@@ -479,7 +484,10 @@ async def scan_graviton_migration_opportunities(
             "",
             "**Basis:** savings are the us-east-1 Linux on-demand list price gap between "
             "the two types. An RI or Savings Plan already covering the x86 instance makes "
-            "the real saving smaller.",
+            "the real saving smaller."
+            + (" Rows outside us-east-1 say so: nable holds no per-type rate for their "
+               "region, and its regional floor, a floor for one instance's price, does not "
+               "bound a gap between two types." if away else ""),
             "",
             "**How to migrate:** an x86_64 AMI does not boot on an arm64 instance type, so "
             "this is a relaunch from an arm64 image, not an in-place type change. Confirm "
@@ -582,7 +590,10 @@ def recommend_spot_adoption(
 
         lines += [
             "",
-            "**Basis:** on-demand cost is the us-east-1 Linux list rate. Interruption bands "
+            "**Basis:** on-demand cost is the us-east-1 Linux list rate, times the least "
+            "the instance's region charges over us-east-1 for the EC2 types nable lists "
+            "where that is more than 1 (a floor for the region); each row's ondemand_basis "
+            "says which. Interruption bands "
             "and savings are the Spot Instance Advisor's us-east-1 figures as of "
             "2026-03-20 where nable has them; \"unknown\" marks the rest, and \"(median)\" a "
             "saving priced at the median of those us-east-1 figures, because nable holds no "

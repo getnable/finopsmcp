@@ -1990,7 +1990,11 @@ async def run_full_cost_audit(
         v = f.get("monthly_savings")
         if v is None:
             return f"{f.get('magnitude', 'unconfirmed')} (needs confirming)"
-        return f"${v:,.2f}" + (" (to confirm)" if f.get("to_confirm") else "")
+        # A row outside us-east-1 priced at us-east-1 list rates says so here,
+        # where the figure is (sweep._listed).
+        tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                ("us-east-1 list", f.get("us_east_1_list"))) if on]
+        return f"${v:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
 
     # Show a Confidence column only when at least one shown finding carries real
     # learned signal, so a cold ledger keeps the original clean 4-column table.

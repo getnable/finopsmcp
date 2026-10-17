@@ -1282,25 +1282,11 @@ def _scaled_basis(basis: str, family: str) -> str:
 # $496/mo, a warn under the $500 threshold, for an instance AWS lists at
 # $765/mo there. For each region, the least and the most it charges over
 # us-east-1 for any EC2 type nable lists (Linux on-demand, AWS Price List
-# regional offer files, October 2026): the guard judges at the least, which
-# is a floor for every listed type, and says the range. A region that is
-# cheaper than us-east-1 for some types keeps the us-east-1 figure (a
+# regional offer files, October 2026; aws_prices.EC2_REGION_RANGE, shared
+# with the scanners that price an instance): the guard judges at the least,
+# which is a floor for every listed type, and says the range. A region that
+# is cheaper than us-east-1 for some types keeps the us-east-1 figure (a
 # guess may raise a figure, never lower it), and an unknown one is named.
-_EC2_REGION_RANGE: dict[str, tuple[float, float]] = {
-    "af-south-1": (1.286, 1.428), "ap-east-1": (1.253, 1.595), "ap-east-2": (1.052, 1.178),
-    "ap-northeast-1": (1.169, 1.5), "ap-northeast-2": (1.124, 1.45),
-    "ap-northeast-3": (1.169, 1.45), "ap-south-1": (0.611, 1.3), "ap-south-2": (0.611, 1.201),
-    "ap-southeast-1": (1.149, 1.45), "ap-southeast-2": (1.198, 1.45),
-    "ap-southeast-3": (1.149, 1.45), "ap-southeast-4": (1.198, 1.45),
-    "ap-southeast-5": (0.975, 1.305), "ap-southeast-7": (0.975, 1.305),
-    "ca-central-1": (1.088, 1.15), "ca-west-1": (1.088, 1.115), "eu-central-1": (1.135, 1.5),
-    "eu-central-2": (1.251, 1.54), "eu-north-1": (1.024, 1.14), "eu-south-1": (1.143, 1.26),
-    "eu-south-2": (1.054, 1.2), "eu-west-1": (1.069, 1.25), "eu-west-2": (1.119, 1.5),
-    "eu-west-3": (1.119, 1.4), "il-central-1": (1.121, 1.296), "me-central-1": (1.18, 1.247),
-    "me-south-1": (1.19, 1.375), "mx-central-1": (1.047, 1.058), "sa-east-1": (1.529, 1.95),
-    "us-east-2": (0.994, 1.0), "us-gov-east-1": (1.167, 1.267),
-    "us-gov-west-1": (1.167, 1.267), "us-west-1": (1.099, 1.3), "us-west-2": (1.0, 1.0),
-}
 _REGION_RE = re.compile(r"(?:(?<!\S)--region(?:=|\s+)|\bAWS_(?:DEFAULT_)?REGION=)"
                         r"[\"']?([a-z]{2}(?:-gov)?-[a-z]+-\d)(?![\w-])")
 _PRICING_REGION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -1319,7 +1305,9 @@ def _regional(listed: float | None, basis: str) -> tuple[float | None, str, str]
     region = _PRICING_REGION.get()
     if listed is None or region is None or region == "us-east-1":
         return listed, basis, ""
-    span = _EC2_REGION_RANGE.get(region)
+    from .aws_prices import EC2_REGION_RANGE
+
+    span = EC2_REGION_RANGE.get(region)
     if span is None:
         return listed, (f"{basis}; the command targets {region}, whose rates nable does not "
                         "hold, so this is the us-east-1 figure"), f" in {region}"

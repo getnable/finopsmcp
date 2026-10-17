@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
-from ..aws_prices import EC2_HOURLY
+from ..aws_prices import EC2_HOURLY, ec2_hourly_in_region
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
@@ -134,8 +134,16 @@ def _get_spot_discount(instance_type: str, region: str | None = None) -> float:
     return spot_saving(instance_type, region)[0]
 
 
-def _monthly_ondemand_cost(instance_type: str) -> float:
-    return round(_HOURLY_PRICE.get(instance_type, 0.0) * _HOURS_PER_MONTH, 2)
+def _monthly_ondemand_cost(instance_type: str, region: str | None = None) -> float:
+    return _ondemand_in_region(instance_type, region)[0]
+
+
+def _ondemand_in_region(instance_type: str, region: str | None) -> tuple[float, str]:
+    """(monthly on-demand cost, its basis): the region's EC2 floor where nable
+    holds one (aws_prices.ec2_hourly_in_region), the us-east-1 list rate and
+    a word on why everywhere else."""
+    hourly, basis = ec2_hourly_in_region(_HOURLY_PRICE.get(instance_type, 0.0), region)
+    return round(hourly * _HOURS_PER_MONTH, 2), basis
 
 
 def _get_cpu_variance(cw_client: Any, instance_id: str, days: int) -> float:
@@ -329,7 +337,7 @@ def _analyze_region(
         band         = _get_interruption_band(itype, region)
         discount, discount_basis = spot_saving(itype, region)
 
-        ondemand_cost = _monthly_ondemand_cost(itype)
+        ondemand_cost, ondemand_basis = _ondemand_in_region(itype, region)
         spot_cost     = round(ondemand_cost * (1.0 - discount), 2)
         savings       = round(ondemand_cost - spot_cost, 2)
         savings_pct   = round(discount * 100, 1)
@@ -349,6 +357,7 @@ def _analyze_region(
             "interruption_band":     band,
             "recommendation":        recommendation,
             "monthly_ondemand_cost": ondemand_cost,
+            "ondemand_basis":        ondemand_basis,
             "monthly_spot_estimate": spot_cost,
             "monthly_savings":       savings,
             "savings_pct":           savings_pct,
@@ -458,7 +467,7 @@ def recommend_spot_adoption(
                 + ("Spot Advisor us-east-1 figure" if top.get("savings_basis") == "spot_advisor"
                    else top.get("savings_basis_note") or "the median of the Spot Advisor figures held")
                 + "; actual price moves with capacity).",
-                "On-demand cost is the us-east-1 Linux list rate; a Reserved Instance or "
+                f"On-demand cost is the {top['ondemand_basis']}; a Reserved Instance or "
                 "Savings Plan already covering the instance makes the real saving smaller.",
             ] + ([
                 f"{len(unread)} on-demand instance(s) were not assessed: their CloudWatch "

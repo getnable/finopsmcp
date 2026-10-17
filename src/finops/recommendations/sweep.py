@@ -237,6 +237,24 @@ def build_specs(aws: Any, regions: list[str] | None) -> list[tuple[str, Any, dic
     ]
 
 
+def _region_note(region: Any) -> str:
+    """"; priced at us-east-1 list rates ..." for a row outside us-east-1 that
+    was priced from nable's us-east-1 tables, else "" (aws_prices)."""
+    from ..aws_prices import us_east_1_list_note
+
+    note = us_east_1_list_note(region if isinstance(region, str) else None)
+    return f"; {note}" if note else ""
+
+
+def _listed(region: Any, basis: str | None = None) -> dict:
+    """{"us_east_1_list": True} for a row outside us-east-1 priced at us-east-1
+    list rates, so the tables can mark the row; a basis naming the region's
+    floor (aws_prices.ec2_hourly_in_region) was priced in the region."""
+    if not _region_note(region) or (basis and "floor" in basis):
+        return {}
+    return {"us_east_1_list": True}
+
+
 def normalise(name, data) -> list[dict]:
     if data is None:
         return []
@@ -248,7 +266,9 @@ def normalise(name, data) -> list[dict]:
                 if s > 0:
                     # current cost rides along so the critique can hold the
                     # claim against it (a saving cannot exceed the resource).
-                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0):.0f}% saving, {r.get('region','')}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate")})
+                    # A gap between two types' rates: a regional floor on each
+                    # side does not bound it, so it stays at us-east-1 list.
+                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0):.0f}% saving, {r.get('region','')}{_region_note(r.get('region'))}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate"), **_listed(r.get("region"))})
         elif name == "ipv4":
             waste = data.get("total_monthly_waste", 0) or 0
             if waste > 0:
@@ -260,7 +280,12 @@ def normalise(name, data) -> list[dict]:
                 parts = [f"{n_unattached} unattached"] if n_unattached else []
                 if n_stopped:
                     parts.append(f"{n_stopped} on stopped instances")
-                out.append({"title": f"Release {n_unattached + n_stopped} idle Elastic IP(s) ({', '.join(parts)})", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, ${PUBLIC_IPV4_PER_MONTH:.2f} per IP"})
+                away = sorted({e["region"] for e in data.get("unattached_eips", [])
+                               + data.get("stopped_instance_eips", [])
+                               if isinstance(e, dict) and _region_note(e.get("region"))})
+                note = (f"; {', '.join(away)} priced at the us-east-1 list rate"
+                        if away else "")
+                out.append({"title": f"Release {n_unattached + n_stopped} idle Elastic IP(s) ({', '.join(parts)})", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, ${PUBLIC_IPV4_PER_MONTH:.2f} per IP{note}", **({"us_east_1_list": True} if away else {})})
         elif name == "lambda_pc" and isinstance(data, list):
             for r in data:
                 s = r.get("wasted_monthly_cost", 0) or 0
@@ -276,7 +301,10 @@ def normalise(name, data) -> list[dict]:
             for r in items:
                 s = r.get("potential_monthly_savings", 0) or 0
                 if s > 0:
-                    out.append({"title": f"Schedule non-prod instance {r.get('name', r.get('instance_id','?'))}", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"env={r.get('environment','?')}, {r.get('idle_hours_per_week',0):.0f} idle hrs/wk"})
+                    region = r.get("region") or ""
+                    where = (f", {region}; on-demand at the {r['price_basis']}"
+                             if _region_note(region) and r.get("price_basis") else "")
+                    out.append({"title": f"Schedule non-prod instance {r.get('name', r.get('instance_id','?'))}", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "region": region, "detail": f"env={r.get('environment','?')}, {r.get('idle_hours_per_week',0):.0f} idle hrs/wk{where}", **_listed(region, r.get("price_basis"))})
         elif name == "rds_snapshots":
             items = data.get("orphaned_snapshots", []) + data.get("old_snapshots", []) if isinstance(data, dict) else []
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
@@ -288,7 +316,10 @@ def normalise(name, data) -> list[dict]:
             for r in data:
                 s = r.get("monthly_savings", 0) or 0
                 if s > 0 and r.get("recommendation") == "RECOMMENDED":
-                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"{r.get('savings_pct',0):.0f}% saving"})
+                    region = r.get("region") or ""
+                    where = (f", {region}; on-demand at the {r['ondemand_basis']}"
+                             if _region_note(region) and r.get("ondemand_basis") else "")
+                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "region": region, "detail": f"{r.get('savings_pct',0):.0f}% saving{where}", **_listed(region, r.get("ondemand_basis"))})
         elif name == "cw_cardinality":
             # The scanner returns a dict; reading only a list dropped every
             # finding it made from the sweep.
@@ -375,7 +406,7 @@ def normalise(name, data) -> list[dict]:
                 # savings == the resource's own cost by construction (delete
                 # it, stop paying it); carrying the cost makes that invariant
                 # checkable by the critique instead of assumed.
-                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd,
+                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}{_region_note(r.region)}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd, **_listed(r.region),
                             **({"to_confirm": True} if _idle_is_inferred(r.resource_type) else {})})
         elif name == "idle_rds" and isinstance(data, list):
             for r in data:
@@ -383,7 +414,7 @@ def normalise(name, data) -> list[dict]:
                 if s > 0:
                     # lookback_days matches check_rds_idle's connection window;
                     # cost equals the saving by construction (stopped == unpaid).
-                    out.append({"title": f"Stop or delete idle RDS instance {r.get('resource_id','?')}", "monthly_savings": s, "category": "Database", "detail": f"{r.get('engine','?')} {r.get('current_class','?')}, {r.get('region','?')}, no connections in 14d", "resource_id": r.get("resource_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": s, "lookback_days": 14})
+                    out.append({"title": f"Stop or delete idle RDS instance {r.get('resource_id','?')}", "monthly_savings": s, "category": "Database", "detail": f"{r.get('engine','?')} {r.get('current_class','?')}, {r.get('region','?')}, no connections in 14d{_region_note(r.get('region'))}", "resource_id": r.get("resource_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": s, "lookback_days": 14, **_listed(r.get("region"))})
     except Exception as exc:
         log.warning("audit norm failed for %s: %s", name, exc)
     return out

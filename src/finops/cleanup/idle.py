@@ -28,7 +28,7 @@ from ..aws_prices import ALB_PER_MONTH as _ALB_PER_MONTH  # noqa: F401  (re-expo
 from ..aws_prices import EBS_SNAPSHOT_PER_GB_MONTH as _SNAPSHOT_PER_GB_MONTH
 from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH as _EIP_PER_MONTH
-from ..aws_prices import ebs_volume_monthly, lb_hourly
+from ..aws_prices import ebs_volume_monthly, lb_hourly, us_east_1_list_note
 from ..aws_read_failures import carry
 
 RESOURCE_TYPES = ("ebs_volume", "elastic_ip", "snapshot", "stopped_ec2", "load_balancer")
@@ -617,6 +617,8 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
             "monthly_cost_usd": r.monthly_cost_usd,
             "reason": r.reason,
             "protected": r.protected,
+            # Every rate here is us-east-1's; a row elsewhere says so.
+            **({"price_basis": note} if (note := us_east_1_list_note(r.region)) else {}),
         }
         for r in sorted(resources, key=lambda r: r.monthly_cost_usd, reverse=True)
     ]
