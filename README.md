@@ -169,6 +169,8 @@ uvx nable
 
 The setup wizard finds AWS or GCP credentials already on your machine (an SSO login, a CLI profile, or default credentials), connects the one you pick, and configures your editor. Usually you never type a key.
 
+In CI, cron, scripts or an agent with no terminal: [docs/HEADLESS.md](docs/HEADLESS.md) has each command's behaviour with stdin closed, its `--json` output and exit codes, every environment variable, air-gap mode, and MCP over stdio.
+
 **Cursor one-click:** [`Add nable to Cursor`](cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=)
 
 Free forever for the local tool. A hosted version for teams (dashboards without a terminal, SSO, scheduled reports, always-on agents) is at [getnable.com/pricing](https://getnable.com/pricing).

@@ -100,3 +100,33 @@ def test_every_reader_of_finops_airgap_reads_it_the_same_way(tmp_path, value, on
         seen.pop("vault._keyring_disabled")
         seen.pop("license._keyring_disabled")
     assert seen == {k: on for k in seen}, seen
+
+
+def test_every_known_name_is_described():
+    from finops import env_vars
+    assert set(env_vars.DOC) == set(env_vars.KNOWN)
+    sections = {key for key, _title in env_vars.SECTIONS}
+    for name, (section, text) in env_vars.DOC.items():
+        assert section in sections and text.strip(), name
+
+
+def test_the_headless_doc_lists_exactly_the_known_names():
+    """docs/HEADLESS.md's environment reference is generated from env_vars by
+    scripts/headless_env_table.py: every name it lists is one the package
+    reads, every name it reads is listed, and the table is the generator's
+    current output."""
+    import importlib.util
+
+    from finops import env_vars
+    root = Path(__file__).resolve().parents[1]
+    doc = (root / "docs" / "HEADLESS.md").read_text(encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "headless_env_table", root / "scripts" / "headless_env_table.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    block = doc.split(gen.START, 1)[1].split(gen.END, 1)[0]
+    listed = re.findall(r"^\| `((?:FINOPS|NABLE)_[A-Z0-9_]+)` \|", block, re.MULTILINE)
+    assert len(listed) == len(set(listed)), "a name is listed twice"
+    assert set(listed) == env_vars.KNOWN
+    assert gen.splice(doc, gen.render()) == doc, (
+        "docs/HEADLESS.md is stale: python scripts/headless_env_table.py --write")
