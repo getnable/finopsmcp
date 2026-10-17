@@ -44,6 +44,8 @@ _NONPROD_VALUES = {
     "dev", "development", "staging", "stage", "test", "testing",
     "qa", "sandbox", "nonprod", "non-prod",
 }
+# The same list, for the weekend-waste pattern (ml.patterns).
+NONPROD_VALUES = _NONPROD_VALUES
 
 # On-demand hourly prices (us-east-1) for cost estimation when no billing data.
 # Shared with every other module that prices an EC2 instance; see aws_prices.

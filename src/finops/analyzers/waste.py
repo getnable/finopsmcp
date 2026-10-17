@@ -795,6 +795,89 @@ def check_cloudtrail_waste(
 
 # ── CloudWatch Log Groups (infinite retention) ────────────────────────────────
 
+_RETENTION_RECOMMENDATIONS = {
+    "vpc-flow": 30,
+    "flow-log": 30,
+    "/aws/lambda": 14,
+    "/aws/rds": 30,
+    "/aws/ecs": 30,
+    "/aws/eks": 30,
+    "/aws/codebuild": 30,
+    "cloudtrail": 90,
+    "access-log": 90,
+    "audit": 365,
+    "security": 365,
+}
+
+
+def log_group_retention_finding(lg: dict, region: str = "unknown") -> dict | None:
+    """The finding for one DescribeLogGroups row, or None when it has a retention policy.
+
+    Shared by check_cloudwatch_logs and the log-retention pattern, so both
+    price a never-expire group the same way: from its stored bytes, and only
+    when it is older than the retention it is told to keep.
+    """
+    group_name = lg.get("logGroupName", "")
+    retention_days = lg.get("retentionInDays")  # None = infinite
+    stored_bytes = lg.get("storedBytes", 0)
+
+    if retention_days is not None:
+        return None  # Has a retention policy — fine
+
+    # Estimate monthly cost from stored bytes
+    stored_gb = stored_bytes / (1024 ** 3)
+    monthly_cost = stored_gb * _CW_LOGS_STORAGE_PER_GB_MONTH
+
+    # Recommend retention period based on log group name patterns
+    recommended_days = 30  # default
+    for pattern, days in _RETENTION_RECOMMENDATIONS.items():
+        if pattern in group_name.lower():
+            recommended_days = days
+            break
+
+    # A retention of N days deletes only what is older than N days.
+    # The whole stored cost used to be the saving, so a group created
+    # ten days ago and told to keep thirty "saved" all its storage. A
+    # group no older than the retention loses nothing yet; an older
+    # one saves at most its stored cost (the API does not say how much
+    # of the volume is older than N days).
+    created_ms = lg.get("creationTime")
+    age_days = (
+        (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
+        if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
+    if age_days is not None and age_days <= recommended_days:
+        savings = 0.0
+        saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
+                      f"retention deletes nothing yet.")
+    else:
+        savings = monthly_cost
+        saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
+                      f"older than {recommended_days} days, which the API does not "
+                      f"break out.")
+
+    return {
+        "resource_id": group_name,
+        "resource_type": "CloudWatch Log Group",
+        "waste_type": "log_group_infinite_retention",
+        "estimated_monthly_savings": round(savings, 2),
+        "price_basis": "upper_bound_all_stored_bytes",
+        "age_days": age_days,
+        "detail": (
+            f"Log group '{group_name}' has no retention policy (infinite). "
+            f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
+            f"{saving_txt} "
+            f"Recommended retention: {recommended_days} days based on log type. "
+            f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
+            f"--retention-in-days {recommended_days}"
+        ),
+        "severity": _severity_from_savings(savings),
+        "region": region,
+        "account_id": None,
+        "stored_gb": round(stored_gb, 3),
+        "recommended_retention_days": recommended_days,
+    }
+
+
 def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dict]:
     """
     Detect CloudWatch Log Groups with no retention policy (infinite retention).
@@ -803,20 +886,6 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
 
     Recommends appropriate retention by log group name pattern.
     """
-    _RETENTION_RECOMMENDATIONS = {
-        "vpc-flow": 30,
-        "flow-log": 30,
-        "/aws/lambda": 14,
-        "/aws/rds": 30,
-        "/aws/ecs": 30,
-        "/aws/eks": 30,
-        "/aws/codebuild": 30,
-        "cloudtrail": 90,
-        "access-log": 90,
-        "audit": 365,
-        "security": 365,
-    }
-
     findings: list[dict] = []
 
     try:
@@ -828,65 +897,9 @@ def check_cloudwatch_logs(logs_client: Any, region: str = "unknown") -> list[dic
 
     for page in pages:
         for lg in page.get("logGroups", []):
-            group_name = lg.get("logGroupName", "")
-            retention_days = lg.get("retentionInDays")  # None = infinite
-            stored_bytes = lg.get("storedBytes", 0)
-
-            if retention_days is not None:
-                continue  # Has a retention policy — fine
-
-            # Estimate monthly cost from stored bytes
-            stored_gb = stored_bytes / (1024 ** 3)
-            monthly_cost = stored_gb * _CW_LOGS_STORAGE_PER_GB_MONTH
-
-            # Recommend retention period based on log group name patterns
-            recommended_days = 30  # default
-            for pattern, days in _RETENTION_RECOMMENDATIONS.items():
-                if pattern in group_name.lower():
-                    recommended_days = days
-                    break
-
-            # A retention of N days deletes only what is older than N days.
-            # The whole stored cost used to be the saving, so a group created
-            # ten days ago and told to keep thirty "saved" all its storage. A
-            # group no older than the retention loses nothing yet; an older
-            # one saves at most its stored cost (the API does not say how much
-            # of the volume is older than N days).
-            created_ms = lg.get("creationTime")
-            age_days = (
-                (_now_utc() - datetime.fromtimestamp(created_ms / 1000, tz=UTC)).days
-                if isinstance(created_ms, (int, float)) and created_ms > 0 else None)
-            if age_days is not None and age_days <= recommended_days:
-                savings = 0.0
-                saving_txt = (f"The group is {age_days} days old, so a {recommended_days}-day "
-                              f"retention deletes nothing yet.")
-            else:
-                savings = monthly_cost
-                saving_txt = (f"Saving: up to ${monthly_cost:.2f}/mo, the part of that storage "
-                              f"older than {recommended_days} days, which the API does not "
-                              f"break out.")
-
-            findings.append({
-                "resource_id": group_name,
-                "resource_type": "CloudWatch Log Group",
-                "waste_type": "log_group_infinite_retention",
-                "estimated_monthly_savings": round(savings, 2),
-                "price_basis": "upper_bound_all_stored_bytes",
-                "age_days": age_days,
-                "detail": (
-                    f"Log group '{group_name}' has no retention policy (infinite). "
-                    f"Currently storing {stored_gb:.2f} GB (${monthly_cost:.2f}/mo). "
-                    f"{saving_txt} "
-                    f"Recommended retention: {recommended_days} days based on log type. "
-                    f"Set via: aws logs put-retention-policy --log-group-name '{group_name}' "
-                    f"--retention-in-days {recommended_days}"
-                ),
-                "severity": _severity_from_savings(savings),
-                "region": region,
-                "account_id": None,
-                "stored_gb": round(stored_gb, 3),
-                "recommended_retention_days": recommended_days,
-            })
+            finding = log_group_retention_finding(lg, region)
+            if finding is not None:
+                findings.append(finding)
 
     return findings
 
