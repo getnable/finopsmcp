@@ -3855,7 +3855,10 @@ def main(args: list[str] | None = None) -> None:
 
         def format_help(self) -> str:
             sub = self._sub_action()
-            if sub is None:
+            # The grouped layout is the top level's. Subparsers inherit this
+            # class, so `nable org --help` (learn, pack) printed its actions
+            # under "other" beside the top level's `setup` and --version.
+            if sub is None or self.prog != "nable":
                 return super().format_help()
             helps = {c.dest: (c.help or "") for c in sub._choices_actions}
             registered = list(sub.choices.keys())
