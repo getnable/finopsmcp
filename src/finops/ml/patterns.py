@@ -328,10 +328,14 @@ def _check_gp2_volumes(ctx: PatternContext) -> PatternMatch | None:
         # Heuristic: if EC2 cost is significant and we have no metadata, flag it
         ec2_monthly = ctx.service_monthly("Amazon EC2")
         if ec2_monthly > 500:
+            # ~4% of EC2 is often EBS gp2, and gp3 is 20% under gp2 ($0.08 vs
+            # $0.10 per GB-month), so the saving is the 20% gap on that 4%.
+            # This priced the whole 4%, the gp2 bill itself, five times what
+            # its own premise gives.
             return _match(
                 "gp2-volumes", "gp2 EBS Volumes (migrate to gp3)", "storage", "low",
                 confidence=0.40,
-                monthly_waste=ec2_monthly * 0.04,   # ~4% of EC2 is often EBS gp2
+                monthly_waste=ec2_monthly * 0.04 * (1 - 0.08 / 0.10),
                 evidence=["Estimated based on EC2 spend — verify with `aws ec2 describe-volumes`"],
                 remediation="Migrate gp2 volumes to gp3: 20% cost reduction, same or better IOPS.",
                 tags=["ebs", "storage", "gp2", "gp3"],
