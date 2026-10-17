@@ -88,9 +88,15 @@ def get_commitment_analysis() -> dict:
             from ..recommendations.commitments import (
                 COMPUTE_SP_DISCOUNT_RANGE, _COMPUTE_SP_DISCOUNT,
             )
+            # The rate the engine priced the plan at: blended by the EC2 and
+            # Fargate share of compute spend, or Fargate's 20% when the split
+            # was not read (blended_compute_sp_rate).
+            rate = float(getattr(analysis, "compute_sp_rate", _COMPUTE_SP_DISCOUNT))
+            rate_basis = getattr(analysis, "compute_sp_rate_basis", "") or (
+                f"the m5.large rate on the AWS rate card ({COMPUTE_SP_DISCOUNT_RANGE})")
             covered_on_demand = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
-            additional_commitment = covered_on_demand * _COMPUTE_SP_DISCOUNT
-            projected_savings = covered_on_demand * (1 - _COMPUTE_SP_DISCOUNT)
+            additional_commitment = covered_on_demand * rate
+            projected_savings = covered_on_demand * (1 - rate)
             actionable["if_you_bought_more"] = {
                 "description": (
                     f"Buying a 1-year no-upfront Compute Savings Plan at "
@@ -98,8 +104,7 @@ def get_commitment_analysis() -> dict:
                     f"${covered_on_demand:,.0f}/mo, about 50% of your average uncovered "
                     f"on-demand spend, and save ~${projected_savings:,.0f}/mo "
                     f"(${projected_savings * 12:,.0f}/yr) at a "
-                    f"{1 - _COMPUTE_SP_DISCOUNT:.0%} discount, the m5.large rate on the "
-                    f"AWS rate card ({COMPUTE_SP_DISCOUNT_RANGE})."
+                    f"{1 - rate:.1%} discount, {rate_basis}."
                 ),
                 "additional_monthly_commitment_usd": round(additional_commitment, 2),
                 "projected_monthly_savings_usd": round(projected_savings, 2),

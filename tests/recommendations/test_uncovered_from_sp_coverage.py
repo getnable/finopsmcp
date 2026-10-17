@@ -10,8 +10,10 @@ rows, which reads as $0 uncovered and no plan, on every account.
 
 GetSavingsPlansCoverage already answers the question in AWS's own terms: per
 period, Coverage.OnDemandCost is the Savings Plans eligible spend no plan
-covered. The engine reads it at MONTHLY granularity, every page, with the tag
-filter, and a call that fails is "not read", never $0.
+covered. The engine reads it at MONTHLY granularity, every page, and a call
+that fails is "not read", never $0. (A tag slice is read by PURCHASE_TYPE
+instead, since GetSavingsPlansCoverage documents no tag filter:
+test_tag_scoped_coverage.py.)
 """
 from __future__ import annotations
 
@@ -58,7 +60,13 @@ class _CE:
         return {"Total": {"CoverageHours": {"CoverageHoursPercentage": "0"}}}
 
     def get_cost_and_usage(self, **kw):
-        raise AssertionError("the plan was sized from GetCostAndUsage filter strings")
+        # Only the EC2/Fargate split that prices the pool (all EC2 here, so the
+        # 26% EC2 rate); the pool itself must not come from GetCostAndUsage.
+        if kw.get("GroupBy") != [{"Type": "DIMENSION", "Key": "SERVICE"}]:
+            raise AssertionError("the plan was sized from GetCostAndUsage filter strings")
+        return {"ResultsByTime": [{"TimePeriod": {"Start": "2026-07-01", "End": "2026-10-01"},
+                                   "Groups": [{"Keys": ["Amazon Elastic Compute Cloud - Compute"],
+                                               "Metrics": {"UnblendedCost": {"Amount": "9840"}}}]}]}
 
 
 def _analyze(monkeypatch, ce, **kw):
@@ -79,10 +87,13 @@ def test_uncovered_is_on_demand_cost_from_every_coverage_page(monkeypatch):
     assert sp["monthly_savings"] == pytest.approx(754.0)
 
 
-def test_the_tag_filter_reaches_the_uncovered_read():
+def test_the_tag_filter_never_reaches_the_coverage_call():
+    # GetSavingsPlansCoverage documents no Tags filter; the tag slice is read
+    # from GetCostAndUsage (which this fake refuses for anything but the split).
     ce = _CE()
-    c._uncovered_on_demand_monthly(ce, "2026-07-01", "2026-10-01", {"team": "platform"})
-    assert ce.coverage_calls[0]["Filter"] == {"Tags": {"Key": "team", "Values": ["platform"]}}
+    assert c._uncovered_on_demand_monthly(
+        ce, "2026-07-01", "2026-10-01", {"team": "platform"}) is None
+    assert ce.coverage_calls == []
 
 
 def test_an_uncovered_read_that_failed_is_not_zero(monkeypatch):
