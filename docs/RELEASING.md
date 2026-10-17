@@ -63,7 +63,12 @@ point at a commit that already passed on `main`.
 
 ## Steps
 
-1. **Bump every carrier to X.Y.Z** in one commit. `tests/test_upgrade_pin.py`
+1. **Bump every carrier to X.Y.Z** in one commit with
+   `python scripts/bump_version.py X.Y.Z`. It edits only the version fields
+   below, writes nothing unless every one says the old version, regenerates
+   the SBOM and refuses to change any other line of `pyproject.toml`. Do not
+   find-and-replace the old version: the 0.11.0 bump did, and it raised the
+   `pdfplumber` dependency floor with it. `tests/test_upgrade_pin.py`
    (`test_every_version_carrier_agrees_with_the_package`) fails until all of
    them agree:
    - `pyproject.toml` (`version`)
