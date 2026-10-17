@@ -2,8 +2,6 @@
 
 See estimated monthly AWS costs **inline** while writing Terraform — before code review, before apply.
 
-![nable extension demo](assets/demo.gif)
-
 ## Features
 
 - **Inline cost hints** — ghost text shows `☁ $560.24/mo · m5.4xlarge on-demand` on every resource block

@@ -116,11 +116,51 @@ def policy_file_path() -> Path:
 _FILE_CACHE: dict[str, Any] = {}
 
 
+# The policy file's numeric settings: (key, whether 0 is allowed, whole
+# number). The same names as DEFAULT_POLICY and the same rules as their
+# FINOPS_POLICY_* env overrides (_NUMERIC_ENV), which win over the file.
+_FILE_NUMBERS = (("max_auto_monthly_usd", True, False),
+                 ("velocity_cap_monthly_usd", True, False),
+                 ("velocity_window_minutes", False, False),
+                 ("loop_repeat_count", True, True),
+                 ("loop_window_minutes", False, False))
+# Every top-level key the file is read for, here and elsewhere: `packs` below
+# (pack_policy) and `remediation` (remediation/gate.py).
+FILE_KEYS = ("on_budget_breach", *(k for k, _z, _w in _FILE_NUMBERS), "packs", "remediation")
+
+
+def _file_number(val: Any, zero_ok: bool, whole: bool) -> float | int | None:
+    """A usable number from the file, or None: finite, 0 or more (above 0
+    for a window), and whole where it counts something. True and False are
+    not numbers here, though Python would take them for 1 and 0."""
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, str):
+        try:
+            val = float(val.strip())
+        except ValueError:
+            return None
+    if not isinstance(val, (int, float)) or not math.isfinite(val):
+        return None
+    if not (val >= 0 if zero_ok else val > 0):
+        return None
+    if whole:
+        return int(val) if float(val).is_integer() else None
+    return float(val)
+
+
+def _default_text(key: str) -> str:
+    if key == "velocity_cap_monthly_usd":
+        return f"{VELOCITY_CAP_MULTIPLE:g} x max_auto_monthly_usd"
+    return repr(DEFAULT_POLICY[key])
+
+
 def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
     """(the keys the policy file sets, validated; what is wrong with it).
-    Currently only on_budget_breach. No keys when there is no file, it cannot
-    be parsed, or a value is not one this policy knows: a broken file never
-    loosens the gate and never breaks it. The problems say so, for doctor."""
+    on_budget_breach and the numeric settings in _FILE_NUMBERS. No keys when
+    there is no file, it cannot be parsed, or a value is not one this policy
+    knows: a broken file never loosens the gate and never breaks it. The
+    problems say so, for `nable guard check`, `nable doctor` and guard doctor."""
     try:
         path = policy_file_path()
         st = path.stat()
@@ -137,9 +177,11 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
             doc = yaml.safe_load(f)
     except Exception as e:  # noqa: BLE001 - an unreadable file is no file
         doc = None
+        mark = getattr(e, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
         problems.append(f"{path} could not be read ({type(e).__name__}: "
-                        f"{str(e).splitlines()[0] if str(e) else 'no detail'}), so the "
-                        "defaults apply")
+                        f"{str(e).splitlines()[0] if str(e) else 'no detail'}{where}), so "
+                        "the defaults apply")
     if isinstance(doc, dict):
         val = doc.get("on_budget_breach")
         if isinstance(val, str) and val.strip().lower() in BUDGET_BREACH_ACTIONS:
@@ -148,6 +190,21 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
             problems.append(f"{path} sets on_budget_breach: {val!r}, which is not "
                             f"{' or '.join(BUDGET_BREACH_ACTIONS)}, so the default "
                             f"({DEFAULT_POLICY['on_budget_breach']}) applies")
+        for name, zero_ok, whole in _FILE_NUMBERS:
+            if doc.get(name) is None:
+                continue
+            x = _file_number(doc[name], zero_ok, whole)
+            if x is not None:
+                keys[name] = x
+                continue
+            need = ("a whole number of 0 or more" if whole else
+                    "a finite number of 0 or more" if zero_ok else "a finite number above 0")
+            problems.append(f"{path} sets {name}: {doc[name]!r}, which is not {need}, "
+                            f"so the default ({_default_text(name)}) applies")
+        for name in doc:
+            if name not in FILE_KEYS:
+                problems.append(f"{path} sets {name!r}, which is not a setting this file "
+                                f"takes ({', '.join(FILE_KEYS)}), so it changes nothing")
     elif doc is not None:
         problems.append(f"{path} is a YAML {type(doc).__name__}, not a mapping of "
                         "settings, so the defaults apply")
@@ -413,6 +470,70 @@ def policy_problems() -> list[str]:
         return []
 
 
+# The settings an explicit check reports as in effect, and the env var that
+# overrides each one.
+_IN_EFFECT = (("max_auto_monthly_usd", "FINOPS_POLICY_MAX_AUTO_USD"),
+              ("velocity_cap_monthly_usd", "FINOPS_POLICY_VELOCITY_CAP_USD"),
+              ("velocity_window_minutes", "FINOPS_POLICY_VELOCITY_WINDOW_MIN"),
+              ("loop_repeat_count", "FINOPS_POLICY_LOOP_COUNT"),
+              ("loop_window_minutes", "FINOPS_POLICY_LOOP_WINDOW_MIN"),
+              ("on_budget_breach", "FINOPS_POLICY_ON_BUDGET_BREACH"))
+
+
+def _env_applies(env: str) -> bool:
+    if env == "FINOPS_POLICY_LOOP_COUNT":
+        return _env_count(env)[0] is not None
+    if env == "FINOPS_POLICY_ON_BUDGET_BREACH":
+        return os.getenv(env, "").strip().lower() in BUDGET_BREACH_ACTIONS
+    zero_ok = next(z for e, _k, z in _NUMERIC_ENV if e == env)
+    return _env_number(env, zero_ok)[0] is not None
+
+
+def policy_report() -> dict[str, Any]:
+    """What an explicit check says about the policy it judged with:
+    {"path", "exists", "broken", "problems", "fix", "in_effect"}.
+
+    in_effect maps each setting load_policy() returned to its value and where
+    it came from: "default", "file" or the env var. broken is True when the
+    policy file, or a FINOPS_POLICY_* override, could not be used as written;
+    the defaults in_effect names are what applied instead. The guard hook
+    never prints this: on every tool call it keeps its fail-safe of judging
+    with the defaults. Never raises."""
+    try:
+        path: Path | None = policy_file_path()
+        exists = path.is_file()
+    except (OSError, ValueError):
+        path, exists = None, False
+    problems = policy_problems()
+    try:
+        pol = load_policy()
+        from_file = _policy_file_keys()
+    except Exception:  # noqa: BLE001 - a diagnostic must not break its caller
+        pol, from_file = dict(DEFAULT_POLICY), {}
+    in_effect: dict[str, dict[str, Any]] = {}
+    for key, env in _IN_EFFECT:
+        source = env if _env_applies(env) else "file" if key in from_file else "default"
+        value = pol.get(key)
+        if key == "velocity_cap_monthly_usd" and value is None:
+            value, source = velocity_cap(pol), f"{source}: 4 x max_auto_monthly_usd"
+        in_effect[key] = {"value": value, "source": source}
+    fix = None
+    if problems:
+        where = str(path) if path else POLICY_FILE_NAME
+        fix = (f"correct {where} (YAML `key: value` lines, taking {', '.join(FILE_KEYS)}) "
+               "or the FINOPS_POLICY_* variable named, or move the file away to use the "
+               "defaults on purpose; `nable guard doctor` checks it again")
+    return {"path": str(path) if path else None, "exists": exists, "broken": bool(problems),
+            "problems": problems, "fix": fix, "in_effect": in_effect}
+
+
+def in_effect_text(report: dict[str, Any]) -> str:
+    """policy_report()'s in_effect as one line of `key value (source)`."""
+    return ", ".join(f"{k} {v['value']:g} ({v['source']})" if isinstance(v["value"], float)
+                     else f"{k} {v['value']} ({v['source']})"
+                     for k, v in report["in_effect"].items())
+
+
 def load_policy() -> dict[str, Any]:
     """The default policy with optional env overrides, so a human can author the
     policy without a config system:
@@ -424,10 +545,13 @@ def load_policy() -> dict[str, Any]:
       FINOPS_POLICY_LOOP_WINDOW_MIN    ...within this many minutes (float, default 10)
       FINOPS_POLICY_ON_BUDGET_BREACH   ask | deny, for a change over a cloud budget
 
-    on_budget_breach may also be set in the policy file (policy_file_path(),
-    nable.policy.yaml in nable's data directory):
+    The same settings, by their policy key, may also be set in the policy
+    file (policy_file_path(), nable.policy.yaml in nable's data directory):
 
-        on_budget_breach: deny     # a change over budget is blocked, not asked
+        on_budget_breach: deny        # a change over budget is blocked, not asked
+        max_auto_monthly_usd: 200     # and velocity_cap_monthly_usd,
+                                      # velocity_window_minutes, loop_repeat_count,
+                                      # loop_window_minutes
 
     The env var wins over the file. A value that cannot be used (not a
     finite number of 0 or more, a window of 0, an unknown on_budget_breach, a

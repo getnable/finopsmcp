@@ -40,11 +40,15 @@ async def get_cost_summary(
             "provider": provider, "category": category,
             "start_date": start_date, "end_date": end_date}) or {}
 
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is None:
+        granularity, bad = _granularity(granularity)
+    if bad is None:
+        provider, bad = _provider_name(provider, llm_ok=True)
+    if bad is not None:
+        return bad
 
     # An LLM provider's spend lives on the LLM cost path, not in the cloud
     # connector registry. get_cost_summary(provider="anthropic") used to find no
@@ -90,7 +94,7 @@ async def get_cost_summary(
         pool = _srv._ALL_CONNECTORS
         targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     grand_total, by_provider, grand_by_service = await _srv._gather_costs(targets, sd, ed, granularity)
     # With several providers the per-provider service detail is the token-bloat driver.
@@ -128,6 +132,7 @@ async def get_cost_summary(
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
+        **window_notes,
     }
     if account:
         result["account"] = acct_cfg.name
@@ -217,11 +222,13 @@ async def get_costs_by_service(
         - "Show me all Datadog product costs"
         - "What did the staging account spend on EC2?"
     """
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is None:
+        bad = _bad_category(category)
+    if bad is None:
+        provider, bad = _provider_name(provider)
+    if bad is not None:
+        return bad
 
     if account:
         from ..accounts import get_boto3_session, resolve_named_account
@@ -243,10 +250,11 @@ async def get_costs_by_service(
     else:
         targets = await _srv._active(_srv._ALL_CONNECTORS)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
+    read_status: dict[str, dict] = {}
 
     async def _one_svc(name: str, connector: _srv.Any):
         try:
@@ -255,6 +263,7 @@ async def get_costs_by_service(
             return name, None, str(exc)
 
     for name, summary, err in await _srv.asyncio.gather(*[_one_svc(n, c) for n, c in targets.items()]):
+        read_status[name] = _read_status(summary, err)
         if err is not None:
             errors[name] = err
             continue
@@ -280,10 +289,13 @@ async def get_costs_by_service(
 
     # Same rule as get_cost_summary: an errored provider adds 0, so "every
     # provider failed" used to come back as total_usd 0 with the reason under
-    # "errors", which reads as "spent nothing on this".
+    # "errors", which reads as "spent nothing on this". A provider that was read
+    # and sent back no rows is the same story, and get_cost_summary refuses it
+    # too: two tools must not give two answers about one bill.
     ok = [n for n in targets if n not in errors]
-    if errors and not ok:
-        return _no_cost_data(errors)
+    refusal = _unread_costs(targets, read_status)
+    if refusal is not None:
+        return refusal
 
     total_usd = round(sum(s["total_usd"] for s in ranked), 4)
     kept, omitted = _srv.fit_to_budget(ranked)
@@ -292,12 +304,14 @@ async def get_costs_by_service(
         "filter": service_filter,
         "services": kept,
         "total_usd": total_usd,
+        **window_notes,
     }
     if account:
         result["account"] = acct_cfg.name
     if omitted:
         result["services_truncated"] = True
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
+    result.update(_no_rows_flags(read_status))
     if errors:
         result["errors"] = errors
         result.update(_partial(ok, errors))
@@ -329,6 +343,9 @@ async def get_top_cost_drivers(
         - "Top 5 most expensive things in AWS"
         - "Top cost drivers in the staging account"
     """
+    if limit < 1:
+        return {"error": f"limit must be 1 or more (got {limit}).",
+                "hint": "Pass the number of services to return, e.g. limit=10."}
     result = await _srv.get_costs_by_service(
         service_filter=None,
         provider=provider,
@@ -345,12 +362,21 @@ async def get_top_cost_drivers(
     for svc in top:
         svc["pct_of_total"] = round(svc["total_usd"] / grand * 100, 1) if grand else 0
 
-    return {
+    out = {
         "period": result["period"],
         "top_services": top,
         "grand_total_usd": grand,
         "grand_total_formatted": _srv._fmt_usd(grand),
     }
+    # The labels get_costs_by_service put on this total travel with it. Dropping
+    # them turned a partial read into a total with nothing saying a provider was
+    # missing from it.
+    for key in ("account", "period_note", "partial", "failed_providers", "partial_warning",
+                "errors", "providers_with_no_rows", "no_rows_note", "services_truncated",
+                "hint"):
+        if key in result:
+            out[key] = result[key]
+    return out
 
 
 @_srv.mcp.tool()
@@ -361,29 +387,44 @@ async def get_cost_trends(
     granularity: str = "DAILY",
 ) -> dict:
     """
-    Cost trends over time broken down by day or month.
+    Spend over the last N days: one total per provider and per service for the
+    whole window, not a day-by-day or month-by-month series. For a series use
+    slice_costs with dimensions=["date"] and granularity "DAILY" or "MONTHLY".
 
     Args:
         provider: Specific provider. None = all.
         category: "cloud" or "saas". None = all.
-        days: Look-back window in days (default 30).
-        granularity: "DAILY" or "MONTHLY".
+        days: Look-back window in days ending today (default 30).
+        granularity: "DAILY" or "MONTHLY", how providers that support it are
+            queried. The totals are the same either way.
 
     Examples:
-        - "Is our AWS spend trending up or down?"
-        - "Show daily cloud costs for the last 2 weeks"
-        - "What did we spend each month this quarter?"
+        - "How much did we spend on AWS in the last 90 days?"
+        - "What did our SaaS tools cost over the last 2 weeks?"
     """
+    if not 1 <= days <= _srv.MAX_LOOKBACK_DAYS:
+        return {"error": (f"days must be between 1 and {_srv.MAX_LOOKBACK_DAYS} (got {days}): "
+                          "the look-back window ending today.")}
+    bad = _bad_category(category)
+    if bad is None:
+        granularity, bad = _granularity(granularity)
+    if bad is None:
+        provider, bad = _provider_name(provider)
+    if bad is not None:
+        return bad
     end = _srv.date.today()
     start = end - _srv.timedelta(days=days)
 
-    pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
-    if provider and provider in pool:
-        pool = {provider: pool[provider]}
+    # A named provider is that provider only. An unrecognised name used to leave
+    # the pool at every provider, so the answer was everyone's spend.
+    if provider:
+        pool = {provider: _srv._ALL_CONNECTORS[provider]}
+    else:
+        pool = _srv.CLOUD_CONNECTORS if category == "cloud" else _srv.SAAS_CONNECTORS if category == "saas" else _srv._ALL_CONNECTORS
 
     targets = await _srv._active(pool)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return await _not_connected(provider)
 
     grand_total, by_provider, _ = await _srv._gather_costs(targets, start, end, granularity)
 
@@ -400,7 +441,8 @@ async def get_cost_trends(
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
-        "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
+        "note": ("Totals for the whole window. For a per-day or per-month series, call "
+                 'slice_costs with dimensions=["date"] and granularity "DAILY" or "MONTHLY".'),
     }
     result.update(_no_rows_flags(by_provider))
     if failed:
@@ -550,17 +592,23 @@ async def get_total_spend_all_sources(
         end_date: ISO date (YYYY-MM-DD). Defaults to today.
 
     """
-    sd, ed = _srv._default_dates()
-    if start_date:
-        sd = _srv.date.fromisoformat(start_date)
-    if end_date:
-        ed = _srv.date.fromisoformat(end_date)
+    sd, ed, bad, window_notes = _cost_window(start_date, end_date)
+    if bad is not None:
+        return bad
 
     targets = await _srv._active(_srv._ALL_CONNECTORS)
     if not targets:
-        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
+        return {"error": _NOTHING_CONNECTED}
 
     grand_total, by_provider, grand_by_service = await _srv._gather_costs(targets, sd, ed)
+    # A total is only a total if something was read: the same refusal and the
+    # same partial label as get_cost_summary, so the two never disagree.
+    refusal = _unread_costs(targets, by_provider)
+    if refusal is not None:
+        return refusal
+    failed = {n: p.get("error") for n, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [n for n in by_provider if n not in failed]
     # Cross-provider tool: top_services already carries the ranked drivers, so cap the
     # per-provider service detail to keep the payload flat as providers scale.
     by_provider = _srv._cap_provider_service_detail(by_provider)
@@ -576,7 +624,7 @@ async def get_total_spend_all_sources(
         if p in by_provider and "total_usd" in by_provider[p]
     )
 
-    return {
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
@@ -591,7 +639,12 @@ async def get_total_spend_all_sources(
             {"service": k, "amount_usd": round(v, 4), "formatted": _srv._fmt_usd(v)}
             for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])[:10]
         ],
+        **window_notes,
     }
+    result.update(_no_rows_flags(by_provider))
+    if failed:
+        result.update(_partial(ok, failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -1869,7 +1922,12 @@ async def run_full_cost_audit(
     if aws is None or not await aws.is_configured():
         return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
-    from ..recommendations.sweep import sweep
+    from ..recommendations.sweep import (
+        COMMITMENTS_NOT_IN_TOTAL,
+        split_total,
+        sweep,
+        to_confirm_line,
+    )
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -1881,9 +1939,25 @@ async def run_full_cost_audit(
     learned_note = result.learned_note
 
     top = findings[:top_n]
+    coverage = result.coverage_lines()
 
     if not top:
-        return "No savings opportunities found. Your infrastructure looks well-optimized, or no AWS account is connected."
+        if errors or result.partial:
+            # Nothing found is only a verdict on what was read. With every scanner
+            # failed, or every AWS call denied, this said "Your infrastructure
+            # looks well-optimized". Name the checks that could not run or read
+            # everything, and why.
+            return "\n\n".join([
+                "## Cost Audit: incomplete, no findings from the checks that ran",
+                *coverage,
+                ("This is not a finding that the account is optimized: the checks above "
+                 "did not look. Fix the access they name (the AWS permissions for those "
+                 "services) and run the audit again."),
+                COMMITMENTS_NOT_IN_TOTAL,
+            ])
+        return ("No savings opportunities found by any of the "
+                f"{result.scanners_run} checks, and none of them reported a failed read. "
+                + COMMITMENTS_NOT_IN_TOTAL)
 
     # A finding the critique retracted carries None, not a number, and it must not
     # be counted toward a total we are asking someone to believe. `or 0` keeps it
@@ -1900,15 +1974,32 @@ async def run_full_cost_audit(
     # alternatives stay attached to the winner so nothing is hidden.
     top, collapsed = _collapse_per_resource(top)
 
-    total_monthly = sum(f.get("monthly_savings") or 0 for f in top)
+    # Recoverable is what the checks measured; a row its check filed as an
+    # inference is to confirm, shown beside the total and not added in, the
+    # split `nable scan` makes. This added both into one figure.
+    total_monthly, to_confirm, n_to_confirm = split_total(top)
     total_annual = total_monthly * 12
+    # The headline covers the rows shown. Say what the rest is worth, on the same
+    # one-fix-per-resource basis, so it is not read as the whole sweep (the CSV
+    # export of "these results" lists up to 50 and totalled a larger figure).
+    everything, _ = _collapse_per_resource(findings)
+    rest_rows = len(everything) - len(top)
+    all_recoverable, all_to_confirm, _ = split_total(everything)
+    rest_usd = max(0.0, all_recoverable - total_monthly)
+    rest_to_confirm = max(0.0, all_to_confirm - to_confirm)
 
     def _savings_cell(f: dict) -> str:
         """The dollar figure, or the band when the claim did not survive review."""
         v = f.get("monthly_savings")
         if v is None:
             return f"{f.get('magnitude', 'unconfirmed')} (needs confirming)"
-        return f"${v:,.2f}"
+        # A row outside us-east-1 priced at us-east-1 list rates says so here,
+        # where the figure is (sweep._listed).
+        above = f.get("to_confirm_above_usd")
+        tags = [t for t, on in (("to confirm", f.get("to_confirm")),
+                                (f"+${above or 0:,.2f} to confirm", above),
+                                ("us-east-1 list", f.get("us_east_1_list"))) if on]
+        return f"${v:,.2f}" + (f" ({'; '.join(tags)})" if tags else "")
 
     # Show a Confidence column only when at least one shown finding carries real
     # learned signal, so a cold ledger keeps the original clean 4-column table.
@@ -1928,8 +2019,13 @@ async def run_full_cost_audit(
 
     lines = [
         f"## Cost Audit, Top {len(top)} Opportunities",
-        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}**"
-        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else ""),
+        f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}** (recoverable, the {len(top)} shown)"
+        + (f"  \n*{to_confirm_line(to_confirm, n_to_confirm)}*" if n_to_confirm else "")
+        + (f"  \n*{rest_rows} more opportunit{'ies' if rest_rows != 1 else 'y'} worth ${rest_usd:,.2f}/mo "
+           + (f"recoverable and ${rest_to_confirm:,.2f}/mo to confirm " if rest_to_confirm else "")
+           + "are not shown (raise top_n, or export to CSV).*" if rest_rows > 0 else "")
+        + (f"  \n*{collapsed} alternative fix(es) on the same resources are not counted in this total: you can bank one fix per resource, not all of them. They are listed against the winning row.*" if collapsed else "")
+        + f"  \n*{COMMITMENTS_NOT_IN_TOTAL}*",
         "",
     ]
     if show_confidence:
@@ -1957,8 +2053,12 @@ async def run_full_cost_audit(
     lines.append("- `push to n8n`, trigger your automation workflow")
     lines.append("- `tell me more about #1`, deep dive on the top opportunity")
 
-    if errors:
-        lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
+    if errors or result.partial:
+        # These could not run, or ran with a region or a read missing, so the total
+        # above is missing whatever they would have found. This said "no data or
+        # not configured" whatever the reason, and only for scanners that raised.
+        lines.append("")
+        lines.extend(f"*{line}*" for line in coverage)
 
     body = "\n".join(lines)
     # Make the token cost visible against the savings found. Under our pricing,
@@ -2257,32 +2357,61 @@ def get_nable_roi(
         with engine.connect() as conn:
             rows = conn.execute(select(sr).where(sr.c.generated_at >= cutoff)).fetchall()
 
-        found_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status not in ("dismissed", "expired"))
-        acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status in ("acted_on", "verified"))
-        # Verified banked savings = money that actually left the bill. Use ONLY the
-        # measured verified amount, never the predicted estimate. A verified row is
-        # money nable confirmed against live cloud state; conflating it with the
-        # estimate would overstate what was actually banked.
-        verified_total = sum(
-            r.verified_monthly_savings_usd or 0
-            for r in rows if r.status == "verified"
+        # One computation for every surface (savings_tracker.headline_totals):
+        # legacy duplicate rows fold, and one resource counts once, so this
+        # report, get_savings_summary and the ledger read the same figures. Summed
+        # raw, two fixes on one instance and a row written twice by an older
+        # release both counted in full here.
+        from ..recommendations.savings_tracker import (
+            headline_totals,
+            recoverable_block,
+            row_dict,
         )
-        verified_count = sum(1 for r in rows if r.status == "verified")
+        totals = headline_totals([row_dict(r) for r in rows])
+        found_total = totals["found"]
+        # Found, split as the scan and the sweep split a total: what was
+        # measured (recoverable) and what rests on an inference (to confirm).
+        found_split = recoverable_block(totals["found_recoverable"], totals["found_to_confirm"],
+                                        totals["found_to_confirm_count"])
+        acted_total = totals["acted_pending"]
+        # Verified = changes confirmed against live cloud state, priced on the best
+        # basis available: the bill itself (CUR before and after), else the
+        # customer's effective rate, else list price. Only the bill-measured part
+        # is money seen leaving the bill; the rest is a confirmed change with an
+        # estimated value, and is labelled so. Never the predicted estimate.
+        verified_total = totals["verified"]
+        verified_bill = totals["verified_bill_measured"]
+        verified_est = totals["verified_estimated"]
+        verified_count = totals["verified_count"]
 
         found_annualized = found_total * 12
-        acted_annualized = acted_total * 12
         verified_annualized = verified_total * 12
         annual_tool_cost = monthly_cost * 12
 
         roi_on_verified = ((verified_total - monthly_cost) / monthly_cost * 100) if monthly_cost > 0 else None
-        payback_months = (monthly_cost / verified_total) if verified_total > 0 else None
+        # A monthly fee against monthly savings pays back only when the savings
+        # are at least the fee; then it is the fraction of a month the first fee
+        # takes to earn back. Below the fee it never pays back, and 25 / 10 =
+        # "2.5 months" was printed as if it would.
+        payback_months = (monthly_cost / verified_total
+                          if monthly_cost > 0 and verified_total >= monthly_cost else None)
 
-        # Hero line: lead with verified banked savings, the number that actually
-        # left the bill, kept clearly distinct from predicted/found opportunity.
+        def _split() -> str:
+            if not verified_est:
+                return "measured on your bill"
+            if not verified_bill:
+                return ("priced from your rates or list price after nable confirmed "
+                        "the change, not yet measured on your bill")
+            return (f"${verified_bill:,.0f}/mo measured on your bill, ${verified_est:,.0f}/mo "
+                    f"priced from your rates or list price after nable confirmed the change")
+
+        # Hero line: lead with verified savings, kept clearly distinct from
+        # predicted/found opportunity, and say how much of it the bill itself shows.
         if verified_total > 0:
-            hero = (f"**Verified banked savings: ${verified_total:,.0f}/mo "
-                    f"(${verified_annualized:,.0f}/yr), confirmed against live cloud state "
-                    f"across {verified_count} change{'s' if verified_count != 1 else ''}.**")
+            hero = (f"**Verified savings: ${verified_total:,.0f}/mo "
+                    f"(${verified_annualized:,.0f}/yr) across {verified_count} confirmed "
+                    f"change{'s' if verified_count != 1 else ''}, {_split()}.** "
+                    f"Verified banked savings, measured on the bill: ${verified_bill:,.0f}/mo.")
         else:
             hero = ("**Verified banked savings: $0/mo so far.** This tracks money that "
                     "actually left your bill. Mark recommendations acted on, then run "
@@ -2297,9 +2426,14 @@ def get_nable_roi(
             f"(${monthly_cost:,.0f}/mo · {plan_name(plan)} plan)",
             "",
             "### Savings pipeline",
-            f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
+            (f"- Found (predicted): ${found_total:,.0f}/mo in opportunities "
+             f"({len(rows)} recommendations): "
+             f"${found_split['monthly_usd']:,.0f}/mo recoverable, "
+             f"${found_split['to_confirm_monthly_usd']:,.0f}/mo to confirm "
+             f"({found_split['to_confirm_findings']} resting on an inference)"),
             f"- Acted on (predicted, pending verification): ${acted_total:,.0f}/mo",
-            f"- Verified (banked, actually left the bill): ${verified_total:,.0f}/mo",
+            f"- Verified (change confirmed): ${verified_total:,.0f}/mo, of which "
+            f"${verified_bill:,.0f}/mo measured on the bill",
             "",
         ]
 
@@ -2311,6 +2445,21 @@ def get_nable_roi(
                 f"verified ${verified_total:,.0f}/mo above against it.",
             ]
         elif monthly_cost == 0:
+            # Payback of Pro against what has been verified, said only when true.
+            # This printed "less than 1 week" for any verified amount above zero.
+            pro_price = float(PLANS.get("pro", {}).get("monthly_usd") or 0.0)
+            if verified_total <= 0 or not pro_price:
+                payback_line = ("Once savings are verified, compare them with the Pro "
+                                f"price (${pro_price:,.0f}/mo).")
+            elif verified_total < pro_price:
+                payback_line = (f"At ${verified_total:,.0f}/mo verified savings, Pro "
+                                f"(${pro_price:,.0f}/mo) would cost more than it has "
+                                "verifiably saved so far.")
+            else:
+                weeks = pro_price / verified_total * (30.4 / 7)
+                when = "less than 1 week" if weeks < 1 else f"about {weeks:.0f} weeks"
+                payback_line = (f"At ${verified_total:,.0f}/mo verified savings, Pro "
+                                f"(${pro_price:,.0f}/mo) pays back in {when}.")
             lines += [
                 "### ROI",
                 f"**The {plan_name(plan)} plan costs nothing.** You're getting "
@@ -2318,12 +2467,13 @@ def get_nable_roi(
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
                 pro_pitch(),
-                f"At ${verified_total:,.0f}/mo verified savings, payback is "
-                f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
+                payback_line,
             ]
         else:
             roi_str = f"{roi_on_verified:.0f}%" if roi_on_verified is not None else "N/A"
-            payback_str = f"{payback_months:.1f} months" if payback_months and payback_months > 0 else "immediate"
+            payback_str = (f"{payback_months:.1f} months" if payback_months is not None
+                           else ("not reached: verified savings are below the tool cost"
+                                 if verified_total > 0 else "no verified savings yet"))
             lines += [
                 "### ROI",
                 f"- Monthly net savings (after tool cost): ${max(0, verified_total - monthly_cost):,.0f}",
@@ -2334,19 +2484,27 @@ def get_nable_roi(
             ]
             if verified_total > monthly_cost * 5:
                 lines.append(f"\n**nable is paying for itself {verified_total / monthly_cost:.0f}x over.**")
-            elif verified_total > 0:
+            elif verified_total >= monthly_cost:
                 lines.append("\n**Verified savings cover tool cost.** Act on remaining recommendations to grow ROI.")
+            elif verified_total > 0:
+                lines.append(f"\n**Verified savings do not yet cover tool cost** "
+                             f"(${verified_total:,.0f}/mo against ${monthly_cost:,.0f}/mo). "
+                             "Act on remaining recommendations to close the gap.")
             else:
                 lines.append("\n**No verified savings yet.** Run verify_savings() after acting on recommendations.")
 
+        # How the others price, not what they would cost here: they charge on
+        # managed cloud spend, which this report does not read. The cells used to
+        # be those percentages of nable's verified savings, labelled as a share
+        # of spend.
         lines += [
             "",
             "### Competitor comparison",
-            "| Tool | Cost at your savings level | What you get |",
-            "|------|---------------------------|-------------|",
+            "| Tool | How it is priced | What you get |",
+            "|------|------------------|-------------|",
             f"| nable (this) | ${annual_tool_cost:,.0f}/yr | Multi-cloud + SaaS + AI, local-first |",
-            f"| CloudHealth | ~${int(verified_annualized * 0.025):,}/yr (2.5% of managed spend) | Dashboard, enterprise only |",
-            f"| Cloudability | ~${int(verified_annualized * 0.015):,}/yr (1.5% of spend) | Dashboard, no AI |",
+            "| CloudHealth | ~2.5% of managed cloud spend | Dashboard, enterprise only |",
+            "| Cloudability | ~1.5% of cloud spend | Dashboard, no AI |",
             "| ProsperOps | 30-35% of RI savings | RI management only |",
         ]
 
@@ -2356,19 +2514,22 @@ def get_nable_roi(
             "plan": plan,
             "monthly_cost_usd": monthly_cost,
             "found_monthly_usd": round(found_total, 2),
+            "recoverable": found_split,
             "acted_monthly_usd": round(acted_total, 2),
             "verified_monthly_usd": round(verified_total, 2),
-            # Explicit banked figure: money confirmed to have left the bill. Same
-            # value as verified_monthly_usd, named so a caller can't confuse it
-            # with predicted/found savings.
-            "verified_banked_monthly_usd": round(verified_total, 2),
-            "verified_banked_annual_usd": round(verified_annualized, 2),
+            # Banked: money measured leaving the bill, and only that. A change
+            # confirmed in the cloud but priced at a rate is verified, not banked:
+            # it is verified_estimated_monthly_usd.
+            "verified_banked_monthly_usd": round(verified_bill, 2),
+            "verified_banked_annual_usd": round(verified_bill * 12, 2),
+            "verified_bill_measured_monthly_usd": round(verified_bill, 2),
+            "verified_estimated_monthly_usd": round(verified_est, 2),
             "verified_count": verified_count,
             "found_annualized_usd": round(found_annualized, 2),
             "verified_annualized_usd": round(verified_annualized, 2),
             "annual_tool_cost_usd": round(annual_tool_cost, 2),
             "roi_pct": round(roi_on_verified, 1) if roi_on_verified is not None else None,
-            "payback_months": round(payback_months, 1) if payback_months else None,
+            "payback_months": round(payback_months, 1) if payback_months is not None else None,
         }
     except Exception as exc:
         _srv.log.error("get_nable_roi failed: %s", exc)
@@ -2433,6 +2594,121 @@ def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
             out["failed_providers"] = failed
         return out
     return None
+
+
+# ── arguments the cost tools cannot honour ────────────────────────────────────
+# Shared so that every cost tool refuses the same bad argument the same way.
+# Before these, an unknown provider read as "No cloud accounts connected yet",
+# a provider named in capitals matched nothing, an unknown category or a
+# provider get_cost_trends did not recognise silently widened to every
+# provider, and a window past the lookback cap was labelled with the start the
+# caller asked for over a total that covered only the last 365 days.
+
+_CATEGORIES = ("cloud", "saas")
+_GRANULARITIES = ("DAILY", "MONTHLY")
+_NOTHING_CONNECTED = (
+    "No cloud accounts connected yet. Connect one right here in the chat: call "
+    "connect_aws or connect_gcp (they detect credentials already on this machine) or "
+    "connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run "
+    "'uvx nable' instead.")
+
+
+def _cost_window(start_date: str | None, end_date: str | None):
+    """(start, end, error, notes) for a cost query's date arguments.
+
+    The start is held to FINOPS_MAX_LOOKBACK_DAYS before the end, which is what
+    the AWS connector reads anyway; doing it here means every provider reads the
+    same window and the answer's period is the one that was read."""
+    sd, ed = _srv._default_dates()
+    try:
+        if start_date:
+            sd = _srv.date.fromisoformat(start_date)
+        if end_date:
+            ed = _srv.date.fromisoformat(end_date)
+    except (TypeError, ValueError):
+        return None, None, {"error": (
+            f"Invalid date (start_date={start_date!r}, end_date={end_date!r}). "
+            "Use YYYY-MM-DD.")}, {}
+    if sd >= ed:
+        # Providers read [start_date, end_date): Cost Explorer's End is
+        # exclusive and the GCP connector reads the same way, so an equal pair
+        # is a window with no days in it. Cost Explorer rejected it; GCP would
+        # have answered with no rows, which reads as an empty bill.
+        return None, None, {"error": (
+            f"start_date ({sd}) must be before end_date ({ed}): end_date is "
+            f"exclusive. For the single day {sd}, pass end_date "
+            f"{sd + _srv.timedelta(days=1)}.")}, {}
+    notes: dict = {}
+    earliest = ed - _srv.timedelta(days=_srv.MAX_LOOKBACK_DAYS)
+    if sd < earliest:
+        notes["period_note"] = (
+            f"Asked from {sd}, read from {earliest}: cost queries cover at most "
+            f"{_srv.MAX_LOOKBACK_DAYS} days before the end date "
+            "(FINOPS_MAX_LOOKBACK_DAYS). The total covers the period shown.")
+        sd = earliest
+    return sd, ed, None, notes
+
+
+def _bad_category(category: str | None) -> dict | None:
+    if category is None or category in _CATEGORIES:
+        return None
+    return {"error": f"Unknown category '{category}'. Use 'cloud', 'saas', or omit it."}
+
+
+def _granularity(granularity: str) -> tuple[str, dict | None]:
+    g = str(granularity or "").strip().upper()
+    if g in _GRANULARITIES:
+        return g, None
+    return g, {"error": (f"Unknown granularity '{granularity}'. Use "
+                         f"{' or '.join(_GRANULARITIES)}.")}
+
+
+def _provider_name(provider: str | None, *, llm_ok: bool = False):
+    """(normalized provider or None, error or None). Case and whitespace do not
+    matter; a name nable does not know is named as unknown."""
+    if provider is None or not str(provider).strip():
+        return None, None
+    p = str(provider).strip().lower()
+    if p in _srv._ALL_CONNECTORS or (llm_ok and p in _LLM_COST_PROVIDERS):
+        return p, None
+    if p in _LLM_COST_PROVIDERS:
+        return None, {
+            "error": (f"{p} spend is read on the LLM cost path, not by this tool."),
+            "next_tool": "get_llm_cost_by_model",
+            "next_tool_args": {"provider": p},
+        }
+    return None, {
+        "error": f"Unknown provider '{provider}'.",
+        "known_providers": sorted(set(_srv._ALL_CONNECTORS) | set(_LLM_COST_PROVIDERS)),
+        "hint": "list_connected_providers shows which of these are connected.",
+    }
+
+
+async def _not_connected(provider: str | None) -> dict:
+    """The answer when nothing matching the request is connected. Naming the
+    provider matters: "No cloud accounts connected" told a user with AWS
+    connected to go and connect AWS."""
+    if not provider:
+        return {"error": _NOTHING_CONNECTED}
+    connected = sorted(await _srv._active())
+    return {
+        "error": f"{provider} is not connected, so there is no {provider} spend to read.",
+        "connected_providers": connected,
+        "hint": "list_connected_providers shows how to connect it.",
+    }
+
+
+def _read_status(summary, err: str | None) -> dict:
+    """One provider's read in the by_provider shape _unread_costs and
+    _no_rows_flags take: its error, or that it came back with no cost rows.
+    For tools that hold CostSummary objects rather than the dicts
+    _gather_costs builds."""
+    if err is not None:
+        return {"error": err}
+    from ..connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        return {"no_rows": True, "no_rows_note": no_rows_message(summary.provider)}
+    return {}
 
 
 def _no_rows_flags(by_provider: dict) -> dict:

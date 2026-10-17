@@ -292,12 +292,15 @@ commitment_bounds:
 def test_the_database_plan_is_bounded_too(installed, monkeypatch):
     monkeypatch.setattr(dsp, "boto3", type("B", (), {"client": staticmethod(
         lambda *_a, **_k: object())}))
-    monkeypatch.setattr(dsp, "_get_rds_spend", lambda *_a: 5000.0)
+    # (eligible, ineligible) instance-hour spend: the plan is sized on the first.
+    monkeypatch.setattr(dsp, "_get_rds_spend_split", lambda *_a: (5000.0, 0.0))
     monkeypatch.setattr(dsp, "_get_database_sp_coverage", lambda *_a: 70.0)
     r = dsp.recommend_database_savings_plans()
     # 70% covered, 1,500 uncovered: 80% leaves room for 500 of it, a third.
+    # Saved at the price list's 20% (AWSDatabaseSavingsPlans 20261007173435; this
+    # read 30%, a rate no plan has).
     assert r["bounds"]["cut"] and r["bounds"]["factor"] == pytest.approx(1 / 3, abs=2e-3)
-    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.30 / 3, rel=5e-3)
+    assert r["estimated_monthly_savings"] == pytest.approx(1500 * 0.20 / 3, rel=5e-3)
     monkeypatch.setattr(dsp, "_get_database_sp_coverage", lambda *_a: 85.0)
     r = dsp.recommend_database_savings_plans()
     assert r["bounds"]["dropped"] and r["finding"] is None

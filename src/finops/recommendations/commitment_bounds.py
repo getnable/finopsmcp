@@ -348,8 +348,10 @@ def cap_projection(actionable: dict[str, Any], *, coverage_pct: float | None,
     if bounds.coverage_target_pct is not None:
         target = min(bounds.coverage_target_pct, float(out.get("coverage_target_pct") or 100.0))
         out["coverage_target_pct"] = target
-        now_pct = float(out.get("combined_coverage_pct") or 0.0)
-        out["coverage_gap_pct"] = round(max(0.0, target - now_pct), 1)
+        # A gap left unknown (coverage that could not be read) stays unknown.
+        if out.get("coverage_gap_pct") is not None:
+            now_pct = float(out.get("combined_coverage_pct") or 0.0)
+            out["coverage_gap_pct"] = round(max(0.0, target - now_pct), 1)
     proj = out.get("if_you_bought_more")
     if not isinstance(proj, dict):
         return out

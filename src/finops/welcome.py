@@ -437,9 +437,11 @@ def _free_scan_value_moment() -> bool:
     report = _run_capped(_free_waste_scan, _FREE_SCAN_DEADLINE + 15)
     if not isinstance(report, dict) or report.get("error") or not report.get("checks_run"):
         return False
-    from .cli_scan import _group_findings
+    from .cli_scan import _group_findings, _recoverable_split
 
-    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    # What the audit measured, as `nable scan` and `nable brief` count it; the
+    # findings it files as inferences are shown beside it, to confirm.
+    recoverable, to_confirm, _n = _recoverable_split(report)
     findings = report.get("findings") or []
     regions = report.get("regions_scanned") or []
     _blank()
@@ -450,6 +452,9 @@ def _free_scan_value_moment() -> bool:
     _line(f"  {dim('Recoverable')}      {amber('$' + format(recoverable, ',.2f') + '/mo')}  "
           + dim(f"{len(findings)} finding{'s' if len(findings) != 1 else ''} across "
                 f"{len(regions)} region{'s' if len(regions) != 1 else ''}"))
+    if to_confirm > 0:
+        _line(f"  {dim('To confirm')}       {'$' + format(to_confirm, ',.2f') + '/mo to confirm'}  "
+              + dim("rests on an inference; not counted as recoverable"))
     groups = _group_findings(findings)
     if groups:
         g = groups[0]
@@ -535,6 +540,12 @@ def _value_moment_body(demo: bool = False) -> bool:
     _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
+    if summary.get("partial"):
+        # The first number nable shows must not pass for the whole bill when a
+        # provider could not be read: get_cost_summary says so, and so does this.
+        missing = ", ".join(sorted(summary.get("failed_providers") or {})) or "a provider"
+        _line(dim(f"                   partial: {missing} could not be read, so real "
+                  "spend is higher"))
     _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
     if ai_share >= 5:
         _line(f"  {dim('AI / ML share')}    {bold(str(ai_share) + '%')}  {dim('of your cloud bill')}")
@@ -566,7 +577,10 @@ def _value_moment_body(demo: bool = False) -> bool:
         if isinstance(idle, dict):
             waste = idle.get("total_monthly_waste_usd") or 0
             if waste and waste >= 1:
-                _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
+                not_read = sorted(idle.get("regions_not_read") or {})
+                note = (f"doing nothing; partial, {', '.join(not_read)} not read"
+                        if idle.get("partial") else "doing nothing")
+                _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim(note)}")
         # Realizable AI savings (e.g. prompt caching). Only the addressable figure,
         # never the labeled routing ceiling, so onboarding never overpromises.
         if isinstance(ai_plan, dict) and not ai_plan.get("error"):
@@ -594,7 +608,9 @@ def _suggest_questions(by_svc: dict, total: float, ai_share: int) -> list[str]:
     top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
     if top:
         name, val = top[0]
-        qs.append(f"Why is {name} ${val:,.0f} this month, and what would cut it?")
+        # The figure is the last 30 days (get_cost_summary's default window), so
+        # the question names that window; "this month" asks about another number.
+        qs.append(f"Why is {name} ${val:,.0f} over the last 30 days, and what would cut it?")
     if ai_share >= 20:
         qs.append("Could cheaper models handle part of our AI workload?")
     elif any("textract" in k.lower() or "bedrock" in k.lower() for k in by_svc):

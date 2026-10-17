@@ -9,6 +9,17 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _waste_evidence(finding: dict) -> str:
+    """"measured" or "inferred", as analyzers.waste_evidence classes the
+    finding's waste type (and a finding whose metric could not be read is an
+    inference whatever its type)."""
+    from ..analyzers.waste_evidence import INFERRED, spec_for
+
+    if finding.get("metrics_unavailable"):
+        return "inferred"
+    return "inferred" if spec_for(finding.get("waste_type", "")).evidence == INFERRED else "measured"
+
+
 async def _price_on_customer_rates(findings: list[dict], resource_type: str) -> dict:
     """Re-price list-price findings on the customer's measured rate, and say so.
 
@@ -172,6 +183,10 @@ async def get_rightsizing_recommendations(
                         },
                         description=rec.title,
                         estimated_monthly_savings_usd=rec.monthly_savings,
+                        # Compute Optimizer measured it (waste_evidence MEASURED);
+                        # the CPU-only fallback is an inference.
+                        evidence=("measured" if rec.source == "compute_optimizer"
+                                  else "inferred"),
                     )
         except Exception:
             pass  # never block the main response
@@ -464,12 +479,9 @@ async def get_rds_rightsizing_recommendations(
         import boto3
         from ..analyzers.waste import check_rds_rightsizing
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -484,8 +496,7 @@ async def get_rds_rightsizing_recommendations(
 
         async def _scan_region_rds_rs(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_rds_rightsizing(
                         boto3.client("rds", region_name=region),
                         boto3.client("cloudwatch", region_name=region),
@@ -548,6 +559,7 @@ async def get_rds_rightsizing_recommendations(
                         description=(f.get("detail", "") or "")[:500],
                         estimated_monthly_savings_usd=f["estimated_monthly_savings"],
                         region=f.get("region", "") or "",
+                        evidence=_waste_evidence(f),
                     )
         except Exception as exc:
             _srv.log.debug("RDS rec tracking skipped: %s", exc)
@@ -568,7 +580,7 @@ async def get_rds_rightsizing_recommendations(
             "findings": kept,
             **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(all_findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": (
-                "Verify FreeStorageSpace and DatabaseConnections before resizing. "
+                "Each downsize halves memory, which was not read: check FreeableMemory and DatabaseConnections before resizing. "
                 "Take a snapshot before any instance class change."
             ),
         }
@@ -598,12 +610,9 @@ async def get_idle_rds_instances(
         import boto3
         from ..analyzers.waste import check_rds_idle
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -616,8 +625,7 @@ async def get_idle_rds_instances(
 
         async def _scan_region_rds_idle(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_rds_idle(
                         boto3.client("rds", region_name=region),
                         boto3.client("cloudwatch", region_name=region),
@@ -686,12 +694,9 @@ async def get_idle_load_balancers(
         import boto3
         from ..analyzers.waste import check_idle_load_balancers
 
-        loop = _srv.asyncio.get_event_loop()
-
         if regions is None:
             try:
-                regions = await loop.run_in_executor(
-                    None,
+                regions = await _srv.asyncio.to_thread(
                     lambda: [
                         r["RegionName"]
                         for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
@@ -704,8 +709,7 @@ async def get_idle_load_balancers(
 
         async def _scan_region_elb(region: str) -> list[dict]:
             try:
-                return await loop.run_in_executor(
-                    None,
+                return await _srv.asyncio.to_thread(
                     lambda: check_idle_load_balancers(
                         boto3.client("elbv2", region_name=region),
                         boto3.client("elb", region_name=region),
@@ -956,9 +960,12 @@ async def list_idle_resources(
         - "List any unattached EBS volumes older than 90 days"
         - "What stopped EC2 instances are we still paying for?"
     Args:
-        resource_types: Subset to scan, e.g. ["ebs", "eip", "nat"]. All types when omitted.
+        resource_types: Subset to scan, e.g. ["ebs", "eip", "snapshot", "stopped", "lb"].
+            All types when omitted. NAT gateways and RDS are not in this scan.
         regions: AWS regions to scan. Defaults to all enabled regions.
-        min_idle_days: Only report resources idle at least this many days.
+        min_idle_days: Only report resources idle at least this many days. For a
+            stopped instance that is time since it stopped; for the rest it is the
+            resource's age, since AWS does not report when it went idle.
 
     """
     try:
@@ -973,6 +980,7 @@ async def list_idle_resources(
         # Persist for savings tracking
         try:
             from ..recommendations.savings_tracker import record_recommendation
+            from ..recommendations.sweep import _idle_is_inferred
             for r in resources:
                 if r.monthly_cost_usd > 0:
                     record_recommendation(
@@ -987,6 +995,9 @@ async def list_idle_resources(
                         recommended_config={"action": "delete_or_release"},
                         description=r.reason,
                         estimated_monthly_savings_usd=r.monthly_cost_usd,
+                        # The class the deep audit gives the same claim (an old
+                        # snapshot is an inference, an unattached volume measured).
+                        evidence="inferred" if _idle_is_inferred(r.resource_type) else "measured",
                     )
         except Exception:
             pass
@@ -1181,6 +1192,19 @@ async def scan_waste_patterns(
                 ORDER BY service, snapshot_date
             """), {"aid": account_id, "cutoff": _cutoff}).fetchall()
 
+        if not rows:
+            # The fingerprints run over the daily cost history. With none, they
+            # ran over nothing and answered total_monthly_waste 0, no findings.
+            return {
+                "status": "not_evaluated",
+                "account_id": account_id,
+                "message": (
+                    f"No daily cost history for account {account_id} in the last 90 "
+                    "days, so no waste pattern was checked. This is not a finding of "
+                    "zero waste. Run take_snapshot_now to start recording history, or "
+                    "run_full_cost_audit to scan resources directly."),
+            }
+
         daily_costs: dict[str, list[float]] = {}
         for service, _date, total in rows:
             daily_costs.setdefault(service, []).append(float(total))
@@ -1200,7 +1224,14 @@ async def scan_waste_patterns(
             result["owner"] = acct_owner.compact()
         result["note"] = (
             "Findings based on cost time-series only. "
-            "Connect EC2/RDS/Lambda metadata for higher-confidence results."
+            "Connect EC2/RDS/Lambda metadata for higher-confidence results. "
+            "Savings Plans coverage is not in the cost history, so no Savings Plan "
+            "saving is priced here: get_commitment_analysis reads coverage and prices one. "
+            "Weekend waste counts only spend whose environment is known to be "
+            "non-production, and the cost history carries no environment, so it was not "
+            "checked: identify_nonprod_scheduling_opportunities reads the instance tags. "
+            "Log retention is an investigation with no dollar figure until the log groups' "
+            "stored bytes are read: scan_cloudwatch_waste reads them."
         )
         return result
     except Exception as e:
@@ -1523,8 +1554,17 @@ async def audit_rds_manual_snapshots(
             f"(${total_monthly:,.2f}/mo)."
         )
         lines.append(
-            f"Potential saving if flagged snapshots are deleted: ${potential_savings:,.2f}/mo."
+            f"Potential saving if flagged snapshots are deleted: up to "
+            f"${potential_savings:,.2f}/mo. An upper bound: each snapshot is priced at its "
+            f"database's allocated storage, and backup storage within the free allocation "
+            f"is not billed."
         )
+        unassessed = result.get("unassessed_snapshots", 0)
+        if unassessed:
+            lines.append(
+                f"{unassessed} snapshot(s) not assessed: the DB instance list in their region "
+                f"could not be read, so whether their source exists is unknown."
+            )
         lines.append("")
 
         _SNAP_TABLE_CAP = 30
@@ -1577,7 +1617,7 @@ async def audit_rds_manual_snapshots(
                 )
             lines.append("")
 
-        if not orphaned and not old:
+        if not orphaned and not old and not unassessed:
             lines.append(
                 f"All {total_snapshots} snapshots are recent (under {age_threshold_days} days) "
                 f"and their source DBs still exist. No immediate action needed."
@@ -1787,8 +1827,9 @@ async def audit_s3_intelligent_tiering(
 ) -> dict:
     """
     Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds
-    savings. IT costs $0.0025/1,000 objects, making it more expensive than
-    S3 Standard for objects smaller than 128KB.
+    savings. IT costs $0.0025/1,000 monitored objects. Objects under 128 KB are
+    not monitored and pay no fee; monitored objects up to about 250 KB pay more
+    in fees than moving to Infrequent Access saves.
 
     Args:
         regions: Unused (S3 is global). Present for API consistency.
@@ -1819,8 +1860,9 @@ async def audit_s3_intelligent_tiering(
         shown = findings[:max_results]
         omitted = len(findings) - len(shown)
         note = (
-            "Objects below 128KB cost more in IT monitoring fees than they save "
-            "in storage tiering. Enable S3 bucket metrics for accurate object size data."
+            "Objects under 128 KB are not monitored and pay no IT fee. Monitored objects "
+            "up to about 250 KB pay more in fees than tiering saves. Sizes are bucket "
+            "averages from S3 bucket metrics, so a bucket that mixes sizes is approximate."
         )
         if omitted > 0:
             note += f" Showing top {max_results} by impact. {omitted} more findings omitted."
@@ -1925,9 +1967,10 @@ async def audit_cloudwatch_metric_cardinality(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits CloudWatch custom metric cardinality. Custom metrics above the 10,000
-    free-tier threshold cost $0.30/metric/month. High-cardinality dimensions like
-    pod_id or request_id can cause thousands of metrics per microservice.
+    Audits CloudWatch custom metric cardinality. Custom metrics bill per
+    metric-month at $0.30 for the first 10,000, then $0.10, $0.05 and $0.02
+    (us-east-1 list), with 10 free. High-cardinality dimensions like pod_id or
+    request_id can cause thousands of metrics per microservice.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
@@ -1952,7 +1995,8 @@ async def audit_cloudwatch_metric_cardinality(
 
         lines: list[str] = ["## CloudWatch Custom Metric Cardinality Audit", ""]
         lines.append(f"Total custom metrics found: **{total:,}**")
-        lines.append(f"Estimated monthly cost (above 10k free tier): **${cost:,.2f}**")
+        lines.append(f"Estimated monthly list cost (tiered, 10 metrics free; an upper "
+                     f"bound, see the finding): **${cost:,.2f}**")
         lines.append("")
 
         if not findings:
@@ -2002,7 +2046,7 @@ async def audit_cloudwatch_orphaned_alarms(
 ) -> str:
     """
     Finds CloudWatch alarms on deleted resources. Standard alarms cost
-    $0.10/month, composite $0.30/month. Terminated instances and deleted
+    $0.10/month, composite $0.50/month. Terminated instances and deleted
     queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.
 
     Args:
@@ -2082,7 +2126,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
 ) -> str:
     """
     Finds CloudWatch Log groups to migrate to Infrequent Access class. IA cuts
-    ingestion cost 50% ($0.075 to $0.0375/GB). Candidates: groups older than
+    ingestion cost 50% ($0.50 to $0.25/GB, us-east-1 list). Candidates: groups older than
     30 days with >1 GB/month still on STANDARD. Note: IA does not support
     metric filters or subscription filters.
 

@@ -1,15 +1,21 @@
 """
 Database Savings Plans recommender.
 
-AWS launched Database Savings Plans at re:Invent 2025. They cover RDS and
-Aurora spend with up to 45% savings, separate from Compute Savings Plans.
+AWS launched Database Savings Plans at re:Invent 2025, separate from Compute
+Savings Plans. The AWS Price List (AWSDatabaseSavingsPlans us-east-1, version
+20261007173435, read 2026-10-13) offers one term, 1 year No Upfront, at 20% off
+every provisioned RDS and Aurora instance hour it covers, and covers only the
+7th-generation and later families (DATABASE_SP_ELIGIBLE_FAMILIES: m7g, m7i,
+r7g, r7i, x2m and the m8 and r8 families), not m5, m6i, m6g, r5, r6g, r6i, t3
+or t4g.
 
 This module:
-1. Pulls current RDS/Aurora spend from Cost Explorer (last 30 days).
+1. Pulls current RDS/Aurora instance-hour spend from Cost Explorer (last 30
+   days), split into the families a plan can cover and those it cannot.
 2. Checks existing Savings Plans coverage filtered to database services.
-3. Calculates uncovered RDS/Aurora baseline spend.
-4. Recommends a 1-year no-upfront Database SP sized to the uncovered baseline.
-5. Estimates savings using conservative discount rates.
+3. Calculates the uncovered spend on eligible families.
+4. Recommends a 1-year no-upfront Database SP sized to that.
+5. Estimates savings at the listed 20% instance-hour discount.
 """
 from __future__ import annotations
 
@@ -26,10 +32,54 @@ try:
 except ImportError:  # pragma: no cover
     boto3 = None  # type: ignore[assignment]
 
-# Discount rates relative to on-demand list price
-DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT = 0.30
+# Discount relative to on-demand list price. AWS Price List,
+# AWSDatabaseSavingsPlans us-east-1 version 20261007173435, matched to the
+# AmazonRDS us-east-1 on-demand offer by usage type and operation: 1-year No
+# Upfront is the only term the offer lists, and every provisioned-instance rate
+# (MySQL, PostgreSQL, MariaDB, Aurora, Oracle, SQL Server, Db2; 1,328 RDS
+# instance-hour rates in all) is exactly 20.0% below on-demand (e.g.
+# db.r7g.large $0.239 -> $0.1912, SKU DZCHH8H3SPVYZ2Z4). It used to be 0.30,
+# called "conservative", which overstated every saving by half.
+DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT = 0.20
+# Not offered: the same price list (and the eu-west-1 and ap-southeast-2 ones)
+# has no all-upfront and no 3-year Database Savings Plan. These two are
+# unverified and nothing here prices with them; they stay only so code
+# importing them keeps working, and as the ordering the tests document if AWS
+# adds the terms.
 DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT = 0.35
 DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT = 0.45
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT": {
+        "source": "AWS Price List, AWSDatabaseSavingsPlans us-east-1, version "
+                  "20261007173435: DatabaseSP:1yrNoUpfront, 20% off every RDS "
+                  "InstanceUsage rate it lists (SKU DZCHH8H3SPVYZ2Z4)",
+        "as_of": "2026-10-13"},
+    "DATABASE_SP_DISCOUNT_1YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+    "DATABASE_SP_DISCOUNT_3YR_ALL_UPFRONT": {
+        "source": "not offered in AWSDatabaseSavingsPlans us-east-1 20261007173435; unused",
+        "as_of": "2026-10-13", "verified": "no"},
+}
+
+# Instance families the same price list gives a Database Savings Plan rate.
+# Spend on any other family (db.t3, db.t4g, db.m5, db.m6g, db.m6i, db.r5,
+# db.r6g, db.r6i among them) has no rate for a plan to apply to, so a
+# commitment sized on it goes unused. eu-west-1 and ap-southeast-2 list the
+# same families or a subset.
+DATABASE_SP_ELIGIBLE_FAMILIES = frozenset({
+    "m7g", "m7i", "m8a", "m8g", "m8gd", "m8i", "m9g",
+    "r7g", "r7i", "r8a", "r8g", "r8gd", "r8i", "x2m",
+})
+
+
+def _family(usage_type: str) -> str:
+    """The instance family in an RDS usage type ("EUW1-InstanceUsage:db.r7g.large"
+    is r7g), or "" when there is none."""
+    cls = usage_type.rsplit(":", 1)[-1].strip().lower()
+    parts = cls.split(".")
+    return parts[1] if len(parts) >= 3 and parts[0] == "db" else ""
 
 _RDS_SERVICES = [
     "Amazon Relational Database Service",
@@ -56,6 +106,13 @@ def _get_rds_spend(ce_client: Any, start: str, end: str) -> float | None:
     Summing total RDS spend oversizes the recommended commitment, so we group
     by usage type and keep only the instance-usage line items.
     """
+    split = _get_rds_spend_split(ce_client, start, end)
+    return None if split is None else split[0] + split[1]
+
+
+def _get_rds_spend_split(ce_client: Any, start: str, end: str) -> tuple[float, float] | None:
+    """(instance-hour spend on DATABASE_SP_ELIGIBLE_FAMILIES, on every other
+    family) over the window, or None when Cost Explorer could not be read."""
     try:
         resp = ce_client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
@@ -64,14 +121,18 @@ def _get_rds_spend(ce_client: Any, start: str, end: str) -> float | None:
             Metrics=["UnblendedCost"],
             GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
         )
-        total = 0.0
+        eligible = other = 0.0
         for period in resp.get("ResultsByTime", []):
             for grp in period.get("Groups", []):
                 ut = (grp.get("Keys", [""])[0] or "").lower()
                 # Instance hours: "...-InstanceUsage:db.r5.large", "...-Multi-AZUsage:db..."
                 if "instanceusage" in ut or "multi-azusage" in ut:
-                    total += float(grp["Metrics"]["UnblendedCost"]["Amount"])
-        return total
+                    amount = float(grp["Metrics"]["UnblendedCost"]["Amount"])
+                    if _family(ut) in DATABASE_SP_ELIGIBLE_FAMILIES:
+                        eligible += amount
+                    else:
+                        other += amount
+        return eligible, other
     except Exception as e:
         log.warning("RDS compute spend fetch failed: %s", e)
         return None
@@ -110,7 +171,8 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
     Returns None if AWS is not configured (boto3 unavailable or no credentials).
 
     Return dict keys:
-        current_monthly_rds_spend     float  USD
+        current_monthly_rds_spend     float  USD (instance hours, every family)
+        ineligible_monthly_spend      float  USD on families no plan covers
         current_sp_coverage_pct       float  0-100
         uncovered_monthly_spend       float  USD
         recommended_sp_hourly_commitment float  USD/hr
@@ -126,8 +188,8 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         ce = boto3.client("ce", region_name="us-east-1")
         start, end = _date_range_30d()
 
-        monthly_rds_spend = _get_rds_spend(ce, start, end)
-        if monthly_rds_spend is None:
+        split = _get_rds_spend_split(ce, start, end)
+        if split is None:
             # CE query failed. Do not emit a confident $0 "no SP needed" result
             # that is indistinguishable from a genuine zero.
             return {
@@ -149,8 +211,14 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 "finding": None,
             }
 
+        eligible_spend, ineligible_spend = split
+        monthly_rds_spend = eligible_spend + ineligible_spend
+
+        # Only the eligible families can carry a plan. Sizing on all instance
+        # hours committed to spend on db.t3, db.m5, db.r5 and the rest that no
+        # Database Savings Plan rate exists for, so the commitment went unused.
         uncovered_fraction = max(0.0, 1.0 - sp_coverage_pct / 100)
-        uncovered_monthly = monthly_rds_spend * uncovered_fraction
+        uncovered_monthly = eligible_spend * uncovered_fraction
 
         # Size the SP at the DISCOUNTED hourly rate you commit to, not on-demand
         # dollars. uncovered_monthly is on-demand spend; committing on-demand/730
@@ -169,14 +237,16 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         # only lands if that RDS/Aurora baseline keeps running for the term. We have only
         # looked at the last 30 days, so we cannot confirm the spend is stable enough to
         # commit to. That makes this an investigation: a band plus the steps to confirm
-        # the baseline holds, not a precise promise. The discount rate is also a
-        # conservative published estimate, not your account's actual SP rate card.
+        # the baseline holds, not a precise promise. The discount is the listed
+        # 20% rate, not your account's actual SP rate card; private pricing on top
+        # of it would change the dollar figure.
         finding = None
         if uncovered_monthly > 50:
             finding = Finding(
                 source="database_savings_plans",
                 title="Uncovered RDS/Aurora spend may be worth a Database Savings Plan",
-                why=("Database Savings Plans discount RDS and Aurora instance hours. About "
+                why=("Database Savings Plans discount RDS and Aurora instance hours on the "
+                     "newer instance families. About "
                      f"${round(uncovered_monthly, 0):,.0f}/mo of your database compute is "
                      f"running on demand with only {round(sp_coverage_pct, 0):.0f}% covered. "
                      "Committing to a Savings Plan on the steady part of that would cut the "
@@ -187,13 +257,16 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                             "but a Savings Plan locks you in for a year. We have not confirmed "
                             "this baseline is stable: if you are about to downsize, migrate "
                             "off RDS, or move to Aurora Serverless, committing to it would "
-                            "strand the commitment. The discount is also a conservative "
-                            "published estimate, not your account's exact SP rate."),
+                            "strand the commitment."),
                 assumptions=[
                     "The uncovered RDS/Aurora baseline keeps running at this level for the "
                     "1-year term.",
-                    "Saving uses a conservative 30% no-upfront discount; your actual SP rate "
-                    "may differ.",
+                    "Saving uses the listed 20% the AWS price list gives every eligible "
+                    "provisioned instance hour on the 1-year no-upfront plan, the only term "
+                    "offered.",
+                    f"${round(ineligible_spend, 0):,.0f}/mo of instance hours is on older "
+                    "families (db.t3, db.m5, db.r5, db.r6g and the like) that no Database "
+                    "Savings Plan covers, so it is left out of the sizing and saves nothing.",
                     "Instance-hour line items were identified correctly (storage, IOPS, "
                     "backups, and transfer are excluded, since Database SPs do not cover them).",
                 ],
@@ -209,8 +282,8 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 pro_can_confirm=True,
                 pro_unlock=("On Pro, nable reads several months of your CUR to confirm the "
                             "database baseline is stable, models the right commitment to the "
-                            "stable floor, and uses your account's actual Savings Plan rates "
-                            "instead of a conservative published estimate."),
+                            "stable floor, and prices it on the rates your account actually "
+                            "pays instead of the published list discount."),
                 remediation=[
                     "Confirm first: verify the baseline holds over a longer window and rule out "
                     "planned changes to the fleet.",
@@ -232,6 +305,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         from . import commitment_bounds as cb
         return cb.apply_database({
             "current_monthly_rds_spend": round(monthly_rds_spend, 2),
+            "ineligible_monthly_spend": round(ineligible_spend, 2),
             "current_sp_coverage_pct": round(sp_coverage_pct, 1),
             "uncovered_monthly_spend": round(uncovered_monthly, 2),
             "recommended_sp_hourly_commitment": round(recommended_hourly, 4),

@@ -130,9 +130,10 @@ def _keyring_disabled() -> bool:
     Also disabled when no macOS login keychain exists, to avoid the blocking
     'cannot be found' modal. license.py carries the same gate for the trial
     store."""
+    from ..telemetry import env_flag_set  # stdlib only; the one rule for FINOPS_AIRGAP
     return (
         os.environ.get("FINOPS_NO_KEYRING", "") == "1"
-        or os.environ.get("FINOPS_AIRGAP", "") == "1"
+        or env_flag_set("FINOPS_AIRGAP")
         or _macos_keychain_missing()
     )
 
@@ -386,16 +387,58 @@ class Vault:
             pass
         return None
 
+    @staticmethod
+    def _key_temp(key_path: Path, key: bytes) -> str:
+        """A complete 0600 copy of `key` beside key_path, for an atomic rename
+        or link into place: a reader never sees a half-written key file, which
+        it would take for a corrupt one and replace."""
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix=f".{key_path.name}.", suffix=".tmp",
+                                   dir=key_path.parent)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(key)
+            os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+        return tmp
+
     @classmethod
     def _write_key_file(cls, key_path: Path, key: bytes) -> None:
         """Cache the master key beside the vault DB (chmod 600). Reading a file
         is silent where a keychain read can prompt; the keyring stays the
         durable recovery copy."""
         try:
-            key_path.write_bytes(key)
-            key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            os.replace(cls._key_temp(key_path, key), key_path)
         except OSError as e:
             log.debug("Vault: could not write key file: %s", e)
+
+    @classmethod
+    def _claim_key_file(cls, key_path: Path, key: bytes) -> bytes | None:
+        """First run: make `key` THE master key unless another process already
+        made its own. Returns the key the file now holds (ours, or the one that
+        got there first), or None when the file cannot be claimed this way (a
+        filesystem without hard links, or a corrupt file to replace).
+
+        Two processes opening a fresh vault together (two cron jobs, a CI step
+        beside an editor's MCP server) each generated a key and each wrote the
+        file, so the last writer's key won and whatever the others stored with
+        theirs could never be decrypted again. os.link fails when the name
+        exists, so exactly one key is ever created; the rest adopt it."""
+        try:
+            tmp = cls._key_temp(key_path, key)
+        except OSError:
+            return None
+        try:
+            os.link(tmp, key_path)
+            return key
+        except FileExistsError:
+            return cls._read_key_file(key_path)
+        except OSError:
+            return None
+        finally:
+            Path(tmp).unlink(missing_ok=True)
 
     @classmethod
     def _try_keyring(cls) -> bytes | None:
@@ -473,11 +516,19 @@ class Vault:
                 cls._write_key_file(key_path, key)
                 log.info("Vault: cached master key to %s", key_path)
 
-        # 4. First run: generate and store in both places
+        # 4. First run: generate and store in both places. The file is claimed
+        # atomically, so concurrent first runs end up sharing one key.
         if key is None:
             from cryptography.fernet import Fernet
-            key = Fernet.generate_key()
-            cls.persist_master_key(key)
+            fresh = Fernet.generate_key()
+            claimed = None if keychain_only else cls._claim_key_file(key_path, fresh)
+            if claimed is None:
+                key = fresh
+                cls.persist_master_key(key)
+            else:
+                key = claimed
+                if claimed == fresh:      # this process created it: keep the recovery copy
+                    cls._save_keyring(key)
 
         return cls(db_path, key)
 

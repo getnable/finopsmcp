@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..aws_prices import PUBLIC_IPV4_PER_MONTH
+from .envelope import INVESTIGATION, magnitude_band
 
 log = logging.getLogger(__name__)
 
@@ -47,24 +48,141 @@ DEFAULT_DEADLINE_S = 90
 # ipv4 scanner reports the same unattached addresses as one aggregate.
 IDLE_RESOURCE_TYPES = ["ebs_volume", "snapshot", "stopped_ec2", "load_balancer"]
 
+# Compute Savings Plan and Reserved Instance savings are in no sweep total.
+# analyze_commitments runs in the sweep, so a coverage read that fails is named
+# beside the total, but it returns a CommitmentAnalysis, which normalise does
+# not read, and that is deliberate: a plan discounts the same instance hours
+# the per-resource rows already claim (a Graviton move, Spot, a stop, a
+# schedule), so adding it would count those dollars twice. Nothing said so,
+# and an account whose largest saving is a plan got a total with no word on
+# where that saving is reported. Every caller prints this beside its total.
+# (A Database Savings Plan is a row of its own, netted of idle RDS.)
+COMMITMENTS_NOT_IN_TOTAL = (
+    "Compute Savings Plan and Reserved Instance savings are not part of this total: "
+    "get_commitment_analysis reports them separately, because a plan discounts the "
+    "same instance hours these per-resource savings already count.")
+
+
+# cleanup.idle files no evidence class of its own. Its rows are the claims
+# run_deep_audit classifies in analyzers.waste_evidence, so each takes that
+# class: an old snapshot priced at its full volume size is an inference there
+# (old_unmanaged_snapshot), and so it is here. A type not listed (a stopped
+# instance's attached storage) is a measured state.
+_IDLE_EVIDENCE_CLASS = {
+    "ebs_volume": "unattached_ebs_volume",
+    "snapshot": "old_unmanaged_snapshot",
+    "load_balancer": "idle_load_balancer",
+}
+
+
+def _idle_is_inferred(resource_type: str) -> bool:
+    from ..analyzers.waste_evidence import INFERRED, spec_for
+
+    cls = _IDLE_EVIDENCE_CLASS.get(resource_type)
+    return cls is not None and spec_for(cls).evidence == INFERRED
+
+
+def _filed_as_inference(data: Any) -> bool:
+    """Whether the scanner's own envelope (envelope.Finding, on its result or
+    on its rows) filed what it found as an investigation: an inference it
+    could not measure. A scanner that says nothing counts as measured, as a
+    finding with no classification does in `nable scan`."""
+    if isinstance(data, dict):
+        env = data.get("finding")
+        return isinstance(env, dict) and env.get("kind") == INVESTIGATION
+    if isinstance(data, list):
+        return any(isinstance(r, dict) and isinstance(r.get("finding"), dict)
+                   and r["finding"].get("kind") == INVESTIGATION for r in data)
+    return False
+
+
+def split_total(findings: list[dict]) -> tuple[float, float, int]:
+    """(recoverable, to confirm, how many to confirm), per month.
+
+    The same split `nable scan` makes (cli_scan._recoverable_split):
+    recoverable is the rows measured, and the rows their scanner filed as an
+    inference are "to confirm", shown beside it and not added in. A row with
+    no figure (an investigation, a retracted claim) is in neither."""
+    recoverable = sum(f.get("monthly_savings") or 0 for f in findings
+                      if not f.get("to_confirm"))
+    confirm = [f for f in findings
+               if f.get("to_confirm") and f.get("monthly_savings") is not None]
+    # A measured row whose resource also has a larger inferred alternative
+    # (collapse_per_resource): the excess is to confirm, the row recoverable.
+    above = [float(f["to_confirm_above_usd"]) for f in findings
+             if not f.get("to_confirm") and (f.get("to_confirm_above_usd") or 0) > 0]
+    return (recoverable, sum(f["monthly_savings"] for f in confirm) + sum(above),
+            len(confirm) + len(above))
+
+
+def to_confirm_line(to_confirm: float, n: int) -> str:
+    """The sentence every caller prints beside its recoverable total."""
+    return (f"${to_confirm:,.2f}/mo to confirm, not counted as recoverable: {n} "
+            f"finding{'s' if n != 1 else ''} rest{'s' if n == 1 else ''} on an inference "
+            "its check could not measure (marked \"to confirm\").")
+
 
 @dataclass
 class SweepResult:
     """What every caller gets: findings, and an honest account of what failed."""
 
     findings: list[dict] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)      # scanners that returned nothing
+    # Scanners that could not run: they raised, said they could not read, or
+    # found nothing with every read failed. None of their findings are in.
+    errors: list[str] = field(default_factory=list)
     learned_note: str | None = None
     timed_out: bool = False
+    # Why each scanner in `errors` could not run, and the scanners that ran
+    # with some of their reads failed (so their findings may be incomplete).
+    error_reasons: dict[str, str] = field(default_factory=dict)
+    partial: dict[str, str] = field(default_factory=dict)
+    scanners_run: int = 0
+
+    def coverage_lines(self) -> list[str]:
+        """What a report must say about the checks that did not fully run."""
+        lines: list[str] = []
+        if self.errors:
+            lines.append(
+                f"{len(self.errors)} of {self.scanners_run} checks could not run, so "
+                "their savings are not in this report: "
+                + "; ".join(f"{n} ({self.error_reasons.get(n, 'no result')})"
+                            for n in self.errors))
+        if self.partial:
+            lines.append(
+                "Checks that ran with some reads failed, so they may be missing "
+                "findings: " + "; ".join(f"{n} ({why})" for n, why in self.partial.items()))
+        return lines
 
 
 def _call(name, fn, **kwargs):
-    try:
-        res = asyncio.run(fn(**kwargs)) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
-        return name, res
-    except Exception as exc:
-        log.warning("audit scanner %s failed: %s", name, exc)
-        return name, None
+    """Run one scanner. Returns (name, result, error, reads): the AWS reads it
+    made are recorded, because most scanners swallow a failed region and return
+    an empty result that is otherwise indistinguishable from a clean one."""
+    from ..aws_read_failures import watching
+
+    with watching() as reads:
+        try:
+            res = asyncio.run(fn(**kwargs)) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
+            return name, res, None, reads
+        except Exception as exc:
+            log.warning("audit scanner %s failed: %s", name, exc)
+            return name, None, f"{type(exc).__name__}: {exc}", reads
+
+
+def _declared_failure(data) -> str | None:
+    """A scanner result that says itself that it could not run."""
+    if isinstance(data, dict):
+        if data.get("error"):
+            return str(data["error"])
+        if data.get("data_incomplete"):
+            return "data incomplete"
+        if data.get("status") == "not_evaluated":
+            return str(data.get("message") or "not evaluated")
+    recs = getattr(data, "recommendations", None)
+    if isinstance(recs, list) and any(
+            isinstance(r, dict) and r.get("type") == "coverage_unavailable" for r in recs):
+        return "commitment coverage could not be read"
+    return None
 
 
 def build_specs(aws: Any, regions: list[str] | None) -> list[tuple[str, Any, dict]]:
@@ -120,6 +238,24 @@ def build_specs(aws: Any, regions: list[str] | None) -> list[tuple[str, Any, dic
     ]
 
 
+def _region_note(region: Any) -> str:
+    """"; priced at us-east-1 list rates ..." for a row outside us-east-1 that
+    was priced from nable's us-east-1 tables, else "" (aws_prices)."""
+    from ..aws_prices import us_east_1_list_note
+
+    note = us_east_1_list_note(region if isinstance(region, str) else None)
+    return f"; {note}" if note else ""
+
+
+def _listed(region: Any, basis: str | None = None) -> dict:
+    """{"us_east_1_list": True} for a row outside us-east-1 priced at us-east-1
+    list rates, so the tables can mark the row; a basis naming the region's
+    floor (aws_prices.ec2_hourly_in_region) was priced in the region."""
+    if not _region_note(region) or (basis and "floor" in basis):
+        return {}
+    return {"us_east_1_list": True}
+
+
 def normalise(name, data) -> list[dict]:
     if data is None:
         return []
@@ -131,7 +267,9 @@ def normalise(name, data) -> list[dict]:
                 if s > 0:
                     # current cost rides along so the critique can hold the
                     # claim against it (a saving cannot exceed the resource).
-                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0)*100:.0f}% saving, {r.get('region','')}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate")})
+                    # A gap between two types' rates: a regional floor on each
+                    # side does not bound it, so it stays at us-east-1 list.
+                    out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} → {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute", "detail": f"{r.get('savings_pct',0):.0f}% saving, {r.get('region','')}{_region_note(r.get('region'))}", "resource_id": r.get("instance_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": r.get("current_monthly_cost_estimate"), **_listed(r.get("region"))})
         elif name == "ipv4":
             waste = data.get("total_monthly_waste", 0) or 0
             if waste > 0:
@@ -143,7 +281,12 @@ def normalise(name, data) -> list[dict]:
                 parts = [f"{n_unattached} unattached"] if n_unattached else []
                 if n_stopped:
                     parts.append(f"{n_stopped} on stopped instances")
-                out.append({"title": f"Release {n_unattached + n_stopped} idle Elastic IP(s) ({', '.join(parts)})", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, ${PUBLIC_IPV4_PER_MONTH:.2f} per IP"})
+                away = sorted({e["region"] for e in data.get("unattached_eips", [])
+                               + data.get("stopped_instance_eips", [])
+                               if isinstance(e, dict) and _region_note(e.get("region"))})
+                note = (f"; {', '.join(away)} priced at the us-east-1 list rate"
+                        if away else "")
+                out.append({"title": f"Release {n_unattached + n_stopped} idle Elastic IP(s) ({', '.join(parts)})", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, ${PUBLIC_IPV4_PER_MONTH:.2f} per IP{note}", **({"us_east_1_list": True} if away else {})})
         elif name == "lambda_pc" and isinstance(data, list):
             for r in data:
                 s = r.get("wasted_monthly_cost", 0) or 0
@@ -159,31 +302,51 @@ def normalise(name, data) -> list[dict]:
             for r in items:
                 s = r.get("potential_monthly_savings", 0) or 0
                 if s > 0:
-                    out.append({"title": f"Schedule non-prod instance {r.get('name', r.get('instance_id','?'))}", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"env={r.get('environment','?')}, {r.get('idle_hours_per_week',0):.0f} idle hrs/wk"})
+                    region = r.get("region") or ""
+                    where = (f", {region}; on-demand at the {r['price_basis']}"
+                             if _region_note(region) and r.get("price_basis") else "")
+                    out.append({"title": f"Schedule non-prod instance {r.get('name', r.get('instance_id','?'))}", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "region": region, "detail": f"env={r.get('environment','?')}, {r.get('idle_hours_per_week',0):.0f} idle hrs/wk{where}", **_listed(region, r.get("price_basis"))})
         elif name == "rds_snapshots":
             items = data.get("orphaned_snapshots", []) + data.get("old_snapshots", []) if isinstance(data, dict) else []
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
             if total > 0:
-                out.append({"title": f"Delete {len(items)} old/orphaned RDS manual snapshots", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo at $0.095/GB-month"})
+                # The scanner prices each snapshot at its database's allocated
+                # storage and calls the figure an upper bound; the row says so.
+                out.append({"title": f"Delete {len(items)} old/orphaned RDS manual snapshots", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo at $0.095/GB-month of allocated storage, an upper bound"})
         elif name == "spot" and isinstance(data, list):
             for r in data:
                 s = r.get("monthly_savings", 0) or 0
                 if s > 0 and r.get("recommendation") == "RECOMMENDED":
-                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "detail": f"{r.get('savings_pct',0)*100:.0f}% saving"})
-        elif name == "cw_cardinality" and isinstance(data, list):
-            for r in data:
+                    region = r.get("region") or ""
+                    where = (f", {region}; on-demand at the {r['ondemand_basis']}"
+                             if _region_note(region) and r.get("ondemand_basis") else "")
+                    out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute", "resource_id": r.get("instance_id", ""), "region": region, "detail": f"{r.get('savings_pct',0):.0f}% saving{where}", **_listed(region, r.get("ondemand_basis"))})
+        elif name == "cw_cardinality":
+            # The scanner returns a dict; reading only a list dropped every
+            # finding it made from the sweep.
+            items = data.get("high_cardinality_namespaces", []) if isinstance(data, dict) else data
+            for r in items if isinstance(items, list) else []:
                 s = r.get("estimated_monthly_cost", 0) or 0
                 if s > 0:
-                    out.append({"title": f"Reduce CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": s, "category": "Observability", "detail": f"{r.get('metric_count',0)} metrics"})
+                    # Never a figure in a total. What a namespace's metrics cost is
+                    # a list-price upper bound on a bill, not a saving: what a
+                    # cardinality cut saves depends on which dimensions are
+                    # dropped, which nothing here has measured (the scanner files
+                    # it as an INFERRED investigation). It stays listed, with a
+                    # size band, as the investigation it is.
+                    out.append({"title": f"Review CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": None, "kind": INVESTIGATION, "magnitude": magnitude_band(s), "rough_monthly": s, "category": "Observability", "detail": f"{r.get('metric_count',0)} metrics; ${s:,.2f}/mo of metric list cost at stake, an upper bound and not a saving"})
         elif name == "cw_alarms":
             items = data.get("orphaned_alarms", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             total = sum(r.get("monthly_cost", 0) for r in items)
             if total > 0:
                 out.append({"title": f"Delete {len(items)} orphaned CloudWatch alarm(s)", "monthly_savings": total, "category": "Observability", "detail": f"${total:.2f}/mo"})
-        elif name == "cw_logs_ia" and isinstance(data, list):
-            total = sum(r.get("monthly_savings", 0) for r in data)
+        elif name == "cw_logs_ia":
+            # Same as cw_cardinality: the scanner returns a dict of candidates.
+            items = data.get("candidates", []) if isinstance(data, dict) else data
+            items = items if isinstance(items, list) else []
+            total = sum(r.get("monthly_savings", 0) or 0 for r in items)
             if total > 0:
-                out.append({"title": f"Move {len(data)} log group(s) to Infrequent Access", "monthly_savings": total, "category": "Observability", "detail": "50% ingestion cost reduction"})
+                out.append({"title": f"Move {len(items)} log group(s) to Infrequent Access", "monthly_savings": total, "category": "Observability", "detail": "50% ingestion cost reduction"})
         elif name == "snapstart" and isinstance(data, list):
             total = sum(r.get("monthly_pc_cost", 0) for r in data if r.get("recommendation") == "ENABLE_SNAPSTART_REPLACE_PC")
             if total > 0:
@@ -206,13 +369,21 @@ def normalise(name, data) -> list[dict]:
                 out.append({"title": f"Disable S3 Transfer Acceleration on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo surcharge"})
         elif name == "ebs_rep":
             total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
-            n = len(data.get("excess_copies", [])) if isinstance(data, dict) else 0
+            sets = [f for f in (data.get("cross_region_findings") or [])
+                    if f.get("orphaned") or f.get("excess_copies") or f.get("has_old_copies")
+                    ] if isinstance(data, dict) else []
             if total > 0:
-                out.append({"title": f"Clean up {n} excess EBS cross-region snapshot copies", "monthly_savings": total, "category": "Storage", "detail": f"${total:.2f}/mo"})
+                # Never a figure in a total. The scanner bills incremental snapshots
+                # at the full volume size and files the result as an INFERRED upper
+                # bound, and the copies it counts (orphaned ones above all) are the
+                # same snapshots idle_resources prices one by one: a 100 GB volume's
+                # two orphaned copies were $10 here on top of the $10 already there.
+                # It stays listed, with a size band, as the investigation it is.
+                out.append({"title": f"Review {len(sets)} cross-region EBS snapshot set(s) for stale copies", "monthly_savings": None, "kind": INVESTIGATION, "magnitude": magnitude_band(total), "rough_monthly": total, "category": "Storage", "detail": "Upper bound at full volume size; the same snapshots may already be listed as idle snapshots"})
         elif name == "db_sp":
             s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
             if s > 0:
-                out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments", "detail": f"Up to 35% off, ${s:.2f}/mo saving"})
+                out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments", "detail": f"20% off eligible instance hours, ${s:.2f}/mo saving"})
         elif name == "textract":
             waste = data.get("estimated_monthly_waste", 0) if isinstance(data, dict) else 0
             callers = data.get("non_prod_callers", []) if isinstance(data, dict) else []
@@ -236,14 +407,15 @@ def normalise(name, data) -> list[dict]:
                 # savings == the resource's own cost by construction (delete
                 # it, stop paying it); carrying the cost makes that invariant
                 # checkable by the critique instead of assumed.
-                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, idle {r.idle_days}d, {r.region}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd})
+                out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, {r.idle_text}, {r.region}{_region_note(r.region)}", "resource_id": r.resource_id, "region": r.region, "current_monthly_cost_usd": r.monthly_cost_usd, **_listed(r.region),
+                            **({"to_confirm": True} if _idle_is_inferred(r.resource_type) else {})})
         elif name == "idle_rds" and isinstance(data, list):
             for r in data:
                 s = r.get("estimated_monthly_savings", 0) or 0
                 if s > 0:
                     # lookback_days matches check_rds_idle's connection window;
                     # cost equals the saving by construction (stopped == unpaid).
-                    out.append({"title": f"Stop or delete idle RDS instance {r.get('resource_id','?')}", "monthly_savings": s, "category": "Database", "detail": f"{r.get('engine','?')} {r.get('current_class','?')}, {r.get('region','?')}, no connections in 14d", "resource_id": r.get("resource_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": s, "lookback_days": 14})
+                    out.append({"title": f"Stop or delete idle RDS instance {r.get('resource_id','?')}", "monthly_savings": s, "category": "Database", "detail": f"{r.get('engine','?')} {r.get('current_class','?')}, {r.get('region','?')}, no connections in 14d{_region_note(r.get('region'))}", "resource_id": r.get("resource_id", ""), "region": r.get("region", ""), "current_monthly_cost_usd": s, "lookback_days": 14, **_listed(r.get("region"))})
     except Exception as exc:
         log.warning("audit norm failed for %s: %s", name, exc)
     return out
@@ -258,8 +430,19 @@ SOURCE_MAP = {
 }
 
 
+def _has_figure(f: dict) -> bool:
+    return f.get("monthly_savings") is not None
+
+
 def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
-    """Keep one finding per resource: the largest saving, alternatives attached.
+    """Keep one finding per resource, alternatives attached.
+
+    Per resource the kept row is the largest measured saving; the largest
+    inferred one counts only for what it claims beyond that, as
+    to_confirm_above_usd (split_total adds it to "to confirm"). Keeping the
+    largest saving whatever its evidence let an inferred $25 alternative push
+    a measured $10 fix out of recoverable. A resource with no measured row
+    keeps its largest inferred one, and one with no figure at all its first.
 
     Findings with no resource_id are aggregates ("delete 12 orphaned alarms") and
     cannot double count a single resource, so they pass through untouched.
@@ -268,26 +451,35 @@ def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
     which the caller reports rather than silently dropping: a total that quietly
     shrank is as hard to trust as one that was quietly inflated.
     """
-    best: dict[str, dict] = {}
-    passthrough: list[dict] = []
-    order: list[str] = []
-
+    groups: dict[str, list[dict]] = {}
     for f in findings:
         rid = (f.get("resource_id") or "").strip()
-        if not rid:
-            passthrough.append(f)
-            continue
-        cur = best.get(rid)
-        if cur is None:
-            best[rid] = dict(f)
-            order.append(rid)
-            continue
-        loser, winner = (cur, f) if (f.get("monthly_savings") or 0) > (cur.get("monthly_savings") or 0) else (f, cur)
+        if rid:
+            groups.setdefault(rid, []).append(f)
+
+    def _usd(f: dict) -> float:
+        return float(f.get("monthly_savings") or 0)
+
+    best: dict[str, dict] = {}
+    for rid, rows in groups.items():
+        measured = [f for f in rows if _has_figure(f) and not f.get("to_confirm")]
+        inferred = [f for f in rows if _has_figure(f) and f.get("to_confirm")]
+        top_m = max(measured, key=_usd) if measured else None
+        top_i = max(inferred, key=_usd) if inferred else None
+        winner = top_m or top_i or rows[0]
         merged = dict(winner)
-        alts = list(merged.get("alternatives") or []) + list(loser.get("alternatives") or [])
-        alts.append({"title": loser.get("title", ""),
-                     "monthly_savings": loser.get("monthly_savings")})
-        merged["alternatives"] = alts
+        if len(rows) > 1:
+            alts = list(winner.get("alternatives") or [])
+            for f in rows:
+                if f is winner:
+                    continue
+                alts += list(f.get("alternatives") or [])
+                alts.append({"title": f.get("title", ""),
+                             "monthly_savings": f.get("monthly_savings")})
+            merged["alternatives"] = alts
+        above = _usd(top_i) - _usd(top_m) if top_m is not None and top_i is not None else 0.0
+        if above > 0:
+            merged["to_confirm_above_usd"] = round(above, 2)
         best[rid] = merged
 
     collapsed = sum(len(b.get("alternatives") or []) for b in best.values())
@@ -310,6 +502,48 @@ def collapse_per_resource(findings: list[dict]) -> tuple[list[dict], int]:
         seen.add(rid)
         kept.append(best[rid])
     return kept, collapsed
+
+
+def _net_database_plan_of_idle_rds(findings: list[dict], db_sp: Any,
+                                   idle_rows: Any = None) -> None:
+    """Take the idle-RDS overlap out of the Database Savings Plan saving, in place.
+
+    The plan's saving is its discount on the uncovered RDS spend Cost Explorer
+    reported on the families a plan covers, and that spend includes the
+    instances idle_rds says to stop. Both cannot be banked in full: 20% off
+    $10,000/mo is $2,000, stopping a $2,000/mo idle instance is $2,000, and done
+    together the plan covers $8,000 for $1,600, $3,600 in all, not $4,000. The
+    plan is reduced by its discount on the idle spend's uncovered share; the
+    idle findings, which are per resource and certain, keep their full figure.
+
+    The plan is sized only on DATABASE_SP_ELIGIBLE_FAMILIES, so an idle
+    instance on another family (db.r5, db.t3) was never in it and stopping it
+    takes nothing from it. An instance whose class cannot be read counts, so
+    the plan is never left above what it can save.
+    """
+    from .database_savings_plans import DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT as discount
+    from .database_savings_plans import DATABASE_SP_ELIGIBLE_FAMILIES, _family
+
+    classes = {(r.get("resource_id"), r.get("region")): r.get("current_class") or ""
+               for r in (idle_rows if isinstance(idle_rows, list) else [])
+               if isinstance(r, dict)}
+
+    def _in_plan(f: dict) -> bool:
+        family = _family(classes.get((f.get("resource_id"), f.get("region")), ""))
+        return not family or family in DATABASE_SP_ELIGIBLE_FAMILIES
+
+    plan = next((f for f in findings if f.get("_scanner") == "db_sp"), None)
+    idle = sum(f.get("monthly_savings") or 0 for f in findings
+               if f.get("_scanner") == "idle_rds" and _in_plan(f))
+    if not plan or not idle or not isinstance(db_sp, dict):
+        return
+    uncovered_share = max(0.0, 1.0 - float(db_sp.get("current_sp_coverage_pct") or 0.0) / 100)
+    overlap = min(plan.get("monthly_savings") or 0, discount * idle * uncovered_share)
+    if overlap <= 0:
+        return
+    plan["monthly_savings"] = round((plan.get("monthly_savings") or 0) - overlap, 2)
+    plan["detail"] = (f"{plan.get('detail', '')}; less ${overlap:,.2f}/mo for idle RDS "
+                      "instances listed separately, which the plan would otherwise cover")
 
 
 async def sweep(
@@ -345,17 +579,50 @@ async def sweep(
         log.warning("cost sweep hit the %ss deadline; returning early", deadline_s)
         return SweepResult(timed_out=True)
 
-    out = SweepResult()
-    for name, data in results:
-        if data is None:
+    out = SweepResult(scanners_run=len(results))
+    raw: dict[str, Any] = {}
+    for name, data, err, reads in results:
+        found = normalise(name, data) if data is not None else []
+        why = err or _declared_failure(data)
+        if why is None and not found and reads.nothing_read:
+            # Nothing found, and every read it made failed: it did not look.
+            why = reads.sentence()
+        if why is not None and not found:
             out.errors.append(name)
+            out.error_reasons[name] = why
             continue
-        for f in normalise(name, data):
+        # It ran but did not read everything, so its findings may be short: a
+        # region the scanner dropped (the idle scan drops a region that raised),
+        # a failure it declared beside the findings it did make, or AWS reads
+        # that failed. Say which, beside the total.
+        gaps: list[str] = []
+        not_read = getattr(data, "regions_not_read", None)
+        if not_read:
+            gaps.append(f"could not read {', '.join(sorted(not_read))}")
+        if why is not None:
+            gaps.append(why)
+        if reads.failed:
+            gaps.append(reads.sentence())
+        if gaps:
+            out.partial[name] = "; ".join(gaps)
+        raw[name] = data
+        inferred = _filed_as_inference(data)
+        for f in found:
             f["source"] = SOURCE_MAP.get(name, name)
+            f["_scanner"] = name
+            if inferred and f.get("monthly_savings") is not None:
+                # Its scanner filed it as an inference: a figure to confirm,
+                # not a recoverable one (split_total).
+                f["to_confirm"] = True
             out.findings.append(f)
 
-    # Sort by monthly savings descending first (the stable base order).
-    out.findings.sort(key=lambda x: x.get("monthly_savings", 0), reverse=True)
+    _net_database_plan_of_idle_rds(out.findings, raw.get("db_sp"), raw.get("idle_rds"))
+    for f in out.findings:
+        f.pop("_scanner", None)
+
+    # Sort by monthly savings descending first (the stable base order). `or 0`:
+    # an investigation carries None, which a bare comparison cannot order.
+    out.findings.sort(key=lambda x: x.get("monthly_savings") or 0, reverse=True)
 
     # Critique first, then rank. A finding whose claim was just retracted must not
     # be ranked on the dollar figure it lost, so this has to run BEFORE rescore.

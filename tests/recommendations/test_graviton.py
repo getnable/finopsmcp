@@ -85,19 +85,21 @@ def test_compute_savings_both_types_known() -> None:
 
 
 def test_compute_savings_fallback_when_graviton_price_missing() -> None:
-    # Use a real x86 type but a fake Graviton type not in the price table
+    # Use a real x86 type but a fake Graviton type not in the price table.
+    # No price, no saving: the flat 20% this used to quote is above every
+    # mapped pair in the AWS price list (5.1% to 19.2%).
     current_cost, savings, pct = _compute_savings("m5.large", "m99g.huge")
     expected_current = round(0.096 * HOURS_PER_MONTH, 2)
     assert current_cost == expected_current
-    assert savings == round(expected_current * 0.20, 2)
-    assert pct == 20.0
+    assert savings == 0.0
+    assert pct == 0.0
 
 
-def test_compute_savings_both_unknown_returns_zeros_with_fallback_pct() -> None:
+def test_compute_savings_both_unknown_returns_zeros() -> None:
     current_cost, savings, pct = _compute_savings("x1.unknown", "y1.unknown")
     assert current_cost == 0.0
     assert savings == 0.0
-    assert pct == 20.0
+    assert pct == 0.0
 
 
 # ── scan_graviton_opportunities output structure ──────────────────────────────

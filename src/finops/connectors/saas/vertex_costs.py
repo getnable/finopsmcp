@@ -23,39 +23,13 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Vertex AI / Google AI pricing per 1M tokens (USD, May 2026)
-# Source: https://cloud.google.com/vertex-ai/generative-ai/pricing
-_VERTEX_PRICING: dict[str, dict[str, float]] = {
-    # Gemini 1.5 Pro (<=128K context)
-    "gemini-1.5-pro":        {"input": 3.50,  "output": 10.50},
-    # Gemini 1.5 Pro (>128K context)
-    "gemini-1.5-pro-long":   {"input": 7.00,  "output": 21.00},
-    # Gemini 1.5 Flash (<=128K)
-    "gemini-1.5-flash":      {"input": 0.075, "output": 0.30},
-    # Gemini 1.5 Flash (>128K)
-    "gemini-1.5-flash-long": {"input": 0.15,  "output": 0.60},
-    # Gemini 1.0 Pro
-    "gemini-1.0-pro":        {"input": 0.50,  "output": 1.50},
-    # Gemini 2.0 Flash
-    "gemini-2.0-flash":      {"input": 0.075, "output": 0.30},
-    # Gemini 2.0 Pro
-    "gemini-2.0-pro":        {"input": 3.50,  "output": 10.50},
-    # Legacy PaLM / text-bison
-    "text-bison":            {"input": 0.125, "output": 0.125},
-    "text-bison-32k":        {"input": 0.125, "output": 0.125},
-    # Chat-bison
-    "chat-bison":            {"input": 0.125, "output": 0.125},
-    "chat-bison-32k":        {"input": 0.125, "output": 0.125},
-    # Code models
-    "code-bison":            {"input": 0.125, "output": 0.125},
-    "codechat-bison":        {"input": 0.125, "output": 0.125},
-    # Embeddings — priced per 1M characters, approximated as tokens
-    "textembedding-gecko":   {"input": 0.025, "output": 0.0},
-    "textembedding-gecko@003": {"input": 0.025, "output": 0.0},
-    "text-embedding-004":    {"input": 0.025, "output": 0.0},
-    # Imagen (per image)
-    "imagegeneration@006":   {"input": 0.020, "output": 0.0},
-}
+# Costs here come from the customer's own billing data (Cloud Billing API or
+# the BigQuery export), never from a rate table. A Gemini/PaLM rate table used
+# to sit here unused, and was wrong against
+# https://cloud.google.com/vertex-ai/generative-ai/pricing (read 2026-10-13):
+# Gemini 2.0 Flash at $0.075/$0.30 per million tokens against the listed
+# $0.15/$0.60, Gemini 1.5 Pro at the pre-cut $3.50/$10.50. It was removed
+# rather than kept as a second, stale copy of a price.
 
 # SKU description → model name mapping patterns (longest match first)
 _SKU_PATTERNS: list[tuple[str, str]] = [

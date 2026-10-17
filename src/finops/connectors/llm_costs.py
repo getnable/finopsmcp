@@ -1,13 +1,15 @@
 """
 LLM cost aggregator — normalizes spend across all AI providers.
 
-Sources:
-  - OpenAI (GPT-4o, o3, embeddings, DALL-E, Whisper)
-  - Anthropic (Claude 3.x / 3.5 / 3.7)
+Sources get_all_llm_costs reads:
+  - OpenAI (organization costs and usage APIs)
+  - Anthropic (cost and usage reports)
   - AWS Bedrock (Claude, Llama, Titan, Mistral, Nova via Cost Explorer)
-  - Azure OpenAI (via Azure Cost Management)
   - Google Vertex AI (via Cloud Billing)
-  - Together AI, Cohere, Mistral AI (via API usage endpoints)
+  - OpenRouter, and a LiteLLM proxy's spend logs (a gateway: not added to
+    the total when a provider it forwards to is read too)
+
+Azure OpenAI, Together AI, Cohere and Mistral AI are not read here.
 
 All costs normalised to USD. Token counts normalised to per-1M-token rates
 for cross-model efficiency comparison.
@@ -271,8 +273,8 @@ def get_all_llm_costs(
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Already inside an async context (e.g. called from an MCP tool handler)
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                from ..aws_read_failures import ScopedThreadPool
+                with ScopedThreadPool(max_workers=1) as pool:
                     return pool.submit(asyncio.run, coro).result()
             return loop.run_until_complete(coro)
         except RuntimeError:
@@ -354,7 +356,6 @@ def get_all_llm_costs(
             return litellm_costs(start_date, end_date)
         return None
 
-    import concurrent.futures
     _fetchers = {
         "openai": _fetch_openai,
         "anthropic": _fetch_anthropic,
@@ -370,7 +371,8 @@ def get_all_llm_costs(
         for _cn in _CLOUD_NATIVE_LLM:
             _fetchers.pop(_cn, None)
     not_configured: list[str] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(_fetchers)) as _pool:
+    from ..aws_read_failures import ScopedThreadPool
+    with ScopedThreadPool(max_workers=len(_fetchers)) as _pool:
         _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
         for name, fut in _futs.items():
             try:
@@ -390,6 +392,17 @@ def get_all_llm_costs(
                 not_configured.append(name)
             else:
                 failed[name] = reason
+
+    # A LiteLLM proxy logs, and prices, the calls it forwards with the user's
+    # own provider keys, and those providers bill the same calls. Adding both
+    # counted every proxied dollar twice: $40 of Claude calls read $80 in
+    # total_usd and in by_model. When a billing provider was read, the gateway
+    # is reported beside the total, not in it. Calls it routes to a provider
+    # not connected here are then missing from the total, and the note says so.
+    gateway_overlap: dict[str, dict] = {}
+    if set(results) & _GATEWAYS and set(results) - _GATEWAYS:
+        for g in sorted(set(results) & _GATEWAYS):
+            gateway_overlap[g] = results.pop(g)
 
     # Aggregate
     total = 0.0
@@ -453,6 +466,14 @@ def get_all_llm_costs(
         # so MCP tool responses do not carry the duplicated per-provider payloads.
         "provider_results": results,
     }
+    if gateway_overlap:
+        _out["gateway_overlap"] = {g: round(d.get("total_usd", 0.0) or 0.0, 4)
+                                   for g, d in gateway_overlap.items()}
+        _out["gateway_overlap_note"] = (
+            f"{', '.join(gateway_overlap)} is a gateway: it logs calls that "
+            f"{', '.join(sorted(results))} bill, so its figure is listed here and not "
+            f"added to total_usd, which would count the same call twice. Calls it sends "
+            f"to a provider not connected here are not in total_usd.")
     if failed or unpriced:
         _out["partial"] = True
     if failed:
@@ -496,6 +517,9 @@ _LLM_FOCUS_NAMES = {
     "litellm": "LiteLLM",
 }
 
+
+# Sources that observe calls another provider bills (see get_all_llm_costs).
+_GATEWAYS = frozenset({"litellm"})
 
 # Bedrock and Vertex spend already appears in the AWS/GCP FOCUS exports (Cost
 # Explorer / BigQuery billing). Exclude them when merging into the unified FOCUS
@@ -593,7 +617,11 @@ def _generate_recommendations(
                 "recommendation": f"Consider {cheaper} for lower-complexity tasks",
                 "estimated_savings_pct": f"{savings_frac * 100:.0f}%",
                 "estimated_savings_usd": round(spend * savings_frac, 2),
-                "basis": "price-ratio estimate assuming a balanced input/output token mix; actual savings depend on your ratio",
+                # A ceiling: priced on all of the model's spend, as if every
+                # call were one the cheaper model can take.
+                "basis": ("a ceiling: assumes every call to this model moves, and a balanced "
+                          "input/output token mix (price-ratio estimate); only the "
+                          "lower-complexity calls should move, so the real saving is lower"),
             })
             break
 

@@ -95,6 +95,8 @@ def _gather_aws(gaps: list[str], scanned: dict,
         codes = sorted({str(f.get("error_code", "")) for f in checks_failed})
         gaps.append("The AWS audit could not read anything: every check failed "
                     f"({', '.join(codes)}). Zero findings here is not a clean account.")
+        # For `nable brief`, which turns credential failures into the fix.
+        scanned["aws_unreadable"] = codes
     for err in report.get("errors") or []:
         gaps.append(str(err))
     timed_out = report.get("regions_timed_out") or []
@@ -231,6 +233,15 @@ def deliver(brief: Brief, *, to: Iterable[str] | None = None,
     wanted = set(to) if to is not None else channels()
     url = url if url is not None else (os.getenv(URL_ENV) or None)
     results: dict[str, bool] = {}
+    from ..config import is_airgap
+    if is_airgap():
+        # Air-gap promises provider traffic only, and Slack, Teams and email
+        # are not providers: the same rule send_report_now keeps
+        # (notifications/reports.py). Every channel asked for is reported
+        # as not delivered, so --deliver fails and says why.
+        log.warning("FINOPS_AIRGAP is set; the brief is not pushed to %s",
+                    ", ".join(sorted(wanted)) or "any channel")
+        return {name: False for name in _VALID_CHANNELS if name in wanted}
     for name in _VALID_CHANNELS:
         if name not in wanted:
             continue

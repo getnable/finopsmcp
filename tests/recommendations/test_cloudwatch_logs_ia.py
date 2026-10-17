@@ -230,3 +230,32 @@ def test_retention_period_preserved():
 
     assert result["total_candidates"] == 1
     assert result["candidates"][0]["retention_days"] == 90
+
+
+# ── an unread metric is not low ingestion ─────────────────────────────────────
+
+def test_an_unread_ingestion_metric_is_counted_not_called_low():
+    """A denied or throttled IncomingBytes read returned 0.0 GB, so every group
+    fell under the 1 GB threshold and the region reported no candidates, as if
+    measured."""
+    from botocore.exceptions import ClientError
+
+    group = _make_log_group("/aws/lambda/busy", days_old=60)
+    cw = MagicMock()
+    cw.get_metric_statistics.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetMetricStatistics")
+    with patch("finops.recommendations.cloudwatch_logs_ia._make_logs",
+               return_value=_make_logs_mock([group])), \
+         patch("finops.recommendations.cloudwatch_logs_ia._make_cw", return_value=cw):
+        result = _run(audit_cloudwatch_logs_ia_opportunities(_make_aws_client(), regions=["us-east-1"]))
+
+    assert result["total_candidates"] == 0
+    assert result["groups_not_assessed"] == 1
+    assert result["by_region"]["us-east-1"]["groups_not_assessed"] == 1
+
+
+def test_the_advice_does_not_delete_retained_logs():
+    """Deleting the old group deletes every log it still holds."""
+    text = _build_recommendation("/aws/lambda/fn", 10.0)
+    assert "then delete the old group" not in text
+    assert "retention" in text

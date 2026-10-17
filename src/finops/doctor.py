@@ -88,6 +88,7 @@ def _check_keyring_storage() -> dict:
     keyring_detail = "keyring library not installed"
     try:
         from .security.vault import _active_profile, _data_dir
+        from .telemetry import env_flag_set as _env_flag_set
         _profile = _active_profile()
         if _profile:
             _key_path = Path.home() / ".finops" / "profiles" / _profile / "vault.key"
@@ -97,7 +98,7 @@ def _check_keyring_storage() -> dict:
             keyring_ok, keyring_detail = True, "master key provided via FINOPS_VAULT_KEY"
         elif _key_path.exists():
             keyring_ok, keyring_detail = True, "master key stored (file, chmod 600)"
-        elif os.environ.get("FINOPS_NO_KEYRING") == "1" or os.environ.get("FINOPS_AIRGAP") == "1":
+        elif os.environ.get("FINOPS_NO_KEYRING") == "1" or _env_flag_set("FINOPS_AIRGAP"):
             keyring_detail = "OS keychain access disabled (FINOPS_NO_KEYRING); no master key file yet"
         else:
             try:
@@ -490,6 +491,112 @@ def _check_network() -> dict:
     }
 
 
+def _check_guard_hook() -> dict | None:
+    """Can the guard hook Claude Code runs here actually start?
+
+    The plugin's hook, and a settings hook installed without a `finops` on
+    PATH, start nable through uvx at one pinned release. When uvx cannot
+    install that release the hook exits 0, on purpose, and Claude Code shows
+    nothing: every command goes through unchecked. This doctor used to say
+    nothing about the guard at all. None (no row) when no Claude Code guard
+    hook is installed here."""
+    try:
+        from . import guard
+        from .guard_adapters import (
+            plugin_release_fix,
+            plugin_status,
+            release_problem,
+            settings_hook_fix,
+        )
+        from .guard_release import plugin_problem
+    except ImportError:
+        return None
+    name = "Agent guard (Claude Code)"
+    try:
+        plugin = plugin_status()
+        scopes = [g for g in (False, True) if guard.is_installed(guard._settings_path(g))]
+        if not plugin["enabled"] and not scopes:
+            return None
+        if plugin["off"]:
+            how = "FINOPS_GUARD=off" if plugin["off"] == "env" else "nable guard off"
+            return {"name": name, "ok": None, "warnings": [],
+                    "detail": f"off ({how}): every hook lets each call through unchecked",
+                    "recommendation": "nable guard on" if plugin["off"] == "flag"
+                    else "unset FINOPS_GUARD"}
+        problems: list[dict] = []
+        if plugin["enabled"]:
+            stuck = plugin_problem() if plugin["runs"] else None
+            if not plugin["runs"]:
+                problems.append({"detail": "the Claude Code plugin's hook needs uvx, which is "
+                                           "not on PATH, so it checks nothing",
+                                 "recommendation": "install uv (https://docs.astral.sh/uv/), "
+                                                   "then restart Claude Code"})
+            elif stuck:
+                problems.append({"detail": f"the Claude Code plugin's hook runs finops-mcp "
+                                           f"{stuck[0]}, which uvx cannot install here, so "
+                                           "it checks nothing",
+                                 "warning": f"uvx: {stuck[1]}",
+                                 "recommendation": plugin_release_fix(stuck[0])})
+        for is_global in scopes:
+            path = guard._settings_path(is_global)
+            flag = " --global" if is_global else ""
+            broken = guard.broken_hook_command(path)
+            stuck = None if broken else release_problem("claude", is_global)
+            if broken:
+                problems.append({"detail": f"the hook in {path} names a program that does "
+                                           "not exist, so it checks nothing",
+                                 "recommendation": f"nable guard install{flag}"})
+            elif stuck:
+                problems.append({"detail": f"the hook in {path} runs finops-mcp {stuck[0]}, "
+                                           "which uvx cannot install here, so it checks "
+                                           "nothing",
+                                 "warning": f"uvx: {stuck[1]}",
+                                 "recommendation": settings_hook_fix(stuck[0], flag)})
+        if problems:
+            first = problems[0]
+            return {"name": name, "ok": False, "detail": first["detail"],
+                    "warnings": [p["warning"] for p in problems if p.get("warning")]
+                    + [p["detail"] for p in problems[1:]],
+                    "recommendation": first["recommendation"]}
+        where = ", ".join((["the Claude Code plugin"] if plugin["enabled"] else [])
+                          + [str(guard._settings_path(g)) for g in scopes])
+        return {"name": name, "ok": True, "detail": f"on: {where}", "warnings": []}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
+        # A diagnostic never fails the doctor.
+        return {"name": name, "ok": None, "warnings": [],
+                "detail": f"could not read the guard's state ({type(e).__name__})"}
+
+
+def _check_guard_policy() -> dict:
+    """Is the guard judging with the policy written down?
+
+    A nable.policy.yaml that does not parse, or a value in it (or in a
+    FINOPS_POLICY_* override) the guard cannot use, makes the guard fall back
+    to its defaults, silently, on every tool call: that is its fail-safe, and
+    the hook cannot print. Only `nable guard doctor` used to say so. This
+    names the file, the fix and the defaults in effect instead."""
+    name = "Guard policy"
+    try:
+        from .policy import in_effect_text, policy_report
+        report = policy_report()
+    except Exception as e:  # noqa: BLE001 - a diagnostic never fails the doctor
+        return {"name": name, "ok": None, "warnings": [],
+                "detail": f"could not read the guard policy ({type(e).__name__})"}
+    effect = in_effect_text(report)
+    if report["broken"]:
+        return {"name": name, "ok": False,
+                "detail": (f"broken, so the guard uses defaults: {report['problems'][0]}. "
+                           f"In effect: {effect}"),
+                "warnings": report["problems"][1:], "recommendation": report["fix"],
+                "path": report["path"], "problems": report["problems"],
+                "in_effect": report["in_effect"]}
+    where = (f"{report['path']}" if report["exists"]
+             else f"no policy file at {report['path']}, so the defaults apply")
+    return {"name": name, "ok": True, "detail": f"{where}. In effect: {effect}",
+            "warnings": [], "path": report["path"], "problems": [],
+            "in_effect": report["in_effect"]}
+
+
 def _check_audit_log(last_n: int = 5) -> dict:
     """Return recent audit log entries from the vault."""
     try:
@@ -633,6 +740,60 @@ def _check_license() -> dict:
             "warnings": []}
 
 
+def _check_environment() -> dict:
+    """The configuration nable reads from the environment, by name.
+
+    Headless use (CI, cron, a container) is configured by environment alone,
+    where a misspelled name is silent. This lists the FINOPS_*/NABLE_* names
+    in effect (names only, never values: several are secrets), names any it
+    does not read with the closest one it does, and flags a name exported in
+    the environment that a credential stored in the vault outranks
+    (security/env.get_env reads the vault first)."""
+    from . import env_vars
+    from .config import is_airgap
+    from .storage.db import data_dir
+    from .update_check import _disabled as _update_check_off
+
+    in_effect = sorted(n for n in os.environ if n in env_vars.KNOWN)
+    unknown = env_vars.unknown(os.environ)
+    warnings: list[str] = []
+    for u in unknown:
+        why = (f"did you mean {u['did_you_mean']}?" if u["did_you_mean"]
+               else u["note"] or "nable does not read it")
+        warnings.append(f"{u['name']} is set but nable does not read it ({why})")
+
+    vault_wins: list[str] = []
+    try:
+        from .security.vault import Vault
+        stored = {k for k in Vault.default().list_keys() if not k.startswith("pack:")}
+        vault_wins = sorted(n for n in stored if os.environ.get(n))
+    except Exception:  # noqa: BLE001 - the credential check reports a broken vault
+        pass
+    for n in vault_wins:
+        warnings.append(f"{n} is exported and also stored in the vault; the stored value is "
+                        f"used (`nable vault delete {n}` makes the environment's count)")
+
+    try:
+        where = str(data_dir())
+    except OSError as e:
+        where = f"unusable ({e})"
+        warnings.append(f"The data directory cannot be used: {e}")
+    detail =(f"{len(in_effect)} nable setting(s) from the environment: {', '.join(in_effect)}"
+              if in_effect else "No FINOPS_*/NABLE_* settings in the environment; defaults apply")
+    return {
+        "name": "Environment",
+        "ok": True,
+        "detail": f"{detail}. Data dir: {where}",
+        "warnings": warnings,
+        "set": in_effect,
+        "unknown": unknown,
+        "vault_wins": vault_wins,
+        "data_dir": where,
+        "airgap": is_airgap(),
+        "update_check": not _update_check_off(),
+    }
+
+
 def run_doctor(as_json: bool = False) -> int:
     """
     Run all health checks and print a report.
@@ -642,6 +803,7 @@ def run_doctor(as_json: bool = False) -> int:
         _check_python_version(),
         _check_path_and_install(),
         _check_license(),
+        _check_environment(),
         _check_keyring_storage(),
         _check_aws_scope(),
         _check_azure_permissions(),
@@ -649,7 +811,10 @@ def run_doctor(as_json: bool = False) -> int:
         _check_telemetry(),
         _check_network(),
         _check_audit_log(),
+        _check_guard_hook(),
+        _check_guard_policy(),
     ]
+    checks = [c for c in checks if c is not None]
 
     if as_json:
         print(json.dumps(checks, indent=2, default=str))
@@ -729,6 +894,10 @@ def main(args: list[str] | None = None) -> None:
         description="Health check for your nable (finops-mcp) installation",
     )
     p.add_argument("--json", action="store_true", help="Output results as JSON")
+    # Every other entry point answers --version; this one exited 2 on it.
+    from . import __version__
+    p.add_argument("--version", action="version",
+                   version=f"finops-doctor (finops-mcp) {__version__ or 'unknown'}")
     p.add_argument(
         "--audit", action="store_true",
         help="Print audit log entries instead of running health checks",

@@ -43,6 +43,12 @@ class EvidenceSpec:
 
 
 _LIST_PRICE = "Priced at public on-demand list rate, not your negotiated or committed rate."
+_UNATTACHED_AT_SCAN = (
+    "Unattached at scan time. AWS does not report when a volume was detached, so "
+    "how long it has been unattached is not known.")
+_UNASSOCIATED_AT_SCAN = (
+    "Not associated at scan time. AWS does not report when an address was detached "
+    "from its instance or network interface, so how long it has been unused is not known.")
 
 # One entry per waste_type emitted by waste.py and optimizer.py.
 #
@@ -53,15 +59,24 @@ _LIST_PRICE = "Priced at public on-demand list rate, not your negotiated or comm
 # see, is INFERRED.
 WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
     # ── observed state, price follows directly ──────────────────────────────
+    # Unattached and unassociated are what one scan saw. EC2 reports neither
+    # when a volume was detached nor when an address was disassociated, so a
+    # volume between a stop and a start, or an address mid-failover, reads the
+    # same as one abandoned for a year. The state was observed and the price
+    # follows from it, so the figure stands; the confidence is medium, and the
+    # assumption is stated on the finding. These were MEASURED/high.
     "unattached_ebs_volume": EvidenceSpec(
-        MEASURED, "high",
-        assumptions=(_LIST_PRICE,),
+        MEASURED, "medium",
+        assumptions=(_UNATTACHED_AT_SCAN, _LIST_PRICE),
     ),
     "gp2_should_migrate_to_gp3": EvidenceSpec(
         MEASURED, "high",
         assumptions=("Same-size gp3 provisioned to the gp2 volume's IOPS and throughput.",),
     ),
-    "unassociated_elastic_ip": EvidenceSpec(MEASURED, "high"),
+    "unassociated_elastic_ip": EvidenceSpec(
+        MEASURED, "medium",
+        assumptions=(_UNASSOCIATED_AT_SCAN,),
+    ),
     "s3_incomplete_multipart_uploads": EvidenceSpec(
         MEASURED, "high",
         assumptions=("Orphaned parts billed at the bucket's current storage class rate.",),
@@ -70,8 +85,20 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
         MEASURED, "high",
         assumptions=("Untagged and older than the cutoff means unreferenced.",),
     ),
+    # The duplicate trails are observed; the dollars are a flat $20/mo per
+    # region, not derived from anything read. This was MEASURED/high.
     "duplicate_cloudtrail_management_events": EvidenceSpec(
-        MEASURED, "high",
+        INFERRED, "medium",
+        why_unsure=(
+            "The duplicate trails are real, but the figure is a flat $20/mo placeholder. "
+            "Each extra copy bills $2 per 100,000 management events, and the event count "
+            "for this region was not read."
+        ),
+        confirm_steps=(
+            ("Check the CloudTrail line in Cost Explorer (usage type ending "
+             "PaidEventsRecorded) for the billed copies."),
+            "Confirm no audit or organization requirement needs the second trail.",
+        ),
         assumptions=("The first management-events trail is free; each extra copy bills.",),
     ),
 

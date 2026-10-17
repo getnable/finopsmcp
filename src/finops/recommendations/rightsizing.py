@@ -76,6 +76,18 @@ class RightsizingRecommendation:
     finding: str                = ""         # Compute Optimizer finding label
     metadata: dict[str, Any]    = field(default_factory=dict)
 
+    # What avg_cpu_pct and avg_mem_pct actually hold, and over how many days.
+    # The Compute Optimizer API returns utilization only as the Maximum over
+    # its look-back period (14, 32 or 93 days), and those figures sit in the
+    # avg_* fields so every consumer keeps reading one place; "maximum" here
+    # is what makes the output call them peaks rather than averages.
+    utilization_statistic: str  = "average"  # "average" | "maximum"
+    lookback_days: int          = _LOOKBACK_DAYS
+
+    @property
+    def is_peak(self) -> bool:
+        return self.utilization_statistic == "maximum"
+
     @property
     def title(self) -> str:
         label = self.name or self.instance_id
@@ -85,25 +97,38 @@ class RightsizingRecommendation:
 
     @property
     def description(self) -> str:
-        parts = [f"Avg CPU {self.avg_cpu_pct:.1f}%"]
+        parts = [f"{'Peak' if self.is_peak else 'Avg'} CPU {self.avg_cpu_pct:.1f}%"]
         if self.avg_mem_pct is not None:
-            parts.append(f"mem {self.avg_mem_pct:.1f}%")
-        parts.append(f"over {_LOOKBACK_DAYS}d.")
+            parts.append(f"{'peak ' if self.is_peak else ''}mem {self.avg_mem_pct:.1f}%")
+        parts.append(f"over {self.lookback_days}d.")
         if self.monthly_savings:
             parts.append(f"Saving ~${self.monthly_savings:,.0f}/mo.")
         if self.source == "cloudwatch_fallback":
             parts.append("(CPU-only estimate — enable Compute Optimizer for full analysis)")
+            # The gap between two types' us-east-1 rates; outside us-east-1
+            # nothing nable holds bounds it (Compute Optimizer prices in-region).
+            from ..aws_prices import us_east_1_list_note
+            note = us_east_1_list_note(self.region)
+            if note and self.monthly_savings:
+                parts.append(f"Saving {note}.")
         return " ".join(parts)
 
 
 # ── Compute Optimizer (primary) ───────────────────────────────────────────────
 
-def _co_utilization(metrics: list[dict]) -> dict[str, float]:
-    """Extract named utilization metrics from a Compute Optimizer metrics list."""
-    out: dict[str, float] = {}
+def _co_utilization(metrics: list[dict]) -> dict[str, Any]:
+    """Extract named utilization metrics from a Compute Optimizer metrics list.
+
+    "statistic" is "maximum" unless every CPU and memory metric says Average:
+    the API documents that it returns only the Maximum statistic.
+    """
+    out: dict[str, Any] = {}
+    stats: set[str] = set()
     for m in metrics:
         name = m.get("name", "")
         value = m.get("value", 0.0)
+        if name in ("Cpu", "Memory"):
+            stats.add(str(m.get("statistic") or "Maximum").lower())
         if name == "Cpu":
             out["cpu"] = round(float(value), 1)
         elif name == "Memory":
@@ -111,6 +136,7 @@ def _co_utilization(metrics: list[dict]) -> dict[str, float]:
         elif name in ("NetworkInBytesPerSecond", "NetworkOutBytesPerSecond"):
             out.setdefault("net_mbps", 0.0)
             out["net_mbps"] = round(out["net_mbps"] + float(value) / 1_000_000, 3)
+    out["statistic"] = "average" if stats == {"average"} else "maximum"
     return out
 
 
@@ -195,6 +221,11 @@ def _fetch_ec2_from_co(co_client: Any, account_id: str) -> list[RightsizingRecom
             risk = str(best.get("performanceRisk", "")).lower()
             confidence = "high" if risk in ("very_low", "low", "0", "1") else "medium"
 
+            try:
+                lookback = int(round(float(rec.get("lookBackPeriodInDays") or _LOOKBACK_DAYS)))
+            except (TypeError, ValueError):
+                lookback = _LOOKBACK_DAYS
+
             results.append(RightsizingRecommendation(
                 instance_id=iid,
                 instance_type=itype,
@@ -211,6 +242,8 @@ def _fetch_ec2_from_co(co_client: Any, account_id: str) -> list[RightsizingRecom
                 confidence=confidence,
                 finding=finding,
                 metadata={"options_count": len(options)},
+                utilization_statistic=util["statistic"],
+                lookback_days=lookback,
             ))
     return results
 
@@ -411,7 +444,7 @@ def _analyze_cloudwatch_fallback(
     concurrently. Bounded workers keep well under CloudWatch API limits.
     """
     import boto3
-    from concurrent.futures import ThreadPoolExecutor
+    from ..aws_read_failures import ScopedThreadPool
 
     cw_cov: dict[str, Any] = {
         "regions_scanned": len(regions), "regions_failed": [],
@@ -422,7 +455,7 @@ def _analyze_cloudwatch_fallback(
 
     # Phase 1: discover running instances, regions in parallel.
     instances: list[dict] = []
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
+    with ScopedThreadPool(max_workers=min(8, max(1, len(regions)))) as pool:
         for region, result in zip(regions, pool.map(_list_instances_or_error, regions)):
             if isinstance(result, str):
                 cw_cov["regions_failed"].append({"region": region, "error_class": result})
@@ -450,7 +483,7 @@ def _analyze_cloudwatch_fallback(
         return inst, avg_cpu, max_cpu
 
     results: list[RightsizingRecommendation] = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ScopedThreadPool(max_workers=10) as pool:
         for inst, avg_cpu, max_cpu in pool.map(_cpu, instances):
             if avg_cpu is None or max_cpu is None:
                 cw_cov["instances_skipped"] += 1
@@ -665,9 +698,13 @@ def rightsizing_summary(
             "source":         r.source,
             "current_type":   r.instance_type,
             "recommended_type": r.recommended_type,
-            "avg_cpu_pct":    r.avg_cpu_pct,
-            "max_cpu_pct":    r.max_cpu_pct or None,
-            "avg_mem_pct":    r.avg_mem_pct,
+            # A Compute Optimizer figure is the period's maximum, so it is
+            # reported as one, never as an average.
+            "avg_cpu_pct":    None if r.is_peak else r.avg_cpu_pct,
+            "max_cpu_pct":    r.avg_cpu_pct if r.is_peak else (r.max_cpu_pct or None),
+            "avg_mem_pct":    None if r.is_peak else r.avg_mem_pct,
+            "max_mem_pct":    r.avg_mem_pct if r.is_peak else None,
+            "lookback_days":  r.lookback_days,
             "monthly_savings": r.monthly_savings,
             "adjusted_monthly_savings": a.adjusted_monthly_savings,
             "verdict":        a.verdict,

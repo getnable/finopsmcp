@@ -496,6 +496,45 @@ def job_weekly_email_digest() -> dict:
             current_week_total = week_total(week_start, today.isoformat())
             prev_week_total = week_total(prev_week_start, prev_week_end)
 
+            # Coverage per provider: total and how many days have a snapshot. A
+            # provider whose fetch failed writes no rows, so a bare difference of
+            # the two sums reported the missing provider as a fall in spend
+            # (the daily digest already guards against this; the weekly did not).
+            def by_provider_days(start: str, end: str) -> dict[str, tuple[float, int]]:
+                rows_ = conn.execute(
+                    select(
+                        cost_snapshots.c.provider,
+                        func.sum(cost_snapshots.c.amount_usd).label("total"),
+                        func.count(func.distinct(cost_snapshots.c.snapshot_date)).label("days"),
+                    )
+                    .where(cost_snapshots.c.snapshot_date >= start)
+                    .where(cost_snapshots.c.snapshot_date < end)
+                    .group_by(cost_snapshots.c.provider)
+                ).fetchall()
+                return {r.provider: (float(r.total or 0), int(r.days or 0)) for r in rows_}
+
+            cur_cov = by_provider_days(week_start, today.isoformat())
+            prev_cov = by_provider_days(prev_week_start, prev_week_end)
+            # Like for like: a provider counts toward the change only when both
+            # weeks have it on the same number of days.
+            common = {p for p in set(cur_cov) & set(prev_cov) if cur_cov[p][1] == prev_cov[p][1]}
+            uneven = sorted((set(cur_cov) | set(prev_cov)) - common)
+            delta_current = None
+            coverage_note = ""
+            if uneven and prev_cov:
+                delta_current = sum(cur_cov[p][0] for p in common)
+                prev_week_total = sum(prev_cov[p][0] for p in common)
+
+                def _days(cov: dict, p: str) -> int:
+                    return cov.get(p, (0.0, 0))[1]
+
+                gaps = ", ".join(f"{p.upper()} ({_days(cur_cov, p)} of 7 days this week, "
+                                 f"{_days(prev_cov, p)} last week)" for p in uneven)
+                coverage_note = (
+                    f"Incomplete comparison: {gaps}. The change shown covers only "
+                    + (", ".join(p.upper() for p in sorted(common)) or "no provider")
+                    + ", so it is not the whole bill moving.")
+
             rows = conn.execute(
                 select(
                     cost_snapshots.c.provider,
@@ -517,19 +556,30 @@ def job_weekly_email_digest() -> dict:
 
         anomalies = get_active_anomalies(limit=10)
 
+        # rightsizing_summary's rows carry no "title" or "description": reading
+        # them raised KeyError inside this try, the except emptied the list, and
+        # every digest said "No recommendations at this time" whatever the
+        # account held. A read that fails is said to have failed, not to have
+        # found nothing.
+        recommendations_note = ""
         try:
             rs = analyze_rightsizing()
             recs = rightsizing_summary(rs)["recommendations"][:5]
             rec_list = [
                 {
-                    "title": r["title"],
-                    "description": r["description"],
+                    "title": (f"Resize {r.get('name') or r.get('instance_id', '?')} "
+                              f"({r.get('current_type', '?')} to "
+                              f"{r.get('recommended_type', '?')})"),
+                    "description": str(r.get("why") or r.get("action") or ""),
                     "monthly_savings": r["monthly_savings"],
                 }
                 for r in recs
             ]
-        except Exception:
+        except Exception as exc:
+            log.warning("weekly digest: rightsizing could not be read: %s", exc)
             rec_list = []
+            recommendations_note = (f"Rightsizing could not be read ({type(exc).__name__}), "
+                                    "so this is not a finding of no recommendations.")
 
         return send_weekly_digest_result(
             total_spend=current_week_total,
@@ -538,6 +588,9 @@ def job_weekly_email_digest() -> dict:
             anomalies=anomalies,
             recommendations=rec_list,
             has_data=bool(rows),
+            delta_current=delta_current,
+            coverage_note=coverage_note,
+            recommendations_note=recommendations_note,
         )
     except Exception as e:
         log.exception("Weekly email digest job failed")

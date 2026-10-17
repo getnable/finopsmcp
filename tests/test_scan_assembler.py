@@ -9,9 +9,29 @@ a free tool would start charging the user's own cloud account.
 from __future__ import annotations
 
 import asyncio
+import threading
 from unittest.mock import patch
 
+import pytest
+
 import finops.scan_assembler as sa
+
+
+@pytest.fixture(autouse=True)
+def _no_worker_outlives_its_test():
+    """A provider abandoned on timeout keeps its pool worker, which is not a
+    daemon thread. `nable scan`'s Ctrl-C and crash paths hard-exit when such a
+    thread is alive (cli_scan._threads_lingering), so a worker left running
+    here made tests/test_cli_scan_says_what_happened.py's Ctrl-C test call
+    os._exit(130) and end the whole run when it came next. A test that hangs a
+    provider must release it before it ends."""
+    before = set(threading.enumerate())
+    yield
+    left = [t for t in threading.enumerate() if t not in before and not t.daemon]
+    for t in left:
+        t.join(timeout=1.0)
+    alive = [t.name for t in left if t.is_alive()]
+    assert not alive, f"worker thread(s) still running after the test: {alive}"
 
 
 def _llm_sample(**over):
@@ -66,6 +86,38 @@ def test_empty_ai_block_is_dropped():
                side_effect=lambda **kw: _llm_sample(total_usd=0.0, by_provider={})):
         blocks, _ = sa.gather_extra_providers(frozenset({"llm"}), spend=False)
     assert blocks == []
+
+
+_ANTHROPIC_401 = ("credential_invalid: Anthropic refused ANTHROPIC_ADMIN_KEY on the usage "
+                  "and cost reports (Client error '401 Unauthorized')")
+
+
+def test_an_ai_provider_that_could_not_be_read_is_named():
+    """A fixture account with OpenAI ($600), Anthropic ($450) and a LiteLLM
+    proxy connected, Anthropic's admin key refused: get_all_llm_costs said
+    partial, failed_providers {"anthropic": ...}, "Not read: anthropic". The
+    scan printed "AI & GPU $1,014/mo [estimated]  Openai $600 · Bedrock $414"
+    with no word that Anthropic was not read."""
+    sample = _llm_sample(total_usd=1014.25, by_provider={"openai": 600.0, "bedrock": 414.25},
+                         failed_providers={"anthropic": _ANTHROPIC_401}, partial=True)
+    with patch("finops.connectors.llm_costs.get_all_llm_costs", side_effect=lambda **kw: sample):
+        blocks, _ = sa.gather_extra_providers(frozenset({"llm"}), spend=True)
+    [ai] = [b for b in blocks if b.family == "ai"]
+    assert ai.status == "ok" and ai.spend_usd == 1014.25
+    assert "not read: anthropic" in (ai.note or ""), ai.note
+
+
+def test_ai_providers_that_all_failed_are_not_dropped_as_empty():
+    """Anthropic alone connected and refused: total 0 and nothing by provider,
+    which the empty-block rule above dropped, so the scan showed no AI at all,
+    the same as an account with none."""
+    sample = _llm_sample(total_usd=0.0, by_provider={},
+                         failed_providers={"anthropic": _ANTHROPIC_401}, partial=True)
+    with patch("finops.connectors.llm_costs.get_all_llm_costs", side_effect=lambda **kw: sample):
+        blocks, _ = sa.gather_extra_providers(frozenset({"llm"}), spend=False)
+    [ai] = [b for b in blocks if b.family == "ai"]
+    assert ai.status != "ok" and ai.spend_usd is None
+    assert "anthropic" in (ai.note or ""), ai.note
 
 
 def test_aws_only_families_gather_nothing():
@@ -170,14 +222,21 @@ def test_demo_blocks_mirror_free_spend_boundary():
 
 
 def test_timeout_marks_abandoned_and_notes():
+    release = threading.Event()
+
     async def _slow(client, *a, **k):
-        await asyncio.sleep(2.0)
+        # Hangs well past the timeout, until the test is done with it.
+        for _ in range(200):
+            if release.is_set():
+                break
+            await asyncio.sleep(0.01)
         return {"total_monthly_savings_usd": 1.0}
 
     with patch("finops.connectors.gcp.GCPConnector", lambda: _FakeGCP(True)), \
          patch("finops.recommendations.gcp_waste.audit_gcp_waste", side_effect=_slow):
         blocks, abandoned = sa.gather_extra_providers(
             frozenset({"gcp"}), spend=False, per_provider_timeout=0.4, overall_budget=1.0)
+        release.set()
     gcp = [b for b in blocks if b.family == "gcp"][0]
     assert gcp.status == "timeout"
     assert abandoned is True   # a lingering worker thread -> caller hard-exits

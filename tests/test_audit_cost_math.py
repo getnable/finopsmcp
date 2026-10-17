@@ -562,10 +562,20 @@ def test_waste_patterns_fire_on_real_cost_explorer_service_names():
 
     assert "error" not in result, result
     fired = {f["pattern_id"] for f in result["findings"]}
-    assert "no-savings-plans" in fired, (
-        f"${EC2_PER_DAY * 30:,.0f}/mo of uncovered EC2 and the savings-plans "
-        f"pattern did not fire; patterns that did: {sorted(fired) or 'none at all'}")
+    assert fired, "no pattern resolved the Cost Explorer service name"
     assert result["total_monthly_waste"] > 0
+    # The savings-plans pattern finds this CE-named series, and prices it when
+    # coverage has been read: 0% read is 26% of $27,000, $7,020 a month. The
+    # cost history holds no coverage, so scan_waste_patterns does not price it
+    # (it used to call this account 0% covered without reading anything).
+    from finops.ml.patterns import PatternContext, _check_savings_plans_coverage
+
+    series = {CE_EC2: [EC2_PER_DAY] * 90}
+    read = _check_savings_plans_coverage(PatternContext(
+        daily_costs=series, by_resource=[], snapshots=[{"savings_plan_coverage_pct": 0.0}]))
+    assert read is not None and read.monthly_waste == pytest.approx(EC2_PER_DAY * 30 * 0.26)
+    assert "no-savings-plans" not in fired, (
+        "the savings-plans pattern priced coverage it never read")
 
 
 def _service_literals_in_patterns() -> set[str]:
@@ -736,7 +746,7 @@ _COMMITMENT_DATA = {
 def test_commitment_dimension_publishes_the_savings_build_scorecard_reads():
     """Fails today. _score_commitment_coverage reads potential_savings_usd into a
     local and writes only coverage_pct and on_demand_spend_usd into its metadata,
-    while build_scorecard reads commits.metadata["potential_savings_usd"] * 0.7
+    while build_scorecard reads commits.metadata["potential_savings_usd"]
     back out of it. The read is always 0. This is the lower half of the defect:
     the producer and the consumer of one metadata key disagree, silently, because
     a dict .get() with a default cannot tell "absent" from "zero"."""
@@ -752,7 +762,9 @@ def test_commitment_dimension_publishes_the_savings_build_scorecard_reads():
 def test_scorecard_recoverable_total_includes_the_commitment_opportunity():
     """Fails today, one level up, and this is the sentence the customer reads. An
     account at 10% coverage with a $16,000/mo Savings Plan opportunity should be
-    told about 70% of it, $11,200, in "Estimated $X/month recoverable". It is
+    told about it in "Estimated $X/month recoverable" (the whole $16,000, the
+    figure the card's action line prints; a 0.7 haircut with no source used to
+    make it $11,200). It is
     told $0 while the same report grades commitments the biggest gap, so the
     report names the problem and prices it at nothing. The dollar figure does
     survive verbatim in the actions string, so the error is one-directional and
@@ -765,9 +777,9 @@ def test_scorecard_recoverable_total_includes_the_commitment_opportunity():
         total_monthly_spend=60000.0,
     )
 
-    assert card.potential_savings_usd >= 16000.0 * 0.7 - 0.01, (
-        f"recoverable is ${card.potential_savings_usd:,.2f}/mo and drops the "
-        f"$11,200 commitment component entirely; the summary reads "
+    assert card.potential_savings_usd == pytest.approx(16000.0), (
+        f"recoverable is ${card.potential_savings_usd:,.2f}/mo, not the "
+        f"$16,000 commitment component; the summary reads "
         f"{card.summary!r}")
 
 
@@ -793,10 +805,15 @@ def test_commitment_coverage_scores_the_hosted_dashboards_shape_not_an_f():
 
     dim = _score_commitment_coverage(hosted_shaped)
 
-    assert dim.grade != "F", f"graded {dim.grade} on 40% real coverage: {dim.findings}"
-    assert dim.metadata["coverage_pct"] == pytest.approx(40.0), (
-        "coverage should be the average of the two instruments that answered "
-        "(55% SP + 25% RI) / 2, not the dict-default 0")
+    assert dim.grade != "F", f"graded {dim.grade} on 55% real coverage: {dim.findings}"
+    # 55% of eligible spend under Savings Plans, 25% of running hours under RIs.
+    # This pinned their average, 40%, a figure that is a share of nothing: the
+    # two have different denominators (spend and hours). With both covering
+    # something and no spend for RIs, the Savings Plans figure is the headline
+    # and RI coverage is reported apart (commitments.combine_coverage).
+    assert dim.metadata["coverage_pct"] == pytest.approx(55.0), (
+        "coverage should be the Savings Plans share of spend, not the dict-default 0 "
+        "and not an average of a spend share and an hours share")
     assert dim.metadata["on_demand_spend_usd"] == pytest.approx(4000.0)
     assert not any("Only 0%" in f for f in dim.findings), dim.findings
 

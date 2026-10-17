@@ -149,8 +149,11 @@ def _parse_mem(mem_str: str) -> float:
     if not mem_str:
         return 0.0
     mem_str = mem_str.strip()
+    # Decimal suffixes are powers of 1000 bytes: "1G" is 10^9 bytes, 953.67
+    # MiB. "M" and "G" were read as 1/1.024 and 1000 MiB, 2.4% and 4.9% high.
+    mib = 2 ** 20
     units = {"Ki": 1/1024, "Mi": 1, "Gi": 1024, "Ti": 1024*1024,
-             "K": 1/1.024/1024, "M": 1/1.024, "G": 1024/1.024}
+             "k": 1e3 / mib, "K": 1e3 / mib, "M": 1e6 / mib, "G": 1e9 / mib, "T": 1e12 / mib}
     for suffix, factor in units.items():
         if mem_str.endswith(suffix):
             return float(mem_str[:-len(suffix)]) * factor
@@ -270,10 +273,12 @@ def allocate_cluster_costs(
         cap = node.status.capacity or {}
         cpu_mc = _parse_cpu(cap.get("cpu", "0"))
         mem_mib = _parse_mem(cap.get("memory", "0"))
-        # Use actual capacity minus system overhead (~10%)
+        # Allocatable already nets out what kubelet reserves for the system.
+        # A further 0.95 here let pods that requested the whole node be
+        # allocated 105% of its cost.
         allocatable = node.status.allocatable or cap
-        alloc_cpu = _parse_cpu(allocatable.get("cpu", str(cpu_mc / 1000))) * 0.95
-        alloc_mem = _parse_mem(allocatable.get("memory", str(mem_mib * 1024 * 1024))) * 0.95
+        alloc_cpu = _parse_cpu(allocatable.get("cpu", str(cpu_mc / 1000)))
+        alloc_mem = _parse_mem(allocatable.get("memory", str(mem_mib * 1024 * 1024)))
 
         nodegroup = labels.get("eks.amazonaws.com/nodegroup", "")
         daily_cost = _node_daily_cost(instance_type, nodegroup)
@@ -363,6 +368,7 @@ def allocate_cluster_costs(
 
         total_cpu_req = sum(p["cpu_req_mc"] for p in pods)
         total_mem_req = sum(p["mem_req_mib"] for p in pods)
+        allocated_share = 0.0
 
         for p in pods:
             cpu_share = (p["cpu_req_mc"] / node_cpu) if node_cpu else 0
@@ -375,6 +381,7 @@ def allocate_cluster_costs(
                 share = 1.0 / len(pods)
 
             daily = node_daily * share
+            allocated_share += share
             pod_costs.append(PodCost(
                 pod_name=p["pod_name"],
                 namespace=p["namespace"],
@@ -387,6 +394,26 @@ def allocate_cluster_costs(
                 share_fraction=share,
                 daily_cost_usd=round(daily, 4),
                 monthly_cost_usd=round(daily * _DAYS_PER_MONTH, 2),
+            ))
+
+        # The part of the node no pod requested is idle. Only a node with no
+        # pods at all used to count, so a node running one small pod
+        # contributed nothing to idle_cost.
+        unrequested = max(0.0, 1.0 - allocated_share)
+        if unrequested > 0 and node_daily:
+            idle_daily = node_daily * unrequested
+            pod_costs.append(PodCost(
+                pod_name="__idle__",
+                namespace="__idle__",
+                team="__idle__",
+                deployment="__idle__",
+                node_name=node_name,
+                node_instance_type=node_info["instance_type"],
+                cpu_req_millicores=0,
+                mem_req_mib=0,
+                share_fraction=unrequested,
+                daily_cost_usd=round(idle_daily, 4),
+                monthly_cost_usd=round(idle_daily * _DAYS_PER_MONTH, 2),
             ))
 
     # ── Aggregate by namespace ────────────────────────────────────────────────

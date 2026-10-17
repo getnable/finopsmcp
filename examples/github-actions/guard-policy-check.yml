@@ -1,0 +1,109 @@
+name: nable guard policy check
+
+# Copy into YOUR repo at .github/workflows/nable-guard-policy.yml (this repo
+# does not run it). It checks two things on every pull request that touches
+# them, with no cloud credentials:
+#
+#   1. nable.policy.yaml, the guard policy this repo keeps (point
+#      FINOPS_POLICY_FILE elsewhere if it lives elsewhere), can be used as
+#      written. A file that does not parse, a value nable cannot use, or a key
+#      it does not take makes `nable guard check` exit 1, name the file and the
+#      fix, and say which defaults applied. The guard hook itself never fails on
+#      a broken policy: it judges with the defaults, silently. This job is
+#      where you hear about it.
+#   2. Every command in .nable/guarded-commands.txt (one per line; # comments)
+#      gets the verdict you expect from the policy: the job fails on a deny,
+#      and on an ask too when FAIL_ON_ASK is "1". Put the commands your agents
+#      and scripts run here, and a policy change that would let one through, or
+#      stop one, shows up in review.
+#
+# Without the commands file, only the policy is checked (the job says so).
+# Without a policy file, the commands are judged against nable's defaults.
+
+on:
+  pull_request:
+    paths: ["nable.policy.yaml", ".nable/guarded-commands.txt"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard-policy:
+    name: Guard policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FINOPS_POLICY_FILE: ${{ github.workspace }}/nable.policy.yaml
+      COMMANDS_FILE: ${{ github.workspace }}/.nable/guarded-commands.txt
+      FAIL_ON_ASK: "0"
+      FINOPS_NO_KEYRING: "1"
+      NABLE_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nable
+        run: python -m pip install --quiet "finops-mcp==0.12.0"
+
+      - name: Check the policy and the commands
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, sys
+          policy, cmds_file = os.environ["FINOPS_POLICY_FILE"], os.environ["COMMANDS_FILE"]
+          fail_on_ask = os.environ.get("FAIL_ON_ASK") == "1"
+          summary = ["## nable guard policy check", ""]
+          if not os.path.exists(policy):
+              print(f"::notice::No {policy}: judging against nable's default policy.")
+              summary.append(f"No `{os.path.basename(policy)}`: nable's defaults apply.")
+          if os.path.exists(cmds_file):
+              with open(cmds_file) as f:
+                  cmds = [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+          else:
+              print(f"::notice::No {cmds_file}: checking the policy file only.")
+              cmds = []
+          failed = False
+          policy_reported = False
+          for cmd in cmds or ["aws s3 ls"]:
+              r = subprocess.run(["nable", "guard", "check", "--json", "--command", cmd],
+                                 capture_output=True, text=True, stdin=subprocess.DEVNULL)
+              try:
+                  doc = json.loads(r.stdout)
+              except ValueError:
+                  print(f"::error::nable guard check gave no verdict for {cmd!r} "
+                        f"(exit {r.returncode}): {r.stderr.strip()[-300:]}")
+                  failed = True
+                  continue
+              pol = doc.get("policy") or {}
+              if pol.get("broken") and not policy_reported:
+                  policy_reported = True
+                  failed = True
+                  for problem in pol["problems"]:
+                      print(f"::error title=nable policy::{problem}")
+                  print(f"::error title=nable policy::Fix: {pol['fix']}")
+                  summary += ["**The policy could not be used as written:**", ""]
+                  summary += [f"- {p}" for p in pol["problems"]] + ["", f"Fix: {pol['fix']}", ""]
+              if not cmds:
+                  break
+              decision = doc.get("decision")
+              summary.append(f"- `{cmd}`: **{decision}**, {doc.get('reason', '')}")
+              if decision == "deny" or (decision == "ask" and fail_on_ask):
+                  print(f"::error title=nable guard::{decision}: {cmd}: {doc.get('reason', '')}")
+                  failed = True
+              elif decision == "ask":
+                  print(f"::warning title=nable guard::ask: {cmd}: {doc.get('reason', '')}")
+          if not failed:
+              summary.append("")
+              summary.append("Policy usable" + (f"; {len(cmds)} command(s) as expected." if cmds
+                                                else "; no commands file to check."))
+          text = "\n".join(summary)
+          print(text)
+          out = os.environ.get("GITHUB_STEP_SUMMARY")
+          if out:
+              with open(out, "a") as f:
+                  f.write(text + "\n")
+          sys.exit(1 if failed else 0)
+          PY

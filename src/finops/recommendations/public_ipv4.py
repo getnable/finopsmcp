@@ -119,20 +119,19 @@ async def audit_public_ipv4(
     aws_client: AWSConnector instance (or anything with ._session).
     regions: explicit list of regions to scan; defaults to all opted-in regions.
     """
-    loop = asyncio.get_running_loop()
     session = getattr(aws_client, "_session", None)
 
     # Resolve region list
     if not regions:
         try:
-            regions = await loop.run_in_executor(None, _get_opted_in_regions, session)
+            regions = await asyncio.to_thread(_get_opted_in_regions, session)
         except Exception as exc:
             log.warning("Could not list regions, falling back to us-east-1: %s", exc)
             regions = ["us-east-1"]
 
     # Scan each region concurrently
     tasks = [
-        loop.run_in_executor(None, _audit_region_sync, session, region)
+        asyncio.to_thread(_audit_region_sync, session, region)
         for region in regions
     ]
     region_results = await asyncio.gather(*tasks, return_exceptions=True)

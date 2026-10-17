@@ -71,7 +71,7 @@ It checks what nable can already see (AWS often works with zero setup, it reuses
 
 ## Connect your cloud
 
-The plugin wires up the runtime. To link your accounts and see your first cost number, run the setup wizard once. Requires Python 3.10 or newer, check with `python3 --version`:
+The plugin wires up the runtime. To link your accounts and see your first cost number, run the setup wizard once. finops-mcp requires Python 3.11 or newer; the `--python 3.12` flag below has uv fetch one:
 
 ```
 uvx --python 3.12 --from finops-mcp finops welcome

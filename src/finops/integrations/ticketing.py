@@ -354,24 +354,37 @@ def _commitment_gap_ticket(gap: dict[str, Any]) -> tuple[str, str, str, list[str
     coverage_pct = gap.get("coverage_pct", 0)
     uncovered_usd = gap.get("uncovered_on_demand_usd", 0)
     monthly_uncovered = uncovered_usd / 3  # 3-month window
-    projected_savings = gap.get("projected_annual_savings", monthly_uncovered * 0.34 * 12)
+    from ..recommendations.commitments import blended_compute_sp_rate
+    # The rate get_commitment_analysis blended for this pool when the caller has
+    # it (CommitmentAnalysis.compute_sp_rate); without it, the plan's lower
+    # saving (Fargate's), as blended_compute_sp_rate prices an unread split.
+    rate = gap.get("compute_sp_rate") or blended_compute_sp_rate(None)[0]
+    projected = gap.get("projected_annual_savings")
+    # Computed here, the figure commits the whole monthly average, which the
+    # body says not to do; it is a ceiling and says so.
+    ceiling = projected is None
+    projected_savings = (monthly_uncovered * (1 - rate) * 12) if ceiling else projected
     recommendation = gap.get("recommendation", "Purchase Compute Savings Plan")
+    disc, floor = 1 - rate, rate
+    saves = "saves up to" if ceiling else "saves"
 
     title = (
         f"[FinOps] Commitment gap: {coverage_pct:.0f}% coverage, "
-        f"${monthly_uncovered:,.0f}/mo exposed (saves ${projected_savings:,.0f}/yr)"
+        f"${monthly_uncovered:,.0f}/mo exposed ({saves} ${projected_savings:,.0f}/yr)"
     )
     body = f"""## FinOps Commitment Coverage Gap
 
 **Current SP/RI coverage:** {coverage_pct:.1f}%
 **Uncovered on-demand (monthly avg):** **${monthly_uncovered:,.2f}**
-**Projected annual savings:** **${projected_savings:,.2f}**
+**Projected annual savings:** **${projected_savings:,.2f}**{" (a ceiling: every uncovered dollar committed at a " + format(disc, ".0%") + " discount)" if ceiling else ""}
 **Recommendation:** {recommendation}
 
 ### Why now
-At <60% coverage, you're paying full on-demand rates for usage that has
-been consistent for 3+ months. A 1-year no-upfront Savings Plan pays back
-immediately — there's no break-even period.
+At <60% coverage, you're paying full on-demand rates on most of this usage.
+A 1-year no-upfront Savings Plan has no upfront payment, but it only saves
+money while its hourly commitment is used: at a {disc:.0%} discount, a plan
+whose utilization averages under {floor:.0%} costs more than on-demand. Size
+it to the hourly usage floor, not this monthly average.
 
 ### Action
 - [ ] Review SP/RI recommendations in AWS Cost Explorer
@@ -775,7 +788,8 @@ def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
     gap dict keys:
         coverage_pct
         uncovered_on_demand_usd   (3-month total)
-        projected_annual_savings  (optional, calculated if absent)
+        projected_annual_savings  (optional; computed as a ceiling if absent)
+        compute_sp_rate           (optional; CommitmentAnalysis.compute_sp_rate)
         recommendation            human-readable recommendation text
     """
     title, body, priority, labels = _commitment_gap_ticket(gap)

@@ -34,8 +34,12 @@ def _rds_clients(db_class: str, engine: str, multi_az: bool = False, value: floa
 
 
 def test_db_m5_8xlarge_is_the_list_rate():
-    # 16x the db.m5.large rate, and the AWS list price; 2.74 was a rounding.
-    assert RDS_HOURLY["db.m5.8xlarge"] == 2.736 == round(16 * RDS_HOURLY["db.m5.large"], 3)
+    # The AWS Price List lists $2.74, not the $2.736 that 16x the db.m5.large
+    # rate gives: AmazonRDS us-east-1 offer 20261006224050, SKU D5NU4Q3STSENKMSM
+    # ("$ 2.74 per RDS db.m5.8xlarge Single-AZ instance hour ... running MySQL"),
+    # read 2026-10-13. This test used to pin 2.736 and call 2.74 a rounding; the
+    # offer file is the authority, so the row is the listed one.
+    assert RDS_HOURLY["db.m5.8xlarge"] == 2.74 != round(16 * RDS_HOURLY["db.m5.large"], 3)
 
 
 # ── analyzers/waste.py ───────────────────────────────────────────────────────

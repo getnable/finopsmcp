@@ -130,6 +130,16 @@ async def export_cost_report(
     all_sections = ["cost_summary", "services", "anomalies", "rightsizing", "savings", "budgets"]
     wanted = set(sections or all_sections)
     fmt_list = formats or ["html", "csv"]
+    # Checked before any data is fetched. An unknown format wrote no file and
+    # answered "Report generated"; an unknown section answered "Make sure at
+    # least one provider is configured".
+    bad_sections = sorted(wanted - set(all_sections))
+    bad_formats = sorted(set(fmt_list) - {"html", "csv"})
+    if bad_sections or bad_formats:
+        return {"error": " ".join(filter(None, [
+            f"Unknown sections {bad_sections}; use {all_sections}." if bad_sections else "",
+            f"Unknown formats {bad_formats}; use ['html', 'csv']." if bad_formats else "",
+        ])) + " Nothing was written."}
 
     collected: dict = {}
 
@@ -510,7 +520,11 @@ def subscribe_to_report(
     if err := _srv.require_role("analyst"):
         return err
     try:
-        from ..notifications.reports import create_subscription, VALID_SECTIONS
+        from ..notifications.reports import PRESET_CRONS, VALID_SECTIONS, create_subscription
+        if not cron and frequency not in PRESET_CRONS:
+            # Saved as the weekly cron, with nothing said, for any other word.
+            return {"error": (f"frequency must be one of {', '.join(PRESET_CRONS)} "
+                              f"(got {frequency!r}), or pass cron. Nothing was saved.")}
         invalid = [s for s in sections if s not in VALID_SECTIONS]
         if invalid:
             return {
@@ -733,13 +747,26 @@ async def export_cost_report_csv(
     # call it ever received. The fork also predated the per-resource collapse, so
     # its total counted mutually exclusive fixes on one instance as if you could
     # bank all of them.
-    from ..recommendations.sweep import collapse_per_resource, sweep
+    from ..recommendations.sweep import (
+        COMMITMENTS_NOT_IN_TOTAL,
+        collapse_per_resource,
+        split_total,
+        sweep,
+        to_confirm_line,
+    )
 
     result = await sweep(aws, regions)
     if result.timed_out:
         return ("The scan took unusually long (a region or API may be slow). Try again, "
                 "or pass a specific region.")
     findings = result.findings
+    coverage = result.coverage_lines()
+    if not findings and result.errors and len(result.errors) == result.scanners_run:
+        # A file reading "Total monthly saving $0.00" for a sweep none of whose
+        # checks could read is a clean bill nobody earned. Write nothing. When
+        # only some could not run, the file is written and says which.
+        return ("No report was written: the checks could not read the account. "
+                + " ".join(coverage))
     # Slice first, then collapse. Collapsing the whole list first would let one
     # resource's folded-away alternatives push real findings off the end of the
     # export, so the file would be short by however many duplicates existed.
@@ -747,8 +774,10 @@ async def export_cost_report_csv(
 
     # `or 0` because the critique sets monthly_savings to None on a claim it
     # retracted. Summing that raises; counting it toward a total we are asking a
-    # finance team to believe would be worse.
-    total_monthly = sum(f.get("monthly_savings") or 0 for f in top)
+    # finance team to believe would be worse. The total is what the checks
+    # measured; the rows a check filed as an inference are to confirm, written
+    # beside it and not added in (sweep.split_total, the split `nable scan` makes).
+    total_monthly, to_confirm, n_to_confirm = split_total(top)
     total_annual = total_monthly * 12
     scan_ts = _srv.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -770,7 +799,14 @@ async def export_cost_report_csv(
         writer.writerow(["AWS account", account_id])
         writer.writerow(["Total monthly saving", f"${total_monthly:,.2f}"])
         writer.writerow(["Total annual saving", f"${total_annual:,.2f}"])
+        writer.writerow(["To confirm monthly", f"${to_confirm:,.2f}"])
+        writer.writerow(["To confirm findings", n_to_confirm])
+        writer.writerow(["Not included", COMMITMENTS_NOT_IN_TOTAL])
         writer.writerow(["Opportunities found", len(top)])
+        # The total above is missing whatever the checks that could not run, or
+        # read only part of the account, would have found.
+        for line in coverage:
+            writer.writerow(["Incomplete", line])
         writer.writerow([])
 
         # Column headers
@@ -793,15 +829,28 @@ async def export_cost_report_csv(
             detail = f.get("detail", "")
             if raw is None:
                 detail = f"needs confirming ({f.get('magnitude', 'unconfirmed')}); {detail}".strip("; ")
+            elif f.get("to_confirm"):
+                detail = f"to confirm, not in the total; {detail}".strip("; ")
+            elif f.get("to_confirm_above_usd"):
+                # A larger inferred alternative on the same resource: its excess
+                # is in "To confirm monthly", this row's figure in the total.
+                detail = (f"plus ${f['to_confirm_above_usd']:,.2f}/mo to confirm from an "
+                          f"inferred alternative; {detail}").strip("; ")
             writer.writerow([i, _csv_safe(f["title"]), _csv_safe(f["category"]), mo, yr, _csv_safe(detail)])
 
     note = ""
+    if n_to_confirm:
+        note = " " + to_confirm_line(to_confirm, n_to_confirm)
     if collapsed:
-        note = (f" {collapsed} alternative fix(es) on the same resources are excluded from "
-                f"the total: you can bank one fix per resource, not all of them.")
+        note += (f" {collapsed} alternative fix(es) on the same resources are excluded from "
+                 f"the total: you can bank one fix per resource, not all of them.")
+    if coverage:
+        note += " Incomplete: " + " ".join(coverage)
     return (
         f"Exported {len(top)} opportunities to {dest}. "
-        f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr).{note}"
+        f"Total estimated saving: ${total_monthly:,.2f}/mo (${total_annual:,.2f}/yr) "
+        f"recoverable.{note} "
+        f"{COMMITMENTS_NOT_IN_TOTAL}"
     )
 
 
@@ -955,7 +1004,13 @@ async def publish_cost_report_to_notion(
     # bank all of them.
     from datetime import datetime as _dt
 
-    from ..recommendations.sweep import collapse_per_resource, sweep
+    from ..recommendations.sweep import (
+        COMMITMENTS_NOT_IN_TOTAL,
+        collapse_per_resource,
+        split_total,
+        sweep,
+        to_confirm_line,
+    )
 
     result = await sweep(aws, regions)
     if result.timed_out:
@@ -966,10 +1021,14 @@ async def publish_cost_report_to_notion(
     top_findings, collapsed = collapse_per_resource(findings[:20])
 
     if not top_findings:
+        if result.errors or result.partial:
+            return ("Nothing was published: no findings, and not every check could read "
+                    "the account. " + " ".join(result.coverage_lines()))
         return "No savings opportunities found, nothing to publish."
 
     # `or 0`: the critique sets monthly_savings to None on a retracted claim.
-    total_monthly = sum(f.get("monthly_savings") or 0 for f in top_findings)
+    # Recoverable and to confirm, as in the CSV export and `nable scan`.
+    total_monthly, to_confirm, n_to_confirm = split_total(top_findings)
     total_annual = total_monthly * 12
 
     account_name = ""
@@ -980,12 +1039,20 @@ async def publish_cost_report_to_notion(
     except Exception:
         pass
 
+    # The same account of the checks that could not run or read everything as
+    # the audit and the CSV export give, so the total is not read as complete.
+    partial_note = " ".join(result.coverage_lines())
     report = {
         "findings": top_findings,
         "total_monthly_savings": total_monthly,
         "total_annual_savings": total_annual,
+        # The scan's keys for the inferred rows, which are not in the total.
+        "to_confirm_monthly_usd": round(to_confirm, 2),
+        "to_confirm_findings": n_to_confirm,
         "scan_timestamp": _dt.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
         "account": account_name,
+        "partial_note": partial_note,
+        "scope_note": COMMITMENTS_NOT_IN_TOTAL,
     }
 
     try:
@@ -995,16 +1062,21 @@ async def publish_cost_report_to_notion(
         return f"Failed to publish to Notion: {e}"
 
     collapsed_note = ""
+    if n_to_confirm:
+        collapsed_note = f"\n\n{to_confirm_line(to_confirm, n_to_confirm)}"
     if collapsed:
-        collapsed_note = (
+        collapsed_note += (
             f"\n\n{collapsed} alternative fix(es) on the same resources are excluded "
             f"from the total: you can bank one fix per resource, not all of them.")
+    if partial_note:
+        collapsed_note += f"\n\n{partial_note}"
     return (
         f"Cost report published to Notion.\n\n"
         f"URL: {page_url}\n\n"
         f"Findings: {len(top_findings)} opportunities, "
-        f"${total_monthly:,.2f}/mo estimated saving "
+        f"${total_monthly:,.2f}/mo estimated saving recoverable "
         f"(${total_annual:,.2f}/yr).{collapsed_note}\n\n"
+        f"{COMMITMENTS_NOT_IN_TOTAL}\n\n"
         f"Share the page with your team from Notion. "
         f"They don't need nable installed to view it."
     )

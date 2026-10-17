@@ -20,7 +20,9 @@ log = logging.getLogger(__name__)
 # Evaluated once at import time so every caller gets a consistent value
 # for the lifetime of the process.
 _AIRGAP_RAW = os.environ.get("FINOPS_AIRGAP", "").strip()
-AIRGAP: bool = _AIRGAP_RAW not in ("", "0", "false", "no")
+# One rule for every opt-out flag (telemetry.env_flag_set): set to anything
+# but 0/false/no/off. "off" used to switch air-gap ON here.
+AIRGAP: bool = _AIRGAP_RAW.lower() not in ("", "0", "false", "no", "off")
 
 _FIPS_RAW = os.environ.get("FINOPS_FIPS", "").strip()
 FIPS_REQUIRED: bool = _FIPS_RAW not in ("", "0", "false", "no")
@@ -29,6 +31,19 @@ FIPS_REQUIRED: bool = _FIPS_RAW not in ("", "0", "false", "no")
 def is_airgap() -> bool:
     """Return True when FINOPS_AIRGAP=1 is set."""
     return AIRGAP
+
+
+def airgap_blocks(channel: str) -> bool:
+    """True, with a warning, when FINOPS_AIRGAP forbids sending to `channel`.
+
+    Air-gap allows traffic to the cost providers nable reads and nothing else,
+    and Slack, Teams and SMTP are not providers. Each sender asks this before
+    it opens a connection, so no path to one (a digest, a report, a brief)
+    can send around the switch."""
+    if not AIRGAP:
+        return False
+    log.warning("FINOPS_AIRGAP is set; nothing is sent to %s", channel)
+    return True
 
 
 def is_fips_mode() -> bool:

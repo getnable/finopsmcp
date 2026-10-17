@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the tool reference from server.py.
+"""Generate the tool reference from the live tool registry.
 
-AST-parses every @mcp.tool() in src/finops/server.py and emits:
+Imports finops.server and reads what it registers, the same registry
+tests/test_capabilities_doc_counts.py holds CAPABILITIES.md and
+docs/tool-inventory.txt to, less the internal (staff) tools. Emits:
   web/tools.json   machine-readable tool index (name, summary, params, pro, category)
   web/tools.html   searchable static reference page, styled per DESIGN.md
 
@@ -17,10 +19,11 @@ import ast
 import html
 import json
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVER = ROOT / "src" / "finops" / "server.py"
+SRC = Path(__file__).resolve().parent.parent / "src"
 OUT_JSON = ROOT / "web" / "tools.json"
 OUT_HTML = ROOT / "web" / "tools.html"
 
@@ -64,59 +67,54 @@ def first_paragraph(doc: str | None) -> str:
     return " ".join(line.strip() for line in para.splitlines()).strip()
 
 
-def extract_tools() -> list[dict]:
-    # Tools live across server.py (a few inline) and the split-out tools/*.py
-    # modules (the bulk, decorated @_srv.mcp.tool()). Parse them all so the
-    # reference matches what actually ships after the server-split + open-core
-    # extractions, otherwise this emits an empty page.
-    sources = [SERVER, *sorted((ROOT / "src" / "finops" / "tools").glob("*.py"))]
-    tools: list[dict] = []
-    seen: set[str] = set()
-    for src in sources:
-        tree = ast.parse(src.read_text())
-        for node in ast.walk(tree):
+def _pro_gated() -> set[str]:
+    """Tools whose body calls require_pro(...), as a bare name (server.py) or as
+    _srv.require_pro(...) (the tools/* modules). The registry does not carry
+    the plan gate, so this one fact still comes from the source."""
+    pkg = SRC / "finops"
+    gated: set[str] = set()
+    for src in [pkg / "server.py", *sorted((pkg / "tools").glob("*.py"))]:
+        for node in ast.walk(ast.parse(src.read_text(encoding="utf-8"))):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            is_tool = any(
-                isinstance(d, ast.Call)
-                and isinstance(d.func, ast.Attribute)
-                and d.func.attr == "tool"
-                for d in node.decorator_list
-            )
-            if not is_tool or node.name in seen:
-                continue
-            seen.add(node.name)
-
-            doc = ast.get_docstring(node)
-            params = []
-            args = node.args
-            n_defaults = len(args.defaults)
-            for i, a in enumerate(args.args):
-                if a.arg in ("self", "ctx"):
-                    continue
-                required = i < len(args.args) - n_defaults
-                ann = ast.unparse(a.annotation) if a.annotation else ""
-                params.append({"name": a.arg, "type": ann, "required": required})
-
-            # Pro-gated if the body calls require_pro(...) — as a bare name
-            # (server.py) or as _srv.require_pro(...) (the split tools/* modules).
-            pro = False
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.Call) and (
+            if any(isinstance(sub, ast.Call) and (
                     (isinstance(sub.func, ast.Name) and sub.func.id == "require_pro")
-                    or (isinstance(sub.func, ast.Attribute) and sub.func.attr == "require_pro")
-                ):
-                    pro = True
-                    break
+                    or (isinstance(sub.func, ast.Attribute) and sub.func.attr == "require_pro"))
+                   for sub in ast.walk(node)):
+                gated.add(node.name)
+    return gated
 
-            tools.append({
-                "name": node.name,
-                "summary": first_paragraph(doc),
-                "params": params,
-                "pro": pro,
-                "category": categorize(node.name),
-                "lineno": node.lineno,
-            })
+
+def _type_of(prop: dict) -> str:
+    if "type" in prop:
+        return str(prop["type"])
+    kinds = [p.get("type") for p in prop.get("anyOf", []) if p.get("type") != "null"]
+    return " | ".join(k for k in kinds if k)
+
+
+def extract_tools() -> list[dict]:
+    """Every tool the server registers, less the internal ones, as served."""
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    from finops import server
+    from finops.tool_surface import INTERNAL_TOOLS
+
+    gated = _pro_gated()
+    tools: list[dict] = []
+    for t in server.mcp._tool_manager.list_tools():
+        if t.name in INTERNAL_TOOLS:
+            continue
+        schema = t.parameters or {}
+        required = set(schema.get("required", []))
+        params = [{"name": n, "type": _type_of(p), "required": n in required}
+                  for n, p in schema.get("properties", {}).items()]
+        tools.append({
+            "name": t.name,
+            "summary": first_paragraph(t.description),
+            "params": params,
+            "pro": t.name in gated,
+            "category": categorize(t.name),
+        })
     tools.sort(key=lambda t: (t["category"], t["name"]))
     return tools
 
@@ -226,7 +224,7 @@ footer{{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;paddin
   <nav class="toc">{''.join(toc)}</nav>
   {''.join(sections)}
 </main>
-<footer><div class="wrap">Generated from server.py · <a href="/docs.html">Back to docs</a> · <a href="/tools.json">tools.json</a></div></footer>
+<footer><div class="wrap">Generated from the tool registry · <a href="/docs.html">Back to docs</a> · <a href="/tools.json">tools.json</a></div></footer>
 <script>
 const q=document.getElementById('q'),tools=[...document.querySelectorAll('.tool')],
 secs=[...document.querySelectorAll('section')],shown=document.getElementById('shown');
@@ -242,6 +240,8 @@ q.addEventListener('input',()=>{{
 
 def main() -> None:
     tools = extract_tools()
+    OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+    OUT_HTML.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps(
         {"count": len(tools), "tools": tools}, indent=1))
     OUT_HTML.write_text(render_html(tools))
@@ -257,7 +257,7 @@ def main() -> None:
     if weak:
         print(f"\nQA: {len(weak)} tools with thin or missing docstrings:")
         for t in weak:
-            print(f"  server.py:{t['lineno']:>5}  {t['name']}  ({len(t['summary'])} chars)")
+            print(f"  {t['name']}  ({len(t['summary'])} chars)")
 
 
 if __name__ == "__main__":

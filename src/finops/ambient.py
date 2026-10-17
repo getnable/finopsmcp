@@ -336,7 +336,8 @@ def detect_all(providers: list[str] | None = None) -> dict[str, Ambient]:
     timeouts is 18 seconds of a first run spent finding nothing."""
     names = providers or list(PROBES)
     out: dict[str, Ambient] = {}
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(names)))
+    from .aws_read_failures import ScopedThreadPool
+    ex = ScopedThreadPool(max_workers=max(1, len(names)))
     try:
         futures = {ex.submit(PROBES[n]): n for n in names if n in PROBES}
         for fut in concurrent.futures.as_completed(futures, timeout=PROBE_TIMEOUT_S * 2):

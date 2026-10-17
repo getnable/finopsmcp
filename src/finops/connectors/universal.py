@@ -102,7 +102,10 @@ _AWS_ALIASES: dict[str, str] = {
     "marketplace":      "AWS Marketplace",
     "lightsail":        "Amazon Lightsail",
     "batch":            "AWS Batch",
-    "fargate":          "AWS Fargate",
+    # Fargate is priced in the AmazonECS offer and billed, as far as this repo
+    # can tell, under ECS. Unverified against a live account; "AWS Fargate" is
+    # still tried (_AWS_ALIAS_FALLBACKS).
+    "fargate":          "Amazon Elastic Container Service",
     "app runner":       "AWS App Runner",
     "elastic beanstalk":"AWS Elastic Beanstalk",
     "cloudformation":   "AWS CloudFormation",
@@ -110,6 +113,12 @@ _AWS_ALIASES: dict[str, str] = {
     "service catalog":  "AWS Service Catalog",
     "control tower":    "AWS Control Tower",
     "organizations":    "AWS Organizations",
+}
+
+
+# Further names an alias is tried under when its target is not in the bill.
+_AWS_ALIAS_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "fargate": ("AWS Fargate",),
 }
 
 
@@ -129,9 +138,10 @@ def _resolve_aws_service(name: str, known_services: list[str]) -> str | None:
     # 2. Alias map
     alias_target = _AWS_ALIASES.get(lower)
     if alias_target:
-        for s in known_services:
-            if s.lower().startswith(alias_target.lower()):
-                return s
+        for target in (alias_target, *_AWS_ALIAS_FALLBACKS.get(lower, ())):
+            for s in known_services:
+                if s.lower().startswith(target.lower()):
+                    return s
 
     # 3. Prefix match on the canonical name
     for s in known_services:

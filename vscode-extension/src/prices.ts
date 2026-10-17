@@ -1,5 +1,9 @@
 /**
- * Embedded AWS pricing table — on-demand us-east-1, May 2026.
+ * Embedded AWS pricing table: on-demand list, us-east-1. Every rate was
+ * compared with the AWS Price List on 2026-10-13, and
+ * tests/test_instance_price_tables.py holds each table to its Python source
+ * (finops.aws_prices and finops.connectors.terraform_estimate). Other regions
+ * often list higher, so a figure here is a us-east-1 floor.
  * No API call needed: works fully offline, zero latency.
  *
  * Structure: resourceType → { key_field → hourly_usd }
@@ -96,14 +100,38 @@ export function rdsHourly(instanceClass: string, engine: string): number | undef
 }
 
 // ── ElastiCache ───────────────────────────────────────────────────────────────
+// Redis OSS and Memcached node hours (the two engines list the same).
 const ELASTICACHE_HOURLY: Record<string, number> = {
   "cache.t3.micro": 0.017,  "cache.t3.small": 0.034,   "cache.t3.medium": 0.068,
   "cache.t4g.micro": 0.016, "cache.t4g.small": 0.032,  "cache.t4g.medium": 0.065,
-  "cache.m5.large": 0.139,  "cache.m5.xlarge": 0.278,  "cache.m5.2xlarge": 0.556,
-  "cache.m6g.large": 0.128, "cache.m6g.xlarge": 0.256,
-  "cache.r5.large": 0.207,  "cache.r5.xlarge": 0.414,  "cache.r5.2xlarge": 0.828,
-  "cache.r6g.large": 0.186, "cache.r6g.xlarge": 0.372,
+  "cache.m5.large": 0.156,  "cache.m5.xlarge": 0.311,  "cache.m5.2xlarge": 0.623,
+  "cache.m6g.large": 0.149, "cache.m6g.xlarge": 0.297,  "cache.m6g.2xlarge": 0.593,
+  "cache.r5.large": 0.216,  "cache.r5.xlarge": 0.431,  "cache.r5.2xlarge": 0.862,
+  "cache.r6g.large": 0.206, "cache.r6g.xlarge": 0.411,  "cache.r6g.2xlarge": 0.821,
 };
+
+// Valkey lists 20% under Redis OSS on every node type.
+const ELASTICACHE_VALKEY_HOURLY: Record<string, number> = {
+  "cache.t3.micro": 0.0136,  "cache.t3.small": 0.0272,  "cache.t3.medium": 0.0544,
+  "cache.t4g.micro": 0.0128, "cache.t4g.small": 0.0256, "cache.t4g.medium": 0.052,
+  "cache.m5.large": 0.1248,  "cache.m5.xlarge": 0.2488, "cache.m5.2xlarge": 0.4984,
+  "cache.m6g.large": 0.1192, "cache.m6g.xlarge": 0.2376, "cache.m6g.2xlarge": 0.4744,
+  "cache.r5.large": 0.1728,  "cache.r5.xlarge": 0.3448, "cache.r5.2xlarge": 0.6896,
+  "cache.r6g.large": 0.1648, "cache.r6g.xlarge": 0.3288, "cache.r6g.2xlarge": 0.6568,
+};
+
+// Nodes an ElastiCache resource runs: num_cache_nodes on a cluster; on a
+// replication group num_cache_clusters, or num_node_groups shards of
+// 1 + replicas_per_node_group in cluster mode.
+function elasticacheNodes(resourceType: string, attrs: Record<string, string>): number {
+  const n = (v: string | undefined) => { const x = parseInt(v || "", 10); return isNaN(x) || x < 0 ? 0 : x; };
+  if (resourceType === "aws_elasticache_replication_group") {
+    const groups = n(attrs["num_node_groups"]);
+    if (groups) return groups * (1 + n(attrs["replicas_per_node_group"]));
+    return Math.max(1, n(attrs["num_cache_clusters"] || attrs["number_cache_clusters"]));
+  }
+  return Math.max(1, n(attrs["num_cache_nodes"]));
+}
 
 // ── Load balancers (hourly base, before LCUs) ───────────────────────────────
 const LB_HOURLY: Record<string, number> = {
@@ -149,21 +177,25 @@ function ebsMonthly(volType: string, sizeGb: number, iops: number, throughput: n
 // ── OpenSearch ───────────────────────────────────────────────────────────────
 const OPENSEARCH_HOURLY: Record<string, number> = {
   "t3.small.search": 0.036, "t3.medium.search": 0.073,
-  "m5.large.search": 0.142, "m5.xlarge.search": 0.285,
-  "r5.large.search": 0.187, "r5.xlarge.search": 0.374,
+  "m5.large.search": 0.142, "m5.xlarge.search": 0.283,
+  "m6g.large.search": 0.128, "m6g.xlarge.search": 0.256,
+  "r5.large.search": 0.186, "r5.xlarge.search": 0.372,
+  "r6g.large.search": 0.167, "r6g.xlarge.search": 0.335,
+  "c5.large.search": 0.125, "c5.xlarge.search": 0.251,
 };
 
 // ── Redshift ──────────────────────────────────────────────────────────────────
 const REDSHIFT_HOURLY: Record<string, number> = {
   "dc2.large": 0.25,   "dc2.8xlarge": 4.80,
-  "ra3.xlplus": 1.086, "ra3.4xlplus": 3.26, "ra3.16xlarge": 13.04,
+  "ra3.large": 0.543,  "ra3.xlplus": 1.086, "ra3.4xlarge": 3.26, "ra3.16xlarge": 13.04,
 };
 
 // ── MSK ───────────────────────────────────────────────────────────────────────
 const MSK_HOURLY: Record<string, number> = {
-  "kafka.t3.small": 0.021, "kafka.m5.large": 0.142,
-  "kafka.m5.xlarge": 0.284,"kafka.m5.2xlarge": 0.568,
-  "kafka.m7g.large": 0.128,"kafka.m7g.xlarge": 0.256,
+  "kafka.t3.small": 0.0456, "kafka.m5.large": 0.21,
+  "kafka.m5.xlarge": 0.42,  "kafka.m5.2xlarge": 0.84,
+  "kafka.m5.4xlarge": 1.68, "kafka.m5.8xlarge": 3.36,
+  "kafka.m7g.large": 0.204, "kafka.m7g.xlarge": 0.408,
 };
 
 // ── Public pricing resolver ────────────────────────────────────────────────────
@@ -208,8 +240,9 @@ export function priceResource(
     case "aws_elasticache_cluster":
     case "aws_elasticache_replication_group": {
       const node = attrs["node_type"];
-      const count = parseInt(attrs["num_cache_nodes"] || attrs["number_cache_clusters"] || "1", 10);
-      const h = node ? ELASTICACHE_HOURLY[node] : undefined;
+      const count = elasticacheNodes(resourceType, attrs);
+      const valkey = (attrs["engine"] || "").toLowerCase() === "valkey";
+      const h = node ? (valkey ? ELASTICACHE_VALKEY_HOURLY : ELASTICACHE_HOURLY)[node] : undefined;
       if (!h) return node ? { monthly: 0, detail: `Unknown node type: ${node}` } : null;
       return {
         monthly: Math.round(h * count * HOURS_PER_MONTH * 100) / 100,
@@ -265,7 +298,8 @@ export function priceResource(
     case "aws_elasticsearch_domain": {
       const inst = attrs["instance_type"] || "m5.large.search";
       const count = parseInt(attrs["instance_count"] || "1", 10);
-      const h = OPENSEARCH_HOURLY[inst] ?? 0.142;
+      const h = OPENSEARCH_HOURLY[inst];
+      if (h === undefined) return { monthly: 0, detail: `${count}× ${inst}: not priced` };
       return {
         monthly: Math.round(h * count * HOURS_PER_MONTH * 100) / 100,
         detail: `${count}× ${inst}`,
@@ -275,7 +309,8 @@ export function priceResource(
     case "aws_redshift_cluster": {
       const node = attrs["node_type"] || "dc2.large";
       const count = parseInt(attrs["number_of_nodes"] || "1", 10);
-      const h = REDSHIFT_HOURLY[node] ?? 0.25;
+      const h = REDSHIFT_HOURLY[node];
+      if (h === undefined) return { monthly: 0, detail: `${count}× ${node}: not priced` };
       return {
         monthly: Math.round(h * count * HOURS_PER_MONTH * 100) / 100,
         detail: `${count}× ${node}`,
@@ -285,7 +320,8 @@ export function priceResource(
     case "aws_msk_cluster": {
       const broker = attrs["instance_type"] || "kafka.m5.large";
       const count = parseInt(attrs["number_of_broker_nodes"] || "3", 10);
-      const h = MSK_HOURLY[broker] ?? 0.142;
+      const h = MSK_HOURLY[broker];
+      if (h === undefined) return { monthly: 0, detail: `${count}× ${broker}: not priced` };
       return {
         monthly: Math.round(h * count * HOURS_PER_MONTH * 100) / 100,
         detail: `${count}× ${broker} brokers`,
@@ -314,12 +350,12 @@ export function priceResource(
 
     case "aws_kinesis_stream": {
       const shards = parseInt(attrs["shard_count"] || "1", 10);
-      const monthly = shards * 0.015 * 24 * 30; // $0.015/shard-hour
+      const monthly = shards * 0.015 * HOURS_PER_MONTH; // $0.015/shard-hour
       return { monthly: Math.round(monthly * 100) / 100, detail: `${shards} shard(s) @ $0.015/shard-hr` };
     }
 
     case "aws_dynamodb_table":
-      return { monthly: 0, detail: "Pay-per-request or provisioned capacity", note: "On-demand: $1.25/M writes, $0.25/M reads" };
+      return { monthly: 0, detail: "Pay-per-request or provisioned capacity", note: "On-demand: $0.625/M writes, $0.125/M reads" };
 
     case "aws_cloudfront_distribution":
       return { monthly: 0, detail: "Pay per request + transfer", note: "~$0.0085/10K HTTPS requests" };

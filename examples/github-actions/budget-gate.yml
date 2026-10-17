@@ -1,0 +1,97 @@
+name: nable budget gate
+
+# Copy into YOUR repo at .github/workflows/budget-gate.yml (this repo does not
+# run it), with your budgets in budget.yml at the repo root.
+#
+# `nable budget ci-gate --fail-on-breach --json` checks each budget in
+# budget.yml against the cost history in nable's data directory. It makes no
+# cloud call and needs no cloud credentials, and it never passes on missing
+# data. The step's exit code is the gate:
+#
+#   0  no budget breached (a budget past its alert percentage only warns)
+#   1  a budget is breached: spend at or past its critical percentage
+#   2  the budgets cannot be checked: budget.yml is missing or invalid, a
+#      budget has no cost data for its period (not $0 spent), or one could not
+#      be read
+#
+# The cost history is what nable records where it runs: the MCP server's
+# take_snapshot_now tool, and nable on a machine that keeps its data directory.
+# A fresh GitHub-hosted runner has none, so there the gate exits 2 until you
+# point it at real history. Run the job on a self-hosted runner and set the
+# repository variables NABLE_RUNNER (its label) and NABLE_DATA_DIR (the
+# directory nable keeps there, normally ~/.finops of the user it runs as).
+#
+# budget.yml:
+#
+#   budgets:
+#     - name: AWS monthly
+#       scope_type: provider        # total | provider | service | account | team
+#       scope_value: aws
+#       period: monthly
+#       limit_usd: 50000
+#       alert_at_pct: 80
+#       critical_at_pct: 100
+
+on:
+  pull_request:
+    paths: ["budget.yml", "**.tf"]
+  schedule:
+    - cron: "17 9 * * 1"            # Mondays 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  budget-gate:
+    name: Budget gate
+    runs-on: ${{ vars.NABLE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      FINOPS_DATA_DIR: ${{ vars.NABLE_DATA_DIR || format('{0}/.nable-data', github.workspace) }}
+      FINOPS_NO_KEYRING: "1"          # no OS keychain on a runner
+      NABLE_NO_UPDATE_CHECK: "1"
+      GATE_JSON: ${{ github.workspace }}/nable-budget-gate.json
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nable
+        run: python -m pip install --quiet "finops-mcp==0.12.0"
+
+      - name: Budget gate
+        run: nable budget ci-gate --fail-on-breach --json --budget-file budget.yml > "$GATE_JSON"
+
+      - name: Summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          path, out = os.environ["GATE_JSON"], os.environ.get("GITHUB_STEP_SUMMARY")
+          try:
+              doc = json.load(open(path))
+          except (OSError, ValueError) as e:
+              doc = {"exit_code": None, "error": f"no gate result ({e})"}
+          lines = ["## nable budget gate", ""]
+          if doc.get("error"):
+              lines.append(f"Could not check the budgets: {doc['error']}")
+          for name in doc.get("breached", []):
+              lines.append(f"- breached: **{name}**")
+          for name in doc.get("cannot_check", []):
+              lines.append(f"- cannot check: **{name}** (no cost data for its period, or it "
+                           "could not be read)")
+          for b in doc.get("budgets", []):
+              lines.append(f"- {b['name']}: {b['status']}, ${b['spent']:,.0f} of "
+                           f"${b['limit']:,.0f} ({b['pct_used']:.0f}%)")
+          lines.append("")
+          lines.append(f"Exit code {doc.get('exit_code')}; cost data through "
+                       f"{doc.get('spend_through') or 'nothing on record'}.")
+          text = "\n".join(lines)
+          print(text)
+          if out:
+              with open(out, "a") as f:
+                  f.write(text + "\n")
+          PY

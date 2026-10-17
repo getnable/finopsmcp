@@ -849,6 +849,26 @@ def test_doctor_covers_an_installed_new_agent(monkeypatch):
     assert any(c.startswith("GitHub Copilot: shell commands") for c in d["covered"])
 
 
+@pytest.mark.parametrize("harness,label", [("copilot", "GitHub Copilot"),
+                                           ("gemini", "Gemini CLI"), ("cline", "Cline")])
+def test_doctor_says_mcp_calls_are_unguarded_where_the_hook_sees_shell_only(
+        harness, label, monkeypatch):
+    """Their covered line said "shell commands" and nothing said what that
+    left out: a Terraform, AWS or Kubernetes MCP server in Copilot, Gemini CLI
+    or Cline changes infrastructure with no check at all."""
+    if harness == "cline" and sys.platform == "win32":
+        pytest.skip("nable writes no Cline hook on Windows")
+    _uvx(monkeypatch)
+    ga.install(harness, True)
+    d = g.doctor()
+    gap = [x for x in d["not_covered"] if x.startswith(f"{label}: MCP tool calls")]
+    assert gap and "not guarded" in gap[0] and "check_action_policy" in gap[0]
+    # Cursor and Codex hooks see MCP calls: no such line for them.
+    ga.install("cursor", True)
+    d = g.doctor()
+    assert not any(x.startswith("Cursor: MCP tool calls") for x in d["not_covered"])
+
+
 # ── Cursor and Codex: MCP tool calls ──────────────────────────────────────────
 
 def _cursor_mcp(tool: str, args: dict, server: str | None = "aws") -> dict:

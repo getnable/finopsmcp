@@ -43,24 +43,39 @@ def _make_session(region: str, role_arn: str | None = None):
     return boto3.Session(region_name=region)
 
 
-# Approximate per-hour on-demand prices for common DocumentDB instance classes
+# On-demand instance hours, us-east-1, standard (not I/O-Optimized) storage
+# configuration. Every row was off before the 2026-10-13 audit: the r6g column
+# sat 5.4% under list (db.r6g.large $0.249 against $0.26315), db.t3.medium
+# $0.076 against $0.078, and the r5 sizes above xlarge were scaled from the
+# large instead of read (db.r5.24xlarge $13.308 against $13.296).
+# I/O-Optimized clusters list 10% higher and are not priced here.
 _INSTANCE_HOURLY_USD: dict[str, float] = {
-    "db.t3.medium": 0.076,
+    "db.t3.medium": 0.078,
     "db.r5.large": 0.277,
     "db.r5.xlarge": 0.554,
-    "db.r5.2xlarge": 1.109,
-    "db.r5.4xlarge": 2.218,
-    "db.r5.8xlarge": 4.436,
-    "db.r5.12xlarge": 6.654,
-    "db.r5.16xlarge": 8.872,
-    "db.r5.24xlarge": 13.308,
-    "db.r6g.large": 0.249,
-    "db.r6g.xlarge": 0.498,
-    "db.r6g.2xlarge": 0.997,
-    "db.r6g.4xlarge": 1.993,
-    "db.r6g.8xlarge": 3.986,
-    "db.r6g.12xlarge": 5.980,
-    "db.r6g.16xlarge": 7.973,
+    "db.r5.2xlarge": 1.108,
+    "db.r5.4xlarge": 2.216,
+    "db.r5.8xlarge": 4.4312,
+    "db.r5.12xlarge": 6.648,
+    "db.r5.16xlarge": 8.8624,
+    "db.r5.24xlarge": 13.296,
+    "db.r6g.large": 0.26315,
+    "db.r6g.xlarge": 0.5263,
+    "db.r6g.2xlarge": 1.0526,
+    "db.r6g.4xlarge": 2.1052,
+    "db.r6g.8xlarge": 4.20964,
+    "db.r6g.12xlarge": 6.3156,
+    "db.r6g.16xlarge": 8.41928,
+}
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_INSTANCE_HOURLY_USD": {
+        "source": "AWS Price List, AmazonDocDB us-east-1 offer, version 20260911124422, "
+                  "OnDemand Database Instance InstanceUsage:<class> (Volume_Optimization "
+                  "General); db.t3.medium H2KGW7B35EBSGXNN, db.r5.large 9CN8QFQRMTEPESBP, "
+                  "db.r5.24xlarge YSBXKJMAJKG7E6QA, db.r6g.large 772AQPZNUUFB9TKD, "
+                  "db.r6g.16xlarge N8D5QCNAFXE798U4",
+        "as_of": "2026-10-13"},
 }
 
 # Class size ordering for downsize recommendations

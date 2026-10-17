@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
-from ..aws_prices import EC2_MONTHLY
+from ..aws_prices import EC2_MONTHLY, HOURS_PER_MONTH
 
 log = logging.getLogger("finops.connectors.kubernetes")
 
@@ -46,21 +46,48 @@ log = logging.getLogger("finops.connectors.kubernetes")
 # $0.038, none of them a rate any other table in the repo used.
 _EC2_MONTHLY = EC2_MONTHLY
 
+# Compute Engine on-demand list, us-central1 (Iowa), USD per hour, the
+# "Default" column of https://cloud.google.com/products/compute/pricing/general-purpose
+# read 2026-10-13. GKE Standard nodes bill as these VMs. The monthly figures
+# used to be typed in, and the N1 and N2 rows were 23% and 15% under list
+# (n2-standard-8 $241.95/mo against $283.58, n1-standard-4 $106.92 against
+# $138.70); the E2 rows were the hourly rate rounded to three places.
+_GCE_HOURLY: dict[str, float] = {
+    "e2-standard-2": 0.06701142, "e2-standard-4": 0.13402284, "e2-standard-8": 0.26804568,
+    "e2-standard-16": 0.53609136, "e2-standard-32": 1.07218272,
+    "n2-standard-2": 0.097118, "n2-standard-4": 0.194236, "n2-standard-8": 0.388472,
+    "n2-standard-16": 0.776944, "n2-standard-32": 1.553888,
+    "n1-standard-1": 0.04749975, "n1-standard-2": 0.0949995, "n1-standard-4": 0.189999,
+    "n1-standard-8": 0.379998, "n1-standard-16": 0.759996,
+}
+# Derived, never typed: list hourly x 730, rounded to cents. N1 and N2 earn a
+# sustained-use discount when they run most of a month; that is a discount on
+# the bill, not the list price, and is not netted out here.
 _GKE_MONTHLY: dict[str, float] = {
-    "e2-standard-2": 48.91,  "e2-standard-4": 97.82,  "e2-standard-8": 195.64,
-    "e2-standard-16": 391.28,"e2-standard-32": 782.56,
-    "n2-standard-2": 60.49,  "n2-standard-4": 120.97,  "n2-standard-8": 241.95,
-    "n2-standard-16": 483.89,"n2-standard-32": 967.78,
-    "n1-standard-1": 26.73,  "n1-standard-2": 53.46,   "n1-standard-4": 106.92,
-    "n1-standard-8": 213.83, "n1-standard-16": 427.67,
+    t: round(h * HOURS_PER_MONTH, 2) for t, h in _GCE_HOURLY.items()
 }
 
+# Unverified: prices.azure.com was not reachable from the 2026-10-13 audit, so
+# these rows are as they were. Each is a whole-cent hourly rate x 730 (the
+# Dv3/Dv5 rows are $0.096 per 2 vCPUs, F4s_v2 $0.17, E4s_v3 $0.252), with no
+# region or OS recorded; read them as approximate pay-as-you-go Linux rates.
 _AKS_MONTHLY: dict[str, float] = {
     "Standard_D2s_v3": 70.08, "Standard_D4s_v3": 140.16,"Standard_D8s_v3": 280.32,
     "Standard_D16s_v3": 560.64,
     "Standard_D2s_v5": 70.08, "Standard_D4s_v5": 140.16,"Standard_D8s_v5": 280.32,
     "Standard_F4s_v2": 124.10,"Standard_F8s_v2": 248.20,
     "Standard_E4s_v3": 183.96,"Standard_E8s_v3": 367.92,
+}
+
+PRICE_SOURCES: dict[str, dict[str, str]] = {
+    "_GCE_HOURLY": {
+        "source": "https://cloud.google.com/products/compute/pricing/general-purpose, Iowa "
+                  "(us-central1), Default (on-demand) column, E2, N2 and N1 standard",
+        "as_of": "2026-10-13"},
+    "_AKS_MONTHLY": {
+        "source": "unverified: prices.azure.com was not reachable from the audit "
+                  "environment on 2026-10-13, and the rows record no region or OS",
+        "as_of": "2026-10-13", "verified": "no"},
 }
 
 
@@ -71,6 +98,59 @@ def _node_monthly_cost(instance_type: str, provider: str = "aws") -> float:
     if provider == "azure":
         return _AKS_MONTHLY.get(instance_type, 0.0)
     return _EC2_MONTHLY.get(instance_type, 0.0)
+
+
+# What a spot node costs as a share of on-demand when nothing sources it: GKE
+# and AKS spot prices are not held anywhere in nable. An assumption, and the
+# node says so.
+_ASSUMED_SPOT_FACTOR = 0.35
+
+
+def _spot_factor(instance_type: str, zone: str, provider: str) -> tuple[float, str]:
+    """(spot price as a share of on-demand, where that share comes from).
+
+    An AWS node takes 1 minus the Spot Advisor saving spot_adoption holds for
+    its type and region (the median of those figures where it holds none, and
+    the basis says so). A flat 0.35 stood here for every node ("spots ~65%
+    cheaper on average"), where the table puts an EKS c5.xlarge in us-east-1
+    at 58% off."""
+    if provider in ("gcp", "azure"):
+        return _ASSUMED_SPOT_FACTOR, (
+            f"assumed: spot at {_ASSUMED_SPOT_FACTOR:.0%} of on-demand; nable holds no "
+            f"{provider} spot price")
+    from ..recommendations.spot_adoption import spot_saving
+
+    saving, basis = spot_saving(instance_type, _zone_region(zone))
+    return round(1.0 - saving, 4), f"spot at {1.0 - saving:.0%} of on-demand: {basis}"
+
+
+def _zone_region(zone: str) -> str | None:
+    """us-east-1 for us-east-1a; None when the node reports no zone."""
+    return zone[:-1] if zone[-1:].isalpha() else (zone or None)
+
+
+def _node_cost(instance_type: str, zone: str, provider: str,
+               is_spot: bool) -> tuple[float, str]:
+    """(a node's monthly cost, where it comes from; "" for an on-demand node
+    priced at the us-east-1 rate in us-east-1).
+
+    An AWS node outside us-east-1 is priced at its region's floor where nable
+    holds one (aws_prices.ec2_hourly_in_region) and says us-east-1 list where
+    it does not; a spot node then takes its Spot Advisor share (_spot_factor)."""
+    monthly = _node_monthly_cost(instance_type, provider)
+    basis: list[str] = []
+    region = _zone_region(zone)
+    if provider not in ("gcp", "azure") and region and region != "us-east-1":
+        from ..aws_prices import ec2_hourly_in_region
+
+        multiplier, regional = ec2_hourly_in_region(1.0, region)
+        monthly *= multiplier
+        basis.append(regional)
+    if is_spot:
+        factor, spot_basis = _spot_factor(instance_type, zone, provider)
+        monthly *= factor
+        basis.append(spot_basis)
+    return monthly, "; ".join(basis)
 
 
 def _fargate_pod_monthly_cost(cpu_cores: float, mem_gib: float) -> float:
@@ -140,6 +220,8 @@ class NodeInfo:
     labels: dict[str, str]
     monthly_cost: float
     is_spot: bool = False
+    # Where a spot node's price comes from (_spot_factor); empty on demand.
+    cost_basis: str = ""
 
 
 @dataclass
@@ -281,9 +363,7 @@ class KubernetesConnector:
                 or labels.get("cloud.google.com/gke-spot", "") == "true"
             )
 
-            monthly = _node_monthly_cost(instance_type, provider)
-            if is_spot:
-                monthly *= 0.35  # spots ~65% cheaper on average
+            monthly, cost_basis = _node_cost(instance_type, zone, provider, is_spot)
 
             nodes.append(NodeInfo(
                 name=meta.name,
@@ -296,6 +376,7 @@ class KubernetesConnector:
                 labels=labels,
                 monthly_cost=monthly,
                 is_spot=is_spot,
+                cost_basis=cost_basis,
             ))
         return nodes
 
@@ -564,6 +645,7 @@ class KubernetesConnector:
                 "instance_type": node.instance_type,
                 "zone": node.zone,
                 "is_spot": node.is_spot,
+                **({"cost_basis": node.cost_basis} if node.cost_basis else {}),
                 "monthly_cost": node.monthly_cost,
                 "cpu_requested_pct": round(cpu_pct, 1),
                 "mem_requested_pct": round(mem_pct, 1),
@@ -587,9 +669,8 @@ class KubernetesConnector:
         provider = self._detect_provider(nodes)
         # Re-price nodes with detected provider
         for node in nodes:
-            node.monthly_cost = _node_monthly_cost(node.instance_type, provider)
-            if node.is_spot:
-                node.monthly_cost *= 0.35
+            node.monthly_cost, node.cost_basis = _node_cost(
+                node.instance_type, node.zone, provider, node.is_spot)
 
         pods = self._get_pods(k8s_client)
         pod_metrics = self._get_pod_metrics(k8s_client)

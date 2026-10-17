@@ -21,8 +21,10 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as _FuturesTimeout
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from functools import partial
+
+from ..aws_read_failures import ScopedThreadPool
 
 log = logging.getLogger(__name__)
 
@@ -509,6 +511,32 @@ def _annotate_evidence(findings: list[dict]) -> list[dict]:
         return findings
 
 
+# Findings whose figure AWS itself priced for the account (Compute Optimizer's
+# estimatedMonthlySavings, Cost Explorer spend), so already at the region's rate.
+_PRICED_BY_AWS = frozenset({
+    "compute_optimizer_overprovisioned_ec2", "compute_optimizer_overprovisioned_rds",
+    "compute_optimizer_overprovisioned_lambda", "data_transfer_cost",
+})
+
+
+def _label_rate_region(findings: list[dict]) -> None:
+    """Say, on each priced finding outside us-east-1 that nable priced from its
+    own us-east-1 tables, that it did, in place. A detector that priced in the
+    region (or said how it priced) sets rate_region itself and is left alone.
+    eu-west-1 lists gp3 at $0.088/GB-month to us-east-1's $0.08, and the row
+    printed $40.00 for a 500 GB volume with nothing to say so."""
+    from ..aws_prices import us_east_1_list_note
+
+    for f in findings:
+        note = us_east_1_list_note(f.get("region"))
+        if (note is None or "rate_region" in f or f.get("waste_type") in _PRICED_BY_AWS
+                or _monthly_savings(f) is None):
+            continue
+        f["rate_region"] = "us-east-1"
+        detail = str(f.get("detail") or "").rstrip()
+        f["detail"] = f"{detail} ({note}.)" if detail else f"{note[0].upper()}{note[1:]}."
+
+
 def _split_evidence_totals(findings: list[dict]) -> dict:
     try:
         from .waste_evidence import split_totals
@@ -694,7 +722,7 @@ def run_deep_audit(
     _deadline_at = (
         time.monotonic() + deadline_seconds if deadline_seconds else None
     )
-    pool = ThreadPoolExecutor(max_workers=min(max_workers, len(regions)))
+    pool = ScopedThreadPool(max_workers=min(max_workers, len(regions)))
     try:
         future_to_region = {
             pool.submit(_audit_region, session, region, active_checks): region
@@ -812,6 +840,7 @@ def run_deep_audit(
     # the sort so ranking still uses the raw figure. Additive: the per-finding
     # savings number is untouched, only the claim we make about it changes.
     all_findings = _annotate_evidence(all_findings)
+    _label_rate_region(all_findings)
     evidence_totals = _split_evidence_totals(all_findings)
 
     # ── Aggregations ──────────────────────────────────────────────────────────

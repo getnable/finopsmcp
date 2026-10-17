@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from finops.recommendations.cloudwatch_cardinality import (
     FREE_METRICS,
     METRIC_COST_PER_MONTH,
+    METRIC_PRICE_TIERS,
     _HIGH_CARDINALITY_THRESHOLD,
     _estimate_cost,
     _identify_high_cardinality_dimensions,
@@ -55,28 +56,68 @@ def _make_cw_mock(pages_by_namespace: dict[str | None, list[dict]]) -> MagicMock
 
 # ── unit tests: pricing constants ─────────────────────────────────────────────
 
+#
+# AWS Price List, AmazonCloudWatch offer, us-east-1, version 20261007115540:
+#   CW:MetricMonitorUsage  0-10,000 $0.30, 10,000-250,000 $0.10,
+#                          250,000-1,000,000 $0.05, over 1,000,000 $0.02
+#   Global-CW:MetricMonitorUsage 0-10 $0.00 (the free tier, account-wide)
+# These tests used to pin a 10,000-metric free tier that does not exist:
+# 5,000 custom metrics read $0 against a list price of $1,497/mo, and 50,000
+# read $12,000 against $6,997 because every metric was priced at the first
+# tier's $0.30.
+
 def test_free_metrics_threshold():
-    assert FREE_METRICS == 10_000
+    assert FREE_METRICS == 10
 
 
 def test_metric_cost_constant():
     assert METRIC_COST_PER_MONTH == 0.30
+    assert METRIC_PRICE_TIERS == (
+        (10_000, 0.30), (250_000, 0.10), (1_000_000, 0.05), (float("inf"), 0.02))
 
 
-def test_estimate_cost_within_free_tier():
-    """No cost when total metrics are within the 10k free tier."""
-    assert _estimate_cost(5_000) == 0.0
-    assert _estimate_cost(10_000) == 0.0
+def test_estimate_cost_bills_the_first_ten_thousand():
+    """5,000 custom metrics are not free: only 10 are."""
+    assert _estimate_cost(5_000) == round(5_000 * 0.30 - 10 * 0.30, 2) == 1497.0
+    assert _estimate_cost(10) == 0.0
 
 
-def test_estimate_cost_above_free_tier():
-    """Cost is $0.30 per metric above 10,000."""
-    cost = _estimate_cost(10_100)
-    assert abs(cost - 100 * 0.30) < 0.001
+def test_estimate_cost_above_first_tier_is_tiered():
+    """Past 10,000 metrics the rate drops to $0.10, not $0.30."""
+    assert _estimate_cost(10_100) == round(10_000 * 0.30 + 100 * 0.10 - 3.0, 2) == 3007.0
 
 
 def test_estimate_cost_large_count():
-    assert abs(_estimate_cost(20_000) - 10_000 * 0.30) < 0.01
+    assert _estimate_cost(50_000) == 6997.0
+    expected = 10_000 * 0.30 + 240_000 * 0.10 + 750_000 * 0.05 + 500_000 * 0.02 - 3.0
+    assert _estimate_cost(1_500_000) == round(expected, 2) == 74497.0
+
+
+def test_estimate_cost_tiers_each_region_separately():
+    """Each region's usage type is tiered on its own; the 10 free metrics are
+    account-wide and come off once."""
+    assert _estimate_cost({"us-east-1": 5_000, "eu-west-1": 5_000}) == 2997.0
+
+
+def test_finding_is_not_a_measured_saving():
+    """The custom-metric bill is not what a cardinality cut saves, so the
+    finding is an investigation without a precise savings figure."""
+    ns = "MyApp/Service"
+    metrics = [
+        {"Namespace": ns, "MetricName": f"m{i}",
+         "Dimensions": [{"Name": "pod_id", "Value": str(i)}]}
+        for i in range(150)
+    ]
+    cw_mock = _make_cw_mock({None: metrics, ns: metrics})
+    with patch("finops.recommendations.cloudwatch_cardinality._make_cw", return_value=cw_mock):
+        result = _run(audit_cloudwatch_metric_cardinality(_make_aws_client(), regions=["us-east-1"]))
+
+    assert result["estimated_monthly_cost"] == round(150 * 0.30 - 3.0, 2)
+    finding = result["finding"]
+    assert finding is not None
+    assert finding["kind"] == "investigation"
+    assert finding["est_monthly_savings"] is None
+    assert "two weeks" in finding["why_unsure"]
 
 
 # ── unit tests: dimension detection ───────────────────────────────────────────

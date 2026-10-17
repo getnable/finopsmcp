@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -43,11 +43,13 @@ class TestGetActiveDbIdentifiers:
         assert "mydb-dev" in result
 
     def test_handles_paginator_exception_gracefully(self):
+        """A denied instance list is unknown, not an empty account. It used to
+        return an empty set, which made every manual snapshot in the region
+        'orphaned' and a measured, high-confidence delete."""
         rds = MagicMock()
         rds.get_paginator.side_effect = Exception("access denied")
         result = _get_active_db_identifiers(rds)
-        assert isinstance(result, set)
-        assert len(result) == 0
+        assert result is None
 
     def test_includes_cluster_identifiers(self):
         rds = MagicMock()
@@ -369,6 +371,57 @@ class TestAuditRdsManualSnapshots:
             )
 
         assert len(result["old_snapshots"]) == 1
+
+    def test_an_unreadable_db_list_leaves_snapshots_unassessed(self):
+        now = datetime.now(UTC)
+        snaps = [{
+            "DBSnapshotIdentifier": "snap-1", "DBInstanceIdentifier": "prod-db",
+            "AllocatedStorage": 500, "Status": "available",
+            "SnapshotCreateTime": now - timedelta(days=60),
+        }]
+        mock_boto3 = MagicMock()
+        mock_rds = MagicMock()
+        denied = MagicMock()
+        denied.paginate.side_effect = Exception("AccessDenied")
+        cluster_pag = MagicMock()
+        cluster_pag.paginate.return_value = [{"DBClusters": []}]
+        snap_pag = MagicMock()
+        snap_pag.paginate.return_value = [{"DBSnapshots": snaps}]
+        pags = {"describe_db_instances": denied, "describe_db_clusters": cluster_pag,
+                "describe_db_snapshots": snap_pag}
+        mock_rds.get_paginator.side_effect = pags.__getitem__
+        mock_boto3.client.return_value = mock_rds
+
+        with patch("finops.recommendations.rds_snapshots.boto3", mock_boto3):
+            result = _run(audit_rds_manual_snapshots(
+                aws_client=_make_aws_client(), regions=["us-east-1"]))
+
+        assert result["orphaned_snapshots"] == []
+        assert result["old_snapshots"] == []
+        assert result["potential_monthly_savings"] == 0.0
+        assert result["unassessed_snapshots"] == 1
+        assert result["finding"] is None
+
+    def test_the_finding_is_an_upper_bound_not_a_measurement(self):
+        """AllocatedStorage is the provisioned size, not what a snapshot holds,
+        and backup storage up to the free allocation is not billed (AWS Price
+        List, AmazonRDS: "$0.095 per additional GB-month of backup storage
+        exceeding free allocation"). So the figure is an upper bound and the
+        finding carries no precise saving."""
+        now = datetime.now(UTC)
+        snaps = [{
+            "DBSnapshotIdentifier": "snap-orphan", "DBInstanceIdentifier": "gone-db",
+            "AllocatedStorage": 100, "Status": "available",
+            "SnapshotCreateTime": now - timedelta(days=60),
+        }]
+        mock_boto3 = self._make_mock_boto3_with_snapshots(snaps, active_dbs=[])
+        with patch("finops.recommendations.rds_snapshots.boto3", mock_boto3):
+            result = _run(audit_rds_manual_snapshots(
+                aws_client=_make_aws_client(), regions=["us-east-1"]))
+
+        assert result["orphaned_snapshots"][0]["price_basis"] == "upper_bound_allocated_storage"
+        assert result["finding"]["kind"] == "investigation"
+        assert result["finding"]["est_monthly_savings"] is None
 
     def test_region_scan_failure_does_not_crash(self):
         mock_boto3 = MagicMock()
