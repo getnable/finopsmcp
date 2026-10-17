@@ -2,6 +2,154 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.12.0
+
+An audit of every dollar figure nable prints, every command run with no
+terminal, and every read that can fail. Figures were re-derived by hand from
+AWS Price List offers against a fixture account; where a figure changed, the
+rule it now follows is below. JSON consumers: see **Changed output** at the
+end.
+
+- **Savings are priced at AWS's rates, and inferred ones are kept apart.**
+  - Every total separates measured savings from inferred ones. `nable scan`,
+    `nable brief`, the full audit (and its CSV and Notion export), the
+    savings ledger and `get_nable_roi` report a recoverable figure (measured
+    findings) and a "to confirm" figure (findings their own scanner files as
+    an inference: Graviton, Database Savings Plans, non-prod schedules, old
+    snapshots, CPU-only rightsizing). One fix per resource: the largest
+    measured saving counts, and a larger inferred alternative adds only its
+    excess to "to confirm". A CPU-only finding reads "low-CPU EC2 instance",
+    not "idle".
+  - Commitments. Uncovered on-demand compute is read from
+    GetSavingsPlansCoverage's `OnDemandCost`, AWS's own figure, instead of a
+    guessed `PURCHASE_TYPE` value; an unread input is "not read", never $0.
+    A Compute Savings Plan is priced at 26% off EC2 (the AWS rate card's
+    m5.large rate, under its median; the range is 18.6 to 29.1%) and 20% off
+    Fargate, blended by their share of the window's compute spend, or at 20%
+    when that split was not read. A Database Savings Plan is 20% on the
+    families it covers only. SP and RI coverage are never averaged (one is a
+    share of spend, the other of hours). Tag-scoped analysis reads on-demand
+    from Cost Explorer's purchase-type groups, however AWS spells them. The
+    full audit says commitment savings come from `get_commitment_analysis` and
+    are not in its total. The scorecard states uncovered on-demand per month,
+    its headline uses the saving its body shows (no unsourced 0.7 haircut),
+    and the commitment-gap ticket says when its figure is a ceiling.
+  - Waste patterns price only what was measured: the Savings Plans pattern
+    no longer assumes nothing is covered when coverage was not read, the
+    weekend pattern counts only spend known to be non-prod on dates that are
+    weekends, and log retention is priced from stored bytes older than the
+    window (an investigation with no figure when none were read).
+  - EBS: gp2 to gp3 is priced at the gp3 gap, not the gp2 bill. Unattached
+    volumes and unassociated Elastic IPs say they are what the scan saw.
+  - S3: no Standard-IA advice for small objects, and objects under 128 KB pay
+    no Intelligent-Tiering monitoring fee. CloudWatch custom metrics use AWS's
+    tiered rate with 10 free. A log retention setting saves only what is older
+    than it. Data transfer is reported as spend, not an unsourced 30% saving.
+  - Idle: NAT gateways are judged on traffic both ways; in-use load
+    balancers and AMI-backed snapshots are no longer idle; a failed existence
+    check does not orphan a CloudWatch alarm; an unread DB list does not
+    orphan every RDS snapshot, and that figure is an upper bound.
+  - Rightsizing reads Compute Optimizer as AWS defines its findings. Graviton
+    uses like-for-like mappings only. Spot uses the Spot Advisor figure for
+    the type, or the median of the figures held (61%, was an assumed 65%) and
+    says so. ECS proposes only Fargate sizes Fargate runs. A non-prod stop
+    schedule saves at most the hours it stops, and environment tag keys match
+    in any case (`env`, `Env`, `ENV`).
+  - Regions: EC2 in another region is priced at that region's floor where
+    the price tables hold one; anything priced at us-east-1 list says so.
+  - Kubernetes: every node dollar is allocated or idle, once, and an AWS spot
+    node is priced from the Spot Advisor figure for its type.
+  - AI spend: a LiteLLM proxy's spend is shown beside the providers it
+    proxies, not added to them. A model-switch saving says it assumes every
+    call moves.
+  - Price tables: every AWS rate has a source. Corrected rates include
+    db.m5.8xlarge ($2.74/h), ElastiCache, OpenSearch, MSK, Redshift,
+    DocumentDB and Kendra at list (no guessed fallbacks), Compute Engine at
+    us-central1 list with GCP disk and snapshot rates, and Claude Sonnet 5.5.
+    A stale Gemini table was dropped.
+  - The weekly digest compares weeks of the same coverage and carries the
+    rightsizing it found (it always said "No recommendations").
+- **A failed read is never a clean bill.**
+  - Every AWS call made inside an MCP tool is watched; a tool whose reads
+    were denied, throttled or failed (5xx, 401, 429, a bodiless 403) says so
+    and is labelled partial or not evaluated. Scanners' own thread pools carry
+    the scope, and each call is counted once.
+  - AWS Organizations listing failures are errors, not an empty org. An S3
+    bucket whose metrics were denied is recorded. A failed AI provider is
+    named in the scan. The scorecard grades only what was read.
+    `check_budget_status` no longer reports "all on track" about no budgets,
+    and `get_commitment_analysis` makes no purchase projection off unread
+    coverage.
+- **MCP tools.** Every tool carries all four annotation hints, and removals
+  are destructive. Write tools refuse an argument they would have dropped.
+  A provider-scoped API key now refuses the eight cross-provider tools
+  (`compare_providers`, `get_total_spend_all_sources` and six more) instead
+  of returning other providers' spend. `get_cost_trends` says it returns
+  window totals and points to `slice_costs` for a series. `slice_costs`
+  reports `total_shown` as the sum of its rows. `forecast_costs` bounds its
+  horizons. Date windows: GCP reads `[start, end)` like Cost Explorer, month
+  views ask for whole months, and a same-day window is refused with the
+  end date to use. Every stated tool count is the registry's.
+- **Guard.**
+  - A corpus of 464 commands and MCP calls with expected verdicts. An EC2
+    launch is judged in the region the command names. Each shell command in a
+    chain is judged on its own, and dry runs pass. eksctl launches and
+    production changes by other tools are caught; the AWS CLI, terraform,
+    kubectl and helm container images are read as their CLIs; a shell name
+    inside a commit message no longer unmasks it.
+  - `nable guard check --json` prints the verdict as data. A broken
+    `nable.policy.yaml` is named with its line and fix, and `guard check`
+    exits 1 on it; the hook keeps its fail-safe.
+  - The status footer and `guard doctor` say what each agent's hook sees,
+    including that MCP calls are unguarded where the hook sees shell only. A
+    hook whose pinned finops-mcp cannot be installed, or whose `uvx` is
+    missing, says so.
+- **Headless and CLI.** New `docs/HEADLESS.md`: what every command does with
+  stdin closed, its `--json`, its exit codes, the environment variables
+  (generated from the code and checked by a test), cron and air-gap use.
+  New CI recipes in `examples/github-actions`: a budget gate, a scheduled
+  scan through a read-only OIDC role, and a guard policy check.
+  - `nable upgrade` repins everything nable pinned (editor configs and guard
+    hooks) and exits 1 when PyPI is unreachable or a pin does not move.
+  - `nable doctor --json` and `--audit`, `finops-doctor --version`, and the
+    environment config in effect (with likely typos named).
+  - Exit codes that mean something: `setup aws --check-scope` without
+    credentials, `setup aws` that connects nothing, `serve` and `credits`
+    (hosted only), `license-status` on an invalid key, and `brief --deliver`
+    when nothing landed all exit 1.
+  - No escape codes into a pipe. A closed stdin answers no:
+    `nable aws-cur < /dev/null` no longer deploys the CUR stack.
+  - Under `FINOPS_AIRGAP`, the Slack, Teams and email senders refuse, and
+    `upgrade` does not ask PyPI.
+  - A new cost database is created 0600 before its schema lock; concurrent
+    first runs agree on one vault master key and one SQLite schema.
+- **Docs.** README, CAPABILITIES, DEPLOY, SLACK, PACKS and CONTRIBUTING now
+  claim only what the code does. The README scan example prints what the scan
+  prices.
+- **Release.** `scripts/check_release.py` and a daily `release-gap` workflow
+  report when main's version is not on PyPI (the plugin pins it, so an
+  unpublished pin turns the plugin's MCP server and guard off).
+  `scripts/bump_version.py` moves the version carriers and nothing else; the
+  0.11.0 bump had also raised the `pdfplumber` floor, now `>=0.10.0` again.
+- **Changed output.**
+  - `nable scan --json`, the full audit, its CSV and Notion export,
+    `get_savings_summary` and `get_nable_roi`: the headline figure is the
+    measured one, and `recoverable.to_confirm_monthly_usd` /
+    `to_confirm_findings` (the CSV's "To confirm" rows) hold the rest. The
+    ledger's existing fields are unchanged; the split is added beside them.
+  - `get_commitment_analysis` adds `compute_sp_rate`, its basis and
+    `combined_coverage_basis`, and returns `monthly_uncovered_on_demand_usd:
+    null` with a `not_read` reason when its input was not read.
+  - Spot rows carry `savings_basis` and `savings_basis_note`; Kubernetes
+    node rows carry `cost_basis`.
+  - The cost database gains a nullable `evidence` column on
+    `savings_recommendations`, added by the existing migration list.
+  - Provider-scoped keys get a tool error from the eight cross-provider tools.
+  - Month views (`mom`, `by_service`) request through the 1st of the next
+    month, and labels end on the last day read.
+  - `nable upgrade`, `setup aws`, `serve`, `credits` and `brief --deliver`
+    exit 1 in the cases above where they used to exit 0.
+
 ## 0.11.0
 
 - **First-party packs.** Four packs in `packs/`, in the `io.github.getnable`

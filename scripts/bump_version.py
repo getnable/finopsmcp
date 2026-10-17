@@ -8,7 +8,8 @@ pdfplumber that may not, and the package would not install.
 
 This script edits only the fields scripts/check_release.py reads as carriers
 (pyproject's [project] version, __version__, server.json, the plugin, the
-marketplace entry, the MCPB manifest and the plugin's hook pins), regenerates
+marketplace entry, the MCPB manifest, the plugin's hook pins and the CI
+recipes' installs in examples/github-actions), regenerates
 docs/sbom.json with scripts/generate_sbom.py, then checks that every carrier
 says the new version and that no dependency line in pyproject.toml changed.
 
@@ -71,6 +72,15 @@ def bump(old: str, new: str, root: Path = ROOT) -> None:
     ]
     for rel, pattern, repl, count in edits:
         _sub_exact(staged, root / rel, pattern, repl, count)
+    # The CI recipes install the release they document; tests/test_ci_recipes.py
+    # holds them to it. Not every recipe pins one, so these may match nothing.
+    examples = root / "examples/github-actions"
+    for path in sorted([*examples.glob("*.yml"), examples / "README.md"]):
+        if path.is_file():
+            text = path.read_text(encoding="utf-8")
+            new_text = re.sub(rf"finops-mcp(==| ){o}\b", rf"finops-mcp\g<1>{n}", text)
+            if new_text != text:
+                staged[path] = new_text
     pyproject = root / "pyproject.toml"
     if _dependency_lines(staged[pyproject]) != _dependency_lines(
             pyproject.read_text(encoding="utf-8")):

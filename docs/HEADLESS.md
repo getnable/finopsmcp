@@ -2,7 +2,7 @@
 
 CI, cron, scripts and agents: nable with nobody at a terminal. This page
 says what each command does when stdin is closed, what it prints, and how it
-exits. Every behaviour in the tables was run on finops-mcp 0.11.0 (2026-10-17)
+exits. Every behaviour in the tables was run on finops-mcp 0.12.0 (2026-10-17)
 the way a pipeline runs it: `timeout 90 nable ... < /dev/null`, a fresh
 `HOME`, stdout and stderr captured separately, and no cloud credentials.
 
@@ -70,7 +70,7 @@ instance metadata.
 | `nable org status` (`review`, `questions`, `export`) | the org model | yes | 0 |
 | `nable learn list`, `nable pack list` | lessons; installed packs | yes | 0 |
 | `nable doctor`, `finops-doctor` | every check, with the fix for each failure | a list of checks | 0, 1 |
-| `finops-doctor --version` | `finops-doctor (finops-mcp) 0.11.0` | | 0 |
+| `finops-doctor --version` | `finops-doctor (finops-mcp) 0.12.0` | | 0 |
 | `nable guard check --command "..."` | the verdict the hook would give | the verdict and the policy in effect | 0, 1, 2 |
 | `nable guard status`, `guard doctor`, `guard report` | hooks per agent; coverage; the decision ledger | `doctor`, `report`: yes | 0 |
 | `nable guard verify-log` | whether the decision ledger's hash chain is intact | yes | 0, 1 |
@@ -346,7 +346,7 @@ It turns off (each one checked headless or by a test):
   --deliver` sends nothing and exits 1 with "FINOPS_AIRGAP is set, and air-gap
   allows traffic to your cost providers only";
 - `nable upgrade` with no version: it does not ask PyPI and exits 1. `nable
-  upgrade 0.11.0` works, through the package index pip and uv are configured
+  upgrade 0.12.0` works, through the package index pip and uv are configured
   for (`PIP_INDEX_URL`, `UV_INDEX_URL`);
 - with `FINOPS_GOVCLOUD`, it also requires FIPS-validated OpenSSL.
 

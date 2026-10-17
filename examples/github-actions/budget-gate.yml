@@ -60,7 +60,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install nable
-        run: python -m pip install --quiet "finops-mcp==0.11.0"
+        run: python -m pip install --quiet "finops-mcp==0.12.0"
 
       - name: Budget gate
         run: nable budget ci-gate --fail-on-breach --json --budget-file budget.yml > "$GATE_JSON"

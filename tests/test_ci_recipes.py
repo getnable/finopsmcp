@@ -88,3 +88,15 @@ def test_the_guard_policy_check_reads_the_verdict_and_the_policy(tmp_path):
     doc = json.loads(r.stdout)
     assert r.returncode == 1 and doc["decision"] == "ask"
     assert doc["policy"]["broken"] and doc["policy"]["problems"] and doc["policy"]["fix"]
+
+
+def test_every_recipe_installs_the_release_its_commands_were_checked_against():
+    """A recipe pinned to an older release runs commands that release lacks
+    (`guard check --json`, the budget gate's exit 2): it would fail on someone
+    else's runner for a reason the tests above never see."""
+    version = re.search(r'^version = "([^"]+)"$',
+                        (ROOT / "pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
+    pins = {p.name: re.findall(r"finops-mcp==([0-9][0-9A-Za-z.]*)", p.read_text(encoding="utf-8"))
+            for p in [*EXAMPLES.glob("*.yml"), EXAMPLES / "README.md"]}
+    assert all(pins[name] for name in RECIPES), pins
+    assert {name: v for name, vs in pins.items() for v in vs if v != version} == {}

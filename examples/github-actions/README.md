@@ -3,9 +3,9 @@
 Copy-paste templates. None of them runs in this repo: copy one into your own
 repo at `.github/workflows/` and set what its header says it needs.
 
-## On the CLI (finops-mcp 0.11.0)
+## On the CLI (finops-mcp 0.12.0)
 
-These install `finops-mcp==0.11.0` and run `nable` in a shell step, so what
+These install `finops-mcp==0.12.0` and run `nable` in a shell step, so what
 they do is what `nable` does on your machine. Each one's exit codes are in its
 header and in [docs/HEADLESS.md](../../docs/HEADLESS.md).
 

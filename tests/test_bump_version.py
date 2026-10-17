@@ -24,6 +24,8 @@ _CARRIER_FILES = [
     ".claude-plugin/marketplace.json",
     "packaging/mcpb/manifest.json",
     "docs/sbom.json",
+    "examples/github-actions/README.md",
+    "examples/github-actions/budget-gate.yml",
 ]
 
 
@@ -97,3 +99,11 @@ def test_a_refused_bump_writes_nothing(tree):
     for rel in _CARRIER_FILES:
         if rel != "plugins/nable/hooks/hooks.json":
             assert (tree / rel).read_text(encoding="utf-8") == before[rel], rel
+
+
+def test_the_ci_recipes_move_with_the_release(tree):
+    _load("bump_version").bump(_current(), "9.9.9", root=tree)
+    gate = (tree / "examples/github-actions/budget-gate.yml").read_text(encoding="utf-8")
+    readme = (tree / "examples/github-actions/README.md").read_text(encoding="utf-8")
+    assert '"finops-mcp==9.9.9"' in gate and _current() not in gate
+    assert "finops-mcp==9.9.9" in readme and "(finops-mcp 9.9.9)" in readme

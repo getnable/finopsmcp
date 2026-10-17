@@ -47,7 +47,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install nable
-        run: python -m pip install --quiet "finops-mcp==0.11.0"
+        run: python -m pip install --quiet "finops-mcp==0.12.0"
 
       - name: Check the policy and the commands
         run: |
