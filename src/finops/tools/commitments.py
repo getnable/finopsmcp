@@ -512,7 +512,8 @@ def recommend_spot_adoption(
     Finds on-demand EC2 instances that could move to spot. Uses env tags, ASG
     membership, CPU variance, and a dated us-east-1 snapshot of Spot Instance
     Advisor savings and interruption bands; outside that snapshot the band is
-    unknown and the saving an assumed 65%, and each row says which.
+    unknown and the saving is the median of the snapshot's figures, and each
+    row says which.
     Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.
 
     Args:
@@ -573,7 +574,7 @@ def recommend_spot_adoption(
                 f"| {c['recommendation']} "
                 f"| ${c['monthly_savings']:,.2f} "
                 f"| {c['savings_pct']:.1f}%"
-                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (assumed)'} |"
+                f"{'' if c.get('savings_basis') == 'spot_advisor' else ' (median)'} |"
             )
 
         if unread_note:
@@ -583,7 +584,9 @@ def recommend_spot_adoption(
             "",
             "**Basis:** on-demand cost is the us-east-1 Linux list rate. Interruption bands "
             "and savings are the Spot Instance Advisor's us-east-1 figures as of "
-            "2026-03-20 where nable has them; \"unknown\" and \"(assumed)\" mark the rest. "
+            "2026-03-20 where nable has them; \"unknown\" marks the rest, and \"(median)\" a "
+            "saving priced at the median of those us-east-1 figures, because nable holds no "
+            "figure for that type or region. "
             "Check the Spot Advisor for your region before sizing the saving.",
             "",
             "**How to migrate:** Use a Launch Template with a mixed instances policy. "

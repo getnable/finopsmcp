@@ -100,6 +100,31 @@ def _node_monthly_cost(instance_type: str, provider: str = "aws") -> float:
     return _EC2_MONTHLY.get(instance_type, 0.0)
 
 
+# What a spot node costs as a share of on-demand when nothing sources it: GKE
+# and AKS spot prices are not held anywhere in nable. An assumption, and the
+# node says so.
+_ASSUMED_SPOT_FACTOR = 0.35
+
+
+def _spot_factor(instance_type: str, zone: str, provider: str) -> tuple[float, str]:
+    """(spot price as a share of on-demand, where that share comes from).
+
+    An AWS node takes 1 minus the Spot Advisor saving spot_adoption holds for
+    its type and region (the median of those figures where it holds none, and
+    the basis says so). A flat 0.35 stood here for every node ("spots ~65%
+    cheaper on average"), where the table puts an EKS c5.xlarge in us-east-1
+    at 58% off."""
+    if provider in ("gcp", "azure"):
+        return _ASSUMED_SPOT_FACTOR, (
+            f"assumed: spot at {_ASSUMED_SPOT_FACTOR:.0%} of on-demand; nable holds no "
+            f"{provider} spot price")
+    from ..recommendations.spot_adoption import spot_saving
+
+    region = zone[:-1] if zone[-1:].isalpha() else (zone or None)
+    saving, basis = spot_saving(instance_type, region)
+    return round(1.0 - saving, 4), f"spot at {1.0 - saving:.0%} of on-demand: {basis}"
+
+
 def _fargate_pod_monthly_cost(cpu_cores: float, mem_gib: float) -> float:
     """
     Compute the monthly cost of an AWS Fargate pod from its resource requests.
@@ -167,6 +192,8 @@ class NodeInfo:
     labels: dict[str, str]
     monthly_cost: float
     is_spot: bool = False
+    # Where a spot node's price comes from (_spot_factor); empty on demand.
+    cost_basis: str = ""
 
 
 @dataclass
@@ -309,8 +336,10 @@ class KubernetesConnector:
             )
 
             monthly = _node_monthly_cost(instance_type, provider)
+            cost_basis = ""
             if is_spot:
-                monthly *= 0.35  # spots ~65% cheaper on average
+                factor, cost_basis = _spot_factor(instance_type, zone, provider)
+                monthly *= factor
 
             nodes.append(NodeInfo(
                 name=meta.name,
@@ -323,6 +352,7 @@ class KubernetesConnector:
                 labels=labels,
                 monthly_cost=monthly,
                 is_spot=is_spot,
+                cost_basis=cost_basis,
             ))
         return nodes
 
@@ -591,6 +621,7 @@ class KubernetesConnector:
                 "instance_type": node.instance_type,
                 "zone": node.zone,
                 "is_spot": node.is_spot,
+                **({"cost_basis": node.cost_basis} if node.cost_basis else {}),
                 "monthly_cost": node.monthly_cost,
                 "cpu_requested_pct": round(cpu_pct, 1),
                 "mem_requested_pct": round(mem_pct, 1),
@@ -616,7 +647,8 @@ class KubernetesConnector:
         for node in nodes:
             node.monthly_cost = _node_monthly_cost(node.instance_type, provider)
             if node.is_spot:
-                node.monthly_cost *= 0.35
+                factor, node.cost_basis = _spot_factor(node.instance_type, node.zone, provider)
+                node.monthly_cost *= factor
 
         pods = self._get_pods(k8s_client)
         pod_metrics = self._get_pod_metrics(k8s_client)

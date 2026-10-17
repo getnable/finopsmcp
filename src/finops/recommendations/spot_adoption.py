@@ -10,7 +10,8 @@ tags to detect environment, and ASG membership to assess interruption
 tolerance. Savings and interruption bands are a dated snapshot of the public
 Spot Instance Advisor data for us-east-1 Linux, used only for us-east-1
 instances of the types it covers. Anywhere else the interruption band is
-unknown and the saving is an assumed default, and each row says which.
+unknown and the saving is the median of the figures held, and each row says
+which (savings_basis, savings_basis_note).
 """
 from __future__ import annotations
 
@@ -54,10 +55,12 @@ SPOT_DISCOUNT: dict[str, float] = {
     "m6i.large":  0.61,  "m6i.xlarge": 0.59,
     "c5.large":   0.61,  "c5.xlarge":  0.58,
     "r5.large":   0.62,  "r5.xlarge":  0.70,
-    # Not from Spot Advisor: an assumed figure for every type and region the
-    # snapshot does not cover. Rows priced on it say savings_basis "assumed".
-    "_default":   0.65,
 }
+# For every type and region the snapshot does not cover: the median of the
+# Spot Advisor savings above, computed from them, so it moves when they do.
+# It was an assumed 0.65, above seven of the nine figures. Rows priced on it
+# say savings_basis "spot_advisor_median" and whose figures it is.
+SPOT_DISCOUNT["_default"] = statistics.median(SPOT_DISCOUNT.values())
 
 SPOT_INTERRUPTION_BAND: dict[str, str] = {
     "m5.large":   ">20%",   "m5.xlarge":  ">20%",   "m5.2xlarge": ">20%",
@@ -109,10 +112,26 @@ def _get_interruption_band(instance_type: str, region: str | None = None) -> str
     return "unknown"
 
 
-def _get_spot_discount(instance_type: str, region: str | None = None) -> float:
+def spot_saving(instance_type: str, region: str | None = None) -> tuple[float, str]:
+    """(the fraction saved on Spot, which Spot Advisor figure it is).
+
+    The type's own figure where the snapshot covers its region; otherwise the
+    median of the figures held, and the basis says they are us-east-1's and
+    what is missing."""
     if _from_advisor(instance_type, region):
-        return SPOT_DISCOUNT[instance_type]
-    return SPOT_DISCOUNT["_default"]
+        return SPOT_DISCOUNT[instance_type], (
+            f"Spot Advisor {SPOT_ADVISOR_REGION} figure for {instance_type} "
+            f"({SPOT_ADVISOR_AS_OF})")
+    held = len(SPOT_DISCOUNT) - 1
+    missing = (f"no {region} figure is held" if region and region != SPOT_ADVISOR_REGION
+               else f"no {instance_type} figure is held")
+    return SPOT_DISCOUNT["_default"], (
+        f"median of the {held} Spot Advisor {SPOT_ADVISOR_REGION} figures held "
+        f"({SPOT_ADVISOR_AS_OF}); {missing}")
+
+
+def _get_spot_discount(instance_type: str, region: str | None = None) -> float:
+    return spot_saving(instance_type, region)[0]
 
 
 def _monthly_ondemand_cost(instance_type: str) -> float:
@@ -308,7 +327,7 @@ def _analyze_region(
         is_stateless = _is_stateless(inst)
         freq         = _get_interruption_freq(itype, region)
         band         = _get_interruption_band(itype, region)
-        discount     = _get_spot_discount(itype, region)
+        discount, discount_basis = spot_saving(itype, region)
 
         ondemand_cost = _monthly_ondemand_cost(itype)
         spot_cost     = round(ondemand_cost * (1.0 - discount), 2)
@@ -333,7 +352,9 @@ def _analyze_region(
             "monthly_spot_estimate": spot_cost,
             "monthly_savings":       savings,
             "savings_pct":           savings_pct,
-            "savings_basis":         "spot_advisor" if band != "unknown" else "assumed",
+            "savings_basis":         ("spot_advisor" if _from_advisor(itype, region)
+                                      else "spot_advisor_median"),
+            "savings_basis_note":    discount_basis,
             "cpu_variance_stddev":   round(cpu_var, 1),
         })
     return results
@@ -424,7 +445,8 @@ def recommend_spot_adoption(
                 "interruption, which I infer from tags and ASG membership, not from "
                 "observed behavior. The discount and interruption band come from a "
                 f"{SPOT_ADVISOR_AS_OF} Spot Instance Advisor snapshot for us-east-1 where "
-                "it covers the type, and are an assumed default elsewhere; real spot prices "
+                "it covers the type; elsewhere the band is unknown and the discount is the "
+                "median of that snapshot's figures. Real spot prices "
                 "vary by AZ and capacity pool, so I cannot put a precise saving on it until "
                 "spot is actually running."
             ),
@@ -434,7 +456,7 @@ def recommend_spot_adoption(
                 "Env tags correctly indicate a stateless or non-prod instance.",
                 f"Spot discount of about {top['savings_pct']:.0f}% holds ("
                 + ("Spot Advisor us-east-1 figure" if top.get("savings_basis") == "spot_advisor"
-                   else "an assumed default, not a Spot Advisor figure")
+                   else top.get("savings_basis_note") or "the median of the Spot Advisor figures held")
                 + "; actual price moves with capacity).",
                 "On-demand cost is the us-east-1 Linux list rate; a Reserved Instance or "
                 "Savings Plan already covering the instance makes the real saving smaller.",

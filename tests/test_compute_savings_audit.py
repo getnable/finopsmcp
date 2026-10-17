@@ -495,7 +495,10 @@ def test_a_spot_figure_from_one_region_is_not_applied_to_another():
     [row] = _spot_rows("m5.large", "eu-west-1")
     assert row["interruption_band"] == "unknown"
     assert row["recommendation"] == "POSSIBLE"
-    assert row["savings_basis"] == "assumed"
+    # Not the us-east-1 m5.large figure (59%): the median of the figures held,
+    # computed (it was an assumed 65%), and the row says so.
+    assert row["savings_basis"] == "spot_advisor_median"
+    assert row["savings_pct"] == 61.0
     [row] = _spot_rows("c5.large", "us-east-1")
     assert row["interruption_band"] == "10-15%" and row["recommendation"] == "POSSIBLE"
     assert row["savings_basis"] == "spot_advisor"
