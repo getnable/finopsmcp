@@ -53,6 +53,7 @@ def get_commitment_analysis() -> dict:
         actionable = {
             "combined_coverage_pct": (None if combined_coverage is None
                                       else round(combined_coverage, 1)),
+            "combined_coverage_basis": analysis.coverage_basis,
             "coverage_target_pct": coverage_target,
             "coverage_gap_pct": None if coverage_gap_pct is None else round(coverage_gap_pct, 1),
             "monthly_uncovered_on_demand_usd": (None if monthly_uncovered is None

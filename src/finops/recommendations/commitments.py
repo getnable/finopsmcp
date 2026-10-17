@@ -128,6 +128,33 @@ class TaggedCoverageEstimate:
     confidence_note: str
 
 
+def combine_coverage(sp: float | None, ri: float | None) -> tuple[float | None, str]:
+    """(one coverage figure, what it is) from Savings Plans and RI coverage.
+
+    The two are percentages of different things. Savings Plans coverage is a
+    share of eligible SPEND (SpendCoveredBySavingsPlans / TotalCost); RI
+    coverage is a share of running HOURS (CoverageHoursPercentage). Averaging
+    them, as this did, told an account whose plan covers 18.6% of its spend and
+    which has no RIs that 9.3% of its compute was committed. A spend-weighted
+    combination needs spend for both, and the RI read reports hours, so: when
+    only one instrument covers anything, or only one could be read, that one is
+    the figure; when both cover something, the Savings Plans figure is the
+    headline and RI coverage is reported apart. None when neither was read.
+    """
+    if sp is None and ri is None:
+        return None, "not read: neither Savings Plans nor RI coverage"
+    if ri is None:
+        return sp, "Savings Plans coverage of eligible spend (RI coverage not read)"
+    if sp is None:
+        return ri, "RI coverage of running hours (Savings Plans coverage not read)"
+    if not ri:
+        return sp, "Savings Plans coverage of eligible spend (no RI coverage)"
+    if not sp:
+        return ri, "RI coverage of running hours (no Savings Plans coverage)"
+    return sp, ("Savings Plans coverage of eligible spend; RI coverage is a share of "
+                "running hours and is reported separately, not combined")
+
+
 @dataclass
 class CommitmentAnalysis:
     # Current state. Coverage is None when the call was denied or failed:
@@ -158,22 +185,14 @@ class CommitmentAnalysis:
 
     @property
     def combined_coverage_pct(self) -> float | None:
-        """Average of the instruments that answered, or None if neither did.
+        """One commitment coverage figure, or None if neither instrument was
+        read. Never an average: see combine_coverage."""
+        return combine_coverage(self.savings_plan_coverage_pct, self.ri_coverage_pct)[0]
 
-        Every consumer wanted this and each rolled its own, as
-        `(sp + ri) / 2`, which raises the moment either is None. Three of them
-        did: tools/commitments, notifications/reports and tools/attribution. That
-        was live for any customer missing ce:GetSavingsPlansCoverage, which is a
-        separate IAM action from the Cost Explorer reads most people grant, so
-        the crash needed no unusual setup at all.
-
-        Averaging only the instruments that answered is the honest reading: if RI
-        coverage is 40% and SP coverage could not be read, "40%" is a better
-        answer than "20%", which silently assumes the unreadable half is zero.
-        """
-        values = [v for v in (self.savings_plan_coverage_pct, self.ri_coverage_pct)
-                  if v is not None]
-        return sum(values) / len(values) if values else None
+    @property
+    def coverage_basis(self) -> str:
+        """What combined_coverage_pct is (combine_coverage)."""
+        return combine_coverage(self.savings_plan_coverage_pct, self.ri_coverage_pct)[1]
 
     @property
     def coverage_score(self) -> str:
@@ -685,7 +704,8 @@ def estimate_coverage_for_partial_tag(
 
         blended_sp = tagged_sp_cov * tagged_weight + inferred_untagged_sp * untagged_weight
         blended_ri = tagged_ri_cov * tagged_weight + inferred_untagged_ri * untagged_weight
-        blended    = (blended_sp + blended_ri) / 2
+        # Never an average of the two: combine_coverage.
+        blended    = combine_coverage(blended_sp, blended_ri)[0]
 
         # ── Step 5: confidence ────────────────────────────────────────────────
         if tag_coverage_pct >= 90:

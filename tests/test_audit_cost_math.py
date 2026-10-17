@@ -803,10 +803,15 @@ def test_commitment_coverage_scores_the_hosted_dashboards_shape_not_an_f():
 
     dim = _score_commitment_coverage(hosted_shaped)
 
-    assert dim.grade != "F", f"graded {dim.grade} on 40% real coverage: {dim.findings}"
-    assert dim.metadata["coverage_pct"] == pytest.approx(40.0), (
-        "coverage should be the average of the two instruments that answered "
-        "(55% SP + 25% RI) / 2, not the dict-default 0")
+    assert dim.grade != "F", f"graded {dim.grade} on 55% real coverage: {dim.findings}"
+    # 55% of eligible spend under Savings Plans, 25% of running hours under RIs.
+    # This pinned their average, 40%, a figure that is a share of nothing: the
+    # two have different denominators (spend and hours). With both covering
+    # something and no spend for RIs, the Savings Plans figure is the headline
+    # and RI coverage is reported apart (commitments.combine_coverage).
+    assert dim.metadata["coverage_pct"] == pytest.approx(55.0), (
+        "coverage should be the Savings Plans share of spend, not the dict-default 0 "
+        "and not an average of a spend share and an hours share")
     assert dim.metadata["on_demand_spend_usd"] == pytest.approx(4000.0)
     assert not any("Only 0%" in f for f in dim.findings), dim.findings
 

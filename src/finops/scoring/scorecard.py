@@ -402,21 +402,20 @@ def _normalize_commitment_data(commitment_data: dict) -> tuple[float | None, flo
     not-None test, not truthiness, so a caller that legitimately passes 0% is
     trusted rather than treated as absent, while a present-but-null value falls
     back to the components rather than reaching _clamp as None). Only when it is
-    absent or null do we derive the
-    same "average of the instruments that answered" figure
-    combined_coverage_pct already computes elsewhere in this codebase, from
-    whichever of the hosted keys showed up.
+    absent or null do we derive the same figure combined_coverage_pct
+    computes (commitments.combine_coverage, never an average of a spend share
+    and an hours share), from whichever of the hosted keys showed up.
     """
     if commitment_data.get("coverage_pct") is not None:
         coverage_pct = commitment_data["coverage_pct"]
     else:
-        parts = [v for v in (
-            commitment_data.get("savings_plan_coverage_pct"),
-            commitment_data.get("ri_coverage_pct"),
-        ) if v is not None]
         # None, not 0, when no instrument answered: unread coverage is not
         # zero coverage, and the caller reports it as not scored.
-        coverage_pct = sum(parts) / len(parts) if parts else None
+        # Never an average of the two (combine_coverage): SP coverage is a share
+        # of spend, RI coverage a share of hours.
+        from ..recommendations.commitments import combine_coverage
+        coverage_pct = combine_coverage(commitment_data.get("savings_plan_coverage_pct"),
+                                        commitment_data.get("ri_coverage_pct"))[0]
 
     if "on_demand_usd" in commitment_data:
         # None is a read that failed: unknown, never $0.
@@ -498,12 +497,12 @@ def _score_commitment_coverage(
 
     if coverage_pct < 30 and on_demand_spend is None:
         findings.append(
-            f"Only {coverage_pct:.0f}% of compute is under commitments; the uncovered "
+            f"Only {coverage_pct:.1f}% of compute is under commitments; the uncovered "
             f"on-demand spend could not be read, so it is not priced here"
         )
     elif coverage_pct < 30:
         findings.append(
-            f"Only {coverage_pct:.0f}% of compute is under commitments — "
+            f"Only {coverage_pct:.1f}% of compute is under commitments — "
             f"${on_demand_spend:,.0f}/month at full on-demand rates"
         )
         if potential_savings > 100:
@@ -513,11 +512,11 @@ def _score_commitment_coverage(
                 f"estimated savings: ${potential_savings:,.0f}/month"
             )
     elif coverage_pct < 60:
-        findings.append(f"{coverage_pct:.0f}% commitment coverage — room to improve")
+        findings.append(f"{coverage_pct:.1f}% commitment coverage — room to improve")
         if potential_savings > 50:
             actions.append(f"Increase commitment coverage to 70%+ — ${potential_savings:,.0f}/month opportunity")
     else:
-        findings.append(f"Strong commitment coverage at {coverage_pct:.0f}%")
+        findings.append(f"Strong commitment coverage at {coverage_pct:.1f}%")
         actions.append("Review commitments annually to ensure they match current usage patterns")
 
     return DimensionScore(
