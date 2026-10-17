@@ -73,7 +73,7 @@ dependencies = [
 snowflake = ["snowflake-connector-python>=3.6.0"]
 azure-oauth = ["msal>=1.28.0"]
 azure = [
-    "azure-mgmt-costmanagement>=4.0.0",
+    "azure-mgmt-costmanagement>=5.0.0",
     "azure-identity>=1.15.0",
 ]
 gcp = [
@@ -118,7 +118,7 @@ all = [
     "kubernetes>=29.0.0",
     "psycopg2-binary>=2.9.0",
     "croniter>=2.0.0",
-    "azure-mgmt-costmanagement>=4.0.0",
+    "azure-mgmt-costmanagement>=5.0.0",
     "azure-identity>=1.15.0",
     "pyasn1>=0.6.4",  # see [gcp] extra: keep the transitive off the 0.6.3 advisories
     "google-cloud-billing>=1.13.0",
