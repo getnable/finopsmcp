@@ -33,9 +33,14 @@ def _channel() -> str:
     return os.environ.get("SLACK_CHANNEL", "#finops-alerts")
 
 
+def _airgapped() -> bool:
+    from ..config import airgap_blocks
+    return airgap_blocks("Slack")
+
+
 async def send_webhook(blocks: list[dict], text: str = "") -> bool:
     url = _webhook_url()
-    if not url:
+    if not url or _airgapped():
         return False
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(url, json={"text": text, "blocks": blocks})
@@ -44,7 +49,7 @@ async def send_webhook(blocks: list[dict], text: str = "") -> bool:
 
 async def send_bot(blocks: list[dict], text: str = "") -> bool:
     token = _bot_token()
-    if not token:
+    if not token or _airgapped():
         return False
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(

@@ -1848,6 +1848,36 @@ def pin_state(harness: str, global_scope: bool) -> str | None:
     return "binary"
 
 
+def _strings(node: Any):
+    """Every string in a parsed JSON document, depth first."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from _strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _strings(v)
+
+
+def hook_releases(harness: str, global_scope: bool) -> set[str | None]:
+    """The finops-mcp release each guard hook command of ours in this
+    harness's file pins with uvx, on every event (post hooks too); None for
+    one that pins no release (a binary path, or uvx with no version). Empty
+    when the file holds no hook of ours. `nable upgrade` reads this to find
+    the hooks it should re-pin. Read-only, never raises."""
+    path = hooks_path(harness, global_scope)
+    try:
+        if harness == "cline":
+            text = _cline_read(path)
+            cmds = [_cline_command_in(text)] if text is not None else []
+        else:
+            cmds = list(_strings(json.loads(path.read_text(encoding="utf-8"))))
+    except (OSError, ValueError, TypeError, RecursionError):
+        return set()
+    return {uvx_release(c) for c in cmds if _is_ours(c)}
+
+
 def sees_mcp(harness: str, global_scope: bool) -> bool:
     """Does our installed hook see MCP tool calls, not only shell commands?
     Cursor and Codex can; an install from before MCP coverage cannot until

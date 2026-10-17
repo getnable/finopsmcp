@@ -233,6 +233,15 @@ def deliver(brief: Brief, *, to: Iterable[str] | None = None,
     wanted = set(to) if to is not None else channels()
     url = url if url is not None else (os.getenv(URL_ENV) or None)
     results: dict[str, bool] = {}
+    from ..config import is_airgap
+    if is_airgap():
+        # Air-gap promises provider traffic only, and Slack, Teams and email
+        # are not providers: the same rule send_report_now keeps
+        # (notifications/reports.py). Every channel asked for is reported
+        # as not delivered, so --deliver fails and says why.
+        log.warning("FINOPS_AIRGAP is set; the brief is not pushed to %s",
+                    ", ".join(sorted(wanted)) or "any channel")
+        return {name: False for name in _VALID_CHANNELS if name in wanted}
     for name in _VALID_CHANNELS:
         if name not in wanted:
             continue

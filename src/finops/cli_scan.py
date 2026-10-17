@@ -64,6 +64,9 @@ import threading
 import time
 
 DOCS_LINE = "docs: https://getnable.com/docs/cli"
+# The line `nable brief` ends its no-credentials answer with: someone with no
+# account at hand can still see what a scan prints.
+_DEMO_HINT = "  no account at hand? `nable scan --demo` shows nable on sample data"
 
 # Staleness check state. The network call runs in a daemon thread started at
 # scan start so it overlaps the AWS work and costs the user nothing; the exit
@@ -1184,6 +1187,7 @@ def run(args, t0: float | None = None) -> int:
                 "  looked in: env vars, ~/.aws/credentials, ~/.aws/config (SSO), instance metadata",
                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
                 "  then: `nable connect` waits and connects the moment they appear",
+                _DEMO_HINT,
             ], "no-creds", t0, props={"n_extra": len(blocks)})
             return _finish(code, abandoned)
         _render(out, None, None, demo=False, ce_denied=False, extra_blocks=blocks)
@@ -1214,6 +1218,7 @@ def run(args, t0: float | None = None) -> int:
                 # rather than only at how to hand over access.
                 "  evaluating first? `nable scan --dry-run` lists every API call "
                 "and permission a scan needs, without running one",
+                _DEMO_HINT,
             ], "no-creds", t0)
         sts = session.client("sts")
         ident = sts.get_caller_identity()
@@ -1232,6 +1237,7 @@ def run(args, t0: float | None = None) -> int:
                 "no usable AWS credentials found",
                 "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
                 "  then: `nable connect` waits and connects the moment they appear",
+                _DEMO_HINT,
             ], "no-creds", t0, exc=exc)
         if klass == "denied":
             return _fail(out, EXIT_DENIED, [

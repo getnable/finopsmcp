@@ -567,6 +567,36 @@ def _check_guard_hook() -> dict | None:
                 "detail": f"could not read the guard's state ({type(e).__name__})"}
 
 
+def _check_guard_policy() -> dict:
+    """Is the guard judging with the policy written down?
+
+    A nable.policy.yaml that does not parse, or a value in it (or in a
+    FINOPS_POLICY_* override) the guard cannot use, makes the guard fall back
+    to its defaults, silently, on every tool call: that is its fail-safe, and
+    the hook cannot print. Only `nable guard doctor` used to say so. This
+    names the file, the fix and the defaults in effect instead."""
+    name = "Guard policy"
+    try:
+        from .policy import in_effect_text, policy_report
+        report = policy_report()
+    except Exception as e:  # noqa: BLE001 - a diagnostic never fails the doctor
+        return {"name": name, "ok": None, "warnings": [],
+                "detail": f"could not read the guard policy ({type(e).__name__})"}
+    effect = in_effect_text(report)
+    if report["broken"]:
+        return {"name": name, "ok": False,
+                "detail": (f"broken, so the guard uses defaults: {report['problems'][0]}. "
+                           f"In effect: {effect}"),
+                "warnings": report["problems"][1:], "recommendation": report["fix"],
+                "path": report["path"], "problems": report["problems"],
+                "in_effect": report["in_effect"]}
+    where = (f"{report['path']}" if report["exists"]
+             else f"no policy file at {report['path']}, so the defaults apply")
+    return {"name": name, "ok": True, "detail": f"{where}. In effect: {effect}",
+            "warnings": [], "path": report["path"], "problems": [],
+            "in_effect": report["in_effect"]}
+
+
 def _check_audit_log(last_n: int = 5) -> dict:
     """Return recent audit log entries from the vault."""
     try:
@@ -782,6 +812,7 @@ def run_doctor(as_json: bool = False) -> int:
         _check_network(),
         _check_audit_log(),
         _check_guard_hook(),
+        _check_guard_policy(),
     ]
     checks = [c for c in checks if c is not None]
 
@@ -863,6 +894,10 @@ def main(args: list[str] | None = None) -> None:
         description="Health check for your nable (finops-mcp) installation",
     )
     p.add_argument("--json", action="store_true", help="Output results as JSON")
+    # Every other entry point answers --version; this one exited 2 on it.
+    from . import __version__
+    p.add_argument("--version", action="version",
+                   version=f"finops-doctor (finops-mcp) {__version__ or 'unknown'}")
     p.add_argument(
         "--audit", action="store_true",
         help="Print audit log entries instead of running health checks",

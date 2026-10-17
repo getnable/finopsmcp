@@ -138,10 +138,14 @@ def run(args) -> int:
     code = EXIT_ERROR if undelivered else EXIT_OK
     if undelivered:
         from .briefing.run import DELIVER_ENV
+        from .config import is_airgap
         failed = [k for k, v in delivered.items() if not v]
         why = (f"delivery failed: {', '.join(failed)}" if failed else
                f"nothing was delivered: {DELIVER_ENV} names no channel "
                "(slack, teams or email)")
+        if failed and is_airgap():
+            why = (f"nothing was sent to {', '.join(failed)}: FINOPS_AIRGAP is set, and "
+                   "air-gap allows traffic to your cost providers only")
         print(f"nable brief --deliver: {why}", file=sys.stderr)
 
     if getattr(args, "html", False):

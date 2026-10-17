@@ -63,7 +63,7 @@ def test_doctor_names_a_misspelled_setting_and_what_is_in_effect(tmp_path):
     r = nable(tmp_path, "doctor", "--json",
               env={"FINOPS_AIRGAPP": "1", "FINOPS_DATA_DIR": str(data),
                    "FINOPS_ENABLE_SCHEDULER": "1",
-                   "FINOPS_SMTP_PASSWORD": "not-a-real-password-7c1e"})
+                   "FINOPS_SMTP_PASSWORD": "not-a-real-password-7c1e"})  # pragma: allowlist secret
     env = _env_check(r)
     assert {"name": "FINOPS_AIRGAPP", "did_you_mean": "FINOPS_AIRGAP", "note": None} in env["unknown"]
     hosted = next(u for u in env["unknown"] if u["name"] == "FINOPS_ENABLE_SCHEDULER")
@@ -169,3 +169,174 @@ def test_brief_deliver_with_no_valid_channel_exits_1(tmp_path):
         r, doc = _brief(tmp_path, channels)
         assert doc["delivered"] == {}
         assert r.returncode == 1, channels
+
+
+# ── setup aws --check-scope, aws-cur, infra ───────────────────────────────────
+
+def test_check_scope_without_credentials_gives_the_next_step_and_exits_1(tmp_path):
+    """"Could not get caller identity" and exit 0: a pipeline asking "is this
+    key read-only?" read a check that never ran as a yes."""
+    r = nable(tmp_path, "setup", "aws", "--check-scope")
+    assert r.returncode == 1
+    assert "Could not get caller identity" in r.stderr
+    assert "Nothing was checked" in r.stderr and "nable setup aws" in r.stderr
+
+
+def test_aws_cur_and_infra_print_no_escape_codes_into_a_pipe(tmp_path):
+    """Both printed raw ANSI codes into every pipe and CI log, and aws-cur
+    exited 0 with no credentials, having deployed and stored nothing."""
+    cur = nable(tmp_path, "aws-cur")
+    assert cur.returncode == 1
+    assert "credentials not found" in cur.stdout
+    infra = nable(tmp_path, "infra")
+    assert infra.returncode == 0 and "connector overview" in infra.stdout
+    for r in (cur, infra):
+        assert "\x1b[" not in r.stdout + r.stderr
+
+
+# ── credits: the other command whose feature is hosted ────────────────────────
+
+def test_credits_without_the_feature_fails_on_stderr_like_serve(tmp_path):
+    """`serve` exits 1 with its reason on stderr when the dashboard is not in
+    this package; `credits` said the same about managed-AI credits on stdout
+    and exited 0, as if it had shown a balance."""
+    import importlib.util
+    if importlib.util.find_spec("finops.billing") is not None:
+        import pytest
+        pytest.skip("managed-AI credits are installed here")
+    for argv in (("credits",), ("credits", "grant", "50")):
+        r = nable(tmp_path, *argv)
+        assert r.returncode == 1, argv
+        assert "hosted" in r.stderr and r.stdout.strip() == "", argv
+
+
+# ── finops-doctor --version ───────────────────────────────────────────────────
+
+def test_finops_doctor_answers_version(tmp_path):
+    from finops import __version__
+    code = ("import sys; sys.argv[0] = 'finops-doctor'; "
+            "from finops.doctor import main; main()")
+    r = subprocess.run(
+        [sys.executable, "-c", code, "--version"], check=False,
+        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+        env={**os.environ, "HOME": str(tmp_path), "PYTHONPATH": SRC})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == f"finops-doctor (finops-mcp) {__version__}"
+
+
+# ── a broken guard policy file ────────────────────────────────────────────────
+
+_BROKEN_POLICIES = {
+    "bad YAML": "on_budget_breach: deny\nmax_auto_monthly_usd: [200\n",
+    "a non-numeric threshold": "max_auto_monthly_usd: lots\n",
+}
+
+
+def _policy_env(tmp_path: Path, text: str) -> tuple[dict[str, str], Path]:
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    policy = data / "nable.policy.yaml"
+    policy.write_text(text)
+    return {"FINOPS_DATA_DIR": str(data)}, policy
+
+
+def test_guard_check_says_a_broken_policy_file_is_broken(tmp_path):
+    """The guard ignored a broken nable.policy.yaml silently (its fail-safe:
+    judge with the defaults) and so did `guard check`, the command people run
+    to see what the guard will do. Only `guard doctor` mentioned it."""
+    for case, text in _BROKEN_POLICIES.items():
+        env, policy = _policy_env(tmp_path, text)
+        r = nable(tmp_path, "guard", "check", "--command", "terraform destroy", env=env)
+        assert r.returncode == 1, case
+        assert "ask" in r.stdout, case                    # the verdict still prints
+        err = " ".join(r.stderr.split())
+        assert str(policy) in err, case
+        assert "Fix: correct" in err, case
+        assert "max_auto_monthly_usd 500 (default)" in err, case
+
+        j = nable(tmp_path, "guard", "check", "--json", "--command", "terraform destroy",
+                  env=env)
+        assert j.returncode == 1, case
+        doc = json.loads(j.stdout)
+        assert doc["decision"] == "ask" and doc["policy"]["broken"] is True, case
+        assert doc["policy"]["path"] == str(policy), case
+        assert doc["policy"]["in_effect"]["max_auto_monthly_usd"] == {
+            "value": 500.0, "source": "default"}, case
+
+
+def test_a_policy_file_threshold_is_read_and_reported(tmp_path):
+    env, _policy = _policy_env(tmp_path, "max_auto_monthly_usd: 200\n")
+    r = nable(tmp_path, "guard", "check", "--json", "--command", "ls", env=env)
+    assert r.returncode == 0, r.stderr
+    doc = json.loads(r.stdout)
+    assert doc["policy"]["broken"] is False
+    assert doc["policy"]["in_effect"]["max_auto_monthly_usd"] == {"value": 200.0,
+                                                                  "source": "file"}
+
+
+def test_the_hook_keeps_its_fail_safe_on_a_broken_policy_file(tmp_path):
+    """The hook is a machine protocol: a broken policy still gets the default
+    verdict as JSON on stdout, exit 0, and no human text."""
+    env, _ = _policy_env(tmp_path, _BROKEN_POLICIES["bad YAML"])
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    full = {k: v for k, v in os.environ.items() if k not in _DROP and not k.startswith("NABLE_")}
+    full.update(HOME=str(home), PYTHONPATH=SRC, FINOPS_NO_KEYRING="1", **env)
+    payload = {"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": "terraform destroy -auto-approve"},
+               "cwd": str(home), "tool_use_id": "t"}
+    r = subprocess.run([sys.executable, "-m", "finops.entry", "guard", "hook"], check=False,
+                       input=json.dumps(payload), capture_output=True, text=True,
+                       timeout=120, env=full, cwd=str(home))
+    assert r.returncode == 0
+    out = json.loads(r.stdout)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "ask"
+    assert "policy" not in r.stderr.lower()
+
+
+def test_doctor_names_a_broken_policy_file_with_its_fix(tmp_path):
+    env, policy = _policy_env(tmp_path, _BROKEN_POLICIES["a non-numeric threshold"])
+    r = nable(tmp_path, "doctor", "--json", env=env)
+    assert r.returncode == 1
+    check = next(c for c in json.loads(r.stdout) if c["name"] == "Guard policy")
+    assert check["ok"] is False and check["path"] == str(policy)
+    assert "lots" in check["detail"] and "500" in check["detail"]
+    assert check["recommendation"].startswith(f"correct {policy}")
+    text = nable(tmp_path, "doctor", env=env)
+    assert "Guard policy" in text.stdout and str(policy) in text.stdout
+
+
+# ── a broken org fact file ────────────────────────────────────────────────────
+
+def test_org_status_names_a_broken_fact_file_once_with_its_path_and_fix(tmp_path):
+    org_dir = tmp_path / "org"
+    org_dir.mkdir()
+    bad = org_dir / "accounts.yaml"
+    bad.write_text("- fact: owner\n  subject: {kind: aws_account, id: '1'\n")
+    r = nable(tmp_path, "org", "status", env={"FINOPS_ORG_DIR": str(org_dir)})
+    both = r.stdout + r.stderr
+    assert both.count("not readable as YAML") == 1, both
+    line = next(x for x in both.splitlines() if "not readable as YAML" in x)
+    assert str(bad) in line and "Fix:" in line and "line" in line
+
+
+def test_setup_aws_that_connects_nothing_exits_1(tmp_path):
+    """With no credentials and stdin closed, `nable setup aws` said "No key
+    entered" and exited 0, where `nable setup openai` exits 1: a provisioning
+    script read an AWS setup that connected nothing as a success."""
+    r = nable(tmp_path, "setup", "aws")
+    assert r.returncode == 1
+    assert "No AWS account was connected" in r.stdout
+
+
+def test_brief_deliver_under_air_gap_says_why_nothing_was_sent(tmp_path):
+    r, doc = _brief_env(tmp_path, {"NABLE_BRIEF_DELIVER": "slack", "FINOPS_AIRGAP": "1",
+                                   "SLACK_WEBHOOK_URL": "http://127.0.0.1:9/hook"})
+    assert doc["delivered"] == {"slack": False}
+    assert r.returncode == 1
+    assert "FINOPS_AIRGAP" in r.stderr
+
+
+def _brief_env(tmp_path, env):
+    r = nable(tmp_path, "brief", "--json", "--deliver", "--no-save", env=env)
+    return r, json.loads(r.stdout)

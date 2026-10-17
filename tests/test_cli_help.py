@@ -75,3 +75,23 @@ def test_garbage_points_at_help():
     r = _bad_cmd("frobnicate9000")
     assert r.returncode == 2
     assert "nable --help" in r.stderr
+
+
+def test_a_subcommand_help_lists_its_own_actions(tmp_path):
+    """`nable org --help`, `learn --help` and `pack --help` printed the
+    top-level layout: their actions under "other", plus the top level's
+    "setup  Pick providers from the full menu" and "--version", neither of
+    which the subcommand takes."""
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    for cmd, action in (("org", "status"), ("learn", "infer"), ("pack", "validate")):
+        r = subprocess.run(
+            [sys.executable, "-m", "finops.entry", cmd, "--help"], check=False,
+            capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+            env={"NABLE_NO_TELEMETRY": "1", "HOME": str(tmp_path), "PYTHONPATH": src,
+                 "PATH": "/usr/bin:/bin"})
+        assert r.returncode == 0, r.stderr
+        assert f"usage: nable {cmd}" in r.stdout, cmd
+        assert action in r.stdout, cmd
+        assert "Pick providers from the full menu" not in r.stdout, cmd
+        assert "--version" not in r.stdout, cmd

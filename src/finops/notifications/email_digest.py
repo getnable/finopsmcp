@@ -17,6 +17,11 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def _airgapped() -> bool:
+    from ..config import airgap_blocks
+    return airgap_blocks("email (SMTP)")
+
+
 def _esc(v: object) -> str:
     """Escape provider-derived strings (service names, recommendation titles,
     descriptions) before they enter the HTML email body. They originate from
@@ -247,6 +252,9 @@ def send_weekly_digest_result(
     msg["To"] = to_addr
     msg.attach(MIMEText(html, "html"))
 
+    if _airgapped():
+        return {"sent": False, "recipient": to_addr, "missing": [],
+                "error": "FINOPS_AIRGAP is set, so no email is sent"}
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP(host, port) as server:
@@ -305,6 +313,8 @@ def send_custom_digest(
     msg.attach(MIMEText(body_text, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
+    if _airgapped():
+        return False
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP(host, port) as server:
@@ -344,6 +354,8 @@ def send_message(recipient: str, subject: str, text_body: str,
     msg.attach(MIMEText(text_body, "plain"))
     if html_body:
         msg.attach(MIMEText(html_body, "html"))
+    if _airgapped():
+        return False
     try:
         ctx = ssl.create_default_context()
         with smtplib.SMTP(host, port) as server:

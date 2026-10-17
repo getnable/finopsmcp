@@ -21,9 +21,14 @@ def is_configured() -> bool:
     return bool(_webhook_url())
 
 
+def _airgapped() -> bool:
+    from ..config import airgap_blocks
+    return airgap_blocks("Microsoft Teams")
+
+
 async def _post(card: dict) -> bool:
     url = _webhook_url()
-    if not url:
+    if not url or _airgapped():
         return False
     payload = {
         "type": "message",
@@ -176,6 +181,8 @@ async def send_to_webhook(url: str, text: str) -> bool:
     """Send plain text to an explicit Teams webhook URL (report subscriptions
     carry their own URL, unlike alerts which use the configured default)."""
     from urllib.parse import urlparse
+    if _airgapped():
+        return False
     host = urlparse(url).hostname or ""
     if not any(host == s.lstrip(".") or host.endswith(s) for s in _ALLOWED_WEBHOOK_SUFFIXES):
         log.warning("Teams webhook host %r is not an Office webhook domain; refusing to post.", host)

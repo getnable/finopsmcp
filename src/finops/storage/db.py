@@ -794,6 +794,16 @@ def _build_engine() -> Engine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
+        # Make the file 0600 before SQLite opens it. SQLite creates a new
+        # database at the process umask (0644 on most machines), and its -wal
+        # and -shm files take the database's mode. The chmod below came only
+        # after the schema was built, outside the lock, so a second run that
+        # started meanwhile (two cron jobs, one beside `nable doctor`) found
+        # the cost history readable by every local user.
+        try:
+            os.close(os.open(db_path, os.O_RDWR | os.O_CREAT, 0o600))
+        except OSError:
+            pass    # an unusable path fails at the database, with its own message
         with _schema_lock(db_path):
             metadata.create_all(engine)
             _run_sqlite_migrations(engine)

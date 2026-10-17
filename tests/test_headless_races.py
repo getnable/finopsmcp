@@ -98,3 +98,35 @@ def test_concurrent_first_runs_agree_on_one_vault_key(tmp_path):
         stored, _, unreadable = out.stdout.strip().partition(" ")
         assert stored == str(PROCS), out.stdout + out.stderr
         assert unreadable == "", f"round {r}: undecryptable after a concurrent first run: {unreadable}"
+
+
+def test_a_new_database_is_never_open_to_other_users(tmp_path, monkeypatch):
+    """SQLite made the cost history file (and its -wal and -shm files) at the
+    process umask, 0644 on most machines, and it was clamped to 0600 only
+    after the schema was built, outside the cross-process lock. A second run
+    starting meanwhile, a cron job beside `nable doctor`, found every local
+    user able to read it, and the doctor failed its permissions check: two
+    of eight concurrent `nable doctor --json` runs exited 1."""
+    import stat
+
+    from finops.storage import db
+
+    path = tmp_path / "finops.db"
+    monkeypatch.setenv("FINOPS_DB_PATH", str(path))
+    seen: dict[str, int] = {}
+    real = db.metadata.create_all
+
+    def create_all_then_look(engine, *a, **k):
+        real(engine, *a, **k)
+        for f in tmp_path.iterdir():
+            seen[f.name] = stat.S_IMODE(f.stat().st_mode)
+
+    monkeypatch.setattr(db.metadata, "create_all", create_all_then_look)
+    old = os.umask(0o022)
+    try:
+        db._build_engine().dispose()
+    finally:
+        os.umask(old)
+    files = {name: mode for name, mode in seen.items() if name.startswith("finops.db")}
+    assert files, seen
+    assert all(mode == 0o600 for mode in files.values()), {k: oct(v) for k, v in files.items()}
