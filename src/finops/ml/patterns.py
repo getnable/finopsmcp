@@ -571,10 +571,13 @@ def _check_savings_plans_coverage(ctx: PatternContext) -> PatternMatch | None:
         _COMPUTE_SP_DISCOUNT,
         _COMPUTE_SP_FARGATE_DISCOUNT,
         COMPUTE_SP_DISCOUNT_RANGE,
+        FARGATE_CE_SERVICES,
     )
 
     ec2_monthly = ctx.service_monthly("Amazon EC2")
-    fargate_monthly = ctx.service_monthly("AWS Fargate")
+    # Fargate bills under ECS; "AWS Fargate" is kept as an alias. Both are
+    # unverified against a live account (commitments.FARGATE_CE_SERVICES).
+    fargate_monthly = sum(ctx.service_monthly(s) for s in FARGATE_CE_SERVICES)
     total = ec2_monthly + fargate_monthly
 
     if total < 200:

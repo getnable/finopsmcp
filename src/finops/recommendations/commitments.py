@@ -78,6 +78,17 @@ PRICE_SOURCES: dict[str, dict[str, str]] = {
 }
 
 
+# Cost Explorer SERVICE values for Fargate. Fargate is priced in the AmazonECS
+# offer (USE1-Fargate-vCPU-Hours:perCPU), and the codebase names ECS spend
+# "Amazon Elastic Container Service" (connectors/universal.py,
+# anomaly/root_cause.py); "AWS Fargate" is kept as an alias. Neither is
+# verified against a live Cost Explorer response: nothing in the repo records
+# one that names Fargate. A value Cost Explorer does not use matches no rows.
+FARGATE_CE_SERVICES = ("Amazon Elastic Container Service", "AWS Fargate")
+# Savings Plans eligible compute, as Cost Explorer services.
+SP_COMPUTE_CE_SERVICES = ("Amazon Elastic Compute Cloud - Compute", *FARGATE_CE_SERVICES)
+
+
 @dataclass
 class TaggedCoverageEstimate:
     """
@@ -190,9 +201,7 @@ def _ec2_spend_for_tag(
             Granularity="MONTHLY",
             Filter={
                 "And": [
-                    {"Dimensions": {"Key": "SERVICE", "Values": [
-                        "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-                    ]}},
+                    {"Dimensions": {"Key": "SERVICE", "Values": list(SP_COMPUTE_CE_SERVICES)}},
                     {"Tags": {"Key": tag_key, "Values": [tag_value]}},
                 ]
             },
@@ -213,9 +222,7 @@ def _total_ec2_spend(ce_client: Any, start: str, end: str) -> float:
         resp = ce_client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
-            Filter={"Dimensions": {"Key": "SERVICE", "Values": [
-                "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
-            ]}},
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": list(SP_COMPUTE_CE_SERVICES)}},
             Metrics=["UnblendedCost"],
         )
         return sum(
