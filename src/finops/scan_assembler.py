@@ -84,12 +84,22 @@ def _gather_ai(spend: bool, days: int = 30) -> ProviderBlock:
 
     blk = ProviderBlock(family="ai", label="AI & GPU", estimated=True,
                         early_recoverable=True, by_provider=by_provider)
+    # A connected provider whose read failed is missing from the total. The
+    # block dropped it without a word: with Anthropic's key refused the scan
+    # printed OpenAI and Bedrock as the AI bill, and with Anthropic the only
+    # provider it printed no AI block at all, the same as an account with none.
+    failed = sorted((data.get("failed_providers") or {}).keys())
+    not_read = f"not read: {', '.join(failed)}, so not in this total" if failed else None
     # Under --spend the cloud-native legs are always asked, so Bedrock (and
     # Vertex) came back as {"bedrock": 0.0} on every AWS account, and a scan
     # of an account with no AI anywhere printed "AI & GPU $0.00/mo [estimated]"
     # and "across 2 providers". Zero from only those legs is the same false
     # positive as no data.
     only_cloud_native = set(by_provider) <= {"bedrock", "vertex"}
+    if total == 0.0 and (not by_provider or only_cloud_native) and failed:
+        blk.status = "errored"
+        blk.note = f"not read: {', '.join(failed)}"
+        return blk
     if total == 0.0 and (not by_provider or only_cloud_native):
         # "llm" is in connected_families() for every AWS user (Bedrock rides on
         # AWS), so an empty AI result is usually that false positive, not a real
@@ -105,6 +115,8 @@ def _gather_ai(spend: bool, days: int = 30) -> ProviderBlock:
         # The cloud-native AI legs are gated; say so, so the number is not read
         # as the whole AI bill when Bedrock/Vertex are in play.
         blk.note = "usage-API providers; Bedrock/Vertex under --spend"
+    if not_read:
+        blk.note = f"{blk.note}; {not_read}" if blk.note else not_read
     # AI recoverable stays qualitative (model routing / idle GPU), never a headline $.
     recs = data.get("recommendations") or []
     if recs:
