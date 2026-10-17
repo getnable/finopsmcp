@@ -174,3 +174,43 @@ def test_the_audit_table_marks_a_row_priced_at_us_east_1_list(monkeypatch):
             monthly_cost_usd=40.0, reason="Unattached gp3 volume, 500 GB")], {})])
     out = asyncio.run(getattr(cq.run_full_cost_audit, "fn", cq.run_full_cost_audit)())
     assert "| $40.00 (us-east-1 list) |" in out, out
+
+
+def test_a_cpu_only_rightsizing_row_outside_us_east_1_says_us_east_1_list():
+    from finops.recommendations.rightsizing import RightsizingRecommendation
+
+    rec = RightsizingRecommendation(
+        instance_id="i-eu", instance_type="m5.xlarge", name="eu", region="eu-west-1",
+        account_id="1", resource_type="ec2", source="cloudwatch_fallback",
+        recommended_type="m5.large", monthly_savings=70.08)
+    assert "priced at us-east-1 list" in rec.description, rec.description
+    rec.region = "us-east-1"
+    assert "us-east-1 list" not in rec.description
+
+
+def _eks_node(itype: str, zone: str, spot: bool):
+    from types import SimpleNamespace as NS
+
+    from finops.connectors.kubernetes import KubernetesConnector
+
+    labels = {"node.kubernetes.io/instance-type": itype, "topology.kubernetes.io/zone": zone}
+    if spot:
+        labels["eks.amazonaws.com/capacityType"] = "SPOT"
+    node = NS(metadata=NS(name="n1", labels=labels),
+              status=NS(allocatable={"cpu": "4", "memory": "8Gi"},
+                        capacity={"cpu": "4", "memory": "8Gi"}))
+    client = NS(CoreV1Api=lambda: NS(list_node=lambda: NS(items=[node])))
+    [n] = KubernetesConnector()._get_nodes(client, "aws")
+    return n
+
+
+def test_an_eks_node_outside_us_east_1_is_priced_at_its_regions_floor():
+    from finops.aws_prices import EC2_MONTHLY
+
+    n = _eks_node("c5.xlarge", "eu-west-1b", spot=False)
+    assert n.monthly_cost == pytest.approx(EC2_MONTHLY["c5.xlarge"] * 1.069)
+    assert "eu-west-1 floor" in n.cost_basis, n.cost_basis
+    s = _eks_node("c5.xlarge", "eu-west-1b", spot=True)
+    assert s.monthly_cost == pytest.approx(EC2_MONTHLY["c5.xlarge"] * 1.069 * 0.39)
+    assert "eu-west-1 floor" in s.cost_basis and "median" in s.cost_basis, s.cost_basis
+    assert _eks_node("c5.xlarge", "us-east-1a", spot=False).cost_basis == ""

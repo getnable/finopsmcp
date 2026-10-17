@@ -120,9 +120,37 @@ def _spot_factor(instance_type: str, zone: str, provider: str) -> tuple[float, s
             f"{provider} spot price")
     from ..recommendations.spot_adoption import spot_saving
 
-    region = zone[:-1] if zone[-1:].isalpha() else (zone or None)
-    saving, basis = spot_saving(instance_type, region)
+    saving, basis = spot_saving(instance_type, _zone_region(zone))
     return round(1.0 - saving, 4), f"spot at {1.0 - saving:.0%} of on-demand: {basis}"
+
+
+def _zone_region(zone: str) -> str | None:
+    """us-east-1 for us-east-1a; None when the node reports no zone."""
+    return zone[:-1] if zone[-1:].isalpha() else (zone or None)
+
+
+def _node_cost(instance_type: str, zone: str, provider: str,
+               is_spot: bool) -> tuple[float, str]:
+    """(a node's monthly cost, where it comes from; "" for an on-demand node
+    priced at the us-east-1 rate in us-east-1).
+
+    An AWS node outside us-east-1 is priced at its region's floor where nable
+    holds one (aws_prices.ec2_hourly_in_region) and says us-east-1 list where
+    it does not; a spot node then takes its Spot Advisor share (_spot_factor)."""
+    monthly = _node_monthly_cost(instance_type, provider)
+    basis: list[str] = []
+    region = _zone_region(zone)
+    if provider not in ("gcp", "azure") and region and region != "us-east-1":
+        from ..aws_prices import ec2_hourly_in_region
+
+        multiplier, regional = ec2_hourly_in_region(1.0, region)
+        monthly *= multiplier
+        basis.append(regional)
+    if is_spot:
+        factor, spot_basis = _spot_factor(instance_type, zone, provider)
+        monthly *= factor
+        basis.append(spot_basis)
+    return monthly, "; ".join(basis)
 
 
 def _fargate_pod_monthly_cost(cpu_cores: float, mem_gib: float) -> float:
@@ -335,11 +363,7 @@ class KubernetesConnector:
                 or labels.get("cloud.google.com/gke-spot", "") == "true"
             )
 
-            monthly = _node_monthly_cost(instance_type, provider)
-            cost_basis = ""
-            if is_spot:
-                factor, cost_basis = _spot_factor(instance_type, zone, provider)
-                monthly *= factor
+            monthly, cost_basis = _node_cost(instance_type, zone, provider, is_spot)
 
             nodes.append(NodeInfo(
                 name=meta.name,
@@ -645,10 +669,8 @@ class KubernetesConnector:
         provider = self._detect_provider(nodes)
         # Re-price nodes with detected provider
         for node in nodes:
-            node.monthly_cost = _node_monthly_cost(node.instance_type, provider)
-            if node.is_spot:
-                factor, node.cost_basis = _spot_factor(node.instance_type, node.zone, provider)
-                node.monthly_cost *= factor
+            node.monthly_cost, node.cost_basis = _node_cost(
+                node.instance_type, node.zone, provider, node.is_spot)
 
         pods = self._get_pods(k8s_client)
         pod_metrics = self._get_pod_metrics(k8s_client)
