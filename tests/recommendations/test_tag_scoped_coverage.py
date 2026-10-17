@@ -26,7 +26,7 @@ TAG = {"team": "platform"}
 
 def _ce():
     return boto3.client("ce", region_name="us-east-1", aws_access_key_id="testing",
-                        aws_secret_access_key="testing")  # a Stubber answers; nothing reaches AWS
+                        aws_secret_access_key="testing")  # pragma: allowlist secret
 
 
 def _period(start, end, groups):

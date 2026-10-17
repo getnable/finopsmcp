@@ -47,7 +47,7 @@ def _request(token: str | None = None) -> dict:
 
 def test_the_split_is_read_from_every_page_in_the_shape_botocore_documents(billed_stub):
     ce = boto3.client("ce", region_name="us-east-1", aws_access_key_id="testing",
-                      aws_secret_access_key="testing")  # a Stubber answers; nothing reaches AWS
+                      aws_secret_access_key="testing")  # pragma: allowlist secret
     with billed_stub(ce) as stub:
         stub.add_response("get_cost_and_usage", {"ResultsByTime": [
             _period("2026-07-01", "2026-08-01", [_group(EC2, 1215.16), _group(ECS, 288.32)])],
