@@ -183,6 +183,67 @@ def test_every_purchase_asks_and_names_the_bound(packs_env, first_party_key, tmp
     assert g.gate_command("gcloud compute commitments list", record=False) is None
 
 
+# Every AWS purchase the guard's commitment floor asks about, from the guard's
+# own table (guard.COMMITMENT_PURCHASES), as the CLI command an agent types.
+PURCHASES = list(g.COMMITMENT_PURCHASES)
+PURCHASE_IDS = [f"{p.service}-{p.verb}" for p in PURCHASES]
+
+
+def _typed(p) -> str:
+    return f"aws {p.service} {p.verb} --x 1" + (f" {p.when} 31536000" if p.when else "")
+
+
+def _purchase_rule():
+    problems: list[Problem] = []
+    doc = content.safe_load((PACK / "guard" / "commitments.yaml").read_text())
+    rules = content.parse_guard_rules(doc, "commitments.yaml", problems)
+    assert not problems
+    [rule] = [r for r in rules if r.id == "commitment-purchase-check-bounds"]
+    return rule
+
+
+def test_the_purchases_the_rule_must_reach_are_in_the_table():
+    ops = {(p.service, p.operation) for p in PURCHASES}
+    assert {("ec2", "PurchaseCapacityBlock"), ("ec2", "PurchaseCapacityBlockExtension"),
+            ("ec2", "PurchaseScheduledInstances"), ("ec2", "AcceptReservedInstancesExchangeQuote"),
+            ("redshift", "AcceptReservedNodeExchange"), ("redshift-serverless", "CreateReservation"),
+            ("sagemaker", "CreateTrainingPlan"), ("sagemaker", "ExtendTrainingPlan"),
+            ("medialive", "PurchaseOffering"), ("mediaconnect", "PurchaseOffering"),
+            ("devicefarm", "PurchaseOffering"), ("outposts", "CreateOrder"),
+            ("glacier", "PurchaseProvisionedCapacity"),
+            ("bedrock", "CreateProvisionedModelThroughput"),
+            ("ec2", "CreateCapacityReservation")} <= ops
+
+
+@pytest.mark.parametrize("p", PURCHASES, ids=PURCHASE_IDS)
+def test_the_purchase_rule_matches_every_aws_purchase_the_floor_asks_about(p):
+    rule = _purchase_rule()
+    cmd = _typed(p)
+    assert g._buys_commitment(cmd), cmd                  # the floor asks about it
+    for form in (cmd, cmd.replace("aws ", "aws --profile prod --region eu-west-1 ", 1)):
+        assert rule.matches_command(g._normalize(form)), form
+    if p.when:
+        # Without its term it is no commitment, and the rule leaves it alone.
+        bare = f"aws {p.service} {p.verb} --x 1"
+        assert not g._buys_commitment(bare) and not rule.matches_command(bare)
+
+
+@pytest.mark.parametrize("p", PURCHASES, ids=PURCHASE_IDS)
+def test_with_the_pack_installed_each_purchase_asks_and_names_the_bound(installed, p):
+    v = g.gate_command(_typed(p), record=False)
+    assert v["decision"] == "ask" and v["action_type"] == "purchase_commitment", v
+    assert "coverage_target_pct" in v["reason"]
+    assert f"rule commitment-purchase-check-bounds of pack {PID}" in v["reason"]
+
+
+def test_the_pack_validates_clean_and_stays_at_1_0_0(packs_env, capsys):
+    code, out, _ = _cli(capsys, "pack", "validate", str(PACK), "--json")
+    body = json.loads(out)
+    assert code == 0 and body["ok"] and body["problems"] == []
+    assert body["version"] == "1.0.0"
+    assert 'version     = "1.0.0"' in (PACK / "nable-pack.toml").read_text()
+
+
 # ── the advice ────────────────────────────────────────────────────────────────
 
 class _CE:

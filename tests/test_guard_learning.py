@@ -408,6 +408,22 @@ def _ours(doc: dict, event: str) -> list[dict]:
             if g._is_our_command(h.get("command"))]
 
 
+@pytest.fixture
+def uvx_on_path(tmp_path, monkeypatch):
+    """A `uvx` on PATH, as tests/test_guard_plugin.py has it. With finops in
+    a venv under /tmp (a temporary install) the hook is written in its uvx
+    form, and with no uvx on PATH install counts that hook as one that cannot
+    start and repairs it every time: the test passed only where uv was
+    installed."""
+    bin_dir = tmp_path / "uvx-bin"
+    bin_dir.mkdir()
+    uvx = bin_dir / "uvx"
+    uvx.write_text("#!/bin/sh\nexit 0\n")
+    uvx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return uvx
+
+
 def test_install_writes_the_post_hook_beside_the_pre_hook():
     g.install(False)
     doc = _settings_doc()
@@ -418,7 +434,7 @@ def test_install_writes_the_post_hook_beside_the_pre_hook():
     assert "PostToolUseFailure" not in doc["hooks"], "an older Claude Code would reject it"
 
 
-def test_install_upgrades_an_existing_install_in_place(tmp_path):
+def test_install_upgrades_an_existing_install_in_place(tmp_path, uvx_on_path):
     path = Path.cwd() / ".claude" / "settings.json"
     path.parent.mkdir(parents=True)
     theirs = {"type": "command", "command": "echo post"}

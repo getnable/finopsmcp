@@ -94,6 +94,9 @@ def test_a_cheap_launch_that_breaks_the_budget_asks_and_says_why():
     assert "$49,999 spent month to date" in reason
     assert f"~${M5_2XL_MONTHLY:,.0f}/mo" in reason
     rest = M5_2XL_MONTHLY * _days_left() * 24 / 730
+    days = _days_left()
+    assert (f"this change at ~${M5_2XL_MONTHLY:,.0f}/mo adds ~${rest:,.0f} over the "
+            f"{days} day{'s' if days != 1 else ''} left") in reason, reason
     over = 49_999.0 + rest - 50_000.0
     assert f"~${over:,.0f} over" in reason
     assert "FINOPS_GUARD_STOP_ON_BUDGET" in reason
@@ -374,3 +377,63 @@ def test_no_cost_data_says_the_budget_was_not_checked():
     the doctor both say the budget went unchecked."""
     note = g._budget_skip_note({"state": "no_data"})
     assert note and note.startswith("Budget not checked") and "no cost data" in note
+
+
+# ── a commitment term against the budget ─────────────────────────────────────
+#
+# A Capacity Reservation with a term bills its on-demand rate by the hour for
+# the term. What lands in this budget period is the hours left in it, not the
+# term's total, and it is not an order paid once.
+
+P5_RATE = EC2_HOURLY["p5.48xlarge"]
+P5_TERM = ("aws ec2 create-capacity-reservation --instance-type p5.48xlarge "
+           "--instance-platform Linux/UNIX --availability-zone us-east-1a "
+           "--instance-count 8 --commitment-duration 31536000")
+P5_TERM_TOTAL = 8 * P5_RATE * 8760
+
+
+def test_a_commitment_term_counts_only_the_hours_it_bills_this_period():
+    _summary(_budget("AWS Total", spent=49_000.0, limit=50_000.0))
+    v = g.gate_command(P5_TERM)
+    assert v is not None and v["decision"] == "ask"
+    reason = v["reason"]
+    assert "one-off" not in reason, reason
+    rest = 8 * P5_RATE * min(_days_left() * 24, 8760)
+    assert f"bills ~${8 * P5_RATE:,.2f}/hr over its 8,760-hour commitment" in reason, reason
+    assert f"adds ~${rest:,.0f} over the {_days_left()} day" in reason, reason
+    assert f"~${49_000.0 + rest - 50_000.0:,.0f} over" in reason, reason
+    bc = _records()[-1]["budget_check"]
+    assert bc["change_one_off_usd"] is None
+    assert bc["change_term_hourly_usd"] == pytest.approx(8 * P5_RATE)
+    assert bc["rest_of_period_usd"] == pytest.approx(rest, abs=0.01)
+    assert bc["rest_of_period_usd"] < P5_TERM_TOTAL
+
+
+def test_a_term_that_ends_inside_the_period_counts_only_its_own_hours():
+    short = P5_TERM.replace("31536000", "3600")          # a one-hour term
+    _summary(_budget("AWS Total", spent=49_999.0, limit=50_000.0))
+    v = g.gate_command(short)
+    bc = _records()[-1]["budget_check"]
+    assert bc["state"] == "over", v
+    assert bc["rest_of_period_usd"] == pytest.approx(8 * P5_RATE, abs=0.01)
+
+
+def test_a_launch_and_a_term_in_one_command_both_count_against_the_budget():
+    _summary(_budget("AWS Total", spent=40_000.0, limit=50_000.0))
+    v = g.gate_command(f"{M5_2XL} && {P5_TERM}")
+    bc = _records()[-1]["budget_check"]
+    monthly_part = M5_2XL_MONTHLY * _days_left() * 24 / 730
+    term_part = 8 * P5_RATE * min(_days_left() * 24, 8760)
+    assert bc["rest_of_period_usd"] == pytest.approx(monthly_part + term_part, abs=0.05)
+    reason = v["reason"]
+    assert f"at ~${M5_2XL_MONTHLY:,.0f}/mo, plus ~${8 * P5_RATE:,.2f}/hr over its " \
+        "8,760-hour commitment, adds" in reason, reason
+
+
+def test_an_order_paid_once_is_still_said_as_one():
+    ri = ("aws ec2 purchase-reserved-instances-offering --reserved-instances-offering-id o-1 "
+          "--instance-count 2 --limit-price Amount=60000,CurrencyCode=USD")
+    _summary(_budget("AWS Total", spent=1_000.0, limit=50_000.0))
+    v = g.gate_command(ri)
+    assert "this change adds a one-off ~$60,000" in v["reason"], v["reason"]
+    assert _records()[-1]["budget_check"]["rest_of_period_usd"] == pytest.approx(60_000.0)

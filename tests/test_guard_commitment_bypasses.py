@@ -289,18 +289,65 @@ def test_an_aws_operation_the_guard_cannot_read_asks(command):
     assert "cannot read" in v["reason"]
 
 
+# The operation, or what makes it a commitment, from what xargs, parallel or
+# find hands it: `{}` (or the -I string) where the verb goes, a bare `aws ec2`
+# that xargs ends with stdin's words, or a term-only purchase whose flags come
+# from stdin. The guard never sees those words.
+XARGS_FED = [
+    "echo create-capacity-reservation | xargs -I{} aws ec2 {} --commitment-duration 31536000",
+    "echo terminate-instances | xargs -I{} aws ec2 {} --instance-ids i-123",
+    "echo terminate-instances | /usr/bin/xargs -I{} /usr/local/bin/aws ec2 {} --instance-ids i-1",
+    "echo rb | xargs -I{} aws s3 {} s3://bucket --force",
+    "echo purchase-reserved-db-instances-offering | xargs -I % aws rds % --db-instance-count 2",
+    "echo purchase-reserved-db-instances-offering | xargs -i aws rds {} --db-instance-count 2",
+    "printf 'terminate-instances\\n' | xargs -I verb aws ec2 verb --instance-ids i-1",
+    "printf 'terminate-instances\\n' | xargs -0 -n 1 -I '{}' sh -c 'aws ec2 {} --instance-ids i-1'",
+    "echo purchase-reserved-db-instances-offering --db-instance-count 2 | xargs aws rds",
+    "echo rds purchase-reserved-db-instances-offering | xargs -n 2 aws",
+    "parallel aws ec2 {} --instance-ids i-1 ::: terminate-instances",
+    "find terminate-instances -maxdepth 0 -exec aws ec2 {} --instance-ids i-1 \\;",
+    ("echo --commitment-duration 31536000 | xargs aws ec2 create-capacity-reservation "
+     "--instance-type t3.micro --instance-platform Linux/UNIX --availability-zone us-east-1a "
+     "--instance-count 1"),
+    ("echo --commitment-duration=31536000 | xargs -I{} aws ec2 create-capacity-reservation "
+     "--instance-type t3.micro --instance-platform Linux/UNIX --availability-zone us-east-1a "
+     "--instance-count 1 {}"),
+]
+
+
+@pytest.mark.parametrize("command", XARGS_FED)
+def test_an_aws_operation_xargs_fills_in_asks(command):
+    v = g.gate_command(command, record=False)
+    assert v is not None and v["decision"] == "ask", command
+    assert "cannot read" in v["reason"]
+    assert _hook(command).get("permissionDecision") == "ask"
+
+
 @pytest.mark.parametrize("command", [
     "aws s3 cp $SRC s3://bucket/key",
     "aws ec2 describe-instances --instance-ids $ID",
     "python3 -m awscli s3 ls",
     'echo "import boto3; print(boto3.client(\'rds\').describe_reserved_db_instances())" | python3',
     "python3 -m pip install boto3",
+    "aws s3 ls s3://b | xargs -I{} aws s3 cp s3://b/{} .",
+    "ls | xargs -I{} aws ec2 describe-instances --instance-ids {}",
+    "echo i-1 | xargs aws ec2 describe-instances --instance-ids",
+    "find . -name '*.tf' | xargs grep -l aws",
+    "find . -name '*.tf' | xargs -n 1 grep -c aws",
+    "echo aws | xargs -I{} echo aws {}",
+    "find . -name '*.json' -exec aws s3 cp {} s3://b/ \\;",
+    "find . -name '*.json' -exec grep -l aws {} +",
 ])
 def test_reads_by_those_names_still_say_nothing(command):
     assert g.gate_command(command, record=False) is None, command
 
 
-def test_an_unreadable_aws_operation_asks_under_the_loosest_policy_and_says_why(monkeypatch):
+@pytest.mark.parametrize("command", [
+    "aws rds $VERB --reserved-db-instances-offering-id o-1",
+    XARGS_FED[0],
+])
+def test_an_unreadable_aws_operation_asks_under_the_loosest_policy_and_says_why(monkeypatch,
+                                                                                 command):
     """It may be a purchase, so the commitment floor holds for it; it may not
     be one, so the ask does not say it buys a commitment."""
     from finops import policy
@@ -310,6 +357,6 @@ def test_an_unreadable_aws_operation_asks_under_the_loosest_policy_and_says_why(
     monkeypatch.setenv("FINOPS_POLICY_ALLOWED_ACTIONS",
                        ",".join([*policy.TWO_WAY_DOORS, "delete_resource",
                                  "purchase_commitment"]))
-    v = g.gate_command("aws rds $VERB --reserved-db-instances-offering-id o-1", record=False)
+    v = g.gate_command(command, record=False)
     assert v is not None and v["decision"] == "ask", v
     assert "cannot read" in v["reason"] and "would buy a commitment" not in v["reason"]

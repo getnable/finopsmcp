@@ -7,9 +7,12 @@ holds, and when each one ends.
 
 Free by default: Describe calls only (commitments_status.py lists them, and
 `--dry-run` prints them with their IAM actions without reading credentials).
-Each commitment is listed with its end date, days left, state and charges as
-AWS reports them, and "matched now" against what is running this minute. A
-read that failed is listed as not read, with its reason; it is never a zero.
+Each RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB reservation and
+each Savings Plan is listed with its end date, days left, state and charges as
+AWS reports them, and RDS, EC2 and ElastiCache ones with "matched now" against
+what is running this minute. A read that failed is listed as not read, with
+its reason; it is never a zero. A service botocore lists no endpoint for in a
+region is not called there and is listed as not offered.
 
 `--spend` adds billed utilization from Cost Explorer, which AWS bills at $0.01
 a request: what it can cost is printed on stderr before the first request,
@@ -91,9 +94,10 @@ def add_parser(sub) -> None:
     s = actions.add_parser(
         "status",
         help="list every reservation and Savings Plan, with end dates (free reads)",
-        description=("Every RDS, EC2 and ElastiCache reservation and every Savings Plan this "
-                     "account holds, with its end date, days left, state and charges as AWS "
-                     "reports them. Free Describe calls only, unless --spend."),
+        description=("Every RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB "
+                     "reservation and every Savings Plan this account holds, with its end "
+                     "date, days left, state and charges as AWS reports them. Free Describe "
+                     "calls only, unless --spend."),
         epilog="exit codes:\n" + "\n".join(f"  {k}  {v}" for k, v in EXIT_CODES.items()),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -141,7 +145,7 @@ def _split_regions(values: list[str] | None) -> list[str]:
 def _report(now: datetime, days: int | None) -> dict[str, Any]:
     return {"command": "nable commitments status", "account": None,
             "scope": "this account only", "as_of": now.astimezone(UTC).isoformat(),
-            "regions": [], "commitments": [], "not_read": [], "summary": {},
+            "regions": [], "commitments": [], "not_read": [], "not_offered": [], "summary": {},
             "utilization": {"basis": "matched now", "note": cs.MATCHED_NOW_NOTE},
             "savings_plans_note": cs.SAVINGS_PLANS_NOTE, "billed_utilization": None,
             "gate": None if days is None else {"days": days, "ending": [], "cannot_check": True},
@@ -259,7 +263,9 @@ def _render(report: dict[str, Any], out: Any, code: int) -> None:
                 f"{', '.join(x for x in (c.get('offering_type'), c.get('term')) if x):<26} "
                 f"{_ends(c)}  {c.get('state')}")
         mn = c.get("matched_now")
-        if mn and mn.get("read"):
+        if mn and mn.get("compared") is False:
+            line += "  matched now not compared"
+        elif mn and mn.get("read"):
             line += f"  matched now {mn['matched']} of {mn['reserved']}"
         elif mn:
             line += f"  matched now not read ({mn['reason']})"
@@ -280,6 +286,13 @@ def _render(report: dict[str, Any], out: Any, code: int) -> None:
             lead = ("permission denied for every commitment read" if code == EXIT_DENIED
                     else "permission denied for some commitment reads")
             print(f"  {lead}: {_GRANT}", file=out)
+    skipped = report.get("not_offered") or []
+    if skipped:
+        print(file=out)
+        print(ink("not offered there, so not called (no endpoint in botocore's list; not a "
+                  "failed read and not a zero):", "2"), file=out)
+        for n in skipped:
+            print(ink(f"  {n['service']:<12} {n['region']}", "2"), file=out)
     print(file=out)
     for note in (cs.MATCHED_NOW_NOTE, cs.SAVINGS_PLANS_NOTE):
         print(ink(textwrap.fill(note, 100, break_on_hyphens=False), "2"), file=out)
@@ -341,11 +354,13 @@ def _resolve_regions(session: Any) -> tuple[list[str], cs.NotRead | None]:
                              what=what, reason=cs.reason_for(str(code)), code=str(code))
 
 
-def _exit_code(commitments: list[dict], missed: list[cs.NotRead], n_regions: int) -> int:
+def _exit_code(commitments: list[dict], missed: list[cs.NotRead], attempted: int) -> int:
+    """`attempted` is how many commitment reads were made: one per service
+    offered in each region, and the Savings Plans read."""
     if not missed:
         return EXIT_OK
     reads = [n for n in missed if n.what == "commitments"]
-    every = len({(n.service, n.region) for n in reads}) == 3 * n_regions + 1
+    every = len({(n.service, n.region) for n in reads}) == attempted
     if every and not commitments:
         reasons = {n.reason for n in reads}
         if reasons == {"expired"}:
@@ -445,14 +460,14 @@ def run(args: argparse.Namespace, *, session: Any = None, now: datetime | None =
                                         say=lambda line: print(line, file=err))
         missed += failed
         report["billed_utilization"] = billed
-    code = _exit_code(commitments, missed, len(regions))
+    code = _exit_code(commitments, missed, result["commitment_reads"])
     if days is not None:
         report["gate"] = _gate(commitments, missed, days, now)
         code = (EXIT_ENDING if report["gate"]["ending"] else
                 EXIT_CANNOT_CHECK if report["gate"]["cannot_check"] else EXIT_OK)
     report.update(commitments=[cs.public(c) for c in commitments],
                   not_read=[n.to_dict() for n in missed], summary=result["summary"],
-                  exit_code=code)
+                  not_offered=result["not_offered"], exit_code=code)
     if as_json:
         print(json.dumps(report, indent=2, default=str), file=out)
     else:

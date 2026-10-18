@@ -26,6 +26,7 @@ _CARRIER_FILES = [
     "docs/sbom.json",
     "examples/github-actions/README.md",
     "examples/github-actions/budget-gate.yml",
+    "examples/github-actions/commitments-status.yml",
 ]
 
 
@@ -105,5 +106,17 @@ def test_the_ci_recipes_move_with_the_release(tree):
     _load("bump_version").bump(_current(), "9.9.9", root=tree)
     gate = (tree / "examples/github-actions/budget-gate.yml").read_text(encoding="utf-8")
     readme = (tree / "examples/github-actions/README.md").read_text(encoding="utf-8")
+    status = (tree / "examples/github-actions/commitments-status.yml").read_text(
+        encoding="utf-8")
     assert '"finops-mcp==9.9.9"' in gate and _current() not in gate
     assert "finops-mcp==9.9.9" in readme and "(finops-mcp 9.9.9)" in readme
+    assert 'uvx --from "finops-mcp==9.9.9" nable commitments status' in status
+    assert _current() not in status
+
+
+def test_check_release_reads_each_recipe_install_as_a_carrier():
+    found = _load("check_release").carriers(ROOT)
+    for rel in ("examples/github-actions/commitments-status.yml",
+                "examples/github-actions/budget-gate.yml",
+                "examples/github-actions/scheduled-scan.yml"):
+        assert found[rel] == _current(), rel

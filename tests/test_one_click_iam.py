@@ -138,12 +138,27 @@ def test_buying_a_commitment_is_a_dangerous_prefix():
 
 
 def test_the_commitments_statement_only_describes():
+    """Exactly seven Describe actions: the four reads `nable commitments
+    status` started with, and Redshift's, OpenSearch's (IAM names it under es)
+    and MemoryDB's."""
     [group] = [g for g in I._OPTIONAL_GROUPS if g[0] == "OptionalCommitments"]
     _sid, param, what, actions = group
     assert sorted(actions) == ["ec2:DescribeReservedInstances",
                                "elasticache:DescribeReservedCacheNodes",
+                               "es:DescribeReservedInstances",
+                               "memorydb:DescribeReservedNodes",
                                "rds:DescribeReservedDBInstances",
+                               "redshift:DescribeReservedNodes",
                                "savingsplans:DescribeSavingsPlans"]
+    assert len(actions) == len(set(actions)) == 7
+    for name in ("Redshift", "OpenSearch", "MemoryDB"):
+        assert name in what
+    import botocore.session
+    session = botocore.session.get_session()
+    for service, op in (("redshift", "DescribeReservedNodes"),
+                        ("opensearch", "DescribeReservedInstances"),
+                        ("memorydb", "DescribeReservedNodes")):
+        assert op in session.get_service_model(service).operation_names
     assert all(a.split(":", 1)[1].startswith("Describe") for a in actions)
     assert param == "IncludeCommitments"
     assert "Unlocks" in what and "nable commitments status" in what
@@ -200,8 +215,18 @@ _ALL_PURCHASE_ACTIONS = (
     "bedrock:CreateProvisionedModelThroughput", "sagemaker:CreateTrainingPlan",
     "sagemaker:ExtendTrainingPlan", "medialive:PurchaseOffering",
     "mediaconnect:PurchaseOffering", "devicefarm:PurchaseOffering", "outposts:CreateOrder",
-    "glacier:PurchaseProvisionedCapacity",
+    "glacier:PurchaseProvisionedCapacity", "ec2:CreateCapacityReservation",
 )
+
+
+def test_each_purchase_in_the_guard_s_table_is_a_dangerous_action():
+    """Read from the guard's own table, so a purchase it learns to ask about
+    is one a read-only key is checked for too. OpenSearch's actions are under
+    IAM's es prefix."""
+    from finops.guard import COMMITMENT_PURCHASES
+    for p in COMMITMENT_PURCHASES:
+        action = f"{'es' if p.service == 'opensearch' else p.service}:{p.operation}"
+        assert any(action.startswith(pre) for pre in I._DANGEROUS_ACTIONS_PREFIXES), action
 
 
 def test_every_commitment_purchase_is_dangerous_and_probed():
@@ -289,7 +314,14 @@ def test_the_fallback_asks_ec2_about_a_purchase_as_a_dry_run(monkeypatch):
                                    "InstanceCount": 1, "DryRun": True,
                                    "ReservedInstancesOfferingId":
                                        "00000000-0000-0000-0000-000000000000"})
+        s_ec2.add_client_error("create_capacity_reservation", "UnauthorizedOperation",
+                               expected_params={
+                                   "InstanceType": "t3.micro", "InstancePlatform": "Linux/UNIX",
+                                   "AvailabilityZone": "us-east-1a", "InstanceCount": 1,
+                                   "DryRun": True})
         s_s3.add_client_error("put_object", "AccessDenied")
         got = I._probe_permissions()
+        s_ec2.assert_no_pending_responses()
     assert got["ec2:PurchaseReservedInstancesOffering"] == "allowed"
     assert got["ec2:TerminateInstances"] == "implicitDeny"
+    assert got["ec2:CreateCapacityReservation"] == "implicitDeny"

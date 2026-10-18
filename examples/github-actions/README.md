@@ -3,9 +3,9 @@
 Copy-paste templates. None of them runs in this repo: copy one into your own
 repo at `.github/workflows/` and set what its header says it needs.
 
-## On the CLI (finops-mcp 0.12.0)
+## On the CLI (finops-mcp 0.13.0)
 
-These install `finops-mcp==0.12.0` and run `nable` in a shell step, so what
+These install `finops-mcp==0.13.0` and run `nable` in a shell step, so what
 they do is what `nable` does on your machine. Each one's exit codes are in its
 header and in [docs/HEADLESS.md](../../docs/HEADLESS.md).
 
@@ -21,6 +21,14 @@ header and in [docs/HEADLESS.md](../../docs/HEADLESS.md).
   can be used as written, and that the commands in
   `.nable/guarded-commands.txt` get the verdicts you expect. Needs no cloud
   credentials.
+- `commitments-status.yml`: every Monday, list the reservations and Savings
+  Plans an AWS account holds with `nable commitments status --json
+  --fail-within 30` (run through `uvx --from finops-mcp==0.13.0`), keep the
+  JSON as an artifact for 90 days, and fail when one ends within 30 days
+  (exit 1) or a commitment read failed (exit 2, cannot check). It assumes a
+  read-only role through GitHub OIDC (`NABLE_AWS_ROLE_ARN`), so no key is
+  stored; the role needs `nable iam-template`'s OptionalCommitments statement.
+  Free Describe calls only.
 
 Each was checked by parsing it as YAML and running its shell steps locally
 against the CLI with no cloud credentials (the `uses:` steps aside): the budget
@@ -28,7 +36,8 @@ gate with no `budget.yml` (exit 2), with no cost history (exit 2), under its
 limit (0) and breached (1); the scan with no credentials (fails, exit 6, the
 error document kept); the policy check with no files (passes, with notices), a
 broken policy (fails), a denied command (fails), commands that only ask
-(passes with a warning, fails with `FAIL_ON_ASK: "1"`).
+(passes with a warning, fails with `FAIL_ON_ASK: "1"`); the commitments check
+with no credentials (fails, exit 2, the error document kept).
 
 ## On the composite actions (pinned to 0.8.216)
 

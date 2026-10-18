@@ -7,12 +7,25 @@ free Describe calls only, every reservation and Savings Plan the account holds:
     rds.describe_reserved_db_instances        each region, every page
     ec2.describe_reserved_instances           each region (one answer, no pages)
     elasticache.describe_reserved_cache_nodes each region, every page
+    redshift.describe_reserved_nodes          each region, every page (Marker)
+    opensearch.describe_reserved_instances    each region, every page (NextToken)
+    memorydb.describe_reserved_nodes          each region, every page (NextToken)
     savingsplans.describe_savings_plans       once (a global service), every page
 
 and lists each one with its class or type, count, engine or product, offering
 type, term, start, end, days left, state, and its fixed and recurring charges
-exactly as AWS reports them. RDS and ElastiCache report no end date: theirs is
-the start plus the term, and says so (end_basis).
+exactly as AWS reports them. RDS, ElastiCache, Redshift, OpenSearch and
+MemoryDB report no end date: theirs is the start plus the term, and says so
+(end_basis).
+
+OpenSearch is read once, through the opensearch API's DescribeReservedInstances,
+which lists the reservations bought through either OpenSearch API (the older
+es one included), so none is counted twice. botocore has no paginator for it;
+every page is read by its NextToken here, as every other read is. Where
+botocore's endpoint list names no Redshift, OpenSearch or MemoryDB endpoint in
+a region (MemoryDB is offered in fewer regions than EC2), that service is not
+called there: it is listed as not offered, with why, and is neither a failed
+read nor a zero.
 
 A read that failed is a NotRead, per service and region, with its reason
 class (denied, throttled, expired and so on, by aws_read_failures' rule for
@@ -29,7 +42,8 @@ it can read low, never high. It is not billed utilization, which only Cost
 Explorer has, at $0.01 a request: read_billed() reads it when the person asks
 (--spend), says what it costs before the first request, and caps its pages.
 Savings Plans get no matched-now figure; their billed utilization needs Cost
-Explorer, and an account sees only its own plans.
+Explorer, and an account sees only its own plans. Nor do Redshift, OpenSearch
+and MemoryDB reservations: matched now reads "not compared" for them.
 """
 from __future__ import annotations
 
@@ -53,8 +67,11 @@ CE_DAYS = 30
 _WORKERS = 8
 
 # States in which a commitment is still bought: billing, about to, or queued
-# to start. Retired, returned and failed ones have ended.
-LIVE_STATES = frozenset({"active", "payment-pending", "queued"})
+# to start (Redshift spells it pending-payment, and a Redshift reserved node
+# being exchanged is still held until the exchange completes). Retired,
+# returned and failed ones have ended.
+LIVE_STATES = frozenset({"active", "payment-pending", "pending-payment", "queued",
+                         "exchanging"})
 _TERMS = {31_536_000: "1 year", 94_608_000: "3 years"}
 
 # (service, call, IAM action, what it is for)
@@ -66,7 +83,18 @@ COMMITMENT_READS = (
     ("ec2", "ec2.describe_reserved_instances", "ec2:DescribeReservedInstances", "commitments"),
     ("elasticache", "elasticache.describe_reserved_cache_nodes",
      "elasticache:DescribeReservedCacheNodes", "commitments"),
+    ("redshift", "redshift.describe_reserved_nodes", "redshift:DescribeReservedNodes",
+     "commitments"),
+    # The opensearch API's call; IAM names it under the es prefix.
+    ("opensearch", "opensearch.describe_reserved_instances", "es:DescribeReservedInstances",
+     "commitments"),
+    ("memorydb", "memorydb.describe_reserved_nodes", "memorydb:DescribeReservedNodes",
+     "commitments"),
 )
+# The services read only where botocore's endpoint list offers them, and
+# whose reservations are not compared with what runs now.
+ENDPOINT_CHECKED = frozenset({"redshift", "opensearch", "memorydb"})
+NOT_COMPARED = {"basis": "matched now", "compared": False, "reason": "not compared"}
 SAVINGS_PLANS_READ = ("savingsplans", "savingsplans.describe_savings_plans",
                       "savingsplans:DescribeSavingsPlans", "commitments")
 INVENTORY_READS = {
@@ -287,6 +315,48 @@ def _cache(raw: dict[str, Any], region: str, now: datetime) -> dict[str, Any]:
                    _arn=raw.get("ReservationARN"))
 
 
+def _start_plus_term(raw: dict[str, Any]) -> tuple[datetime | None, Any, datetime | None]:
+    start, dur = _aware(raw.get("StartTime")), raw.get("Duration")
+    return start, dur, (start + timedelta(seconds=dur) if start and isinstance(dur, int)
+                        else None)
+
+
+def _redshift(raw: dict[str, Any], region: str, now: datetime) -> dict[str, Any]:
+    start, dur, end = _start_plus_term(raw)
+    return _record("redshift", region, str(raw.get("ReservedNodeId")),
+                   cls=raw.get("NodeType"), count=raw.get("NodeCount"), product=None,
+                   offering=raw.get("OfferingType"), term_s=dur, start=start, end=end,
+                   end_basis="start plus term", state=str(raw.get("State") or ""), now=now,
+                   charges=_picked(raw, ("FixedPrice", "UsagePrice", "CurrencyCode",
+                                         "RecurringCharges")),
+                   offering_id=raw.get("ReservedNodeOfferingId"),
+                   node_offering_type=raw.get("ReservedNodeOfferingType"))
+
+
+def _opensearch(raw: dict[str, Any], region: str, now: datetime) -> dict[str, Any]:
+    start, dur, end = _start_plus_term(raw)
+    sub = raw.get("BillingSubscriptionId")
+    return _record("opensearch", region, str(raw.get("ReservedInstanceId")),
+                   cls=raw.get("InstanceType"), count=raw.get("InstanceCount"), product=None,
+                   offering=raw.get("PaymentOption"), term_s=dur, start=start, end=end,
+                   end_basis="start plus term", state=str(raw.get("State") or ""), now=now,
+                   charges=_picked(raw, ("FixedPrice", "UsagePrice", "CurrencyCode",
+                                         "RecurringCharges")),
+                   reservation_name=raw.get("ReservationName"),
+                   offering_id=raw.get("ReservedInstanceOfferingId"),
+                   _lease=str(sub) if sub is not None else None)
+
+
+def _memorydb(raw: dict[str, Any], region: str, now: datetime) -> dict[str, Any]:
+    start, dur, end = _start_plus_term(raw)
+    return _record("memorydb", region, str(raw.get("ReservationId")),
+                   cls=raw.get("NodeType"), count=raw.get("NodeCount"), product=None,
+                   offering=raw.get("OfferingType"), term_s=dur, start=start, end=end,
+                   end_basis="start plus term", state=str(raw.get("State") or ""), now=now,
+                   charges=_picked(raw, ("FixedPrice", "RecurringCharges")),
+                   offering_id=raw.get("ReservedNodesOfferingId"), _arn=raw.get("ARN"))
+
+
 def _plan(raw: dict[str, Any], now: datetime) -> dict[str, Any]:
     kind = " ".join(x for x in (raw.get("savingsPlanType"), raw.get("ec2InstanceFamily")) if x)
     return _record("savingsplans", str(raw.get("region") or "all regions"),
@@ -404,6 +474,12 @@ _COMMITMENT_CALLS = {
     "ec2": ("describe_reserved_instances", {}, "ReservedInstances", None, _ec2),
     "elasticache": ("describe_reserved_cache_nodes", {"MaxRecords": PAGE_SIZE},
                     "ReservedCacheNodes", "Marker", _cache),
+    "redshift": ("describe_reserved_nodes", {"MaxRecords": PAGE_SIZE}, "ReservedNodes",
+                 "Marker", _redshift),
+    "opensearch": ("describe_reserved_instances", {"MaxResults": PAGE_SIZE},
+                   "ReservedInstances", "NextToken", _opensearch),
+    "memorydb": ("describe_reserved_nodes", {"MaxResults": PAGE_SIZE}, "ReservedNodes",
+                 "NextToken", _memorydb),
 }
 _INVENTORY_CALLS = {
     "rds": ("describe_db_instances", {"MaxRecords": PAGE_SIZE}, "DBInstances", "Marker"),
@@ -424,7 +500,9 @@ def read_region(clients: dict[str, Any], region: str, now: datetime
     for spec in COMMITMENT_READS:
         service = spec[0]
         op, params, key, token, shape = _COMMITMENT_CALLS[service]
-        client = clients.get(service)
+        if service not in clients:
+            continue                    # not offered in this region (offered_in)
+        client = clients[service]
         if isinstance(client, BaseException):
             missed.append(not_read(spec, region, client))
             summary[service] = "not read"
@@ -439,6 +517,10 @@ def read_region(clients: dict[str, Any], region: str, now: datetime
             summary[service] = len(rows)
         active = [c for c in rows if c["state"] == "active"]
         if not active:
+            continue
+        if service not in INVENTORY_READS:
+            for c in active:
+                c["matched_now"] = dict(NOT_COMPARED)
             continue
         inv = INVENTORY_READS[service]
         op, params, key, token = _INVENTORY_CALLS[service]
@@ -475,13 +557,36 @@ def _client(session: Any, service: str, region: str, config: Any) -> Any:
         return exc
 
 
+def offered_in(session: Any, service: str, region: str) -> bool:
+    """Whether botocore's endpoint list offers `service` in `region`, for the
+    services in ENDPOINT_CHECKED (always True for the others). True whenever
+    the list cannot be read, or names the service nowhere in the region's
+    partition: a read is skipped only when the list is sure."""
+    if service not in ENDPOINT_CHECKED:
+        return True
+    try:
+        partition = session.get_partition_for_region(region)
+        listed = session.get_available_regions(service, partition_name=partition)
+    except Exception:  # noqa: BLE001 - an unreadable list never skips a read
+        return True
+    return not listed or region in listed
+
+
 def read_all(session: Any, regions: list[str], *, now: datetime, config: Any = None
              ) -> dict[str, Any]:
     """Every commitment in `regions` and every Savings Plan, with matched now.
 
     Clients are built here, on this thread (a boto3 session is not safe to
-    share across threads); the regions are then read in parallel."""
-    per_region = {r: {svc: _client(session, svc, r, config) for svc in _COMMITMENT_CALLS}
+    share across threads); the regions are then read in parallel. A service
+    botocore offers nowhere in a region is not called there and is listed
+    under not_offered."""
+    not_offered = [{"service": svc, "region": r,
+                    "reason": f"botocore's endpoint list has no {svc} endpoint in {r}"}
+                   for r in regions for svc in _COMMITMENT_CALLS
+                   if not offered_in(session, svc, r)]
+    skipped = {(n["service"], n["region"]) for n in not_offered}
+    per_region = {r: {svc: _client(session, svc, r, config) for svc in _COMMITMENT_CALLS
+                      if (svc, r) not in skipped}
                   for r in regions}
     sp_client = _client(session, "savingsplans", "us-east-1", config)
     commitments: list[dict] = []
@@ -494,12 +599,15 @@ def read_all(session: Any, regions: list[str], *, now: datetime, config: Any = N
             rows, failed, counts = futures[r].result()
             commitments += rows
             missed += failed
-            summary[r] = counts
+            summary[r] = {**counts, **{svc: "not offered" for svc, where in skipped
+                                       if where == r}}
         rows, failed, count = plans.result()
     commitments += rows
     missed += failed
     summary["all regions"] = {"savingsplans": count}
-    return {"commitments": commitments, "not_read": missed, "summary": summary}
+    return {"commitments": commitments, "not_read": missed, "summary": summary,
+            "not_offered": not_offered,
+            "commitment_reads": len(regions) * len(_COMMITMENT_CALLS) - len(skipped) + 1}
 
 
 def is_live(c: dict[str, Any]) -> bool:
@@ -619,9 +727,12 @@ def dry_run_plan(spend: bool) -> dict[str, Any]:
          "where": "once, unless --regions names them", "billed": False},
     ]
     for service, call, action, what in COMMITMENT_READS:
-        calls.append({"call": call, "iam_action": action, "what": what,
-                      "where": ("each region (one answer, no pages)" if service == "ec2"
-                                else "each region, every page"), "billed": False})
+        where = ("each region (one answer, no pages)" if service == "ec2"
+                 else "each region, every page")
+        if service in ENDPOINT_CHECKED:
+            where = "each region botocore lists an endpoint in, every page"
+        calls.append({"call": call, "iam_action": action, "what": what, "where": where,
+                      "billed": False})
     calls.append({"call": SAVINGS_PLANS_READ[1], "iam_action": SAVINGS_PLANS_READ[2],
                   "what": SAVINGS_PLANS_READ[3], "where": "once, every page", "billed": False})
     for _, call, action, what in INVENTORY_READS.values():
