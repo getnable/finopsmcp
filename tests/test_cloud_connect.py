@@ -279,6 +279,7 @@ def test_saving_never_follows_a_symlink(ledger, org_dir, tmp_path):
     ("https://user:pass@box.example.com", None),  # pragma: allowlist secret
     ("https://box.example.com/api?x=1", None),
     ("https://", None),
+    ("https://[::1]:8443", "https://[::1]:8443"),
 ])
 def test_only_an_https_box_is_a_destination(url, ok):
     if ok is None:
@@ -402,6 +403,17 @@ def test_the_key_from_a_file_only_with_mode_0600(tmp_path):
     link.symlink_to(f)
     with pytest.raises(cc.ConnectError):
         cc.read_key(key_file=str(link), environ={}, prompt=None)
+
+
+def test_a_fifo_in_a_key_file_s_or_an_org_file_s_place_never_hangs(org_dir, tmp_path):
+    fifo = tmp_path / "key"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(cc.ConnectError, match="regular file"):
+        cc.read_key(key_file=str(fifo), environ={}, prompt=None)
+    (org_dir / "teams.yaml").unlink()
+    os.mkfifo(org_dir / "teams.yaml")
+    p = cc.build()
+    assert p.org["not_read"]["teams.yaml"] == "not a regular file"
 
 
 def test_the_key_from_a_prompt_and_never_without_one(monkeypatch):

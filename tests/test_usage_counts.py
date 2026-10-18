@@ -182,7 +182,7 @@ def test_a_status_run_sends_counts_and_nothing_it_read(monkeypatch, sent):
         "exit_class": 0, "commitments_read": 8, "ending_within_90_days": 4,
         "services_not_read": 0, "json": True}
     text = json.dumps(body)
-    for planted in PLANTED:
+    for planted in (*PLANTED, "1000.0", "FixedPrice", "Partial Upfront", "us-east-1"):
         assert planted not in text, planted
     # Only the allow-list and the runtime facts every event carries.
     runtime = set(_tel()._runtime_props()) | {"$ip"}

@@ -740,7 +740,12 @@ def _write_counts_state(state: dict) -> None:
     try:
         _COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = _COUNTS_FILE.with_name(_COUNTS_FILE.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                     | getattr(os, "O_NOFOLLOW", 0), 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(json.dumps(state))
         os.replace(tmp, _COUNTS_FILE)

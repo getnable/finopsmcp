@@ -761,10 +761,12 @@ def stored_lines(path: Path | None = None) -> dict[str, Any]:
     if _symlink_target(path) is not None:
         raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
     try:
-        fh = path.open("rb")
+        st = os.stat(path)
     except FileNotFoundError:
         return {"lines": [], "chain": chain_of([]), "partial": False, "path": str(path)}
-    with fh:
+    if not stat.S_ISREG(st.st_mode):
+        raise OSError(errno.EINVAL, "the ledger is not a regular file", str(path))
+    with path.open("rb") as fh:
         raw = fh.read()
     body, _, tail = raw.rpartition(b"\n")
     lines = body.split(b"\n") if body or raw.startswith(b"\n") else []

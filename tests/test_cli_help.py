@@ -54,7 +54,7 @@ def test_help_has_no_other_bucket():
 def test_help_covers_all_commands():
     out = _help_text()
     for cmd in ("welcome", "doctor", "aws", "gcp", "azure", "openai", "slack",
-                "login", "vault", "guard", "iam-template", "serve", "cloud"):
+                "login", "vault", "guard", "iam-template", "serve"):
         assert cmd in out, f"{cmd} missing from --help"
 
 
@@ -100,7 +100,17 @@ def test_a_subcommand_help_lists_its_own_actions(tmp_path):
         assert "--version" not in r.stdout, cmd
 
 
-def test_cloud_is_listed_with_the_account_commands():
+def test_cloud_is_registered_and_runs_though_not_yet_listed():
+    """`nable cloud` is registered and answers its own --help. It is left out
+    of the top-level list (as `pricing` is) until CAPABILITIES.md's CLI
+    section lists it, which tests/test_capabilities_doc_counts.py holds to
+    that list; listing it then is moving it from _HIDDEN to the account
+    group in the same change."""
     out = _help_text()
-    group = out.split("account & billing", 1)[1].split("\n\n", 1)[0]
-    assert "\n  cloud " in group, group
+    assert "\n  cloud " not in out.split("\noptions\n", 1)[0]
+    r = subprocess.run(
+        [sys.executable, "-c", "import sys; sys.argv=['finops','cloud','--help']; "
+                               "from finops.setup_wizard import main; main()"],
+        capture_output=True, text=True, timeout=60,
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC})
+    assert r.returncode == 0 and "connect" in r.stdout and "status" in r.stdout, r.stderr

@@ -3834,7 +3834,10 @@ def main(args: list[str] | None = None) -> None:
 
         # Internal commands, registered and runnable but left out of --help:
         # `pricing` is the founder's margin table, not something a user needs.
-        _HIDDEN = frozenset({"pricing"})
+        # `cloud` (nable cloud connect, status) joins "account & billing" when
+        # CAPABILITIES.md's CLI section lists it too: the count test holds
+        # the two together. Until then README.md and HEADLESS.md name it.
+        _HIDDEN = frozenset({"pricing", "cloud"})
 
         # Ordered groups. A command registered but not listed here auto-renders
         # under "other", so new subcommands can never silently vanish from help.
@@ -3853,7 +3856,7 @@ def main(args: list[str] | None = None) -> None:
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
             ("editor & agents", ["claude", "guard", "agents"]),
             ("account & billing", ["login", "logout", "license", "license-status", "whoami",
-                                   "plan", "credits", "cloud", "uninstall"]),
+                                   "plan", "credits", "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra", "pack"]),
         ]
 

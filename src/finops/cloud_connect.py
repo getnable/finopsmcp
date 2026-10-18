@@ -135,8 +135,11 @@ def _read_org_file(path: Path) -> tuple[str | None, str | None]:
     if st.st_size > ORG_FILE_MAX:
         return None, f"{st.st_size:,} bytes, over the {ORG_FILE_MAX:,} a workspace takes"
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return None, "not a regular file"
             raw = fh.read(ORG_FILE_MAX + 1)
     except OSError as exc:
         return None, f"not read ({errno.errorcode.get(exc.errno or 0, 'os error')})"
@@ -360,6 +363,8 @@ def parse_box(url: str) -> str:
         port = parts.port
     except ValueError as exc:
         raise ConnectError("--box has a port that is not a number") from exc
+    if ":" in host:
+        host = f"[{host}]"
     return f"https://{host}" + (f":{port}" if port else "")
 
 
@@ -497,7 +502,8 @@ def read_key(*, key_file: str | None = None, environ: Mapping[str, str] | None =
     env = os.environ if environ is None else environ
     if key_file:
         try:
-            fd = os.open(key_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            fd = os.open(key_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                         | getattr(os, "O_NONBLOCK", 0))
         except OSError as exc:
             raise ConnectError(f"--key-file could not be opened "
                                f"({errno.errorcode.get(exc.errno or 0, 'os error')}; "
