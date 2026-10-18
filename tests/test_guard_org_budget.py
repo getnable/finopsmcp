@@ -269,6 +269,17 @@ def test_the_stricter_of_the_org_budget_and_ai_budget_json_answers(box, monkeypa
     assert v["decision"] == "deny"
 
 
+def test_the_org_budget_answers_when_it_is_the_stricter(box, monkeypatch):
+    """ai-budget.json only close (a note), the org budget over: the ask is
+    the org budget's, with the note's reason after it."""
+    _budget(box, "person", "alice@acme.example", "{monthly_usd: 4}")     # over
+    _person(monkeypatch)
+    ab.set_budget(spend_cap=5)                                           # 90%: a note
+    v = guard.gate_command("ls -la")
+    assert v["decision"] == "ask" and v["action_type"] == "ai_budget"
+    assert v["reason"].index("budgets.yaml") < v["reason"].index("close to its AI budget")
+
+
 def test_ai_budget_json_still_answers_when_the_org_budget_is_under(box, monkeypatch):
     _budget(box, "person", "alice@acme.example", "{monthly_usd: 1000}")
     _person(monkeypatch)

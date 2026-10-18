@@ -219,10 +219,16 @@ def test_dollars_round_up_to_the_millionth(laptop, monkeypatch):
             out=0, cwd=str(laptop["pay"]))           # $0.000001
     _claude(laptop["claude"], "s-9", NOW - timedelta(days=4), model="claude-3-5-haiku",
             inp=1, out=0, cwd=str(laptop["pay"]))    # $0.0000008, rounded up
+    _claude(laptop["claude"], "s-9", NOW - timedelta(days=4), model="claude-opus-4-1",
+            inp=0, out=0, cr=1, cwd=str(laptop["pay"]))   # one cached read: $0.0000015
+    _claude(laptop["claude"], "s-9", NOW - timedelta(days=4), model="claude-sonnet-4-5",
+            inp=0, out=0, cr=1, cwd=str(laptop["pay"]))   # $0.0000003: up, never to 0
     recs = {r["model"]: r for r in _records(_build()) if r["day"] == "2026-10-14"}
     assert recs["claude-sonnet-4-6"]["usd"] == "0.000003"
     assert recs["claude-haiku-4-5"]["usd"] == "0.000001"
     assert recs["claude-3-5-haiku"]["usd"] == "0.000001"
+    assert recs["claude-opus-4-1"]["usd"] == "0.000002"
+    assert recs["claude-sonnet-4-5"]["usd"] == "0.000001"
 
 
 def test_the_exact_rate_matches_the_float_one():

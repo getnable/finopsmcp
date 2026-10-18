@@ -102,3 +102,14 @@ def test_an_mcp_shell_tool_writing_budgets_yaml_asks(machine):
 def test_reading_budgets_yaml_stays_silent(machine):
     for path in _places(machine):
         assert g.gate_command(f"cat {path}", record=False, cwd=os.getcwd()) is None
+
+
+def test_budgets_yaml_is_named_by_the_guards_own_rule(machine):
+    """Held by name, not only by the directory it is in: match() and
+    match_file() both answer for budgets.yaml in each org dir."""
+    from finops import guard_paths
+    for path in _places(machine):
+        if path.startswith(("..", "~")):
+            continue
+        assert guard_paths.match(path, os.getcwd()) is not None, path
+        assert guard_paths.match_file(path, os.getcwd()) is not None, path
