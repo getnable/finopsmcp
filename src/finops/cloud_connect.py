@@ -910,8 +910,8 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
         lines.append("  the last record was still being written; it waits for the next connect")
     lines += ["", *_describe_usage(payload.usage), ""]
     if not payload.data:
-        lines += ["Nothing to send: no org model, no ledger records and no coding-agent "
-                  "usage here."]
+        lines += [("Nothing to send: no org model, no ledger records and no coding-agent "
+                   "usage here.")]
         return "\n".join(lines)
     count = len(plan(payload, None))
     n_lines = len(payload.lines)
@@ -937,8 +937,8 @@ def _describe_usage(u: Mapping[str, Any]) -> list[str]:
         return ["Coding agents", f"  left out: {u['left_out']}"]
     w = u.get("window") or {}
     if not n:
-        return ["Coding agents", f"  no usage on closed UTC days {w.get('first')} to "
-                                 f"{w.get('last')}"]
+        return ["Coding agents", (f"  no usage on closed UTC days {w.get('first')} to "
+                                  f"{w.get('last')}")]
     d = u.get("days") or {}
     t = u.get("tokens") or {}
     who = u.get("developer")

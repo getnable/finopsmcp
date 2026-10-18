@@ -91,7 +91,6 @@ def box(tmp_path, monkeypatch):
 
     def no_git(cwd):
         reads.append(cwd)
-        return None
     monkeypatch.setattr(ab, "_read_git_email", no_git)
     _transcript(tmp_path / "claude", "s-1")          # $4.50 this month on this machine
     return {"org": org, "claude": tmp_path / "claude", "reads": reads, "tmp": tmp_path}

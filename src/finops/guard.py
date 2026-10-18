@@ -3303,7 +3303,7 @@ def _org_budget_hard_stop() -> tuple[bool, str]:
     try:
         if load_policy().get("on_budget_breach") == "deny":
             return True, "your policy sets on_budget_breach: deny"
-    except Exception:  # noqa: BLE001 - an unreadable policy stops nothing
+    except Exception:  # noqa: BLE001, S110 - an unreadable policy stops nothing
         pass
     if _stop_on_budget():
         return True, "you chose to stop on a breach (`nable ai-budget`, on_breach stop)"
@@ -3356,8 +3356,8 @@ def _org_budget_gate(session_id: str | None, cwd: str | None) -> dict[str, Any] 
                               "Confirm to continue, or have whoever owns the budget raise it in "
                               f"their own terminal with {raise_it}. Set "
                               "FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop."))}
-    except Exception:
-        return None  # an unreadable org model or transcript is not a reason to stop anyone
+    except Exception:  # noqa: BLE001 - an unreadable org model or transcript stops nobody
+        return None
 
 
 # How often the "close to your AI budget" note may show in one session. Every
@@ -5457,8 +5457,8 @@ _CONFIG_WRITES = frozenset(("--add", "--replace-all", "--unset", "--unset-all", 
 _CONFIG_SECTION = frozenset(("--remove-section", "--rename-section", "remove-section",
                              "rename-section"))
 _GIT_IDENTITY = ("git-identity", "ai_budget_change",
-                 "changing git's user.email, which says whose AI budget this machine's "
-                 "agents are held to")
+                 ("changing git's user.email, which says whose AI budget this machine's "
+                  "agents are held to"))
 
 
 def _word(token: str) -> str:

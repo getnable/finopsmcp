@@ -35,7 +35,8 @@ from pathlib import Path
 
 import pytest
 
-from finops import ai_budget, cli_cloud, cloud_connect as cc, guard_ledger, llm_prices
+from finops import ai_budget, cli_cloud, guard_ledger, llm_prices
+from finops import cloud_connect as cc
 
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 BOX = "https://box.example.com"
@@ -304,25 +305,25 @@ def test_the_developer_is_the_sender_named_with_as(laptop, monkeypatch):
 
 def test_on_a_terminal_it_is_git_user_email_then_user(laptop, monkeypatch):
     monkeypatch.setattr(cli_cloud, "_git_email", lambda: "alice@acme.example")
-    code, doc, _ = _dry(terminal=True)
+    _code, doc, _ = _dry(terminal=True)
     assert doc["agent_usage"]["developer"] == "alice@acme.example"
     monkeypatch.setattr(cli_cloud, "_git_email", lambda: None)
     monkeypatch.setenv("USER", "alice")
-    code, doc, _ = _dry(terminal=True)
+    _code, doc, _ = _dry(terminal=True)
     assert (doc["agent_usage"]["developer"], doc["agent_usage"]["developer_from"]) == (
         "alice", "$USER")
 
 
 def test_without_a_terminal_or_as_no_record_is_built(laptop, monkeypatch):
     monkeypatch.setattr(cli_cloud, "_git_email", lambda: "alice@acme.example")
-    code, doc, _ = _dry(terminal=False)
+    _code, doc, _ = _dry(terminal=False)
     assert doc["agent_usage"]["records"] == 0
     assert "--as" in doc["agent_usage"]["left_out"]
     assert not any(k == "agent_usage" for k, *_ in cc.build(now=NOW).lines)
 
 
 def test_no_agent_usage_leaves_it_out(laptop, monkeypatch):
-    code, doc, _ = _dry("--as", "alice@acme.example", "--no-agent-usage")
+    _code, doc, _ = _dry("--as", "alice@acme.example", "--no-agent-usage")
     assert doc["agent_usage"]["records"] == 0 and "--no-agent-usage" in doc["agent_usage"][
         "left_out"]
 
@@ -341,7 +342,7 @@ def test_the_dry_run_shows_counts_days_developer_agents_models_projects_tokens_a
                  "input", "output", "cache read", "list-price equivalent",
                  "not an invoice", "llm_prices", "9,000,000 tokens", "not priced"):
         assert said in text, said
-    code, doc, _ = _dry("--as", "alice@acme.example")
+    _code, doc, _ = _dry("--as", "alice@acme.example")
     u = doc["agent_usage"]
     assert u["records"] == 6 and u["days"] == {"first": "2026-09-13", "last": "2026-10-17",
                                                "count": 4}
@@ -362,7 +363,7 @@ def test_the_confirm_code_changes_when_any_record_changes(laptop):
 
 
 def test_a_send_with_the_old_code_after_a_record_changed_is_refused(laptop, monkeypatch):
-    code0, doc, _ = _dry("--as", "alice@acme.example")
+    _code0, doc, _ = _dry("--as", "alice@acme.example")
     _claude(laptop["claude"], "s-1", NOW - timedelta(days=1), out=1, cwd=str(laptop["pay"]))
     sent = []
     out, err = io.StringIO(), io.StringIO()
@@ -439,7 +440,7 @@ def test_guard_py_imports_neither_cloud_connect_nor_telemetry():
     src = Path(__file__).resolve().parents[1] / "src" / "finops" / "guard.py"
     text = src.read_text(encoding="utf-8")
     assert not re.search(r"^\s*(?:from|import)\s+(?:\.|finops\.)?\s*(?:cloud_connect|telemetry)\b",
-                         text, re.M)
+                         text, re.MULTILINE)
     assert "from . import cloud_connect" not in text and "from .telemetry" not in text
     assert hashlib.sha256(text.encode()).hexdigest()   # read, not imported
 
