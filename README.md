@@ -64,7 +64,7 @@ run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)
 
 Uses the AWS credentials already on your machine and reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan --demo` runs on sample data with no account at all. Add `--json` for CI, or `--spend` for a deeper breakdown.
 
-`uvx nable commitments status` lists every reservation and Savings Plan the account holds and when each ends, from free reads; `--fail-within 30` makes it a CI check (exit 1 when one ends within 30 days).
+`uvx nable commitments status` lists the RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB reservations and the Savings Plans the account holds and when each ends, from free reads; `--fail-within 30` makes it a CI check (exit 1 when one ends within 30 days, 2 when one could not be read). [examples/github-actions/commitments-status.yml](examples/github-actions/commitments-status.yml) runs it every week through a read-only role assumed with GitHub OIDC and keeps the JSON.
 
 From there nable:
 
@@ -102,7 +102,7 @@ Infracost prices an infrastructure change as it is written and in the pull reque
 
 ## Agent guard
 
-`nable guard install` adds a hook to Claude Code (and `--all` to every supported agent it finds: Cursor, Codex CLI, GitHub Copilot, Gemini CLI, Cline) that checks each infrastructure command, or MCP call in Claude Code, Cursor and Codex, before it runs: a one-way door (destroy, terminate, a commitment) asks you first, and a launch is priced at list price so a ~$128k/mo `run-instances` (8x p4d.24xlarge) asks instead of passing. It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
+`nable guard install` adds a hook to Claude Code (and `--all` to every supported agent it finds: Cursor, Codex CLI, GitHub Copilot, Gemini CLI, Cline) that checks each infrastructure command, or MCP call in Claude Code, Cursor and Codex, before it runs: a one-way door (destroy, terminate, a commitment purchase) asks you first, and a launch is priced at list price so a ~$128k/mo `run-instances` (8x p4d.24xlarge) asks instead of passing. An EC2 Capacity Reservation is priced the same way, since it bills from creation whether or not anything runs in it; with a commitment duration it is a commitment purchase, and asks whatever the policy says. The purchases it covers, and the ones it does not, are listed in [CHANGELOG.md](CHANGELOG.md#0130-2026-10-18). It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
 
 **AI budgets that stay current.** When a Claude Code, Codex or Cursor spend cap is set, the guard weighs each call against it. Cursor usage comes from its Admin API (`CURSOR_ADMIN_API_KEY`): the hook never waits on the network, and when its copy is over an hour old it refreshes it in the background and says so (`FINOPS_GUARD_BACKGROUND_REFRESH=0` turns that off). `FINOPS_GUARD_AUTO_REFRESH_BUDGET=1` does the same for the cloud-budget figure, recomputing it from local cost history with no billed calls.
 
@@ -110,7 +110,7 @@ Infracost prices an infrastructure change as it is written and in the pull reque
 
 ```bash
 nable guard report --session <id>     # what it asked, blocked and let through, in dollars
-nable guard reconcile --hours 24      # CloudTrail's creates and destroys against the ledger
+nable guard reconcile --hours 24      # CloudTrail's creates, destroys and commitments against the ledger
 nable guard export --format cef       # the verified ledger, for a SIEM
 nable budget refresh                  # recompute budgets and the guard's spend figure
 nable budget ci-gate --fail-on-breach --json   # a pipeline step that fails on a breached budget

@@ -6,9 +6,11 @@ reservation and Savings Plan the account holds and says when each ends, and
 it is honest about what it could not read.
 
 What has to stay true:
-  - free reads only by default: RDS, EC2 and ElastiCache reservations in each
-    region (resolved the way `nable scan` resolves them) and the Savings Plans
-    once, every page of each; no Cost Explorer call without --spend
+  - free reads only by default: RDS, EC2, ElastiCache, Redshift, OpenSearch
+    and MemoryDB reservations in each region (resolved the way `nable scan`
+    resolves them) and the Savings Plans once, every page of each; no Cost
+    Explorer call without --spend; a service botocore offers nowhere in a
+    region is not called there, and is listed as not offered
   - every commitment read is listed with its end date, days left, state and
     charges exactly as AWS reports them
   - a read that failed is labelled not read, per service and region, with its
@@ -57,17 +59,30 @@ def _client(service: str, region: str):
                         aws_secret_access_key="testing")  # pragma: allowlist secret
 
 
+# The services read since Redshift, OpenSearch and MemoryDB were added, and
+# the empty answer each gives in a test that does not stub it.
+NEW = {"redshift": ("describe_reserved_nodes", {"ReservedNodes": []}),
+       "opensearch": ("describe_reserved_instances", {"ReservedInstances": []}),
+       "memorydb": ("describe_reserved_nodes", {"ReservedNodes": []})}
+
+
 class FakeSession:
     """boto3.Session as far as the command uses it: one stubbed client per
-    (service, region), and a record of every client asked for."""
+    (service, region), and a record of every client asked for. A Redshift,
+    OpenSearch or MemoryDB client no test stubbed answers with nothing.
+    `offered` is botocore's endpoint list as the session reports it
+    ({service: regions}); without it the session cannot say, as a session
+    that is not boto3's cannot."""
 
-    def __init__(self, regions=("us-east-1", "eu-west-1"), *, creds=True):
+    def __init__(self, regions=("us-east-1", "eu-west-1"), *, creds=True, offered=None):
         self.creds = creds
+        self.offered = offered
         self.requested: list[tuple[str, str | None]] = []
         self.clients: dict[tuple[str, str], object] = {}
         self.stubs: dict[tuple[str, str], Stubber] = {}
+        self.touched: set[tuple[str, str]] = set()
         for region in regions:
-            for svc in ("rds", "ec2", "elasticache"):
+            for svc in ("rds", "ec2", "elasticache", *NEW):
                 self._add(svc, region)
         for svc in ("sts", "savingsplans", "ce"):
             self._add(svc, "us-east-1")
@@ -80,14 +95,27 @@ class FakeSession:
         self.stubs[(svc, region)] = Stubber(c)
 
     def stub(self, svc, region="us-east-1") -> Stubber:
+        self.touched.add((svc, region))
         return self.stubs[(svc, region)]
 
     def get_credentials(self):
         return object() if self.creds else None
 
+    def get_partition_for_region(self, region):
+        if self.offered is None:
+            raise AttributeError("get_partition_for_region")
+        return "aws"
+
+    def get_available_regions(self, service, partition_name="aws"):
+        return list(self.offered.get(service, ())) if self.offered else []
+
     def client(self, service, region_name=None, **_kw):
         self.requested.append((service, region_name))
-        return self.clients[(service, region_name or "us-east-1")]
+        key = (service, region_name or "us-east-1")
+        if service in NEW and key not in self.touched:
+            op, empty = NEW[service]
+            self.stub(*key).add_response(op, empty, None)
+        return self.clients[key]
 
     def __enter__(self):
         for s in self.stubs.values():
@@ -229,6 +257,76 @@ def _full_account(sess, *, discover=True, sp_page_2_denied=False):
         {"maxResults": 1000, "nextToken": "t2"})
 
 
+def _redshift_ri(rid, ntype, count, start, duration, *, state="active"):
+    return {"ReservedNodeId": rid, "ReservedNodeOfferingId": f"off-{rid}", "NodeType": ntype,
+            "StartTime": start, "Duration": duration, "FixedPrice": 2000.0, "UsagePrice": 0.0,
+            "CurrencyCode": "USD", "NodeCount": count, "State": state,
+            "OfferingType": "All Upfront", "RecurringCharges": [],
+            "ReservedNodeOfferingType": "Regular"}
+
+
+def _opensearch_ri(rid, itype, count, start, duration, *, state="active"):
+    return {"ReservationName": f"name-{rid}", "ReservedInstanceId": rid,
+            "BillingSubscriptionId": 4242, "ReservedInstanceOfferingId": f"off-{rid}",
+            "InstanceType": itype, "StartTime": start, "Duration": duration,
+            "FixedPrice": 0.0, "UsagePrice": 0.0, "CurrencyCode": "USD",
+            "InstanceCount": count, "State": state, "PaymentOption": "NO_UPFRONT",
+            "RecurringCharges": [{"RecurringChargeAmount": 0.12,
+                                  "RecurringChargeFrequency": "Hourly"}]}
+
+
+def _memorydb_ri(rid, ntype, count, start, duration, *, state="active"):
+    return {"ReservationId": rid, "ReservedNodesOfferingId": f"off-{rid}", "NodeType": ntype,
+            "StartTime": start, "Duration": duration, "FixedPrice": 300.0, "NodeCount": count,
+            "OfferingType": "Partial Upfront", "State": state,
+            "RecurringCharges": [{"RecurringChargeAmount": 0.03,
+                                  "RecurringChargeFrequency": "Hourly"}],
+            "ARN": f"arn:aws:memorydb:us-east-1:{ACCOUNT}:reservednode/{rid}"}
+
+
+def _quiet_core(sess, region="us-east-1"):
+    """RDS, EC2 and ElastiCache in `region` answering with nothing."""
+    sess.stub("rds", region).add_response("describe_reserved_db_instances",
+                                          {"ReservedDBInstances": []}, None)
+    sess.stub("ec2", region).add_response("describe_reserved_instances",
+                                          {"ReservedInstances": []}, {})
+    sess.stub("elasticache", region).add_response("describe_reserved_cache_nodes",
+                                                  {"ReservedCacheNodes": []}, None)
+
+
+def _new_services_on_several_pages(sess):
+    """Redshift on two pages (Marker), OpenSearch on three and MemoryDB on two
+    (NextToken), with the request each page must carry."""
+    rs = sess.stub("redshift")
+    rs.add_response("describe_reserved_nodes", {"ReservedNodes": [
+        _redshift_ri("rn-1", "ra3.4xlarge", 2, datetime(2025, 12, 1, tzinfo=UTC), YEAR)],
+        "Marker": "rm2"}, {"MaxRecords": 100})
+    rs.add_response("describe_reserved_nodes", {"ReservedNodes": [
+        _redshift_ri("rn-2", "dc2.large", 4, datetime(2024, 1, 1, tzinfo=UTC), THREE_YEARS,
+                     state="pending-payment"),
+        _redshift_ri("rn-old", "dc2.large", 1, datetime(2020, 1, 1, tzinfo=UTC), YEAR,
+                     state="retired")]}, {"MaxRecords": 100, "Marker": "rm2"})
+    os_ = sess.stub("opensearch")
+    os_.add_response("describe_reserved_instances", {"ReservedInstances": [
+        _opensearch_ri("11111111-1111-1111-1111-111111111111", "r6g.large.search", 3,
+                       datetime(2026, 2, 1, tzinfo=UTC), YEAR)], "NextToken": "o2"},
+        {"MaxResults": 100})
+    os_.add_response("describe_reserved_instances", {"ReservedInstances": [],
+                                                     "NextToken": "o3"},
+                     {"MaxResults": 100, "NextToken": "o2"})
+    os_.add_response("describe_reserved_instances", {"ReservedInstances": [
+        _opensearch_ri("22222222-2222-2222-2222-222222222222", "m6g.large.search", 1,
+                       datetime(2026, 8, 1, tzinfo=UTC), YEAR)]},
+        {"MaxResults": 100, "NextToken": "o3"})
+    mdb = sess.stub("memorydb")
+    mdb.add_response("describe_reserved_nodes", {"ReservedNodes": [
+        _memorydb_ri("mrn-1", "db.r6g.large", 2, datetime(2026, 1, 15, tzinfo=UTC), YEAR)],
+        "NextToken": "m2"}, {"MaxResults": 100})
+    mdb.add_response("describe_reserved_nodes", {"ReservedNodes": [
+        _memorydb_ri("mrn-2", "db.r6g.xlarge", 1, datetime(2025, 11, 20, tzinfo=UTC), YEAR,
+                     state="payment-pending")]}, {"MaxResults": 100, "NextToken": "m2"})
+
+
 def _parse(*argv):
     import argparse
     p = argparse.ArgumentParser(prog="nable")
@@ -285,6 +383,148 @@ def test_every_commitment_on_every_page_in_both_regions_is_listed():
     assert got["sp-1"]["region"] == "all regions"
 
 
+def test_redshift_opensearch_and_memorydb_are_listed_on_every_page():
+    with FakeSession(regions=("us-east-1",)) as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1")
+        _quiet_core(sess)
+        _new_services_on_several_pages(sess)
+        sess.stub("savingsplans").add_response("describe_savings_plans", {"savingsPlans": []}, None)
+        code, doc, _ = _json(sess)
+        for st in sess.stubs.values():
+            st.assert_no_pending_responses()
+    assert code == cli.EXIT_OK, doc["not_read"]
+    got = {c["id"]: c for c in doc["commitments"]}
+    assert set(got) == {"rn-1", "rn-2", "rn-old", "11111111-1111-1111-1111-111111111111",
+                        "22222222-2222-2222-2222-222222222222", "mrn-1", "mrn-2"}
+    rs = got["rn-1"]
+    assert (rs["service"], rs["region"], rs["class"], rs["count"], rs["offering_type"]) == \
+        ("redshift", "us-east-1", "ra3.4xlarge", 2, "All Upfront")
+    # AWS gives no end: it is the start plus the term, and says so.
+    assert rs["end"] == "2026-12-01T00:00:00+00:00" and rs["end_basis"] == "start plus term"
+    assert rs["days_left"] == 44 and rs["term"] == "1 year" and rs["state"] == "active"
+    assert rs["charges"] == {"FixedPrice": 2000.0, "UsagePrice": 0.0, "CurrencyCode": "USD",
+                             "RecurringCharges": []}
+    assert got["rn-2"]["state"] == "pending-payment" and got["rn-2"]["term"] == "3 years"
+    assert got["rn-old"]["state"] == "retired" and got["rn-old"]["days_left"] < 0
+    osr = got["22222222-2222-2222-2222-222222222222"]
+    assert (osr["service"], osr["class"], osr["count"], osr["offering_type"]) == \
+        ("opensearch", "m6g.large.search", 1, "NO_UPFRONT")
+    assert osr["end"] == "2027-08-01T00:00:00+00:00" and osr["end_basis"] == "start plus term"
+    assert osr["charges"]["RecurringCharges"] == [{"RecurringChargeAmount": 0.12,
+                                                   "RecurringChargeFrequency": "Hourly"}]
+    mdb = got["mrn-1"]
+    assert (mdb["service"], mdb["class"], mdb["count"]) == ("memorydb", "db.r6g.large", 2)
+    assert mdb["end"] == "2027-01-15T00:00:00+00:00" and mdb["days_left"] == 89
+    assert mdb["charges"] == {"FixedPrice": 300.0, "RecurringCharges": [
+        {"RecurringChargeAmount": 0.03, "RecurringChargeFrequency": "Hourly"}]}
+    assert got["mrn-2"]["state"] == "payment-pending"
+    # Matched now is not compared for these, and says so.
+    for rid in ("rn-1", "11111111-1111-1111-1111-111111111111", "mrn-1"):
+        assert got[rid]["matched_now"] == {"basis": "matched now", "compared": False,
+                                           "reason": "not compared"}
+    assert doc["summary"]["us-east-1"] == {"rds": 0, "ec2": 0, "elasticache": 0,
+                                           "redshift": 3, "opensearch": 2, "memorydb": 2}
+    # OpenSearch is read once, through its own API: no es client was asked for.
+    assert not [r for r in sess.requested if r[0] == "es"]
+
+
+def test_the_new_services_in_the_human_listing_and_the_gate():
+    with FakeSession(regions=("us-east-1",)) as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1")
+        _quiet_core(sess)
+        _new_services_on_several_pages(sess)
+        sess.stub("savingsplans").add_response("describe_savings_plans", {"savingsPlans": []}, None)
+        code, out, _ = _run(sess, "--fail-within", "60")
+    assert code == cli.EXIT_ENDING
+    line = next(ln for ln in out.splitlines() if "rn-1" in ln)
+    assert "2026-12-01" in line and "44 days left" in line and "matched now not compared" in line
+    assert "matched now not read" not in out
+    # A pending payment is still bought: it counts for the gate.
+    assert "2 commitments end within 60 days (mrn-2, rn-1)" in out
+
+
+def test_a_new_service_read_that_fails_is_not_read_per_service_and_region():
+    with FakeSession() as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1", "eu-west-1")
+        for region in ("us-east-1", "eu-west-1"):
+            _quiet_core(sess, region)
+        _denied(sess.stub("redshift", "eu-west-1"), "describe_reserved_nodes",
+                "AccessDenied", 403)
+        _denied(sess.stub("opensearch", "eu-west-1"), "describe_reserved_instances",
+                "ThrottlingException", 429)
+        mdb = sess.stub("memorydb")
+        mdb.add_response("describe_reserved_nodes", {"ReservedNodes": [
+            _memorydb_ri("mrn-1", "db.r6g.large", 2, datetime(2026, 1, 15, tzinfo=UTC), YEAR)],
+            "NextToken": "m2"}, {"MaxResults": 100})
+        _denied(mdb, "describe_reserved_nodes", "ThrottlingException", 400)
+        sess.stub("savingsplans").add_response("describe_savings_plans", {"savingsPlans": []}, None)
+        code, doc, _ = _json(sess, "--fail-within", "30")
+    assert code == cli.EXIT_CANNOT_CHECK
+    nr = {(n["service"], n["region"]): n for n in doc["not_read"]}
+    assert set(nr) == {("redshift", "eu-west-1"), ("opensearch", "eu-west-1"),
+                       ("memorydb", "us-east-1")}
+    assert (nr[("redshift", "eu-west-1")]["reason"],
+            nr[("redshift", "eu-west-1")]["iam_action"]) == ("denied",
+                                                            "redshift:DescribeReservedNodes")
+    assert (nr[("opensearch", "eu-west-1")]["reason"],
+            nr[("opensearch", "eu-west-1")]["iam_action"]) == ("throttled",
+                                                              "es:DescribeReservedInstances")
+    assert nr[("memorydb", "us-east-1")]["page"] == 2
+    assert nr[("memorydb", "us-east-1")]["iam_action"] == "memorydb:DescribeReservedNodes"
+    # The page that was read is kept; nothing says a region holds none.
+    assert [c["id"] for c in doc["commitments"]] == ["mrn-1"]
+    assert doc["summary"]["eu-west-1"]["redshift"] == "not read"
+    assert doc["summary"]["eu-west-1"]["opensearch"] == "not read"
+    assert doc["summary"]["us-east-1"]["memorydb"] == "not read"
+    with FakeSession(regions=("us-east-1",)) as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1")
+        _quiet_core(sess)
+        _denied(sess.stub("redshift"), "describe_reserved_nodes", "AccessDenied", 403)
+        sess.stub("savingsplans").add_response("describe_savings_plans", {"savingsPlans": []}, None)
+        code, _doc, _ = _json(sess)
+    assert code == cli.EXIT_PARTIAL
+
+
+def test_a_service_with_no_endpoint_in_a_region_is_not_offered_and_not_a_failure():
+    """MemoryDB is offered in fewer regions than EC2 (botocore lists none in
+    ap-northeast-3): it is not called there, it is listed as not offered, and
+    an account whose every read answered still exits 0, and its gate still
+    answers."""
+    offered = {"memorydb": ["us-east-1"], "redshift": ["us-east-1", "ap-northeast-3"],
+               "opensearch": ["us-east-1", "ap-northeast-3"]}
+    with FakeSession(regions=("us-east-1", "ap-northeast-3"), offered=offered) as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1", "ap-northeast-3")
+        for region in ("us-east-1", "ap-northeast-3"):
+            _quiet_core(sess, region)
+        sess.stub("savingsplans").add_response("describe_savings_plans", {"savingsPlans": []}, None)
+        code, doc, _ = _json(sess, "--fail-within", "30")
+    assert code == 0 and doc["gate"]["cannot_check"] is False
+    assert ("memorydb", "ap-northeast-3") not in sess.requested
+    assert ("memorydb", "us-east-1") in sess.requested
+    assert doc["not_offered"] == [{"service": "memorydb", "region": "ap-northeast-3",
+                                   "reason": "botocore's endpoint list has no memorydb "
+                                             "endpoint in ap-northeast-3"}]
+    assert doc["not_read"] == []
+    assert doc["summary"]["ap-northeast-3"]["memorydb"] == "not offered"
+
+
+def test_an_endpoint_list_that_cannot_be_read_never_skips_a_read():
+    class NoList(FakeSession):
+        def get_available_regions(self, service, partition_name="aws"):
+            raise RuntimeError("no endpoint data")
+    with NoList(regions=("us-east-1",), offered={}) as sess:
+        assert cs.offered_in(sess, "memorydb", "us-east-1") is True
+    # botocore naming the service nowhere in the partition is not a no either.
+    with FakeSession(regions=("us-east-1",), offered={"redshift": ["us-east-1"]}) as sess:
+        assert cs.offered_in(sess, "memorydb", "us-east-1") is True
+        assert cs.offered_in(sess, "rds", "anywhere-1") is True
+
+
 def test_the_human_listing_names_each_commitment_with_its_end():
     with FakeSession() as sess:
         _full_account(sess)
@@ -334,8 +574,10 @@ def test_a_denied_or_throttled_region_is_not_read_and_exit_is_5():
     # Nothing was read there, and nothing says it holds none.
     assert not [c for c in doc["commitments"] if c["region"] == "eu-west-1"]
     assert doc["summary"]["eu-west-1"] == {"rds": "not read", "ec2": "not read",
-                                           "elasticache": "not read"}
-    assert doc["summary"]["us-east-1"] == {"rds": 0, "ec2": 0, "elasticache": 0}
+                                           "elasticache": "not read", "redshift": 0,
+                                           "opensearch": 0, "memorydb": 0}
+    assert doc["summary"]["us-east-1"] == {"rds": 0, "ec2": 0, "elasticache": 0,
+                                           "redshift": 0, "opensearch": 0, "memorydb": 0}
 
 
 def test_the_human_output_says_not_read_and_never_none_found():
@@ -399,10 +641,7 @@ def test_access_denied_in_every_region_exits_4():
         _identity(sess)
         _denied(sess.stub("ec2"), "describe_regions", "UnauthorizedOperation")
         for region in ("us-east-1",):
-            _denied(sess.stub("rds", region), "describe_reserved_db_instances")
-            _denied(sess.stub("ec2", region), "describe_reserved_instances",
-                    "UnauthorizedOperation")
-            _denied(sess.stub("elasticache", region), "describe_reserved_cache_nodes")
+            _deny_every_read(sess, region)
         _denied(sess.stub("savingsplans"), "describe_savings_plans", "AccessDeniedException")
         code, doc, _ = _json(sess)
     assert code == cli.EXIT_DENIED == 4
@@ -410,7 +649,40 @@ def test_access_denied_in_every_region_exits_4():
     assert {n["reason"] for n in doc["not_read"]} == {"denied"}
     assert {n["iam_action"] for n in doc["not_read"]} >= {
         "rds:DescribeReservedDBInstances", "ec2:DescribeReservedInstances",
-        "elasticache:DescribeReservedCacheNodes", "savingsplans:DescribeSavingsPlans"}
+        "elasticache:DescribeReservedCacheNodes", "savingsplans:DescribeSavingsPlans",
+        "redshift:DescribeReservedNodes", "es:DescribeReservedInstances",
+        "memorydb:DescribeReservedNodes"}
+
+
+def _deny_every_read(sess, region):
+    _denied(sess.stub("rds", region), "describe_reserved_db_instances")
+    _denied(sess.stub("ec2", region), "describe_reserved_instances", "UnauthorizedOperation")
+    _denied(sess.stub("elasticache", region), "describe_reserved_cache_nodes")
+    _denied(sess.stub("redshift", region), "describe_reserved_nodes",
+            "AccessDenied")
+    _denied(sess.stub("opensearch", region), "describe_reserved_instances",
+            "AccessDeniedException")
+    _denied(sess.stub("memorydb", region), "describe_reserved_nodes",
+            "AccessDeniedException", 400)
+
+
+def test_one_new_service_answering_keeps_it_from_exit_4():
+    """Every read denied but MemoryDB's, which answered with nothing: the
+    account is partly read (5), not denied everywhere (4)."""
+    with FakeSession(regions=("us-east-1",)) as sess:
+        _identity(sess)
+        _regions(sess, "us-east-1")
+        for svc, op, code in (("rds", "describe_reserved_db_instances", "AccessDenied"),
+                              ("ec2", "describe_reserved_instances", "UnauthorizedOperation"),
+                              ("elasticache", "describe_reserved_cache_nodes", "AccessDenied"),
+                              ("redshift", "describe_reserved_nodes", "AccessDenied"),
+                              ("opensearch", "describe_reserved_instances",
+                               "AccessDeniedException")):
+            _denied(sess.stub(svc), op, code)
+        _denied(sess.stub("savingsplans"), "describe_savings_plans", "AccessDeniedException")
+        code, doc, _ = _json(sess)
+    assert code == cli.EXIT_PARTIAL == 5
+    assert doc["summary"]["us-east-1"]["memorydb"] == 0
 
 
 def test_every_commitment_read_denied_in_two_regions_exits_4_even_with_regions_listed():
@@ -418,10 +690,7 @@ def test_every_commitment_read_denied_in_two_regions_exits_4_even_with_regions_l
         _identity(sess)
         _regions(sess, "us-east-1", "eu-west-1")
         for region in ("us-east-1", "eu-west-1"):
-            _denied(sess.stub("rds", region), "describe_reserved_db_instances")
-            _denied(sess.stub("ec2", region), "describe_reserved_instances",
-                    "UnauthorizedOperation")
-            _denied(sess.stub("elasticache", region), "describe_reserved_cache_nodes")
+            _deny_every_read(sess, region)
         _denied(sess.stub("savingsplans"), "describe_savings_plans", "AccessDeniedException")
         code, out, _ = _run(sess)
     assert code == 4
@@ -662,7 +931,13 @@ def test_dry_run_lists_calls_and_actions_without_credentials():
     calls = {c["call"] for c in doc["calls"]}
     assert {"rds.describe_reserved_db_instances", "ec2.describe_reserved_instances",
             "elasticache.describe_reserved_cache_nodes",
+            "redshift.describe_reserved_nodes", "opensearch.describe_reserved_instances",
+            "memorydb.describe_reserved_nodes",
             "savingsplans.describe_savings_plans"} <= calls
+    # OpenSearch once: never the es API's call as well.
+    assert not [c for c in calls if c.startswith("es.")]
+    assert {"redshift:DescribeReservedNodes", "es:DescribeReservedInstances",
+            "memorydb:DescribeReservedNodes"} <= set(doc["iam_actions"])
     assert not [c for c in doc["calls"] if c["call"].startswith("ce.")]
     assert set(doc["iam_actions"]) >= {"rds:DescribeReservedDBInstances",
                                        "savingsplans:DescribeSavingsPlans"}
@@ -670,6 +945,33 @@ def test_dry_run_lists_calls_and_actions_without_credentials():
     out = io.StringIO()
     cli.run(_parse("--dry-run", "--spend"), session=Boom(), now=NOW, stdout=out, stderr=err)
     assert "ce.get_reservation_utilization" in out.getvalue() and "$0.01" in out.getvalue()
+
+
+def test_the_human_dry_run_names_the_new_calls():
+    out = io.StringIO()
+    assert cli.run(_parse("--dry-run"), session=None, now=NOW, stdout=out,
+                   stderr=io.StringIO()) == 0
+    text = out.getvalue()
+    for call, action in (("redshift.describe_reserved_nodes", "redshift:DescribeReservedNodes"),
+                         ("opensearch.describe_reserved_instances",
+                          "es:DescribeReservedInstances"),
+                         ("memorydb.describe_reserved_nodes",
+                          "memorydb:DescribeReservedNodes")):
+        assert re.search(rf"{re.escape(call)}\s+{re.escape(action)}", text), text
+
+
+def test_each_new_read_is_an_operation_in_botocore():
+    """Each call and its paging token as botocore's model has them; botocore
+    has no paginator for OpenSearch's, so its NextToken is followed by hand."""
+    import botocore.session
+    session = botocore.session.get_session()
+    for service, op, token in (("redshift", "DescribeReservedNodes", "Marker"),
+                               ("opensearch", "DescribeReservedInstances", "NextToken"),
+                               ("memorydb", "DescribeReservedNodes", "NextToken")):
+        model = session.get_service_model(service).operation_model(op)
+        assert token in model.input_shape.members and token in model.output_shape.members
+    assert not session.get_paginator_model("opensearch")._paginator_config.get(
+        "DescribeReservedInstances")
 
 
 def test_the_dry_run_actions_are_the_iam_template_s():

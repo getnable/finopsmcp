@@ -1,9 +1,16 @@
-# Any commitment purchase an agent tries asks a person, and the reason names
+# A commitment purchase an agent tries asks a person, and the reason names
 # the bound it would breach (policies/bounds.yaml: coverage at most 80% of
 # eligible spend, a term of at most 12 months, no money up front, no term
 # running into a migration blackout). nable's guard already asks about the
 # AWS purchases as one-way doors; these rules add the bounds to that ask and
-# reach the Google Cloud and Azure purchases too. nable never buys a
+# reach the Google Cloud and Azure purchases too. The AWS part of the purchase
+# rule matches every AWS CLI purchase the guard's commitment table lists
+# (finops.guard.COMMITMENT_PURCHASES), typed or through an MCP call: any
+# purchase-* or accept-reserved-* operation, a Savings Plan, a Redshift
+# Serverless reservation, a SageMaker training plan or its extension, an
+# Outposts order, and a Capacity Reservation or Bedrock Provisioned
+# Throughput with a commitment duration. SDK code that buys one is asked
+# about by the guard itself, without the bounds named. nable never buys a
 # commitment itself. Keep the figures here in step with bounds.yaml.
 version: 1
 rules:
@@ -22,7 +29,7 @@ rules:
       (no-upfront only). A person decides whether to go past it; nable never
       buys commitments.
   - id: commitment-purchase-check-bounds
-    pattern: '\baws\s+(?:savingsplans\s+create-savings-plan|\S+\s+purchase-(?:reserved|host-reservation)\S*)\b|\bgcloud\s+(?:beta\s+|alpha\s+)?compute\s+commitments\s+create\b|\baz\s+reservations\s+reservation-order\s+purchase\b'
+    pattern: '\baws\s+(?:\S+\s+(?:purchase|accept-reserved)-\S+|savingsplans\s+create-savings-plan|redshift-serverless\s+create-reservation|sagemaker\s+(?:create|extend)-training-plan|outposts\s+create-order|(?:ec2\s+create-capacity-reservation|bedrock\s+create-provisioned-model-throughput)\s[^;&|\n]*(?:--commitment-duration|ommitmentDuration))|\bgcloud\s+(?:beta\s+|alpha\s+)?compute\s+commitments\s+create\b|\baz\s+reservations\s+reservation-order\s+purchase\b'
     verdict: ask
     reason: >-
       A commitment purchase must stay within the commitment bounds: coverage

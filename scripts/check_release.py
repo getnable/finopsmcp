@@ -64,6 +64,22 @@ def _hook_pins(root: Path) -> list[str]:
     return pins
 
 
+def _recipe_pins(root: Path) -> dict[str, str]:
+    """The release each CI recipe in examples/github-actions installs, one
+    entry per `finops-mcp==X` in it: a recipe the bump missed would run
+    commands its pinned release lacks on someone else's runner."""
+    examples = root / "examples" / "github-actions"
+    out: dict[str, str] = {}
+    for path in sorted([*examples.glob("*.yml"), examples / "README.md"]):
+        if not path.is_file():
+            continue
+        pins = _PIN.findall(path.read_text(encoding="utf-8"))
+        for i, pin in enumerate(pins):
+            out[f"examples/github-actions/{path.name}"
+                + (f" (install {i + 1})" if len(pins) > 1 else "")] = pin
+    return out
+
+
 def package_version(root: Path = ROOT) -> str:
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     return data["project"]["version"]
@@ -91,6 +107,7 @@ def carriers(root: Path = ROOT) -> dict[str, str]:
     }
     for i, pin in enumerate(_hook_pins(root)):
         out[f"plugins/nable/hooks/hooks.json (hook {i + 1})"] = pin
+    out.update(_recipe_pins(root))
     return out
 
 

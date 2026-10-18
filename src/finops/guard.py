@@ -142,6 +142,96 @@ from .policy import (
 # more word (destroy.tfplan).
 _END = r"(?![^\s;&|)`<>])"
 
+
+class CommitmentPurchase(NamedTuple):
+    """One AWS CLI operation that buys a commitment: money for a term, paid
+    whether it is used or not. `operation` is the botocore operation the verb
+    calls, which is also the name CloudTrail records it under; `when` is the
+    flag that makes it a commitment, for an operation that is one only with a
+    term (without it, it is billed by the hour and can be ended)."""
+    service: str
+    verb: str
+    operation: str
+    when: str = ""
+
+
+# Every commitment purchase the guard asks about, and the one table the rest
+# reads: the classifier rules below, the commitment floor, `nable guard
+# reconcile` (guard_reconcile.py maps each to its CloudTrail event), the
+# commitments-bounds pack's purchase rule, and the tests that pin each to
+# botocore's service model (tests/test_guard_commitment_purchase.py,
+# tests/test_guard_capacity_reservation.py). A purchase added here and not
+# reconciled, or not matched by the pack, fails those tests.
+COMMITMENT_PURCHASES: tuple[CommitmentPurchase, ...] = (
+    CommitmentPurchase("savingsplans", "create-savings-plan", "CreateSavingsPlan"),
+    CommitmentPurchase("ec2", "purchase-reserved-instances-offering",
+                       "PurchaseReservedInstancesOffering"),
+    CommitmentPurchase("ec2", "purchase-host-reservation", "PurchaseHostReservation"),
+    CommitmentPurchase("ec2", "purchase-scheduled-instances", "PurchaseScheduledInstances"),
+    CommitmentPurchase("ec2", "purchase-capacity-block", "PurchaseCapacityBlock"),
+    CommitmentPurchase("ec2", "purchase-capacity-block-extension",
+                       "PurchaseCapacityBlockExtension"),
+    CommitmentPurchase("ec2", "accept-reserved-instances-exchange-quote",
+                       "AcceptReservedInstancesExchangeQuote"),
+    # A future-dated Capacity Reservation: with a commitment duration it is
+    # held, and billed, for at least that long. Without one it is an
+    # on-demand reservation, priced like a launch (_price_capacity_reservation).
+    CommitmentPurchase("ec2", "create-capacity-reservation", "CreateCapacityReservation",
+                       "--commitment-duration"),
+    CommitmentPurchase("rds", "purchase-reserved-db-instances-offering",
+                       "PurchaseReservedDBInstancesOffering"),
+    CommitmentPurchase("elasticache", "purchase-reserved-cache-nodes-offering",
+                       "PurchaseReservedCacheNodesOffering"),
+    CommitmentPurchase("memorydb", "purchase-reserved-nodes-offering",
+                       "PurchaseReservedNodesOffering"),
+    CommitmentPurchase("redshift", "purchase-reserved-node-offering",
+                       "PurchaseReservedNodeOffering"),
+    CommitmentPurchase("redshift", "accept-reserved-node-exchange", "AcceptReservedNodeExchange"),
+    CommitmentPurchase("redshift-serverless", "create-reservation", "CreateReservation"),
+    CommitmentPurchase("opensearch", "purchase-reserved-instance-offering",
+                       "PurchaseReservedInstanceOffering"),
+    CommitmentPurchase("es", "purchase-reserved-elasticsearch-instance-offering",
+                       "PurchaseReservedElasticsearchInstanceOffering"),
+    CommitmentPurchase("sagemaker", "create-training-plan", "CreateTrainingPlan"),
+    CommitmentPurchase("sagemaker", "extend-training-plan", "ExtendTrainingPlan"),
+    CommitmentPurchase("medialive", "purchase-offering", "PurchaseOffering"),
+    CommitmentPurchase("mediaconnect", "purchase-offering", "PurchaseOffering"),
+    CommitmentPurchase("devicefarm", "purchase-offering", "PurchaseOffering"),
+    CommitmentPurchase("outposts", "create-order", "CreateOrder"),
+    CommitmentPurchase("glacier", "purchase-provisioned-capacity", "PurchaseProvisionedCapacity"),
+    # Bedrock Provisioned Throughput is a commitment only with a term.
+    CommitmentPurchase("bedrock", "create-provisioned-model-throughput",
+                       "CreateProvisionedModelThroughput", "--commitment-duration"),
+)
+
+
+def _purchase_verbs(conditional: bool) -> str:
+    """An alternation of `SERVICE VERB` patterns over the table's purchases
+    with a condition flag (`conditional`) or without one."""
+    return "|".join(rf"{re.escape(p.service)}\s+{re.escape(p.verb)}"
+                    for p in COMMITMENT_PURCHASES if bool(p.when) == conditional)
+
+
+def _conditional_rule(p: CommitmentPurchase) -> str:
+    """The rule name of a purchase that is a commitment only with its flag."""
+    return "bedrock-commitment" if p.service == "bedrock" else f"{p.service}-{p.verb}-commitment"
+
+
+def _snake(operation: str) -> str:
+    """`PurchaseReservedDBInstancesOffering` ->
+    `purchase_reserved_db_instances_offering`, the boto3 method name, as
+    botocore's xform_name makes it (tests/test_guard_capacity_reservation.py
+    holds the two together for every purchase in the table). Here so the hook
+    need not import botocore."""
+    words = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", operation)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", words).lower()
+
+
+def _python_term_rule(p: CommitmentPurchase) -> str:
+    """The rule name of SDK code that buys a purchase with a `when` flag."""
+    return f"python-{_conditional_rule(p)}"
+
+
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # `destroy` must end the word: a plan file called destroy.tfplan is a
     # file name, and `terraform apply destroy.tfplan` goes to the saved-plan
@@ -197,29 +287,12 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     ("spot-fleet-terminate", "terminate_instance"),
     (r"\baws\s+ec2\s+release-address\b", "release_ip"),
     (r"\baws\s+ec2\s+delete-snapshot\b", "snapshot_delete"),
-    # The AWS CLI operations that buy a commitment: a term of capacity paid
-    # for whether it is used or not. Each verb is an operation in botocore's
-    # service model (tests/test_guard_commitment_purchase.py pins them).
-    # Bedrock Provisioned Throughput is a commitment only with a term, so it
-    # is its own rule below.
-    (r"\baws\s+(?:savingsplans\s+create-savings-plan|"
-     r"ec2\s+purchase-reserved-instances-offering|"
-     r"ec2\s+purchase-host-reservation|"
-     r"ec2\s+purchase-scheduled-instances|"
-     r"ec2\s+purchase-capacity-block|"
-     r"ec2\s+accept-reserved-instances-exchange-quote|"
-     r"rds\s+purchase-reserved-db-instances-offering|"
-     r"elasticache\s+purchase-reserved-cache-nodes-offering|"
-     r"memorydb\s+purchase-reserved-nodes-offering|"
-     r"redshift\s+(?:purchase-reserved-node-offering|accept-reserved-node-exchange)|"
-     r"redshift-serverless\s+create-reservation|"
-     r"opensearch\s+purchase-reserved-instance-offering|"
-     r"es\s+purchase-reserved-elasticsearch-instance-offering|"
-     r"sagemaker\s+(?:create|extend)-training-plan|"
-     r"(?:medialive|mediaconnect|devicefarm)\s+purchase-offering|"
-     r"outposts\s+create-order|"
-     r"glacier\s+purchase-provisioned-capacity)", "purchase_commitment"),
-    ("bedrock-commitment", "purchase_commitment"),
+    # The AWS CLI operations that buy a commitment (COMMITMENT_PURCHASES): a
+    # term of capacity paid for whether it is used or not. The ones that are a
+    # commitment only with a term (a Capacity Reservation, Bedrock Provisioned
+    # Throughput) are rules of their own, one per purchase.
+    (rf"\baws\s+(?:{_purchase_verbs(False)})", "purchase_commitment"),
+    *((_conditional_rule(p), "purchase_commitment") for p in COMMITMENT_PURCHASES if p.when),
     # delete-*, and the batch forms (ecr batch-delete-image, dynamodb
     # batch-delete-item) that delete many at once.
     (r"\baws\s+\S+\s+(?:batch-)?delete-[a-z0-9-]+", "delete_resource"),
@@ -237,6 +310,7 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # aws command whose service or operation is a variable or a
     # substitution; and a base64 payload decoded straight into a shell.
     ("python-boto3-purchase", "purchase_commitment"),
+    *((_python_term_rule(p), "purchase_commitment") for p in COMMITMENT_PURCHASES if p.when),
     ("python-boto3-delete", "delete_resource"),
     ("aws-unresolved-operation", "delete_resource"),
     ("base64-to-shell", "delete_resource"),
@@ -262,6 +336,11 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # eksctl creates a cluster's or a node group's instances itself.
     (rf"\beksctl\s+(?:\S+\s+)*create\s+(?:cluster|nodegroup|ng){_END}", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
+    # A Capacity Reservation with no commitment, or a fleet of them: billed
+    # from creation whether or not anything runs in it, and ended by
+    # cancelling it. With a commitment duration it is a purchase (above).
+    (rf"\baws\s+ec2\s+create-capacity-reservation(?:-fleet)?{_END}", "infra_apply"),
+    ("python-boto3-capacity-reservation", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
     # time. Unpriced: the template is not read here.
@@ -759,7 +838,9 @@ class _Lazy:
 # The operators between shell commands in a normalized command.
 _COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
 _SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
-_CROSS_SEGMENT = frozenset({"python-boto3-delete", "python-boto3-purchase", "base64-to-shell"})
+_CROSS_SEGMENT = frozenset({"python-boto3-delete", "python-boto3-purchase",
+                            *(_python_term_rule(p) for p in COMMITMENT_PURCHASES if p.when),
+                            "python-boto3-capacity-reservation", "base64-to-shell"})
 _CLI_WORD_RE = re.compile(r"(?<![\w./-])(?:aws|kubectl|helm|terraform|tofu|terragrunt|pulumi|"
                           r"gcloud|az|cdk|sam|doctl|eksctl|gsutil)(?![\w.-])")
 _AWS_EC2_RE = re.compile(r"aws\s+ec2\s")
@@ -1029,15 +1110,19 @@ class _PythonBoto3Delete:
     _delete = re.compile(r"\b(?:delete|terminate)_\w+|\.(?:delete|terminate)\("
                          r"|_make_api_call\( ?(?:Delete|Terminate)[A-Z]\w*")
 
-    def search(self, cmd: str) -> re.Match[str] | None:
+    def _code_start(self, cmd: str) -> int | None:
+        """Where the Python code that imports boto3 or botocore starts, or
+        None when there is none."""
         py = self._python.search(cmd)
         piped = self._piped.search(cmd) is not None
         if py is None and not piped:
             return None
         start = 0 if piped or py is None else py.end()
-        if self._boto3.search(cmd, start) is None:
-            return None
-        return self._delete.search(cmd, start)
+        return start if self._boto3.search(cmd, start) is not None else None
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        start = self._code_start(cmd)
+        return None if start is None else self._delete.search(cmd, start)
 
     def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
         return self.search(cmd)
@@ -1046,22 +1131,52 @@ class _PythonBoto3Delete:
 class _PythonBoto3Purchase(_PythonBoto3Delete):
     """`python3 -c "import boto3; ...purchase_reserved_db_instances_offering(...)"`:
     a commitment bought through the SDK. The same heuristic as the delete
-    one, so it only ever asks."""
+    one, so it only ever asks. The purchases that are commitments only with
+    a term are _PythonTermPurchase's."""
 
     pattern = "python-boto3-purchase"
     _delete = re.compile(r"\b(?:purchase_(?:reserved_\w+|capacity_block\w*|host_reservation|"
                          r"scheduled_instances|offering|provisioned_capacity)|"
                          r"accept_reserved_(?:instances_exchange_quote|node_exchange)|"
                          r"create_savings_plan|create_reservation|create_order|"
-                         r"(?:create|extend)_training_plan|"
-                         r"create_provisioned_model_throughput\b[^)]*\bcommitmentDuration)\b"
+                         r"(?:create|extend)_training_plan)\b"
                          # The same operations by their API names, through the
                          # client's own dispatcher.
                          r"|_make_api_call\( ?(?:Purchase(?:Reserved\w+|CapacityBlock\w*|"
                          r"HostReservation|ScheduledInstances|Offering|ProvisionedCapacity)|"
                          r"AcceptReserved\w+|CreateSavingsPlan|CreateReservation|CreateOrder|"
-                         r"(?:Create|Extend)TrainingPlan|"
-                         r"CreateProvisionedModelThroughput\b[^)]*\bcommitmentDuration)\b")
+                         r"(?:Create|Extend)TrainingPlan)\b")
+
+
+class _PythonTermPurchase(_PythonBoto3Delete):
+    """`python3 -c "import boto3; ...create_capacity_reservation(...)"`: SDK
+    code for an operation that is a commitment only with a term (a Capacity
+    Reservation, Bedrock Provisioned Throughput). With the term's parameter
+    anywhere in the code, passed in the call or in a dict before it, it is a
+    commitment purchase. With `calls`, the rule is the other one: any such
+    call, term or not, which for a Capacity Reservation (or a fleet of them)
+    asks without a figure, since the guard does not price Python code. A
+    heuristic, so it only ever asks."""
+
+    _term = re.compile(r"(?i:commitmentduration)")
+
+    def __init__(self, pattern: str, operation: str, calls: str = "") -> None:
+        self.pattern = pattern
+        self._one = re.compile(rf"\b{_snake(operation)}\b|_make_api_call\( ?{operation}\b")
+        self._calls = re.compile(calls) if calls else None
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        start = self._code_start(cmd)
+        if start is None:
+            return None
+        if self._calls is not None:
+            return self._calls.search(cmd, start)
+        hit = self._one.search(cmd, start)
+        return hit if hit is not None and self._term.search(cmd, start) else None
+
+
+_PYTHON_CAPACITY_CALLS = (r"\bcreate_capacity_reservation(?:_fleet)?\b"
+                          r"|_make_api_call\( ?CreateCapacityReservation(?:Fleet)?\b")
 
 
 class _AwsUnresolved:
@@ -1104,6 +1219,14 @@ class _Base64ToShell:
         return self.search(cmd)
 
 
+# What makes a purchase with a `when` flag a commitment: the flag, the
+# same parameter in input the command carries inline (`--cli-input-json
+# '{"CommitmentDuration": ...}'`), or input the guard does not read (a
+# `file://` or URL `--cli-input-json`), which may hold it.
+_TERM_FLAG = r"\s--commitment-duration(?![^\s=])|(?i:commitmentduration)\W{0,3}[=:]"
+_UNREAD_INPUT = r"\s--cli-input-(?:json|yaml)(?:=|\s+)(?:file|fileb|https?)://"
+_TERM_FLAG_RE = re.compile(_TERM_FLAG)
+
 _SPECIAL_RULES = {r.pattern: r for r in (
     _VerbWithFlag("apply-with-destroy-flag", r"\b(?:terraform|tofu|terragrunt)\s",
                   rf"(?<!\S)apply{_END}", rf"\s--?destroy(?:=(?i:1|t|true))?{_END}",
@@ -1122,10 +1245,15 @@ _SPECIAL_RULES = {r.pattern: r for r in (
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
     _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
-    _VerbWithFlag("bedrock-commitment",
-                  rf"\baws\s+bedrock\s+create-provisioned-model-throughput{_END}", r"",
-                  r"\s--commitment-duration(?![^\s=])"),
+    *(_VerbWithFlag(_conditional_rule(p),
+                    rf"\baws\s+{re.escape(p.service)}\s+{re.escape(p.verb)}{_END}", r"",
+                    rf"{_TERM_FLAG}|{_UNREAD_INPUT}")
+      for p in COMMITMENT_PURCHASES if p.when),
     _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _PythonBoto3Purchase(),
+    *(_PythonTermPurchase(_python_term_rule(p), p.operation)
+      for p in COMMITMENT_PURCHASES if p.when),
+    _PythonTermPurchase("python-boto3-capacity-reservation", "CreateCapacityReservation",
+                        calls=_PYTHON_CAPACITY_CALLS),
     _AwsUnresolved(), _Base64ToShell(),
 )}
 
@@ -1584,15 +1712,25 @@ def _regional(listed: float | None, basis: str) -> tuple[float | None, str, str]
     return listed * low, regional, f" in {region}"
 
 
-def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
-               lead: str = "") -> dict[str, Any] | None:
-    """`count` instances of `itype` at the EC2 table's rate (or the org's
-    price book rate for it), or None."""
+class _Ec2Rate(NamedTuple):
+    hourly: float               # the rate judged: list (regional floor) or the price book's
+    basis: str
+    where: str                  # " in REGION" for the line, or ""
+    book: dict[str, Any] | None
+    judged: bool                # whether `hourly` is the book's
+
+
+def _ec2_rate(itype: str | None, basis: str = _ON_DEMAND_BASIS, *,
+              scale: bool = True) -> _Ec2Rate | None:
+    """The hourly rate the guard judges `itype` at: the EC2 table's (scaled
+    from its family's sizes when `scale` and the size is not listed), in the
+    command's region, or the org's price book rate for it; None when there is
+    none."""
     if not itype:
         return None
     from .aws_prices import EC2_HOURLY
     listed, family = EC2_HOURLY.get(itype), ""
-    if listed is None:
+    if listed is None and scale:
         listed, family = _scaled(EC2_HOURLY, itype)
     if family:
         basis = _scaled_basis(basis, family)
@@ -1600,7 +1738,18 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     hourly, book, judged = _gated("aws", itype, listed)
     if hourly is None:
         return None
-    basis = _book_basis(basis, book) if book and judged else regional_basis
+    return _Ec2Rate(hourly, _book_basis(basis, book) if book and judged else regional_basis,
+                    where, book, judged)
+
+
+def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
+               lead: str = "") -> dict[str, Any] | None:
+    """`count` instances of `itype` at the EC2 table's rate (or the org's
+    price book rate for it), or None."""
+    rate = _ec2_rate(itype, basis)
+    if rate is None:
+        return None
+    hourly, basis, where, book, judged = rate
     count = max(count, 1)
     hours = count * _hours_per_month()
     monthly = hourly * hours
@@ -1891,6 +2040,177 @@ def _price_reserved_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     }
 
 
+# ── EC2 Capacity Reservations ─────────────────────────────────────────────────
+# `aws ec2 create-capacity-reservation` holds capacity in one Availability
+# Zone and bills it at the on-demand rate whether or not anything runs in it:
+# in the AmazonEC2 us-east-1 offer EC2_HOURLY cites (version 20261012193925),
+# the UnusedBox rate of each of the 174 Linux types nable lists equals its
+# BoxUsage rate (checked by hand against the offer file, 2026-10-18; no test
+# can read it offline). With no commitment duration it is priced like a launch, count x
+# hourly x 730 a month (or, when it is limited to end within a month, for its
+# own hours), and judged on the launch threshold. With one it is a commitment
+# (COMMITMENT_PURCHASES): count x hourly x the duration's hours, from a rate
+# the table lists, never one scaled from a family. Only Linux/UNIX on shared
+# tenancy is priced: the table holds no other platform or tenancy, and those
+# get no figure. A fleet reserves a weighted mix of types and gets none either.
+_CAPACITY_RESERVATION_RE = re.compile(r"\baws\s+ec2\s+create-capacity-reservation(?![\w-])")
+_CAPACITY_FLEET_RE = re.compile(r"\baws\s+ec2\s+create-capacity-reservation-fleet(?![\w-])")
+# `us-east-1a`: the region is the zone without its letter. A Local Zone
+# (`us-east-1-bos-1a`) or a Wavelength Zone bills at rates the table does not
+# hold.
+_ZONE_RE = re.compile(r"([a-z]{2}(?:-gov)?-[a-z]+-\d)[a-z]")
+CAPACITY_BILLING = "it bills from when it is created, whether or not anything runs in it"
+_CAPACITY_HELD = ("it bills at that rate while it is active, whether or not anything runs "
+                  "in it")
+_CAPACITY_BASIS = f"{_ON_DEMAND_BASIS}; the offer bills an unused reservation at the same rate"
+# AWS's own words for a commitment duration, from the CreateCapacityReservation
+# API reference (botocore's ec2 model; tests/test_guard_capacity_reservation.py
+# holds this to it). Whether it can be cancelled inside the term is not said
+# here: that wording is the EC2 User Guide's, and it has not been checked.
+CAPACITY_COMMITMENT_TERMS = ("AWS's API reference calls the commitment duration \"a minimum "
+                             "duration for which you commit to having the future-dated "
+                             "Capacity Reservation in the active state in your account after "
+                             "it has been delivered\"")
+
+
+def _utcnow() -> Any:
+    """Now, in UTC; tests set the clock here."""
+    from datetime import UTC, datetime
+    return datetime.now(UTC)
+
+
+def _hours_until(raw: str | None) -> float | None:
+    """Hours from now to an --end-date (ISO 8601, or seconds since the epoch),
+    or None when it cannot be read."""
+    from datetime import UTC, datetime
+    if not raw:
+        return None
+    try:
+        end = (datetime.fromtimestamp(float(raw), UTC) if re.fullmatch(r"\d+(?:\.\d+)?", raw)
+               else datetime.fromisoformat(raw))
+    except (ValueError, OverflowError, OSError):
+        return None
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    return (end - _utcnow()).total_seconds() / 3600
+
+
+def _capacity_quote(cmd: str) -> tuple[dict[str, Any] | None, str]:
+    """(the figure for one create-capacity-reservation command, or None;
+    why there is none, "" when there is one)."""
+    platform = _flag(cmd, "instance-platform")
+    if platform is None:
+        return None, "the command names no --instance-platform"
+    if platform.lower() != "linux/unix":
+        return None, ("its --instance-platform is not Linux/UNIX, and the guard prices "
+                      "Linux/UNIX on shared tenancy only")
+    tenancy = (_flag(cmd, "tenancy") or "default").lower()
+    if tenancy != "default":
+        return None, (f"it reserves {tenancy} tenancy, and the guard prices shared "
+                      "tenancy only")
+    itype = _flag(cmd, "instance-type")
+    if not itype:
+        return None, "the command names no --instance-type"
+    count = _num(_flag(cmd, "instance-count"))
+    if count is None or not count.is_integer():
+        return None, "the command names no --instance-count"
+    zone = _flag(cmd, "availability-zone")
+    in_zone = _ZONE_RE.fullmatch(zone) if zone else None
+    if zone and in_zone is None:
+        return None, (f"{zone} is not a standard Availability Zone, and the guard holds no "
+                      "Local Zone or Wavelength Zone rates")
+    term = _flag(cmd, "commitment-duration")
+    seconds = _num(term)
+    if term is not None and seconds is None:
+        return None, f"the guard could not read --commitment-duration {term}"
+    hours: float | None = None
+    if seconds is None and (_flag(cmd, "end-date-type") or "").lower() == "limited":
+        hours = _hours_until(_flag(cmd, "end-date"))
+        if hours is None:
+            return None, "the guard could not read its --end-date"
+        if hours <= 0:
+            return None, "its --end-date has passed"
+        if hours >= _hours_per_month():
+            hours = None               # a month or more away: priced by the month
+    token = (_PRICING_REGION.set(in_zone.group(1))
+             if in_zone and _PRICING_REGION.get() is None else None)
+    try:
+        rate = _ec2_rate(itype, _CAPACITY_BASIS, scale=seconds is None)
+    finally:
+        if token is not None:
+            _PRICING_REGION.reset(token)
+    if rate is None:
+        return None, f"the guard's table has no on-demand rate for {itype}"
+    n = int(count)
+    at = "at your price book rate of " if rate.judged else "at "
+    what = (f"a Capacity Reservation for {n}x {itype}{rate.where} {at}"
+            f"{_rate(rate.hourly)}/hr ({rate.basis})")
+    book = rate.book
+    if seconds is not None:
+        held = seconds / 3600
+        total = rate.hourly * n * held
+        return {
+            "monthly_usd": None,       # a term total, billed from when it is delivered
+            "total_usd": round(total, 2),
+            "commitment_hours": round(held, 2),
+            "hourly_usd": rate.hourly, "instance_type": itype, "count": n,
+            "basis": rate.basis,
+            **({"price_book": _book_field(book, rate.judged, book["usd"] * n * held)}
+               if book else {}),
+            "line": (f"{what} is ~${total:,.0f} over its {held:,.0f}-hour commitment"
+                     + (_below_list(book, n * held).replace("/mo", "")
+                        if book and not rate.judged else "") + f"; {_CAPACITY_HELD}"),
+        }, ""
+    units = n * (hours if hours is not None else _hours_per_month())
+    monthly = rate.hourly * units
+    span = (f" for the {hours:,.0f} hours until its end date" if hours is not None
+            else "")
+    return {
+        "monthly_usd": round(monthly, 2), "hourly_usd": rate.hourly,
+        "instance_type": itype, "count": n, "basis": rate.basis,
+        **({"hours": round(hours, 2)} if hours is not None else {}),
+        **({"price_book": _book_field(book, rate.judged, book["usd"] * units)} if book else {}),
+        **({"region": rate.where[4:]} if rate.where else {}),
+        "line": (f"{what} is ~${monthly:,.0f}" + (span or "/mo")
+                 + (_below_list(book, units) if book and not rate.judged else "")
+                 + f"; {CAPACITY_BILLING}"),
+    }, ""
+
+
+def _price_capacity_reservation(cmd: str, **_: Any) -> dict[str, Any] | None:
+    return _capacity_quote(cmd)[0]
+
+
+def _unpriced_reservation(command: str) -> str | None:
+    """The ask for a Capacity Reservation with no commitment, or a fleet of
+    them, that the command creates and the guard cannot price; None when
+    there is none. Each bills from when it is created, so it asks rather
+    than pass unpriced the way a launch with no figure would."""
+    if "capacity" not in command.lower():
+        return None
+    norm = _normalize(command)
+    if _SPECIAL_RULES["python-boto3-capacity-reservation"].search(norm):
+        return (f"this looks like Python code that creates an EC2 Capacity Reservation, and "
+                f"{CAPACITY_BILLING}. No figure: the guard does not price Python code")
+    dry_runs = _dry_runs(command)
+    for form in next(_pricing_forms(command), []):
+        excused = _excused(form, dry_runs)
+        for seg, at in _commands_in(form):
+            if at in excused:
+                continue
+            if _CAPACITY_FLEET_RE.search(seg):
+                return ("this creates an EC2 Capacity Reservation Fleet: each reservation in "
+                        "it bills from when it is created, whether or not anything runs in "
+                        "it. No figure: a fleet reserves a weighted mix of instance types, "
+                        "which the guard does not price")
+            if _CAPACITY_RESERVATION_RE.search(seg) and not _TERM_FLAG_RE.search(seg):
+                why = _capacity_unpriced(seg)
+                if why:
+                    return (f"this creates an EC2 Capacity Reservation, and {CAPACITY_BILLING}. "
+                            f"No figure: {why}")
+    return None
+
+
 # A commitment purchase with no price in the command: the offering id fixes
 # the price, and reading an offering needs the network, so no figure is shown
 # and none is guessed. How many it buys is in the command, and is said.
@@ -1900,9 +2220,26 @@ _NO_COMMITMENT_FIGURE = ("No figure: the offering id fixes the price, which the 
                          "look up offline")
 
 
+def _capacity_unpriced(seg: str) -> str:
+    """Why one create-capacity-reservation command has no figure ("" when it
+    has one)."""
+    if re.search(r"\s--cli-input-(?:json|yaml)(?![^\s=])", seg):
+        return ("it takes its parameters from --cli-input-json or --cli-input-yaml, which "
+                "the guard does not price from")
+    return _capacity_quote(seg)[1]
+
+
 def _commitment_unpriced(command: str) -> str:
     """The sentence an unpriced commitment purchase gets in place of a figure."""
     norm = _normalize(command)
+    for seg, _at in _commands_in(norm):
+        if _CAPACITY_RESERVATION_RE.search(seg) and (
+                _TERM_FLAG_RE.search(seg) or re.search(_UNREAD_INPUT, seg)):
+            why = _capacity_unpriced(seg)
+            if why:
+                return f"No figure: {why}. "
+    if _SPECIAL_RULES[_python_term_rule(_CAPACITY_RESERVATION)].search(norm):
+        return "No figure: it is Python code, which the guard does not price. "
     counts = []
     for flag, noun in _COMMITMENT_COUNTS:
         n = _num(_flag(norm, flag))
@@ -2438,6 +2775,7 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
 
 _PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
+    (_CAPACITY_RESERVATION_RE, _price_capacity_reservation),
     (_RDS_CREATE_RE, _price_rds),
     (_RDS_MODIFY_RE, _price_rds_class_change),
     (_EC2_MODIFY_RE, _price_instance_type_change),
@@ -2497,14 +2835,43 @@ def _commands_in(form: str):
     yield form[pos:], pos
 
 
-def _price_form(form: str, cwd: str | None) -> tuple[list[dict[str, Any]], int]:
+def _dry_runs(command: str) -> int | None:
+    """How many of the command's shell commands hand the CLI a dry run as an
+    argument of its own (_shell_view), or None when the shell's reading
+    cannot be had. Pricing excuses no more dry runs than this: the forms it
+    reads keep a comment's text and drop quotes, so `# --dry-run` and
+    `--client-token 'x --dry-run'` look like dry runs there, and a launch
+    that is no dry run went unpriced and through."""
+    if "dry" not in command:
+        return 0
+    found = [0]
+
+    def count(text: str, dry: bool) -> None:
+        if dry and _inert(text):
+            found[0] += 1
+
+    return None if _shell_view(command, count) is _UNREADABLE else found[0]
+
+
+def _excused(form: str, dry_runs: int | None) -> frozenset[int]:
+    """The offsets of the commands in `form` that are dry runs pricing may
+    leave out: all of them when the shell reads at least as many, none
+    otherwise (then each is priced as if it ran)."""
+    dry = frozenset(at for seg, at in _commands_in(form) if "dry" in seg and _inert(seg))
+    return dry if dry_runs is not None and len(dry) <= dry_runs else frozenset()
+
+
+def _price_form(form: str, cwd: str | None, dry_runs: int | None = 0
+                ) -> tuple[list[dict[str, Any]], int]:
     """(figures, how many changes had none) for each command in `form`: the
     first pricer whose command it is prices it, and a command it cannot price
-    does not stop the others. A dry run costs nothing and is not priced."""
+    does not stop the others. A dry run costs nothing and is not priced, when
+    the shell agrees it is one (`dry_runs`, _excused)."""
     parts: list[dict[str, Any]] = []
     unpriced = 0
+    excused = _excused(form, dry_runs)
     for seg, at in _commands_in(form):
-        if "dry" in seg and _inert(seg):
+        if at in excused:
             continue
         for pattern, pricer in _PRICERS:
             if pattern.search(seg):
@@ -2613,10 +2980,11 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
         if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
             return None
         token = _PRICING_REGION.set(_named_region(command))
+        dry_runs = _dry_runs(command)
         for forms in _pricing_forms(command):
             best: dict[str, Any] | None = None
             for form in forms:
-                parts, unpriced = _price_form(form, cwd)
+                parts, unpriced = _price_form(form, cwd, dry_runs)
                 # Each part says on its own when its figure is us-east-1's for
                 # a command that names another region.
                 est = _added_up([_with_region(p, command) for p in parts], unpriced)
@@ -2840,6 +3208,7 @@ _RDS_SERVICE = "Amazon Relational Database Service"
 # command does not say (a saved plan can span providers).
 _PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
     _price_run_instances: ("aws", _EC2_SERVICE),
+    _price_capacity_reservation: ("aws", _EC2_SERVICE),
     _price_rds: ("aws", _RDS_SERVICE),
     _price_rds_class_change: ("aws", _RDS_SERVICE),
     _price_instance_type_change: ("aws", _EC2_SERVICE),
@@ -3559,6 +3928,9 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
                 return {**verdict("deny", _ALLOWLIST_REASON.format(action=action_type)),
                         "rule": "allowlist"}
         cost = f" {_cost_line(est)}." if est else ""
+        reserved = _unpriced_reservation(command)
+        if reserved:
+            return verdict("ask", f"{reserved}.{cost} Confirm to proceed.", est=est)
         if _strict():
             return verdict("ask", "this changes infrastructure and therefore the "
                            f"bill.{cost} Cost it first (ask nable to "
@@ -3710,17 +4082,41 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
         d = (chdir.group(1) if chdir else moved if moved
              else Path(cwd).name if cwd else "")
         where = f" in {d.rstrip('/')}/" if d else ""
-    if action_type == "purchase_commitment":
+    bought = _purchases_in(norm) if action_type == "purchase_commitment" else ()
+    if bought and _TERM_FLAG_RE.search(norm) is None and set(bought) <= _CONDITIONAL_RULES:
+        # Only a purchase that is a commitment with a term, whose term would
+        # be in input the guard does not read.
+        what = ("may buy a commitment: it reads its parameters from input the guard does "
+                "not read")
+    if what.startswith(("runs", "looks", "may")):
+        closing = "The guard cannot see exactly what it does; confirm to proceed."
+    elif bought and set(bought) <= _CAPACITY_COMMITMENT_RULES:
+        closing = f"{CAPACITY_COMMITMENT_TERMS}; confirm to proceed."
+    elif action_type == "purchase_commitment":
         closing = "It cannot be cancelled once bought; confirm to proceed."
     elif what == "would evict every pod from a node":
         closing = ("The evicted pods restart elsewhere only if the cluster has room, and "
                    "their emptyDir data is lost; `kubectl uncordon` reopens the node. "
                    "Confirm to proceed.")
-    elif what.startswith(("runs", "looks")):
-        closing = "The guard cannot see exactly what it does; confirm to proceed."
     else:
         closing = "It cannot be undone; confirm to proceed."
     return f"This {what} (`{shown}`{where})", closing
+
+
+# The rules of the purchases that are commitments only with a term, and of
+# the Capacity Reservation ones, whose term AWS describes in its own words.
+_CONDITIONAL_RULES = frozenset(_conditional_rule(p) for p in COMMITMENT_PURCHASES if p.when)
+_CAPACITY_RESERVATION = next(p for p in COMMITMENT_PURCHASES
+                             if p.verb == "create-capacity-reservation")
+_CAPACITY_COMMITMENT_RULES = frozenset({_conditional_rule(_CAPACITY_RESERVATION),
+                                        _python_term_rule(_CAPACITY_RESERVATION)})
+
+
+def _purchases_in(norm: str) -> tuple[str, ...]:
+    """The names of the commitment purchase rules that match a normalized
+    command (the reading, not yet the shell commands that run)."""
+    return tuple(rule.pattern for rule in _COMMITMENT_RULES
+                 if rule.pattern != "aws-unresolved-operation" and rule.search(norm))
 
 
 # ── History: what the guard already let through ────────────────────────────────

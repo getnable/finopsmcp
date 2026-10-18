@@ -142,6 +142,15 @@ today: the Budget Guard always, the other two while their pricing is decided
 Plus `finops guard` (a cost guardrail your AI agents check before spending) and a
 `estimate_change_cost` preflight on Terraform and Helm diffs.
 
+The guard asks a person before each AWS commitment purchase in its table
+(`COMMITMENT_PURCHASES` in `src/finops/guard.py`; the 0.13.0 entry in
+[CHANGELOG.md](CHANGELOG.md) names every one and what it does not cover),
+whatever the policy says, and prices an EC2 Capacity Reservation the way it
+prices a launch. `nable commitments status` lists, from free Describe calls,
+the RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB reservations and
+the Savings Plans an account holds and when each ends; a read that failed is
+listed as not read, never as zero.
+
 ---
 
 ## Free vs Pro

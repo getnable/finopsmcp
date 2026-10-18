@@ -21,7 +21,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples" / "github-actions"
 SRC = str(ROOT / "src")
-RECIPES = ("budget-gate.yml", "scheduled-scan.yml", "guard-policy-check.yml")
+RECIPES = ("budget-gate.yml", "scheduled-scan.yml", "guard-policy-check.yml",
+           "commitments-status.yml")
 
 
 def _workflow(name: str) -> dict:

@@ -35,14 +35,25 @@ coverage target. When an installed pack that provides policies cannot be
 loaded, its bounds are unknown, so purchase advice is withheld until
 `nable pack audit` is clean.
 
-**Guard rules** (`guard/commitments.yaml`). Every commitment purchase an
-agent tries asks a person, on AWS (Savings Plans and every reserved offering),
-Google Cloud (committed use discounts) and Azure (reservations), and the
-reason names the bound it would breach: the term when the command shows a
-longer one, the payment option when it pays up front, and otherwise every
-bound the person should check, since coverage and an offering's term cannot
-be read from the command. nable's guard already asks about the AWS purchases
-as one-way doors; the pack adds the bounds to that question.
+**Guard rules** (`guard/commitments.yaml`). A commitment purchase an agent
+tries asks a person, on AWS, Google Cloud (committed use discounts) and Azure
+(reservations), and the reason names the bound it would breach: the term
+when the command shows a longer one, the payment option when it pays up
+front, and otherwise every bound the person should check, since coverage and
+an offering's term cannot be read from the command. On AWS the purchase rule
+matches every AWS CLI purchase in the guard's commitment table, typed or sent
+through an MCP call: Savings Plans; EC2 Reserved Instances, Dedicated Host
+reservations, Scheduled Instances, Capacity Blocks and their extensions, and
+Reserved Instance exchanges; RDS, ElastiCache, MemoryDB, Redshift, OpenSearch
+and Elasticsearch reservations; Redshift reserved node exchanges and Redshift
+Serverless reservations; SageMaker training plans and their extensions;
+MediaLive, MediaConnect and Device Farm offerings; Outposts orders; Glacier
+provisioned capacity; and an EC2 Capacity Reservation or Bedrock Provisioned
+Throughput with a commitment duration. It does not read SDK code (a boto3
+one-liner that buys one) or input in a file (`--cli-input-json file://...`):
+nable's guard asks about those itself, without the bounds named. nable's
+guard already asks about every AWS purchase as a one-way door; the pack adds
+the bounds to that question.
 
 **A policy for change records** (`policies/bounds.yaml`, rule
 `agent-tried-to-buy-a-commitment`): with the change-control pack installed,

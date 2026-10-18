@@ -396,3 +396,118 @@ def test_console_is_matched_by_whole_host(ua, via):
     from finops.guard_reconcile import _via
     got = _via(ua, {"type": "IAMUser"})
     assert (got == "console") == (via == "console"), got
+
+
+# ── every commitment purchase the guard asks about ────────────────────────────
+# Parametrized from the guard's own table (guard.COMMITMENT_PURCHASES): a
+# purchase added there without an event source here is a purchase reconcile
+# never reads, and fails the tests below.
+
+from finops import guard as _guard
+
+_PURCHASES = list(_guard.COMMITMENT_PURCHASES)
+_PIDS = [f"{p.service}-{p.verb}" for p in _PURCHASES]
+
+
+def _cli_of(p) -> str:
+    return f"aws {p.service} {p.verb} --x 1" + (f" {p.when} 31536000" if p.when else "")
+
+
+def _raw(name: str, minutes_ago: float, source: str, *, params: dict | None = None,
+         eid: str | None = None) -> dict:
+    raw = _event(name, minutes_ago, eid=eid)
+    raw["EventSource"] = source
+    if params is not None:
+        detail = json.loads(raw["CloudTrailEvent"])
+        detail["requestParameters"] = params
+        raw["CloudTrailEvent"] = json.dumps(detail)
+    return raw
+
+
+@pytest.mark.parametrize("p", _PURCHASES, ids=_PIDS)
+def test_each_purchase_maps_to_its_cloudtrail_event(p):
+    source = gr.COMMIT_EVENT_SOURCES.get(p.service)
+    assert source, f"no CloudTrail event source for {p.service}: reconcile would not read it"
+    assert gr.EVENTS[p.operation][0] == "commit"
+    assert source in gr.EVENT_SOURCES[p.operation]
+    assert gr._expectation(_cli_of(p)) == (frozenset({p.operation}), source)
+    assert gr._expectation(_cli_of(p).replace("aws ", "aws --profile prod ", 1))[0] == \
+        frozenset({p.operation})
+    # The event name is the API operation the guard pinned to botocore.
+    import botocore.session
+    assert p.operation in botocore.session.get_session().get_service_model(
+        p.service).operation_names
+
+
+@pytest.mark.parametrize("p", _PURCHASES, ids=_PIDS)
+def test_each_purchase_reconciles_a_fixture_event(p):
+    source = gr.COMMIT_EVENT_SOURCES[p.service]
+    params = {"commitmentDuration": 31536000} if p.when else None
+    ev = gr._event(_raw(p.operation, 3, source, params=params), "us-east-1")
+    assert ev["kind"] == "commit" and ev["source"] == source
+    records = [{"ts": _ts(4).isoformat(timespec="seconds"), "decision": "ask",
+                "action_type": "purchase_commitment", "command": _cli_of(p)}]
+    out = gr.match([ev], records, tolerance=timedelta(minutes=5))
+    [seen] = out["seen_and_happened"]
+    assert seen["event"] == p.operation and seen["ledger"]["command"] == _cli_of(p)
+    # The same name from another service is not this purchase's event.
+    other = gr._event(_raw(p.operation, 3, "elsewhere.amazonaws.com", params=params),
+                      "us-east-1")
+    out = gr.match([other], records, tolerance=timedelta(minutes=5))
+    assert out["seen_and_happened"] == [] and len(out["no_guard_record"]) == 1
+
+
+def test_reconcile_reads_every_purchase_event_name():
+    r, _ = _run()
+    for p in _PURCHASES:
+        assert p.operation in r["event_names"]
+    # One query per name: the names three services share are read once.
+    assert r["lookup_calls"] == len(gr.EVENTS)
+    assert gr.EVENT_SOURCES["PurchaseOffering"] == {
+        "medialive.amazonaws.com", "mediaconnect.amazonaws.com", "devicefarm.amazonaws.com"}
+
+
+def test_a_device_farm_purchase_is_not_explained_by_a_medialive_one():
+    _ledger("ask", "purchase_commitment", "aws medialive purchase-offering --offering-id 1", 6)
+    r, _ = _run({"PurchaseOffering": [[
+        _raw("PurchaseOffering", 5, "devicefarm.amazonaws.com", eid="df"),
+        _raw("PurchaseOffering", 4, "medialive.amazonaws.com", eid="ml")]]})
+    assert [e["event_id"] for e in r["seen_and_happened"]] == ["ml"]
+    assert [e["event_id"] for e in r["no_guard_record"]] == ["df"]
+
+
+@pytest.mark.parametrize("params,kind", [
+    ({"CreateCapacityReservationRequest": {"InstanceType": "p5.48xlarge",
+                                           "CommitmentDuration": 31536000}}, "commit"),
+    ({"CreateCapacityReservationRequest": {"InstanceType": "p5.48xlarge",
+                                           "InstanceCount": 8}}, "create"),
+    (None, "commit"),
+    ({}, "commit"),
+])
+def test_a_capacity_reservation_is_a_commitment_only_with_a_term(params, kind):
+    """A Capacity Reservation event is a commitment when its request names a
+    commitment duration, a create when the request was read and names none,
+    and a commitment when the request could not be read (never explained
+    away as a create)."""
+    raw = _raw("CreateCapacityReservation", 3, "ec2.amazonaws.com", params=params)
+    if params is None:
+        detail = json.loads(raw["CloudTrailEvent"])
+        detail.pop("requestParameters", None)
+        raw["CloudTrailEvent"] = json.dumps(detail)
+    assert gr._event(raw, "us-east-1")["kind"] == kind
+
+
+def test_a_capacity_reservation_with_no_term_matches_the_launch_the_guard_judged():
+    cmd = ("aws ec2 create-capacity-reservation --instance-type m5.large --instance-platform "
+           "Linux/UNIX --availability-zone us-east-1a --instance-count 2")
+    _ledger("allow", "infra_apply", cmd, 6)
+    _ledger("ask", "infra_apply", "aws ec2 create-capacity-reservation-fleet --total-target-"
+            "capacity 4", 6)
+    r, _ = _run({"CreateCapacityReservation": [[_raw(
+                     "CreateCapacityReservation", 5, "ec2.amazonaws.com",
+                     params={"CreateCapacityReservationRequest": {"InstanceType": "m5.large"}},
+                     eid="cr")]],
+                 "CreateCapacityReservationFleet": [[_raw(
+                     "CreateCapacityReservationFleet", 5, "ec2.amazonaws.com", eid="fleet")]]})
+    assert sorted(e["event_id"] for e in r["seen_and_happened"]) == ["cr", "fleet"]
+    assert {e["kind"] for e in r["seen_and_happened"]} == {"create"}
