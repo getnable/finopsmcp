@@ -661,9 +661,13 @@ def evaluate_action_gate(
         out["gate"] = GATE_ESCALATE
         out["rule"] = "one_way"
         what = _ONE_WAY_WHAT.get(action_type, "This action")
-        out["reason"] = (f"{what} cannot be "
-                         f"{'cancelled' if action_type == 'purchase_commitment' else 'undone'},"
-                         " so a human must confirm it before it is applied.")
+        # Whether a commitment can be ended inside its term differs by
+        # purchase (a Capacity Reservation's commitment duration is AWS's own
+        # term), so the policy says what is certain of every one of them.
+        out["reason"] = (f"{what} commits money for a term, so a human must confirm it before "
+                         "it is applied." if action_type == "purchase_commitment" else
+                         f"{what} cannot be undone, so a human must confirm it before it is "
+                         "applied.")
     elif action_type not in set(pol.get("allowed_action_types", [])):
         # Not in the human's allowlist -> block.
         out["gate"] = GATE_BLOCK
@@ -697,8 +701,8 @@ def evaluate_action_gate(
     if action_type == "purchase_commitment" and out["gate"] == GATE_ALLOW:
         out["gate"] = GATE_ESCALATE
         out["rule"] = "commitment_floor"
-        out["reason"] = ("Buying a commitment cannot be cancelled, so a human must confirm it "
-                         "before it is applied, whatever the policy allows.")
+        out["reason"] = ("Buying a commitment commits money for a term, so a human must "
+                         "confirm it before it is applied, whatever the policy allows.")
 
     # ---- Learning layer (caution-only ratchet) ----
     return _apply_learning(out, action_type, signal)

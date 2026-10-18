@@ -96,6 +96,11 @@ MORE = [
      "PurchaseProvisionedCapacity"),
     ("aws devicefarm purchase-offering --offering-id o-1 --quantity 1", "devicefarm",
      "PurchaseOffering"),
+    # A future-dated EC2 Capacity Reservation: with a commitment duration it is
+    # held for that term (tests/test_guard_capacity_reservation.py has the rest).
+    (("aws ec2 create-capacity-reservation --instance-type p5.48xlarge --instance-platform "
+      "Linux/UNIX --availability-zone us-east-1a --instance-count 8 "
+      "--commitment-duration 31536000"), "ec2", "CreateCapacityReservation"),
 ]
 ALL = NEW + EXISTING + MORE
 IDS = [f"{svc}-{op}" for _, svc, op in ALL]
@@ -163,12 +168,30 @@ def test_each_purchase_is_an_operation_in_botocore(cmd, service, operation):
     assert cmd.split()[1] == service
 
 
+def test_every_purchase_in_the_guard_s_table_is_listed_here():
+    """guard.COMMITMENT_PURCHASES is the one table the classifier, the floor,
+    reconcile and the pack read: a purchase added to it without a case here
+    is a purchase none of the tests below asks about."""
+    table = {(p.service, p.operation) for p in g.COMMITMENT_PURCHASES}
+    assert table == {(svc, op) for _, svc, op in ALL}
+    for p in g.COMMITMENT_PURCHASES:
+        assert xform_name(p.operation, "-") == p.verb
+        model = botocore.session.get_session().get_service_model(p.service)
+        if p.when:
+            member = "".join(w.title() for w in p.when.lstrip("-").split("-"))
+            assert member.lower() in {m.lower() for m in
+                                      model.operation_model(p.operation).input_shape.members}
+
+
 # ── it asks, by every door ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("cmd,service,operation", ALL, ids=IDS)
 def test_classified_as_a_commitment_purchase(cmd, service, operation):
     assert g.classify_command(cmd) == ("one_way", "purchase_commitment")
     assert g.classify_command(cmd.replace("aws ", "aws --profile prod --region eu-west-1 ", 1)) \
+        == ("one_way", "purchase_commitment")
+    assert g.classify_command(cmd.replace(f"aws {service} ",
+                                          f"aws {service} --region eu-west-1 --profile p ", 1)) \
         == ("one_way", "purchase_commitment")
 
 
@@ -212,6 +235,9 @@ _USE_AWS_PARAMS = {
     "CreateSavingsPlan": {"savingsPlanOfferingId": "o-1", "commitment": "2.5"},
     "CreateProvisionedModelThroughput": {"modelUnits": 1, "provisionedModelName": "p",
                                          "modelId": "m", "commitmentDuration": "SixMonths"},
+    "CreateCapacityReservation": {"InstanceType": "p5.48xlarge", "InstancePlatform": "Linux/UNIX",
+                                  "AvailabilityZone": "us-east-1a", "InstanceCount": 8,
+                                  "CommitmentDuration": 31536000},
 }
 
 
@@ -232,6 +258,47 @@ def test_a_boto3_one_liner_that_buys_asks(cmd):
     assert g.classify_command(cmd) == ("one_way", "purchase_commitment")
     v = g.gate_command(cmd, record=False)
     assert v["decision"] == "ask" and v["action_type"] == "purchase_commitment"
+
+
+def _term_member(p) -> str:
+    """The API's own spelling of a purchase's term parameter
+    (CommitmentDuration for EC2, commitmentDuration for Bedrock)."""
+    shape = botocore.session.get_session().get_service_model(p.service).operation_model(
+        p.operation).input_shape
+    [name] = [m for m in shape.members if xform_name(m, "-") == p.when.lstrip("-")]
+    return name
+
+
+_TABLE = list(g.COMMITMENT_PURCHASES)
+_TABLE_IDS = [f"{p.service}-{p.verb}" for p in _TABLE]
+
+
+@pytest.mark.parametrize("p", _TABLE, ids=_TABLE_IDS)
+def test_every_purchase_through_boto3_and_make_api_call_asks(p):
+    """Each purchase in the guard's table, made through a boto3 client by its
+    method name or through `_make_api_call` by its API name, is a commitment
+    purchase: with its term, for the ones that are commitments only with one."""
+    term = f", {_term_member(p)}=31536000" if p.when else ""
+    api_term = f", '{_term_member(p)}': 31536000" if p.when else ""
+    method = (f"python3 -c \"import boto3; boto3.client('{p.service}')."
+              f"{xform_name(p.operation)}(X=1{term})\"")
+    api = (f"python3 -c \"import botocore.session; c = botocore.session.get_session()"
+           f".create_client('{p.service}'); c._make_api_call('{p.operation}', "
+           f"{{'X': 1{api_term}}})\"")
+    for cmd in (method, api):
+        assert g.classify_command(cmd) == ("one_way", "purchase_commitment"), cmd
+        v = g.gate_command(cmd, record=False)
+        assert v["decision"] == "ask" and v["action_type"] == "purchase_commitment", cmd
+    if p.when:
+        plain = method.replace(term, "")
+        assert g.classify_command(plain) != ("one_way", "purchase_commitment"), plain
+
+
+def test_bedrock_with_its_term_in_a_dict_before_the_call_asks():
+    cmd = ("python3 -c \"import boto3; kw = dict(modelUnits=1, provisionedModelName='p', "
+           "modelId='m', commitmentDuration='SixMonths'); "
+           "boto3.client('bedrock').create_provisioned_model_throughput(**kw)\"")
+    assert g.classify_command(cmd) == ("one_way", "purchase_commitment")
 
 
 @pytest.mark.parametrize("cmd", [
@@ -339,7 +406,7 @@ def _pack_rules(monkeypatch, verdict: str):
     problems: list = []
     rule = {"id": "buying", "pattern": (r"purchase|create-savings|accept-reserved|"
                                         r"create-reservation|provisioned-model|training-plan|"
-                                        r"create-order"),
+                                        r"create-order|capacity-reservation"),
             "verdict": verdict, "reason": "not this quarter"}
     rules = parse_guard_rules({"rules": [rule]}, "g.yaml", problems)
     assert not problems
@@ -469,3 +536,34 @@ def test_the_rds_count_reaches_the_ask_through_use_aws():
         "service_name": "rds", "operation_name": "PurchaseReservedDBInstancesOffering",
         "parameters": _USE_AWS_PARAMS["PurchaseReservedDBInstancesOffering"]}, record=False)
     assert "3 DB instances" in v["reason"] and "$" not in v["reason"]
+
+
+# ── the CHANGELOG names exactly what the guard covers ─────────────────────────
+
+def _release_notes() -> str:
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text(encoding="utf-8")
+    m = re.search(r"^## 0\.13\.0 \(2026-10-18\)\n(.*?)^## ", text, re.DOTALL | re.MULTILINE)
+    assert m, "no dated 0.13.0 section"
+    return " ".join(m.group(1).split())
+
+
+def test_the_changelog_names_each_covered_operation_and_what_is_not_covered():
+    notes = _release_notes()
+    assert not re.search(r"\b(?:any|every) commitment purchase\b", notes, re.IGNORECASE)
+    for p in g.COMMITMENT_PURCHASES:
+        assert f"`{p.verb}`" in notes or f"`{p.verb}` " in notes, p.verb
+    _covered, _, gaps = notes.partition("Not covered")
+    for gap in ("`aws ec2 modify-capacity-reservation`", "`aws_ec2_capacity_reservation`",
+                "`ec2.CapacityReservation`", "Python script file's contents",
+                "`python3 -W` or `-X` with a separate value before `-c`", "`eval`",
+                "a variable in a global-option position", "a Terraform registry module",
+                "a Terragrunt saved plan"):
+        assert gap in gaps, gap
+    from finops import guard_reconcile as gr
+    assert f"That is {len(gr.EVENTS)} event names" in notes
+    from finops.security import iam_setup
+    [group] = [grp for grp in iam_setup._OPTIONAL_GROUPS if grp[0] == "OptionalCommitments"]
+    assert f"{len(group[3])}".replace("7", "seven") + " Describe actions" in notes
+    for action in group[3]:
+        assert action in notes, action

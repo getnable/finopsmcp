@@ -1,0 +1,90 @@
+name: nable commitments status
+
+# Copy into YOUR repo at .github/workflows/nable-commitments.yml (this repo
+# does not run it). Every Monday it lists the reservations and Savings Plans
+# an AWS account holds with `nable commitments status --json --fail-within 30`,
+# keeps the JSON as a workflow artifact for 90 days, and fails when one ends
+# within 30 days, so a renewal is decided before the reservation lapses to
+# on-demand rates.
+#
+# Credentials: a read-only IAM role assumed through GitHub's OIDC provider, so
+# no key is stored. Set the repository variable NABLE_AWS_ROLE_ARN to it. The
+# role needs the OptionalCommitments statement of `nable iam-template`
+# (rds:DescribeReservedDBInstances, ec2:DescribeReservedInstances,
+# elasticache:DescribeReservedCacheNodes, redshift:DescribeReservedNodes,
+# es:DescribeReservedInstances, memorydb:DescribeReservedNodes,
+# savingsplans:DescribeSavingsPlans), plus sts:GetCallerIdentity and
+# ec2:DescribeRegions; `nable commitments status --dry-run` lists every call.
+# Free Describe calls only: no Cost Explorer request, no change to anything.
+#
+# Exit codes with --fail-within, and what this job does with them:
+#   0  every commitment was read and none ends within 30 days
+#   1  a commitment that was read ends within 30 days (this wins)
+#   2  a commitment read failed, so it cannot check (no credentials included);
+#      each read that failed is in the JSON under not_read, never as a zero
+# Any other code is an error: the JSON says which ({"error": {"class", ...}}).
+# The artifact is uploaded either way, then the job fails on anything but 0.
+
+on:
+  schedule:
+    - cron: "17 7 * * 1"            # Mondays 07:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write                   # OIDC, for the read-only role
+
+jobs:
+  commitments:
+    name: Commitments status
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FINOPS_NO_KEYRING: "1"
+      NABLE_NO_UPDATE_CHECK: "1"
+      AWS_REGION: ${{ vars.NABLE_AWS_REGION || 'us-east-1' }}
+      STATUS_JSON: ${{ github.workspace }}/nable-commitments.json
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install --quiet "uv==0.8.17"
+
+      - name: Read-only AWS role
+        if: ${{ vars.NABLE_AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.NABLE_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.NABLE_AWS_REGION || 'us-east-1' }}
+
+      - name: Commitments status
+        id: status
+        run: |
+          set +e
+          uvx --from "finops-mcp==0.13.0" nable commitments status --json --fail-within 30 > "$STATUS_JSON"
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "nable commitments status: nothing ends within 30 days" ;;
+            1) echo "::warning title=nable commitments::a reservation or Savings Plan ends within 30 days (exit 1); see gate.ending in the artifact" ;;
+            2) echo "::error title=nable commitments::a commitment read failed, so it cannot check (exit 2); see not_read in the artifact, or set NABLE_AWS_ROLE_ARN" ;;
+            *) echo "::error title=nable commitments::nable commitments status failed (exit $code)" ;;
+          esac
+
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nable-commitments-${{ github.run_id }}
+          path: ${{ env.STATUS_JSON }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Fail when one ends soon or could not be read
+        if: always() && steps.status.outputs.exit_code != '0'
+        env:
+          STATUS_EXIT: ${{ steps.status.outputs.exit_code }}
+        run: exit "${STATUS_EXIT:-1}"

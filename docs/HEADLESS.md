@@ -4,7 +4,9 @@ CI, cron, scripts and agents: nable with nobody at a terminal. This page
 says what each command does when stdin is closed, what it prints, and how it
 exits. Every behaviour in the tables was run on finops-mcp 0.12.0 (2026-10-17)
 the way a pipeline runs it: `timeout 90 nable ... < /dev/null`, a fresh
-`HOME`, stdout and stderr captured separately, and no cloud credentials.
+`HOME`, stdout and stderr captured separately, and no cloud credentials. The
+`commitments status` rows, `nable --version` and `nable guard check` were run
+again that way on 0.13.0 (2026-10-18).
 
 - [The rules every command keeps](#the-rules-every-command-keeps)
 - [Commands for scripts](#commands-for-scripts)
@@ -73,7 +75,7 @@ instance metadata.
 | `nable org status` (`review`, `questions`, `export`) | the org model | yes | 0 |
 | `nable learn list`, `nable pack list` | lessons; installed packs | yes | 0 |
 | `nable doctor`, `finops-doctor` | every check, with the fix for each failure | a list of checks | 0, 1 |
-| `finops-doctor --version` | `finops-doctor (finops-mcp) 0.12.0` | | 0 |
+| `finops-doctor --version` | `finops-doctor (finops-mcp) 0.13.0` | | 0 |
 | `nable guard check --command "..."` | the verdict the hook would give | the verdict and the policy in effect | 0, 1, 2 |
 | `nable guard status`, `guard doctor`, `guard report` | hooks per agent; coverage; the decision ledger | `doctor`, `report`: yes | 0 |
 | `nable guard verify-log` | whether the decision ledger's hash chain is intact | yes | 0, 1 |
@@ -89,10 +91,13 @@ instance metadata.
 | `nable serve`, `nable credits` | "a hosted/enterprise feature" on stderr, nothing on stdout | | 1 |
 | `nable` with no arguments | the MCP server on stdio (stdin is not a terminal); exits when stdin closes | | 0 |
 
-The `commitments status` rows are from the next release (CHANGELOG,
-Unreleased), run the same way on its branch. With credentials it reads only
-free Describe calls; `--spend` adds Cost Explorer and prints what that can
-cost on stderr before the first request.
+The `commitments status` rows are from 0.13.0. With credentials it reads only
+free Describe calls (RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB
+reservations in each region, and the Savings Plans once); `--spend` adds Cost
+Explorer and prints what that can cost on stderr before the first request. A
+service botocore lists no endpoint for in a region is not called there: it is
+listed under `not_offered` in the report, is not a failed read, and leaves the
+exit code as it was.
 
 `nable guard hook` is not for scripts: it is the agents' hook protocol, reads
 one payload on stdin, answers on stdout and always exits 0, so a hook that
@@ -462,10 +467,13 @@ there, for example as `ssh build-host nable` as the server command.
 
 ## CI recipes
 
-[examples/github-actions](../examples/github-actions/README.md) has three
+[examples/github-actions](../examples/github-actions/README.md) has four
 workflows that run this CLI: a budget gate (`nable budget ci-gate
---fail-on-breach --json`), a daily `nable scan --json` kept as an artifact, and
-a guard policy check (`nable guard check --json` over the repo's
-`nable.policy.yaml` and the commands it should judge). Each states its exit
-codes and what it needs, and fails with a reason rather than passing on
+--fail-on-breach --json`), a daily `nable scan --json` kept as an artifact, a
+guard policy check (`nable guard check --json` over the repo's
+`nable.policy.yaml` and the commands it should judge), and a weekly
+`nable commitments status --json --fail-within 30` run through `uvx`, with a
+read-only role assumed through GitHub OIDC, kept as an artifact (exit 1 when a
+commitment ends within 30 days, 2 when one could not be read). Each states its
+exit codes and what it needs, and fails with a reason rather than passing on
 missing data or credentials.

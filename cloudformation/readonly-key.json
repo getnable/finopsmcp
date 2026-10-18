@@ -50,7 +50,7 @@
         "false"
       ],
       "Default": "true",
-      "Description": "Free reads. Unlocks `nable commitments status`: the RDS, EC2 and ElastiCache reservations and the Savings Plans this account holds, with their end dates. Describe only; nothing here can buy a commitment. Set to false to leave statement OptionalCommitments out."
+      "Description": "Free reads. Unlocks `nable commitments status`: the RDS, EC2, ElastiCache, Redshift, OpenSearch and MemoryDB reservations and the Savings Plans this account holds, with their end dates. Describe only; nothing here can buy a commitment. Set to false to leave statement OptionalCommitments out."
     },
     "IncludeOrganizations": {
       "Type": "String",
@@ -253,7 +253,10 @@
                     "rds:DescribeReservedDBInstances",
                     "ec2:DescribeReservedInstances",
                     "elasticache:DescribeReservedCacheNodes",
-                    "savingsplans:DescribeSavingsPlans"
+                    "savingsplans:DescribeSavingsPlans",
+                    "redshift:DescribeReservedNodes",
+                    "es:DescribeReservedInstances",
+                    "memorydb:DescribeReservedNodes"
                   ],
                   "Resource": "*"
                 },

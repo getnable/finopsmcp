@@ -2,28 +2,42 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.13.0 (2026-10-18)
 
-The free on-ramp to commitments: see what this account has committed to and
-when it ends, have the guard ask before an agent buys one, and price RDS in
-sixteen regions, Multi-AZ included, from cited Price List rows. No version
-bump.
+The free on-ramp to commitments: see what an account has committed to and
+when it ends, have the guard ask before an agent buys one (an EC2 Capacity
+Reservation with a commitment duration among them), and price RDS in sixteen
+regions, Multi-AZ included, from cited Price List rows.
 
-- **`nable commitments status`.** Every RDS, EC2 and ElastiCache reservation
-  in each region (found the way `nable scan` finds them, or `--regions`) and
-  every Savings Plan, every page, with class or type, count, engine or
-  product, offering type, term, start, end, days left, state, and the fixed
-  and recurring charges as AWS reports them. RDS and ElastiCache report no
-  end date; theirs is the start plus the term, and says so.
+- **`nable commitments status`.** The RDS, EC2, ElastiCache, Redshift,
+  OpenSearch and MemoryDB reservations in each region (found the way `nable
+  scan` finds them, or `--regions`) and every Savings Plan, every page, with
+  class or type, count, engine or product, offering type, term, start, end,
+  days left, state, and the fixed and recurring charges as AWS reports them.
+  RDS, ElastiCache, Redshift, OpenSearch and MemoryDB report no end date;
+  theirs is the start plus the term, and says so.
+  - Redshift is read with DescribeReservedNodes (paged by Marker), MemoryDB
+    with DescribeReservedNodes (by NextToken), and OpenSearch once, with the
+    opensearch API's DescribeReservedInstances, its NextToken followed by
+    hand (botocore has no paginator for it). That call lists reservations
+    bought through either OpenSearch API, so a legacy Elasticsearch
+    reservation is not counted twice. A Redshift node in pending-payment or
+    exchanging is still held, and counts as live for `--fail-within`.
   - Free reads only by default. A read that failed is listed as not read,
     per service and region, with its reason (denied, throttled, expired and
-    so on), never as a zero or "none found".
-  - "Matched now" compares each active reservation with what is running this
-    minute (free describes of DB instances, EC2 instances and cache
-    clusters, only where an active reservation is). Reservations of one kind
-    share what runs, size flexibility is not counted, and it is never called
-    billed utilization. Savings Plans say billed utilization needs Cost
-    Explorer and that an account sees only its own plans.
+    so on), never as a zero or "none found". Where botocore's endpoint list
+    names no Redshift, OpenSearch or MemoryDB endpoint in a region (MemoryDB
+    is in 19 of the 34 regions the bundled botocore lists EC2 in), that
+    service is not called there: it is listed under `not_offered`, and is
+    neither a failed read nor a zero.
+  - "Matched now" compares each active RDS, EC2 and ElastiCache reservation
+    with what is running this minute (free describes of DB instances, EC2
+    instances and cache clusters, only where an active reservation is).
+    Reservations of one kind share what runs, size flexibility is not
+    counted, and it is never called billed utilization. For Redshift,
+    OpenSearch and MemoryDB it reads "not compared". Savings Plans say billed
+    utilization needs Cost Explorer and that an account sees only its own
+    plans.
   - `--spend` reads billed utilization from Cost Explorer
     (GetReservationUtilization by subscription,
     GetSavingsPlansUtilizationDetails), at most five pages a query, and
@@ -31,32 +45,60 @@ bump.
   - `--dry-run` lists every call and IAM action without reading credentials.
     `--json` is one document on stdout, a failure included.
   - Exit codes: 0 every read succeeded, 5 some failed, 4 every commitment
-    read was denied, 3 credentials expired, 6 no credentials. With
-    `--fail-within DAYS`: 1 a commitment that was read ends within DAYS
-    (this wins), 2 a commitment read failed (cannot check), else 0.
+    read was denied (the Redshift, OpenSearch and MemoryDB ones included), 3
+    credentials expired, 6 no credentials. With `--fail-within DAYS`: 1 a
+    commitment that was read ends within DAYS (this wins), 2 a commitment
+    read failed (cannot check), else 0. A service not offered in a region
+    changes none of them.
   - The IAM templates gain an OptionalCommitments statement
-    (`IncludeCommitments`): rds:DescribeReservedDBInstances,
-    ec2:DescribeReservedInstances, elasticache:DescribeReservedCacheNodes and
-    savingsplans:DescribeSavingsPlans, Describe only.
+    (`IncludeCommitments`) of seven Describe actions:
+    rds:DescribeReservedDBInstances, ec2:DescribeReservedInstances,
+    elasticache:DescribeReservedCacheNodes, savingsplans:DescribeSavingsPlans,
+    redshift:DescribeReservedNodes, es:DescribeReservedInstances (OpenSearch's
+    call, under IAM's es prefix) and memorydb:DescribeReservedNodes.
     cloudformation/readonly-key.json is regenerated; the published copy is
     updated when it is next published.
-- **The guard asks before any commitment purchase.**
-  - New: ElastiCache, MemoryDB, Redshift, OpenSearch and Elasticsearch
-    reserved nodes and instances, EC2 Scheduled Instances, Capacity Blocks
-    and their extensions, and Reserved Instance exchanges; Redshift reserved
-    node exchanges, Redshift Serverless reservations, Bedrock Provisioned
-    Throughput with a commitment duration (without one it is hourly and
-    does not ask), SageMaker training plans and their extensions, MediaLive,
-    MediaConnect and Device Farm offerings, Outposts orders and Glacier
-    provisioned capacity. Each is pinned to an operation in botocore's
-    service model, through `nable guard check`, the hook, and the MCP
-    call_aws and use_aws paths. Python code that buys one asks too (a
-    heuristic, like the one for deletes): a `-c` one-liner, combined flags
-    ending in `c`, code on stdin from a heredoc or a pipe, a boto3 or a
-    botocore client, and `_make_api_call` with the operation's own name. The
-    AWS CLI run as `python -m awscli` is read as `aws`, and an aws command
-    whose service or operation is a variable or a substitution asks, since
-    the guard cannot read what it runs.
+  - `examples/github-actions/commitments-status.yml` runs `nable commitments
+    status --json --fail-within 30` every Monday through `uvx --from
+    finops-mcp==0.13.0`, with a read-only role assumed through GitHub OIDC (no
+    stored key), keeps the JSON as an artifact for 90 days, and fails on exit
+    1 or 2. scripts/check_release.py reads each recipe's install as a release
+    carrier, and scripts/bump_version.py moves it.
+- **The guard asks before these AWS commitment purchases.** Each CLI
+  operation below is pinned to its operation in botocore's service model, and
+  asks through `nable guard check`, the hook, and the MCP call_aws and use_aws
+  paths, with AWS global options (`--profile`, `--region`) before or after the
+  service name:
+  - Savings Plans `create-savings-plan`.
+  - EC2 `purchase-reserved-instances-offering`, `purchase-host-reservation`,
+    `purchase-scheduled-instances`, `purchase-capacity-block`,
+    `purchase-capacity-block-extension`,
+    `accept-reserved-instances-exchange-quote`, and
+    `create-capacity-reservation` with `--commitment-duration` (below).
+  - RDS `purchase-reserved-db-instances-offering`; ElastiCache
+    `purchase-reserved-cache-nodes-offering`; MemoryDB
+    `purchase-reserved-nodes-offering`; Redshift
+    `purchase-reserved-node-offering` and `accept-reserved-node-exchange`;
+    Redshift Serverless `create-reservation`; OpenSearch
+    `purchase-reserved-instance-offering`; Elasticsearch (`es`)
+    `purchase-reserved-elasticsearch-instance-offering`.
+  - SageMaker `create-training-plan` and `extend-training-plan`; Bedrock
+    `create-provisioned-model-throughput` with `--commitment-duration`
+    (without one it is hourly and does not ask); MediaLive, MediaConnect and
+    Device Farm `purchase-offering`; Outposts `create-order`; Glacier
+    `purchase-provisioned-capacity`.
+  - Each of those through Python (a heuristic, like the one for deletes): a
+    `-c` one-liner, combined flags ending in `c`, code on stdin from a
+    heredoc or a pipe, a boto3 client by the operation's method name, and a
+    botocore client's `_make_api_call` by its API name; for the two with a
+    term, with the term's parameter anywhere in the code, a dict built
+    before the call included. The AWS CLI run as `python -m awscli` is read
+    as `aws`, and an aws command whose service or operation is a variable or
+    a substitution asks, since the guard cannot read what it runs.
+  - These come from one table (`COMMITMENT_PURCHASES` in guard.py), which
+    also drives the commitment floor, `nable guard reconcile` and the
+    commitments-bounds pack's rule. A purchase added to it without a test
+    case, a CloudTrail event source or a pack match fails the tests.
   - A Terraform, OpenTofu or Terragrunt apply, or a `pulumi up`, that creates
     `aws_rds_reserved_instance`, `aws_elasticache_reserved_cache_node` or
     `aws_ec2_capacity_block_reservation` (or the Pulumi `rds.ReservedInstance`,
@@ -68,6 +110,10 @@ bump.
   - A dry run excuses a purchase only when the shell hands the CLI
     `--dry-run` as an argument of its own: not in a comment, not inside
     another option's quoted value, and in use_aws only from `DryRun: true`.
+    The pricer holds to the same rule: `aws ec2 run-instances
+    --instance-type p5.48xlarge --count 8 # --dry-run` read as a launch and
+    was then left unpriced as a dry run, so it passed with no figure and no
+    ask; it is priced, and asks.
   - An MCP shell tool that takes the program in `command` and argv in
     `args`, `argv` or `arguments` is judged as the joined command line.
   - Never weaker than an ask: no policy (escalate_one_way_doors off, a high
@@ -76,21 +122,91 @@ bump.
     into an allow, in the policy gate and in the guard's final verdict. A
     pack's deny still denies. In Codex CLI, Gemini CLI and Cline the deny
     says it is never approved out of band, and no approval id is offered.
+    The policy gate's reason now says buying a commitment "commits money for
+    a term", not that it "cannot be cancelled".
   - A figure only where the command carries one (a Savings Plan's
-    `--commitment`, an EC2 `--limit-price`). Otherwise the ask says the
-    offering id fixes the price, which the guard cannot look up offline,
-    shows no figure, and names the count the command buys where it gives one
+    `--commitment`, an EC2 `--limit-price`) or a cited rate prices it (a
+    Capacity Reservation, below). Otherwise the ask says the offering id
+    fixes the price, which the guard cannot look up offline, shows no
+    figure, and names the count the command buys where it gives one
     (`--db-instance-count`, `--cache-node-count`, `--node-count`,
     `--instance-count`).
   - Every one of those purchases is a dangerous action for a read-only key
     (`rds:Purchase`, `ec2:Purchase`, `savingsplans:Create`,
     `elasticache:Purchase`, `memorydb:Purchase`, `redshift:Purchase`,
-    `es:Purchase` and the rest by name), and `nable setup aws --check-scope`
-    asks the IAM simulator about one action for each. A key that cannot call
-    the simulator is checked by the probes that need none, an EC2 Reserved
-    Instance purchase among them as a dry run; whatever those cannot reach
-    is listed as not read, never as denied or allowed, and the key is
-    reported as not proven (exit 1), not as correctly scoped.
+    `es:Purchase`, `ec2:CreateCapacityReservation` and the rest by name), and
+    `nable setup aws --check-scope` asks the IAM simulator about one action
+    for each. A key that cannot call the simulator is checked by the probes
+    that need none, an EC2 Reserved Instance purchase and a one-instance
+    Capacity Reservation among them, each as a dry run; whatever those
+    cannot reach is listed as not read, never as denied or allowed, and the
+    key is reported as not proven (exit 1), not as correctly scoped.
+  - Not covered, so an agent's use of them is not asked about as a
+    commitment purchase: `aws ec2 modify-capacity-reservation` (it can raise
+    a reservation's count, and the guard does not read the reservation it
+    changes); Terraform `aws_ec2_capacity_reservation` and Pulumi
+    `ec2.CapacityReservation` (judged as any apply is); a Python script
+    file's contents (`python3 buy.py`); `python3 -W` or `-X` with a separate
+    value before `-c` (`python3 -W ignore -c "..."`); `eval` of a string the
+    command builds; a variable in a global-option position (`aws --$OPT x rds
+    purchase-reserved-db-instances-offering ...`); a Terraform registry module
+    before `terraform init` has downloaded it into `.terraform/modules`; and
+    a Terragrunt saved plan.
+- **EC2 Capacity Reservations.** `aws ec2 create-capacity-reservation`, and
+  the same through use_aws, call_aws, the hook and Python:
+  - With a commitment duration (`--commitment-duration`, `CommitmentDuration`
+    in use_aws, in Python or inline in `--cli-input-json`) it is a
+    commitment purchase under the floor above. It is priced at count x the
+    cited on-demand hourly rate x the duration's hours when the guard's table
+    lists the type: 8x p5.48xlarge for 31,536,000 seconds is 8 x $55.04 x
+    8,760 hours, about $3,857,203 (EC2_HOURLY, AmazonEC2 us-east-1 offer
+    20261012193925). A type the table does not list, or lists only by
+    scaling from its family, gets no figure, and the ask says why. The ask
+    quotes the API reference's words for the term ("a minimum duration for
+    which you commit to having the future-dated Capacity Reservation in the
+    active state in your account after it has been delivered") and does not
+    say it cannot be cancelled. With `--cli-input-json file://...` the term
+    may be in the file: the floor holds, and the ask says the guard did not
+    read it.
+  - Without one it is priced the way `run-instances` is: count x hourly x
+    730 a month, judged on the launch threshold; with `--end-date-type
+    limited` and an end under a month away, for the hours until then. The
+    reason says it bills from when it is created, whether or not anything
+    runs in it: the offer bills an unused reservation (UnusedBox) at the
+    on-demand (BoxUsage) rate for each of the 174 Linux types nable lists
+    (checked by hand against the offer file, not by a test). A
+    standard zone (`--availability-zone sa-east-1a`) prices it in its region,
+    at the regional floor launches use.
+  - Only Linux/UNIX on shared tenancy is priced. Another platform, dedicated
+    tenancy, a Local or Wavelength Zone, a type the table does not list, or
+    an end date that cannot be read or has passed: each asks, with no figure
+    and why. `aws ec2 create-capacity-reservation-fleet` asks with no figure,
+    and so does Python that creates a reservation or a fleet without a term.
+- **`nable guard reconcile` reads each commitment purchase above.** Its
+  CloudTrail event names come from the guard's table, each with its event
+  source (OpenSearch's and Elasticsearch's under es.amazonaws.com), and a
+  ledger command that names one purchase accounts only for that operation's
+  event from that service: a Device Farm `PurchaseOffering` is not explained
+  by a MediaLive one. A `CreateCapacityReservation` or
+  `CreateProvisionedModelThroughput` event is a commitment when its request
+  names a commitment duration, a create when the request was read and names
+  none, and a commitment when the request could not be read.
+  `CreateCapacityReservationFleet` is read as a create. That is 41 event
+  names, one LookupEvents query each per region at 2 a second, about 21
+  seconds a region.
+- **The commitments-bounds pack names its bounds for each of those
+  purchases.** Its purchase rule matches every AWS CLI purchase above, typed
+  or through an MCP call: any `purchase-*` or `accept-reserved-*` operation,
+  a Savings Plan, a Redshift Serverless reservation, a SageMaker training
+  plan or its extension, an Outposts order, and a Capacity Reservation or
+  Bedrock Provisioned Throughput with a commitment duration. It does not
+  read SDK code or an input file; the guard asks about those itself, without
+  the bounds named. The pack is still version 1.0.0, with new content.
+- **Two guard tests no longer need uv.**
+  tests/test_guard_learning.py::test_install_upgrades_an_existing_install_in_place
+  and tests/test_guard_telemetry.py::test_reinstalling_is_distinguishable_from_a_first_install
+  put a stub uvx on PATH, as tests/test_guard_plugin.py does. With finops in
+  a venv under /tmp and no uvx on PATH, they failed.
 - **Regional and Multi-AZ RDS rates, each a cited Price List row.**
   `aws_prices.rds_rate(instance_class, engine, region, multi_az=False)`
   returns an `RdsRate` (the listed USD string, region, engine, deployment,

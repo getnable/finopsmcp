@@ -105,14 +105,17 @@ _OPTIONAL_GROUPS: list[tuple[str, str, str, list[str]]] = [
     # (rds:Purchase*, ec2:Purchase*, savingsplans:Create*) is in
     # _DANGEROUS_ACTIONS_PREFIXES below, and nothing here can.
     ("OptionalCommitments", "IncludeCommitments",
-     ("Free reads. Unlocks `nable commitments status`: the RDS, EC2 and ElastiCache "
-      "reservations and the Savings Plans this account holds, with their end dates. "
-      "Describe only; nothing here can buy a commitment."),
+     ("Free reads. Unlocks `nable commitments status`: the RDS, EC2, ElastiCache, "
+      "Redshift, OpenSearch and MemoryDB reservations and the Savings Plans this account "
+      "holds, with their end dates. Describe only; nothing here can buy a commitment."),
      [
          "rds:DescribeReservedDBInstances",
          "ec2:DescribeReservedInstances",
          "elasticache:DescribeReservedCacheNodes",
          "savingsplans:DescribeSavingsPlans",
+         "redshift:DescribeReservedNodes",
+         "es:DescribeReservedInstances",
+         "memorydb:DescribeReservedNodes",
      ]),
     ("OptionalOrganizations", "IncludeOrganizations",
      ("Free. Unlocks the org rollup: listing member accounts and organizational "
@@ -197,6 +200,10 @@ _DANGEROUS_ACTIONS_PREFIXES = [
     "medialive:PurchaseOffering", "mediaconnect:PurchaseOffering",
     "devicefarm:PurchaseOffering", "outposts:CreateOrder",
     "glacier:PurchaseProvisionedCapacity",
+    # A Capacity Reservation bills from creation whether or not anything runs
+    # in it, and with a commitment duration it is held for that term. Already
+    # under ec2:Create; named so the scope check asks the simulator about it.
+    "ec2:CreateCapacityReservation",
 ]
 # One action per commitment prefix above, asked of the IAM simulator.
 _COMMITMENT_PURCHASE_PROBES = [
@@ -218,6 +225,7 @@ _COMMITMENT_PURCHASE_PROBES = [
     "devicefarm:PurchaseOffering",
     "outposts:CreateOrder",
     "glacier:PurchaseProvisionedCapacity",
+    "ec2:CreateCapacityReservation",
 ]
 
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
@@ -760,6 +768,13 @@ def _probe_permissions() -> dict[str, str]:
             InstanceCount=1, ReservedInstancesOfferingId="00000000-0000-0000-0000-000000000000",
             DryRun=True),
         "ec2:PurchaseReservedInstancesOffering",
+    )
+    # The same for a Capacity Reservation: one t3.micro, never created.
+    _try(
+        lambda: ec2.create_capacity_reservation(
+            InstanceType="t3.micro", InstancePlatform="Linux/UNIX",
+            AvailabilityZone="us-east-1a", InstanceCount=1, DryRun=True),
+        "ec2:CreateCapacityReservation",
     )
 
     s3 = boto3.client("s3")

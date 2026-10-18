@@ -47,6 +47,32 @@ from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from .guard import COMMITMENT_PURCHASES
+
+# The event source CloudTrail records each service's calls under, for every
+# service the guard's commitment table (guard.COMMITMENT_PURCHASES) names.
+# OpenSearch Service records both its APIs, opensearch and the older es,
+# under es.amazonaws.com. A purchase whose service is missing here is not
+# reconciled (tests/test_guard_reconcile.py fails on one).
+COMMIT_EVENT_SOURCES: dict[str, str] = {
+    "savingsplans": "savingsplans.amazonaws.com",
+    "ec2": "ec2.amazonaws.com",
+    "rds": "rds.amazonaws.com",
+    "elasticache": "elasticache.amazonaws.com",
+    "memorydb": "memorydb.amazonaws.com",
+    "redshift": "redshift.amazonaws.com",
+    "redshift-serverless": "redshift-serverless.amazonaws.com",
+    "opensearch": "es.amazonaws.com",
+    "es": "es.amazonaws.com",
+    "sagemaker": "sagemaker.amazonaws.com",
+    "medialive": "medialive.amazonaws.com",
+    "mediaconnect": "mediaconnect.amazonaws.com",
+    "devicefarm": "devicefarm.amazonaws.com",
+    "outposts": "outposts.amazonaws.com",
+    "glacier": "glacier.amazonaws.com",
+    "bedrock": "bedrock.amazonaws.com",
+}
+
 # CloudTrail event name -> (kind, event source). Management events that start
 # or stop a bill, or commit money.
 EVENTS: dict[str, tuple[str, str]] = {
@@ -68,11 +94,26 @@ EVENTS: dict[str, tuple[str, str]] = {
     "DeleteDBCluster": ("destroy", "rds.amazonaws.com"),
     "DeleteLoadBalancer": ("destroy", "elasticloadbalancing.amazonaws.com"),
     "DeleteBucket": ("destroy", "s3.amazonaws.com"),
-    "PurchaseReservedInstancesOffering": ("commit", "ec2.amazonaws.com"),
-    "PurchaseHostReservation": ("commit", "ec2.amazonaws.com"),
-    "PurchaseReservedDBInstancesOffering": ("commit", "rds.amazonaws.com"),
-    "CreateSavingsPlan": ("commit", "savingsplans.amazonaws.com"),
+    "CreateCapacityReservationFleet": ("create", "ec2.amazonaws.com"),
 }
+# Every commitment purchase the guard asks about, under the event name its
+# operation is recorded as. Some names are shared (PurchaseOffering is
+# MediaLive's, MediaConnect's and Device Farm's): EVENT_SOURCES holds each
+# name's sources, and one query per name reads them all.
+EVENT_SOURCES: dict[str, frozenset[str]] = {name: frozenset({src}) for name, (_, src)
+                                            in EVENTS.items()}
+for _p in COMMITMENT_PURCHASES:
+    _src = COMMIT_EVENT_SOURCES.get(_p.service)
+    if _src is None:
+        continue
+    EVENTS.setdefault(_p.operation, ("commit", _src))
+    EVENT_SOURCES[_p.operation] = EVENT_SOURCES.get(_p.operation, frozenset()) | {_src}
+# Purchases that are a commitment only with a term (guard.CommitmentPurchase
+# .when): their event is a commitment when its request parameters carry the
+# commitment duration, a create when they were read and do not, and a
+# commitment when they could not be read (the side that is never explained
+# away).
+TERM_EVENTS = frozenset(_p.operation for _p in COMMITMENT_PURCHASES if _p.when)
 
 # The ledger's action types (policy.py vocabulary) as event kinds.
 KIND_OF_ACTION = {
@@ -85,8 +126,10 @@ KIND_OF_ACTION = {
 }
 
 # A ledger command that names one AWS API can only account for that API's
-# events. Checked in order against the ledger's (redacted) command summary.
-_EXPECT: list[tuple[re.Pattern[str], frozenset[str]]] = [
+# events, and a commitment purchase only for its own service's (the event
+# source). Checked in order against the ledger's (redacted) command summary.
+# Each entry is (pattern, event names) or (pattern, event names, event source).
+_EXPECT: list[tuple[Any, ...]] = [
     (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+run-instances\b"), frozenset({"RunInstances"})),
     (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+terminate-instances\b"),
      frozenset({"TerminateInstances"})),
@@ -94,14 +137,12 @@ _EXPECT: list[tuple[re.Pattern[str], frozenset[str]]] = [
     (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+delete-snapshot\b"), frozenset({"DeleteSnapshot"})),
     (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+delete-nat-gateway\b"),
      frozenset({"DeleteNatGateway"})),
-    (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+purchase-reserved-instances-offering\b"),
-     frozenset({"PurchaseReservedInstancesOffering"})),
-    (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+purchase-host-reservation\b"),
-     frozenset({"PurchaseHostReservation"})),
-    (re.compile(r"\baws\s+(?:\S+\s+)*?rds\s+purchase-reserved-db-instances-offering\b"),
-     frozenset({"PurchaseReservedDBInstancesOffering"})),
-    (re.compile(r"\baws\s+(?:\S+\s+)*?savingsplans\s+create-savings-plan\b"),
-     frozenset({"CreateSavingsPlan"})),
+    *((re.compile(rf"\baws\s+(?:\S+\s+)*?{re.escape(_p.service)}\s+{re.escape(_p.verb)}"
+                  r"(?![\w-])"), frozenset({_p.operation}),
+       COMMIT_EVENT_SOURCES.get(_p.service, ""))
+      for _p in COMMITMENT_PURCHASES),
+    (re.compile(r"\baws\s+(?:\S+\s+)*?ec2\s+create-capacity-reservation-fleet\b"),
+     frozenset({"CreateCapacityReservationFleet"})),
     (re.compile(r"\baws\s+(?:\S+\s+)*?rds\s+create-db-instance\b"),
      frozenset({"CreateDBInstance"})),
     (re.compile(r"\baws\s+(?:\S+\s+)*?rds\s+delete-db-instance\b"),
@@ -134,7 +175,8 @@ MATCHING_NOTE = (
     "Matched by kind and time only: the ledger holds no resource ids (the guard "
     "runs before anything exists). A command that names one API (aws ec2 "
     "run-instances) matches one event of that API; a broad one (terraform apply, "
-    "an MCP call) matches any event of its kind in its window. Console actions "
+    "an MCP call) matches any event of its kind in its window. A commitment purchase "
+    "matches only an event from its own service. Console actions "
     "are never matched to the ledger, and failed calls are listed apart. "
     "Unmatched means nothing in the ledger accounts for it, not proof that no "
     "agent did it."
@@ -198,6 +240,18 @@ def _via(user_agent: str, identity: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _has_key(doc: Any, key: str, depth: int = 0) -> bool:
+    """Whether `key` (lower case, compared without regard to case) is a key
+    anywhere in a request's parameters, however CloudTrail nests them."""
+    if depth > 6:
+        return False
+    if isinstance(doc, dict):
+        return any(str(k).lower() == key or _has_key(v, key, depth + 1) for k, v in doc.items())
+    if isinstance(doc, list):
+        return any(_has_key(v, key, depth + 1) for v in doc)
+    return False
+
+
 def _event(raw: dict[str, Any], region: str) -> dict[str, Any]:
     try:
         detail = json.loads(raw.get("CloudTrailEvent") or "{}")
@@ -210,11 +264,16 @@ def _event(raw: dict[str, Any], region: str) -> dict[str, Any]:
         when = when.replace(tzinfo=UTC)
     name = raw.get("EventName") or detail.get("eventName") or "?"
     ua = detail.get("userAgent") or ""
+    kind = EVENTS.get(name, ("other", ""))[0]
+    if name in TERM_EVENTS:
+        params = detail.get("requestParameters")
+        if isinstance(params, dict) and params and not _has_key(params, "commitmentduration"):
+            kind = "create"
     return {
         "time": when.isoformat(timespec="seconds") if isinstance(when, datetime) else None,
         "region": detail.get("awsRegion") or region,
         "event": name,
-        "kind": EVENTS.get(name, ("other", ""))[0],
+        "kind": kind,
         "source": raw.get("EventSource") or detail.get("eventSource"),
         "event_id": raw.get("EventId"),
         "user": raw.get("Username"),
@@ -316,12 +375,17 @@ def read_events(session: Any, regions: Iterable[str], start: datetime, end: date
 def _expected(command: str) -> frozenset[str] | None:
     """The event names a ledger command can account for; None when any event
     of its kind will do; an empty set when it calls no AWS API at all."""
-    for pattern, names in _EXPECT:
+    return _expectation(command)[0]
+
+
+def _expectation(command: str) -> tuple[frozenset[str] | None, str]:
+    """(_expected, the event source its events must come from, "" for any)."""
+    for pattern, names, *source in _EXPECT:
         if pattern.search(command):
-            return names
+            return names, (source[0] if source else "")
     if not _AWS_TOOLS.search(command) and _NOT_AWS_TOOLS.search(command):
-        return frozenset()
-    return None
+        return frozenset(), ""
+    return None, ""
 
 
 def _candidates(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -334,8 +398,8 @@ def _candidates(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ts = datetime.fromisoformat(r["ts"])
         except (KeyError, TypeError, ValueError):
             continue
-        out.append({**r, "_kind": kind, "_ts": ts,
-                    "_expect": _expected(str(r.get("command") or ""))})
+        expect, source = _expectation(str(r.get("command") or ""))
+        out.append({**r, "_kind": kind, "_ts": ts, "_expect": expect, "_source": source})
     return out
 
 
@@ -380,6 +444,8 @@ def match(events: list[dict[str, Any]], records: list[dict[str, Any]], *,
                 continue
             if r["_expect"] is not None and ev["event"] not in r["_expect"]:
                 continue
+            if r["_source"] and ev.get("source") and ev["source"] != r["_source"]:
+                continue                # the same name, another service's call
             fits.append((r["decision"] == "deny", abs((when - r["_ts"]).total_seconds()), i))
         if not fits:
             out["no_guard_record"].append(public)

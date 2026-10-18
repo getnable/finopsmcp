@@ -11,8 +11,9 @@ Counters only, and silent under NABLE_NO_TELEMETRY like every other event.
 from __future__ import annotations
 
 import argparse
-import io
 import contextlib
+import io
+import os
 
 import pytest
 
@@ -28,6 +29,21 @@ def fired(monkeypatch, tmp_path):
                         lambda e, p: events.append((e, p)))
     monkeypatch.setattr(g, "_settings_path", lambda global_scope: tmp_path / "settings.json")
     return events
+
+
+@pytest.fixture
+def uvx_on_path(tmp_path, monkeypatch):
+    """A `uvx` on PATH, as tests/test_guard_plugin.py has it. With finops in
+    a venv under /tmp the hook is written in its uvx form, and with no uvx on
+    PATH every reinstall repaired a hook that could not start: the test
+    passed only where uv was installed."""
+    bin_dir = tmp_path / "uvx-bin"
+    bin_dir.mkdir()
+    uvx = bin_dir / "uvx"
+    uvx.write_text("#!/bin/sh\nexit 0\n")
+    uvx.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    return uvx
 
 
 def _install(**kw):
@@ -48,7 +64,7 @@ def test_a_fresh_install_is_counted(fired):
     assert evs[0]["scope"] == "project"
 
 
-def test_reinstalling_is_distinguishable_from_a_first_install(fired):
+def test_reinstalling_is_distinguishable_from_a_first_install(fired, uvx_on_path):
     _install()
     fired.clear()
     _install()
