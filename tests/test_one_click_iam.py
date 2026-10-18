@@ -187,3 +187,109 @@ def test_check_credential_scope_names_commitment_purchases_it_could_make(monkeyp
     assert set(_PURCHASE_ACTIONS) <= set(sent["ActionNames"])
     assert sorted(out["dangerous_allowed"]) == sorted(_PURCHASE_ACTIONS)
     assert out["scoped_correctly"] is False
+
+
+# Every commitment purchase the guard asks about, as its IAM action.
+_ALL_PURCHASE_ACTIONS = (
+    *_PURCHASE_ACTIONS,
+    "elasticache:PurchaseReservedCacheNodesOffering", "memorydb:PurchaseReservedNodesOffering",
+    "redshift:PurchaseReservedNodeOffering", "redshift:AcceptReservedNodeExchange",
+    "es:PurchaseReservedElasticsearchInstanceOffering", "es:PurchaseReservedInstanceOffering",
+    "ec2:AcceptReservedInstancesExchangeQuote", "ec2:PurchaseCapacityBlock",
+    "ec2:PurchaseHostReservation", "redshift-serverless:CreateReservation",
+    "bedrock:CreateProvisionedModelThroughput", "sagemaker:CreateTrainingPlan",
+    "sagemaker:ExtendTrainingPlan", "medialive:PurchaseOffering",
+    "mediaconnect:PurchaseOffering", "devicefarm:PurchaseOffering", "outposts:CreateOrder",
+    "glacier:PurchaseProvisionedCapacity",
+)
+
+
+def test_every_commitment_purchase_is_dangerous_and_probed():
+    for action in _ALL_PURCHASE_ACTIONS:
+        assert any(action.startswith(p) for p in I._DANGEROUS_ACTIONS_PREFIXES), action
+    purchase_prefixes = I._DANGEROUS_ACTIONS_PREFIXES[
+        I._DANGEROUS_ACTIONS_PREFIXES.index("rds:Purchase"):]
+    for prefix in purchase_prefixes:
+        assert any(p.startswith(prefix) for p in I._COMMITMENT_PURCHASE_PROBES), prefix
+    import botocore.session
+    session = botocore.session.get_session()
+    for probe in I._COMMITMENT_PURCHASE_PROBES:
+        service, op = probe.split(":", 1)
+        assert op in session.get_service_model(service).operation_names, probe
+
+
+def _scope(monkeypatch, *, simulate=None, probes=None):
+    """check_credential_scope against stubbed STS and IAM: `simulate` is the
+    set of actions the simulator allows, or None when the key may not call
+    it; `probes` is what _probe_permissions found, for that case."""
+    import boto3
+    from botocore.stub import ANY, Stubber
+
+    sts, iam = _stubbed("sts"), _stubbed("iam")
+    sent: dict = {}
+    iam.meta.events.register("provide-client-params.iam.SimulatePrincipalPolicy",
+                             lambda params, **_: sent.update(params))
+    arn = "arn:aws:iam::123456789012:user/ci"
+    monkeypatch.setattr(boto3, "client", lambda name, *a, **k: {"sts": sts, "iam": iam}[name])
+    if probes is not None:
+        monkeypatch.setattr(I, "_probe_permissions", lambda: dict(probes))
+    with Stubber(sts) as s_sts, Stubber(iam) as s_iam:
+        s_sts.add_response("get_caller_identity",
+                           {"Account": "123456789012", "Arn": arn, "UserId": "AIDA0"})
+        if simulate is None:
+            s_iam.add_client_error("simulate_principal_policy", "AccessDenied",
+                                   http_status_code=403)
+        else:
+            names = list(dict.fromkeys(
+                [*I._REQUIRED_ACTIONS, "ec2:TerminateInstances", "s3:PutObject",
+                 "iam:CreateUser", "lambda:InvokeFunction", *I._COMMITMENT_PURCHASE_PROBES]))
+            s_iam.add_response("simulate_principal_policy", {"EvaluationResults": [
+                {"EvalActionName": a, "EvalDecision": "allowed" if a in simulate
+                 else "implicitDeny"} for a in names]},
+                {"PolicySourceArn": arn, "ActionNames": ANY, "ResourceArns": ["*"]})
+        out = I.check_credential_scope()
+    return out, sent
+
+
+def test_a_key_that_can_buy_reserved_nodes_or_exchange_is_not_scoped(monkeypatch):
+    buys = {"elasticache:PurchaseReservedCacheNodesOffering",
+            "redshift:PurchaseReservedNodeOffering", "ec2:AcceptReservedInstancesExchangeQuote"}
+    out, sent = _scope(monkeypatch, simulate=set(I._REQUIRED_ACTIONS) | buys)
+    assert buys <= set(sent["ActionNames"])
+    assert set(out["dangerous_allowed"]) == buys
+    assert out["scoped_correctly"] is False
+
+
+def test_a_key_that_cannot_simulate_is_not_reported_clean(monkeypatch):
+    """The fallback probes only a few actions. What it could not reach is not
+    read, never denied and never allowed, and the key is not proven clean."""
+    probed = {a: "allowed" for a in I._REQUIRED_ACTIONS}
+    probed.update({"ec2:TerminateInstances": "implicitDeny", "s3:PutObject": "implicitDeny",
+                   "ec2:PurchaseReservedInstancesOffering": "implicitDeny"})
+    out, _ = _scope(monkeypatch, probes=probed)
+    assert out["scoped_correctly"] is None
+    assert "rds:PurchaseReservedDBInstancesOffering" in out["not_read"]
+    assert "ec2:PurchaseReservedInstancesOffering" not in out["not_read"]
+    assert out["dangerous_allowed"] == [] and out["required_denied"] == []
+
+
+def test_the_fallback_asks_ec2_about_a_purchase_as_a_dry_run(monkeypatch):
+    import boto3
+    from botocore.stub import Stubber
+
+    ce, ec2, s3 = _stubbed("ce"), _stubbed("ec2"), _stubbed("s3")
+    monkeypatch.setattr(boto3, "client", lambda name, *a, **k: {"ce": ce, "ec2": ec2,
+                                                                 "s3": s3}[name])
+    with Stubber(ce) as s_ce, Stubber(ec2) as s_ec2, Stubber(s3) as s_s3:
+        s_ce.add_response("get_cost_and_usage", {"ResultsByTime": []})
+        s_ec2.add_client_error("describe_regions", "DryRunOperation")
+        s_ec2.add_client_error("terminate_instances", "UnauthorizedOperation")
+        s_ec2.add_client_error("purchase_reserved_instances_offering", "DryRunOperation",
+                               expected_params={
+                                   "InstanceCount": 1, "DryRun": True,
+                                   "ReservedInstancesOfferingId":
+                                       "00000000-0000-0000-0000-000000000000"})
+        s_s3.add_client_error("put_object", "AccessDenied")
+        got = I._probe_permissions()
+    assert got["ec2:PurchaseReservedInstancesOffering"] == "allowed"
+    assert got["ec2:TerminateInstances"] == "implicitDeny"

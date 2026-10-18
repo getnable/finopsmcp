@@ -4382,8 +4382,14 @@ def main(args: list[str] | None = None) -> None:
             raise SystemExit(1)
         print(f"  Account:      {result['account_id']}")
         print(f"  Identity:     {result['identity_arn']}")
-        print(f"  Correctly scoped: {'✓ Yes' if result['scoped_correctly'] else '✗ No'}")
-        if result.get("required_denied"):
+        scoped = result["scoped_correctly"]
+        said = "✓ Yes" if scoped else "not proven" if scoped is None else "✗ No"
+        print(f"  Correctly scoped: {said}")
+        if result.get("not_read"):
+            print(f"\n  Not read ({len(result['not_read'])}): this key cannot call the IAM "
+                  "simulator, so these were not checked:")
+            for a in result["not_read"]:
+                print(f"    ? {a}")
             print(f"\n  Missing permissions ({len(result['required_denied'])}):")
             for a in result["required_denied"]:
                 print(f"    ✗ {a}")
@@ -4393,12 +4399,13 @@ def main(args: list[str] | None = None) -> None:
                 print(f"    ⚠ {a}")
             print()
             print("  Run `finops setup aws --iam-template` to generate a scoped policy.")
-        elif not result.get("required_denied"):
+        elif scoped:
             print("\n  ✓ Credentials are read-only and correctly scoped for nable.")
         print()
         if not result.get("scoped_correctly"):
-            # Missing permissions or write access: the answer to "is this key
-            # read-only and enough?" is no, and a pipeline reads the exit code.
+            # Missing permissions, write access, or something that could not
+            # be read: the answer to "is this key read-only and enough?" is not
+            # yes, and a pipeline reads the exit code.
             raise SystemExit(1)
         return
     elif parsed.cmd == "claude":

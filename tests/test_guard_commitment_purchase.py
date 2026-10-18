@@ -69,8 +69,36 @@ EXISTING = [
     (("aws rds purchase-reserved-db-instances-offering --reserved-db-instances-offering-id o-1 "
       "--db-instance-count 2"), "rds", "PurchaseReservedDBInstancesOffering"),
 ]
-ALL = NEW + EXISTING
-IDS = [op for _, _, op in ALL]
+# Term commitments outside the reservation verbs: a Redshift Serverless
+# reservation, a Redshift reserved node exchanged for a new one, Bedrock
+# Provisioned Throughput with a commitment term, SageMaker training plans,
+# MediaLive and MediaConnect reservations, an Outposts order, Glacier
+# provisioned capacity and Device Farm slots. Each is bought for a term and
+# cannot be cancelled once bought.
+MORE = [
+    ("aws redshift-serverless create-reservation --capacity 64 --offering-id o-1",
+     "redshift-serverless", "CreateReservation"),
+    (("aws redshift accept-reserved-node-exchange --reserved-node-id rn-1 "
+      "--target-reserved-node-offering-id o-1"), "redshift", "AcceptReservedNodeExchange"),
+    (("aws bedrock create-provisioned-model-throughput --model-units 1 "
+      "--provisioned-model-name p --model-id m --commitment-duration SixMonths"),
+     "bedrock", "CreateProvisionedModelThroughput"),
+    ("aws sagemaker create-training-plan --training-plan-name p --training-plan-offering-id o-1",
+     "sagemaker", "CreateTrainingPlan"),
+    ("aws sagemaker extend-training-plan --training-plan-extension-offering-id o-1",
+     "sagemaker", "ExtendTrainingPlan"),
+    ("aws medialive purchase-offering --offering-id 1 --count 1", "medialive", "PurchaseOffering"),
+    (("aws mediaconnect purchase-offering --offering-arn arn:aws:mediaconnect:x "
+      "--reservation-name r --start 2026-11-01"), "mediaconnect", "PurchaseOffering"),
+    (("aws outposts create-order --outpost-identifier op-1 --payment-option ALL_UPFRONT "
+      "--payment-term THREE_YEARS"), "outposts", "CreateOrder"),
+    ("aws glacier purchase-provisioned-capacity --account-id -", "glacier",
+     "PurchaseProvisionedCapacity"),
+    ("aws devicefarm purchase-offering --offering-id o-1 --quantity 1", "devicefarm",
+     "PurchaseOffering"),
+]
+ALL = NEW + EXISTING + MORE
+IDS = [f"{svc}-{op}" for _, svc, op in ALL]
 SP_BUY = EXISTING[0][0]
 RDS_BUY = EXISTING[3][0]
 
@@ -87,6 +115,20 @@ BOTO3_BUYS = [
      ".purchase_reserved_cache_nodes_offering(ReservedCacheNodesOfferingId=\"o-1\")'"),
     ("python3 -c \"import boto3; boto3.client('ec2').purchase_capacity_block_extension("
      "CapacityBlockExtensionOfferingId='x', CapacityReservationId='cr-1')\""),
+    ("python3 -c \"import boto3; boto3.client('redshift-serverless').create_reservation("
+     "capacity=64, offeringId='o-1')\""),
+    ("python3 -c \"import boto3; boto3.client('bedrock').create_provisioned_model_throughput("
+     "modelUnits=1, provisionedModelName='p', modelId='m', commitmentDuration='SixMonths')\""),
+    ("python3 -c \"import boto3; boto3.client('sagemaker').create_training_plan("
+     "TrainingPlanName='p', TrainingPlanOfferingId='o-1')\""),
+    ("python3 -c \"import boto3; boto3.client('redshift').accept_reserved_node_exchange("
+     "ReservedNodeId='rn-1', TargetReservedNodeOfferingId='o-1')\""),
+    ("python3 -c \"import boto3; boto3.client('medialive').purchase_offering("
+     "OfferingId='1', Count=1)\""),
+    ("python3 -c \"import boto3; boto3.client('outposts').create_order("
+     "OutpostIdentifier='op-1', PaymentOption='ALL_UPFRONT')\""),
+    ("python3 -c \"import boto3; boto3.client('glacier').purchase_provisioned_capacity("
+     "accountId='-')\""),
 ]
 
 
@@ -168,6 +210,8 @@ _USE_AWS_PARAMS = {
     "PurchaseReservedDBInstancesOffering": {"ReservedDBInstancesOfferingId": "o-1",
                                             "DBInstanceCount": 3},
     "CreateSavingsPlan": {"savingsPlanOfferingId": "o-1", "commitment": "2.5"},
+    "CreateProvisionedModelThroughput": {"modelUnits": 1, "provisionedModelName": "p",
+                                         "modelId": "m", "commitmentDuration": "SixMonths"},
 }
 
 
@@ -198,6 +242,24 @@ def test_a_boto3_one_liner_that_buys_asks(cmd):
 ])
 def test_reading_or_naming_a_purchase_does_not_ask(cmd):
     assert g.gate_command(cmd, record=False) is None
+
+
+def test_bedrock_provisioned_throughput_is_a_commitment_only_with_a_term():
+    """With no commitment duration it is billed by the hour and can be
+    deleted; with one it is a one- or six-month term."""
+    model = botocore.session.get_session().get_service_model("bedrock")
+    shape = model.operation_model("CreateProvisionedModelThroughput").input_shape
+    assert "commitmentDuration" in shape.members
+    hourly = ("aws bedrock create-provisioned-model-throughput --model-units 1 "
+              "--provisioned-model-name p --model-id m")
+    assert g.gate_command(hourly, record=False) is None
+    assert g.gate_mcp_call("mcp__q__use_aws", {
+        "service_name": "bedrock", "operation_name": "CreateProvisionedModelThroughput",
+        "parameters": {"modelUnits": 1, "provisionedModelName": "p", "modelId": "m"}},
+        record=False) is None
+    assert g.gate_command("python3 -c \"import boto3; boto3.client('bedrock')"
+                          ".create_provisioned_model_throughput(modelUnits=1, "
+                          "provisionedModelName='p', modelId='m')\"", record=False) is None
 
 
 def test_an_ec2_dry_run_buys_nothing():
@@ -275,7 +337,9 @@ def _pack_rules(monkeypatch, verdict: str):
     from finops import guard_packs
     from finops.packs.content import parse_guard_rules
     problems: list = []
-    rule = {"id": "buying", "pattern": r"purchase|create-savings|accept-reserved",
+    rule = {"id": "buying", "pattern": (r"purchase|create-savings|accept-reserved|"
+                                        r"create-reservation|provisioned-model|training-plan|"
+                                        r"create-order"),
             "verdict": verdict, "reason": "not this quarter"}
     rules = parse_guard_rules({"rules": [rule]}, "g.yaml", problems)
     assert not problems

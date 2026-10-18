@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -111,7 +112,11 @@ def _cli_flags(params: Any) -> str:
     `MaxCount`); both become the CLI flag (`--instance-type`, `--max-count`),
     because that is what the classifier and the pricer read. Passed verbatim,
     `{"InstanceType": "p4d.24xlarge", "MaxCount": 8}` was a launch nobody
-    could price."""
+    could price.
+
+    Each value is quoted as the shell would need it, so a value stays one
+    argument: `{"ClientToken": "x --dry-run"}` is a token, not a dry run.
+    Only `DryRun: true` becomes the flag."""
     if not isinstance(params, dict):
         return ""
     out = []
@@ -122,12 +127,12 @@ def _cli_flags(params: Any) -> str:
         elif v is False or v is None:
             continue
         elif isinstance(v, list):
-            out.append(_join(flag, *(json.dumps(x) if isinstance(x, (dict, list)) else str(x)
-                                     for x in v)))
+            out.append(_join(flag, *(shlex.quote(json.dumps(x) if isinstance(x, (dict, list))
+                                                 else str(x)) for x in v)))
         elif isinstance(v, dict):
-            out.append(f"{flag} {json.dumps(v, separators=(',', ':'))}")
+            out.append(f"{flag} {shlex.quote(json.dumps(v, separators=(',', ':')))}")
         else:
-            out.append(f"{flag} {v}")
+            out.append(f"{flag} {shlex.quote(str(v))}")
     return " ".join(out)
 
 
@@ -167,6 +172,13 @@ _CLI_WORD_RE = re.compile(
 # ("never run terraform destroy" in an issue body) stays silent.
 _COMMAND_KEYS = frozenset({"command", "commands", "cmd", "script", "args", "arguments",
                            "argv", "input", "code", "cli_command", "shell"})
+# A shell tool may take the program and the rest of argv apart:
+# {"command": "aws", "args": ["rds", "purchase-..."]}. Neither half is a
+# command line on its own, so a program key holding a bare CLI name is
+# joined with its argv sibling and the two are judged as one.
+_PROGRAM_KEYS = ("command", "cmd", "program", "executable")
+_ARGV_KEYS = ("args", "argv", "arguments")
+_BARE_CLI_RE = re.compile(rf"\s*(?:\S*/)?(?:{_CLI_NAMES})\s*", re.IGNORECASE)
 _CLI_PREFIX_SCAN = 512          # how far into a line the program name may sit
 _STRINGS_MAX = 64               # command lines judged per call
 _ARG_DEPTH = 8                  # how deep in the arguments they are judged
@@ -186,6 +198,23 @@ def _names_cli(s: str, key: str) -> bool:
     if key.lower() in _COMMAND_KEYS:
         return _CLI_WORD_RE.search(s) is not None
     return any(_is_cli_command(seg) for seg in _SEGMENT_RE.split(s))
+
+
+def _program_and_argv(d: dict[Any, Any]) -> str | None:
+    """`aws rds purchase-...` from {"command": "aws", "args": ["rds", ...]},
+    or None when the dict is not that shape."""
+    keys = {str(k).lower(): k for k in d}
+    for pk in _PROGRAM_KEYS:
+        prog = d.get(keys[pk]) if pk in keys else None
+        if not isinstance(prog, str) or not _BARE_CLI_RE.fullmatch(prog):
+            continue
+        for ak in _ARGV_KEYS:
+            argv = d.get(keys[ak]) if ak in keys else None
+            if isinstance(argv, str) and argv.strip():
+                return f"{prog.strip()} {argv.strip()}"
+            if isinstance(argv, list) and argv and all(isinstance(x, str) for x in argv):
+                return " ".join([prog.strip(), *argv])
+    return None
 
 
 @dataclass
@@ -249,6 +278,12 @@ def scan_arguments(args: Any, *, implied: str = "") -> _Scan:
             for x in v:
                 walk(x, key, depth + 1)
         elif isinstance(v, dict):
+            joined = _program_and_argv(v)
+            if joined is not None:
+                if len(scan.found) >= _STRINGS_MAX:
+                    scan.unchecked = f"more than {_STRINGS_MAX} command lines"
+                    return
+                scan.found.append(joined)
             # Command-like keys first, so padding in other arguments cannot
             # use up the budget before the command is reached.
             items = sorted(v.items(), key=lambda kv: str(kv[0]).lower() not in _COMMAND_KEYS)

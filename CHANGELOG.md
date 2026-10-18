@@ -43,10 +43,33 @@ bump.
 - **The guard asks before any commitment purchase.**
   - New: ElastiCache, MemoryDB, Redshift, OpenSearch and Elasticsearch
     reserved nodes and instances, EC2 Scheduled Instances, Capacity Blocks
-    and their extensions, and Reserved Instance exchanges, each pinned to an
-    operation in botocore's service model, through `nable guard check`, the
-    hook, and the MCP call_aws and use_aws paths. A boto3 one-liner that buys
-    one asks too (a heuristic, like the one for deletes).
+    and their extensions, and Reserved Instance exchanges; Redshift reserved
+    node exchanges, Redshift Serverless reservations, Bedrock Provisioned
+    Throughput with a commitment duration (without one it is hourly and
+    does not ask), SageMaker training plans and their extensions, MediaLive,
+    MediaConnect and Device Farm offerings, Outposts orders and Glacier
+    provisioned capacity. Each is pinned to an operation in botocore's
+    service model, through `nable guard check`, the hook, and the MCP
+    call_aws and use_aws paths. Python code that buys one asks too (a
+    heuristic, like the one for deletes): a `-c` one-liner, combined flags
+    ending in `c`, code on stdin from a heredoc or a pipe, a boto3 or a
+    botocore client, and `_make_api_call` with the operation's own name. The
+    AWS CLI run as `python -m awscli` is read as `aws`, and an aws command
+    whose service or operation is a variable or a substitution asks, since
+    the guard cannot read what it runs.
+  - A Terraform, OpenTofu or Terragrunt apply, or a `pulumi up`, that creates
+    `aws_rds_reserved_instance`, `aws_elasticache_reserved_cache_node` or
+    `aws_ec2_capacity_block_reservation` (or the Pulumi `rds.ReservedInstance`,
+    `elasticache.ReservedCacheNode` and `ec2.CapacityBlockReservation`)
+    asks: from a saved plan's creates, or else from the configuration the
+    apply reads (the root module, its local modules and `.terraform/modules`;
+    every module below a Terragrunt directory; a Pulumi project's own source,
+    its dependencies left out). A configuration too large to read asks.
+  - A dry run excuses a purchase only when the shell hands the CLI
+    `--dry-run` as an argument of its own: not in a comment, not inside
+    another option's quoted value, and in use_aws only from `DryRun: true`.
+  - An MCP shell tool that takes the program in `command` and argv in
+    `args`, `argv` or `arguments` is judged as the joined command line.
   - Never weaker than an ask: no policy (escalate_one_way_doors off, a high
     max_auto_monthly_usd, purchase_commitment on the allowed-actions list),
     pack, learned threshold or one-time approval turns a commitment purchase
@@ -59,9 +82,15 @@ bump.
     shows no figure, and names the count the command buys where it gives one
     (`--db-instance-count`, `--cache-node-count`, `--node-count`,
     `--instance-count`).
-  - `rds:Purchase`, `ec2:Purchase` and `savingsplans:Create` are dangerous
-    prefixes for a read-only key, and `nable setup aws --check-scope` asks the
-    IAM simulator about one purchase action for each.
+  - Every one of those purchases is a dangerous action for a read-only key
+    (`rds:Purchase`, `ec2:Purchase`, `savingsplans:Create`,
+    `elasticache:Purchase`, `memorydb:Purchase`, `redshift:Purchase`,
+    `es:Purchase` and the rest by name), and `nable setup aws --check-scope`
+    asks the IAM simulator about one action for each. A key that cannot call
+    the simulator is checked by the probes that need none, an EC2 Reserved
+    Instance purchase among them as a dry run; whatever those cannot reach
+    is listed as not read, never as denied or allowed, and the key is
+    reported as not proven (exit 1), not as correctly scoped.
 - **Regional and Multi-AZ RDS rates, each a cited Price List row.**
   `aws_prices.rds_rate(instance_class, engine, region, multi_az=False)`
   returns an `RdsRate` (the listed USD string, region, engine, deployment,
