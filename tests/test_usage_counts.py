@@ -334,6 +334,29 @@ def test_no_ledger_or_an_unreadable_one_sends_nothing_never_a_zero(monkeypatch, 
     assert not _tel()._COUNTS_FILE.exists(), "a failed read was recorded as counted"
 
 
+def test_a_count_whose_state_cannot_be_kept_is_not_sent(monkeypatch, sent):
+    """Sent without its state, the same asks would be counted again at the
+    next start: a count that cannot be remembered is not sent at all."""
+    import os
+    _consent(monkeypatch)
+    _write_ledger(guard_ledger.ledger_path(), [_ask(NOW - timedelta(days=1))])
+    real = os.replace
+
+    def refuse(src, dst, *a, **k):
+        if Path(dst) == _tel()._COUNTS_FILE:
+            raise OSError(28, "No space left on device")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "replace", refuse)
+    assert _tel().count_guard_asks(now=NOW) is False
+    assert _events(sent, "guard_commitment_asks") == []
+    monkeypatch.setattr(os, "replace", real)
+    assert _tel().count_guard_asks(now=NOW + timedelta(hours=1)) is True
+    assert _tel().count_guard_asks(now=NOW + timedelta(days=1)) is True
+    first, second = (e["properties"]["asks"] for e in _events(sent, "guard_commitment_asks"))
+    assert (first, second) == (1, 0), "an ask was counted twice"
+
+
 def test_the_counts_state_is_private(monkeypatch, sent):
     _consent(monkeypatch)
     _write_ledger(guard_ledger.ledger_path(), [_ask(NOW)])

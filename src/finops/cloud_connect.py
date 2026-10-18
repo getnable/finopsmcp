@@ -579,15 +579,15 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
         return "\n".join(lines)
     count = len(plan(payload, None))
     n_lines = len(payload.lines)
-    lines += [f"Payload       {n_lines:,} line{'s' if n_lines != 1 else ''}, "
-              f"{len(payload.data):,} bytes, "
-              f"{count} batch{'es' if count != 1 else ''} of at most {BATCH_MAX:,} bytes",
+    lines += [(f"Payload       {n_lines:,} line{'s' if n_lines != 1 else ''}, "
+               f"{len(payload.data):,} bytes, "
+               f"{count} batch{'es' if count != 1 else ''} of at most {BATCH_MAX:,} bytes"),
               f"  sha256 {payload.sha256}"]
     if out:
         lines.append(f"  saved to {out}: exactly the bytes that would leave")
     lines += ["", "To send exactly these bytes:",
               f"  nable cloud connect --box {box} --send --confirm {payload.sha256}",
-              f"The workspace key is read from {KEY_ENV}, a --key-file with mode 0600, or a "
-              "hidden prompt, never from the command line. A resend skips what the "
-              "workspace already holds."]
+              (f"The workspace key is read from {KEY_ENV}, a --key-file with mode 0600, or "
+               "a hidden prompt, never from the command line. A resend skips what the "
+               "workspace already holds.")]
     return "\n".join(lines)

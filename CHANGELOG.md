@@ -268,8 +268,9 @@ regions, Multi-AZ included, from cited Price List rows.
   - The workspace key (an analyst key bound to the workspace, made on its
     /workspace page) is read from the new `NABLE_WORKSPACE_KEY`, a
     `--key-file` with mode 0600, or a hidden prompt. It is never taken from
-    the command line (`--key` is refused without being echoed), and never
-    stored, printed or logged.
+    the command line (`--key`, a word left over and a flag the command does
+    not have are refused, and none of them is repeated), and never stored,
+    printed or logged.
   - An org file that is a symlink, is not a regular file, is over 128 KiB or
     is not UTF-8 is left out and named; a repo's `nable.org/` nobody trusted
     here is not sent. A ledger over 50,000 records or 32 MiB, the most a
@@ -291,7 +292,9 @@ regions, Multi-AZ included, from cited Price List rows.
   enumerations, with counts clamped at 100,000, so no account id, ARN, dollar
   figure, command, path or resource name travels in one. There is no new
   prompt. `NABLE_NO_TELEMETRY`, `DO_NOT_TRACK`, CI and air-gap mode send
-  nothing, and without consent the ledger is not read for it.
+  nothing, and without consent the ledger is not read for it. A count whose
+  place in the ledger cannot be remembered is not sent, so no ask is counted
+  twice.
 - **Guard ledger read helpers.** `guard_ledger.count_asks`, `chain_of` and
   `stored_lines` read the ledger for the two features above; the append path
   and the record format are unchanged.

@@ -29,7 +29,8 @@ Two usage counts, sent under the same consent, with no new prompt:
     window that count covers, in days. Counted from the local ledger at most
     once a day, from a CLI or MCP start, on a background thread, and never
     from inside the guard hook: the hook imports no telemetry. No ledger, or
-    one that cannot be read, sends nothing, never a zero.
+    one that cannot be read, sends nothing, never a zero; nor does a count
+    whose place in the ledger cannot be remembered, so none is sent twice.
   Each is a closed allow-list of integers, booleans and enumerations
   (USAGE_EVENTS). A property off the list or of the wrong kind never leaves,
   and a count is clamped at COUNT_MAX, so no identifier fits in one. Neither
@@ -695,7 +696,7 @@ USAGE_EVENTS: dict[str, dict[str, object]] = {
 COUNT_MAX = 100_000
 
 
-def usage_props(event: str, raw: dict) -> "dict | None":
+def usage_props(event: str, raw: dict) -> dict | None:
     """The allow-listed properties of one usage event, or None for an event
     that is not one of USAGE_EVENTS."""
     spec = USAGE_EVENTS.get(event)
@@ -735,10 +736,11 @@ def _read_counts_state() -> dict:
     return state if isinstance(state, dict) else {}
 
 
-def _write_counts_state(state: dict) -> None:
-    """Atomically, 0600. A filesystem that refuses just means the next start
-    counts again from the same place."""
-    try:
+def _write_counts_state(state: dict) -> bool:
+    """Atomically, 0600. False when the filesystem refused: the count it
+    belongs to is then not sent, since the next start would count the same
+    records again."""
+    with contextlib.suppress(Exception):
         _COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = _COUNTS_FILE.with_name(_COUNTS_FILE.name + ".tmp")
         try:
@@ -750,8 +752,8 @@ def _write_counts_state(state: dict) -> None:
         with os.fdopen(fd, "w") as fh:
             fh.write(json.dumps(state))
         os.replace(tmp, _COUNTS_FILE)
-    except Exception:
-        pass
+        return True
+    return False
 
 
 _COUNTS_STARTED = False
@@ -796,14 +798,14 @@ def count_guard_asks(now: datetime | None = None) -> bool:
     The state remembers the record the last count ended on, by line and
     hash, so a record is counted once; a ledger rewritten since is counted
     by time instead. The state is written before the send: a process that
-    exits mid-send loses that window's count rather than counting it twice.
-    Never raises."""
+    exits mid-send loses that window's count rather than counting it twice,
+    and a state that cannot be written sends nothing. Never raises."""
     try:
         if _is_opted_out():
             return False
         with _counts_lock() as mine:
             return mine and _count_guard_asks(now or datetime.now(UTC))
-    except Exception:
+    except Exception:  # noqa: BLE001 - a count never fails a start
         return False
 
 
@@ -831,8 +833,9 @@ def _count_guard_asks(now: datetime) -> bool:
         start = None
     seconds = max(0.0, (now - start).total_seconds()) if start is not None else 0.0
     window = int(-(-seconds // 86400)) if seconds else 0
-    _write_counts_state({"day": today, "sent_at": now.isoformat(),
-                         "through": got.get("through") or state.get("through")})
+    if not _write_counts_state({"day": today, "sent_at": now.isoformat(),
+                                "through": got.get("through") or state.get("through")}):
+        return False                        # not remembered: counted again would be twice
     return send_usage("guard_commitment_asks",
                       {"asks": int(got["asks"]), "window_days": window})
 
@@ -843,7 +846,7 @@ def start_usage_counts() -> None:
     never calls this: it never imports this module. Once a process: a CLI
     command can reach both this and the MCP server's start."""
     global _COUNTS_STARTED
-    try:
+    with contextlib.suppress(Exception):
         if _is_opted_out():
             return
         with _lock:
@@ -851,5 +854,3 @@ def start_usage_counts() -> None:
                 return
             _COUNTS_STARTED = True
         in_background(count_guard_asks)
-    except Exception:
-        pass

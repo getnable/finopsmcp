@@ -569,7 +569,7 @@ def test_no_mcp_tool_can_send_to_a_workspace():
     assert naming("cloud_connect") == [], "something but the cloud CLI reaches the sender"
     assert naming("cli_cloud") == ["setup_wizard.py"], "the cloud CLI is reached elsewhere"
     tools = _registered_tools()
-    for name, tool in tools.items():
+    for name in tools:
         assert "cloud_connect" not in name and "free_tool" not in name, name
 
 

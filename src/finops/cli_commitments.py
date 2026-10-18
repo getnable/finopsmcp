@@ -110,7 +110,7 @@ def _count_run(code: int, commitments: list[dict], missed: list[cs.NotRead] | No
             "exit_class": exit_class(code), "commitments_read": len(commitments),
             "ending_within_90_days": ending, "services_not_read": not_read,
             "json": as_json})
-    except Exception:  # noqa: BLE001 - a count is never worth a failed command
+    except Exception:  # noqa: BLE001, S110 - a count is never worth a failed command
         pass
 
 

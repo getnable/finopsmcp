@@ -3786,7 +3786,7 @@ def main(args: list[str] | None = None) -> None:
             try:
                 from .telemetry import start_usage_counts
                 start_usage_counts()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - a count never stops a command
                 pass
 
     # `guard` output belongs to the guard: no first-run welcome, no PATH
@@ -4178,6 +4178,12 @@ def main(args: list[str] | None = None) -> None:
     profile_p.add_argument("profile_name", nargs="?", default="")
 
     parsed, _extras = parser.parse_known_args(args)
+    if _extras and parsed.cmd == "cloud":
+        # `nable cloud` is the one command handed a workspace key, and a key
+        # typed under a flag it does not have would be printed straight back
+        # below. It names none of them.
+        from .cli_cloud import refuse_extras
+        raise SystemExit(refuse_extras(_extras, as_json=bool(getattr(parsed, "json", False))))
     if _extras:
         # A bad flag on a subcommand (`nable scan --jsn`) used to print the
         # top-level usage, which lists commands, not the flag that was wrong.

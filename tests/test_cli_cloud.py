@@ -169,16 +169,27 @@ def test_a_key_on_the_command_line_is_refused_unechoed_and_unused(machine, argv)
     assert "never taken from the command line" in err
 
 
-def test_a_key_on_the_real_command_line_is_not_echoed(machine, tmp_path):
-    env = {k: v for k, v in os.environ.items() if k != cc.KEY_ENV}
-    env.update(PYTHONPATH=SRC, HOME=str(tmp_path / "home"), NABLE_NO_TELEMETRY="1",
-               FINOPS_DATA_DIR=str(tmp_path / "data"))
-    r = subprocess.run([sys.executable, "-c", "from finops.setup_wizard import main; main()",
-                        "cloud", "connect", "--box", BOX, "--key", KEY],
-                       capture_output=True, text=True, env=env, timeout=60,
-                       stdin=subprocess.DEVNULL, check=False)
+@pytest.mark.parametrize("argv", [
+    ["--key", KEY],
+    # Flags nable does not have: argparse would name each one it did not
+    # recognize, value and all, so `nable cloud` names none of them.
+    [f"--token={KEY}"], [f"--bearer={KEY}"], [f"-k{KEY}"], ["--token", KEY],
+    [f"--workspace-token={KEY}", "--json"],
+])
+def test_a_key_on_the_real_command_line_is_not_echoed(machine, tmp_path, argv):
+    r = _nable(tmp_path, "cloud", "connect", "--box", BOX, *argv)
     assert r.returncode == cli_cloud.EXIT_USAGE, r.stderr
-    assert KEY not in r.stdout + r.stderr
+    assert KEY not in r.stdout + r.stderr, "the key was echoed"
+    assert "never taken from the command line" in r.stderr
+    if "--json" in argv:
+        assert json.loads(r.stdout)["error"]["exit_code"] == cli_cloud.EXIT_USAGE
+
+
+def test_an_unknown_flag_elsewhere_still_names_itself(machine, tmp_path):
+    """Only `nable cloud` keeps an unknown flag's text back; every other
+    command still says which flag it did not know."""
+    r = _nable(tmp_path, "brief", "--jsn")
+    assert r.returncode == 2 and "--jsn" in r.stderr
 
 
 def test_a_key_file_must_be_0600(machine, tmp_path):

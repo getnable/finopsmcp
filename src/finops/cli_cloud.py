@@ -15,7 +15,8 @@ bytes that sha256 names.
 The workspace key is a bound analyst key made on the workspace's /workspace
 page, read from NABLE_WORKSPACE_KEY, a --key-file with mode 0600, or a hidden
 prompt at a terminal. It is never an argument: a --key given anyway is refused
-without being echoed or used, and so is any word left over, which could be one.
+without being echoed or used, and so is any word left over or any flag this
+command does not have, since either could be one. None of them is repeated.
 
 Exit codes:
     0  the dry run was built, the send finished, or the status was read
@@ -90,6 +91,20 @@ def add_parser(sub) -> None:
                    help="send the payload; needs --confirm with the sha256 the dry run printed")
     c.add_argument("--confirm", metavar="SHA256",
                    help="the payload's sha256, as the dry run printed it")
+
+
+def refuse_extras(extras: list[str], *, as_json: bool, stdout: Any = None,
+                  stderr: Any = None) -> int:
+    """Words on a `nable cloud` command line that no option took: refused
+    like a key on the command line, and none of them repeated, since any could
+    be one (the wizard's parser would print each back, value and all)."""
+    n = len(extras)
+    return _fail("key_in_argv", EXIT_USAGE,
+                 f"{n} argument{'s' if n != 1 else ''} not recognized, and not repeated here: "
+                 "a workspace key is never taken from the command line, and any of them could "
+                 "be one. `nable cloud connect --help` lists the options. A key typed on a "
+                 "command line is in your shell history: revoke it on /workspace and make "
+                 "another.", as_json=as_json, out=stdout or sys.stdout, err=stderr or sys.stderr)
 
 
 def _err_doc(klass: str, code: int, message: str) -> str:

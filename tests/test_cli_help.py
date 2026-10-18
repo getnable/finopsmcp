@@ -109,8 +109,8 @@ def test_cloud_is_registered_and_runs_though_not_yet_listed():
     out = _help_text()
     assert "\n  cloud " not in out.split("\noptions\n", 1)[0]
     r = subprocess.run(
-        [sys.executable, "-c", "import sys; sys.argv=['finops','cloud','--help']; "
-                               "from finops.setup_wizard import main; main()"],
-        capture_output=True, text=True, timeout=60,
+        [sys.executable, "-c", ("import sys; sys.argv=['finops','cloud','--help']; "
+                                "from finops.setup_wizard import main; main()")],
+        capture_output=True, text=True, timeout=60, check=False,
         env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC})
     assert r.returncode == 0 and "connect" in r.stdout and "status" in r.stdout, r.stderr
