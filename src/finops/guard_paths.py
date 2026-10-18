@@ -50,6 +50,10 @@ _LEDGER_FILES = (
     ("packs-guard-cache.json", "the guard's cache of pack rules and price books"),
     # guard_approvals.STORE_NAME: an approval written here lets a call through.
     ("guard-approvals.json", "the one-time approvals for calls the guard stopped"),
+    # ai_budget.PERSON_CACHE: whose org model AI budget this machine is held to.
+    ("guard-person.json", "the git identity the org model's AI budgets are matched by"),
+    # The connect payload's install id (SOURCE_NAME): changed, a resend counts usage twice.
+    ("agent-usage-source", "the install id coding-agent usage is sent under"),
 )
 # Directories beside the ledger: facts derived from the org model's files,
 # keyed on their content (written into, they would be read as facts).

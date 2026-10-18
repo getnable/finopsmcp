@@ -32,7 +32,7 @@ KNOWN: frozenset[str] = frozenset({
     'FINOPS_DEMO_MODE', 'FINOPS_DIGEST_CRON', 'FINOPS_DIGEST_TO', 'FINOPS_FIPS',
     'FINOPS_FLAT_TOOLS', 'FINOPS_GOVCLOUD', 'FINOPS_GUARD', 'FINOPS_GUARD_ACCOUNT',
     'FINOPS_GUARD_AUTO_REFRESH_BUDGET', 'FINOPS_GUARD_BACKGROUND_REFRESH',
-    'FINOPS_GUARD_BUDGET_MAX_AGE_HOURS', 'FINOPS_GUARD_PROD_PATTERNS',
+    'FINOPS_GUARD_BUDGET_MAX_AGE_HOURS', 'FINOPS_GUARD_PERSON', 'FINOPS_GUARD_PROD_PATTERNS',
     'FINOPS_GUARD_RELEASE_CHECK', 'FINOPS_GUARD_STOP_ON_BUDGET', 'FINOPS_GUARD_STRICT', 'FINOPS_GUARD_TEAM',
     'FINOPS_HOME', 'FINOPS_INSTANCE_ID', 'FINOPS_INVOICE_FOLDER',
     'FINOPS_INVOICE_IMAP_HOST', 'FINOPS_INVOICE_IMAP_PASSWORD', 'FINOPS_INVOICE_IMAP_USER',
@@ -159,6 +159,9 @@ DOC: dict[str, tuple[str, str]] = {
                           "where the agent runs.")),
     "FINOPS_GUARD_ACCOUNT": ("guard", ("The 12-digit AWS account whose budgets a priced change "
                              "counts against.")),
+    "FINOPS_GUARD_PERSON": ("guard", ("Whose org model AI budget this machine's agents are held "
+                            "to (an email or github:LOGIN), set where the agent runs; else "
+                            "git's user.email.")),
     "FINOPS_GUARD_STOP_ON_BUDGET": ("guard", ("1: a change over a cloud budget is denied; 0: "
                                     "asked. Overrides on_budget_breach for one session or CI "
                                     "run.")),

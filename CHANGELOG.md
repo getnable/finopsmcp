@@ -2,6 +2,68 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+Coding-agent budgets a team writes down, held at the agent's next call, and
+coding-agent spend a person can carry into a paid workspace.
+
+- **AI budgets in the org model.** A new fact kind, `ai_budget`, in
+  `nable.org/budgets.yaml`: a monthly budget in list-price-equivalent US
+  dollars (`monthly_usd`, above 0) for a `team` (with an optional
+  `per_person_usd`, what each of its people may spend), a `person` (a new
+  subject kind: an email or `github:LOGIN`, matched without regard to case)
+  or the `org`. Validation names the field it refuses (`value.monthly_usd`,
+  `value.per_person_usd`, `subject.kind`, `subject.id`). Only an `ai_budget`
+  fact may be about a person, and `ai_budget` facts live in `budgets.yaml`
+  alone, so 0.13.0, which reads its own eight files and warns about any other,
+  ignores the file. `nable org set ai_budget --subject team:payments
+  --monthly-usd 5000 --per-person-usd 400`, at a terminal or with `--as WHO`,
+  writes a confirmed one; without either it is refused. `budgets.yaml` is one
+  of the guard's own files wherever the org model is.
+- **The guard holds an agent to them.** At every call the AI budget gate
+  already sees (each Bash command and each MCP call in Claude Code; shell
+  commands in Cursor and Codex), the guard compares this machine's
+  month-to-date (UTC) coding-agent spend at list price with the person's
+  budget, else their confirmed team's `per_person_usd`, and with the team's
+  and the org's `monthly_usd`. Over one: ask, with `action_type: ai_budget`
+  and a reason naming the budget's file and fact key, the figure, its price
+  source (`llm_prices`, by provider and date) and that it is this machine
+  only (a team's or the org's figure can only be under-counted, and it says
+  so); deny under `FINOPS_GUARD_STOP_ON_BUDGET=1`, `on_budget_breach: deny`
+  or `nable ai-budget`'s on_breach stop. Close (80%): a note, at most every 30
+  minutes. A proposed budget, or one from a repo nobody trusted, only asks.
+  The stricter of this and `ai-budget.json` answers. Only tokens of a model
+  `llm_prices` has a cited row for are dollars; the rest are counted and said.
+  An org model or a transcript that cannot be read is no opinion, as before.
+  Without a `budgets.yaml` the org model is not read at all: a stat or three.
+- **Whose budget.** `FINOPS_GUARD_PERSON`, else git's `user.email` for the
+  agent's directory, read once with `git config --get user.email` and kept in
+  `guard-person.json` beside the ledger until git's config files change. The
+  guard asks before an agent runs `git config` to change `user.email` (set,
+  `--add`, `--replace-all`, `--unset`, `unset`, `--remove-section user`,
+  `--edit`); reading it stays silent. `nable guard doctor` says whose budgets
+  apply and this month's figure (`ai_budgets` in `--json`).
+- **Coding-agent usage in `nable cloud connect`.** A new payload record kind,
+  `agent_usage`: one line per (install id, UTC day, developer, agent, model,
+  project) for the closed UTC days of the last 35, keys sorted, no spaces:
+  `agent` (`claude_code`, `codex`, `cursor`), `basis` (`list_price`), `day`,
+  `developer`, `kind`, `model` (as the agent logged it), `price_source` (the
+  `llm_prices` row), `project` (the repo's identity only when the org model
+  holds a repo_path fact for it, else `unmapped`), `source` (32 hex, made once
+  per install), `tokens` (`cache_read`, `cache_write`, `input`, `output`),
+  `unpriced_tokens`, `usd` (priced tokens only, at most 6 places, rounded up)
+  and `v`. The developer is the sender: `--as WHO`, else at a terminal git's
+  `user.email`, then `$USER`; with neither the records are left out, and
+  `--no-agent-usage` leaves them out on purpose. The dry run shows the count,
+  the days, the developer, the agents, the models, the projects named, the
+  tokens, and the USD with its basis and price source, and the confirm code
+  covers every record. No prompt, file content, path, host name or machine id
+  is in a record. Cursor counts only when its Admin API read is scoped to one
+  person (`CURSOR_ADMIN_USER_EMAIL`). A send goes whole each time (the box
+  replaces records by key) and is refused before anything leaves when the
+  box's status does not list `agent_usage` among what it accepts.
+- `llm_prices.ModelPrice.cost_exact` (exact decimal) and `citation()`.
+
 ## 0.13.0 (2026-10-18)
 
 The free on-ramp to commitments: see what an account has committed to and

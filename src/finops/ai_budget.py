@@ -31,6 +31,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -1038,3 +1039,279 @@ def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict
         "session": st["session"],
         "headroom": st["headroom"],
     }
+
+
+# ── Org model budgets (nable.org/budgets.yaml) ───────────────────────────────
+#
+# A team's, a person's or the org's ai_budget fact (finops.org.model) is
+# compared with what this machine's coding agents spent this month (UTC), at
+# list price: only tokens of a model llm_prices has a cited row for are
+# dollars; the rest are counted and said, never priced at a guess. It is this
+# machine alone, so a team's or the org's figure can only be under-counted.
+# Whose budget: FINOPS_GUARD_PERSON, else git's user.email for the agent's
+# directory, read once and kept beside the ledger until git's config changes.
+
+PERSON_ENV = "FINOPS_GUARD_PERSON"
+PERSON_CACHE = "guard-person.json"
+_PERSON_KEPT = 50
+_AGENT_NAMES = {harness_usage.HARNESS_CLAUDE: "Claude Code",
+                harness_usage.HARNESS_CODEX: "Codex",
+                harness_usage.HARNESS_CURSOR: "Cursor"}
+
+
+def _read_git_email(cwd: str | None) -> str | None:
+    """`git config --get user.email` run in `cwd`, or None. The one place a
+    process is started for the identity; the cache keeps it off every call."""
+    import shutil
+    import subprocess
+    git = shutil.which("git")
+    if not git:
+        return None
+    try:
+        r = subprocess.run([git, "config", "--get", "user.email"],  # nosec B603
+                           cwd=cwd if cwd and os.path.isdir(cwd) else None,
+                           capture_output=True, text=True, timeout=2, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    email = (r.stdout or "").strip()
+    return email or None
+
+
+def _stamp(p: Path) -> list[Any]:
+    try:
+        st = p.stat()
+    except OSError:
+        return [str(p), None]
+    return [str(p), st.st_mtime_ns, st.st_size, st.st_ino]
+
+
+def _git_config_files(root: Path | None) -> list[Path]:
+    """The files `git config` reads user.email from, as far as nable can
+    tell without running it: the system file, the global ones, and the
+    repo's own config (its common dir's, and a worktree's). include.path is
+    not followed: a change behind an include is seen when one of these
+    changes, or when the cache is removed."""
+    home = Path.home()
+    out: list[Path] = []
+    if not os.environ.get("GIT_CONFIG_NOSYSTEM"):
+        out.append(Path(os.environ.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig"))
+    if os.environ.get("GIT_CONFIG_GLOBAL"):
+        out.append(Path(os.environ["GIT_CONFIG_GLOBAL"]))
+    else:
+        xdg = os.environ.get("XDG_CONFIG_HOME") or str(home / ".config")
+        out += [Path(xdg) / "git" / "config", home / ".gitconfig"]
+    if root is not None:
+        git = root / ".git"
+        out.append(git / "config")
+        try:
+            if git.is_file():
+                text = git.read_text(encoding="utf-8")
+                gd = next((line[7:].strip() for line in text.splitlines()
+                           if line.startswith("gitdir:")), "")
+                if gd:
+                    gdir = Path(gd) if Path(gd).is_absolute() else (root / gd)
+                    out += [gdir / "config.worktree", gdir / "commondir"]
+                    common = (gdir / (gdir / "commondir").read_text().strip())
+                    out.append(common / "config")
+        except OSError:
+            pass
+    return out
+
+
+def _person_cache_path() -> Path:
+    from . import guard_ledger
+    return guard_ledger.ledger_path().with_name(PERSON_CACHE)
+
+
+def _cached_git_email(cwd: str | None) -> str | None:
+    """git's user.email for `cwd`, from guard-person.json while the config
+    files it came from are as they were, else read again (and kept)."""
+    from . import guard_paths
+    root = guard_paths.git_root(cwd)
+    where = str(root) if root is not None else ""
+    stamp = [_stamp(p) for p in _git_config_files(root)]
+    path = _person_cache_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        entries = doc.get("entries") if isinstance(doc, dict) and doc.get("v") == 1 else None
+    except (OSError, ValueError):
+        entries = None
+    entries = entries if isinstance(entries, dict) else {}
+    hit = entries.get(where)
+    if isinstance(hit, dict) and hit.get("stamp") == stamp:
+        email = hit.get("email")
+        return email if isinstance(email, str) and email else None
+    email = _read_git_email(str(root) if root is not None else cwd)
+    entries.pop(where, None)
+    entries[where] = {"stamp": stamp, "email": email}
+    kept = dict(list(entries.items())[-_PERSON_KEPT:])
+    with contextlib.suppress(OSError, TypeError, ValueError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        harness_usage.write_json_atomic(path, {"v": 1, "entries": kept})
+    return email
+
+
+def developer(cwd: str | None = None) -> tuple[str | None, str]:
+    """(who this machine's agents spend for, where that came from):
+    FINOPS_GUARD_PERSON, else git's user.email for the agent's directory,
+    lowercased (a budget's person is matched without regard to case).
+    (None, "") when neither says."""
+    env = os.environ.get(PERSON_ENV, "").strip()
+    if env:
+        return env.lower(), PERSON_ENV
+    email = _cached_git_email(cwd)
+    return (email.strip().lower(), "git user.email") if email else (None, "")
+
+
+def list_price_usd(r: dict[str, Any]) -> Decimal | None:
+    """One response at its model's cited list price (llm_prices), exact, or
+    None when llm_prices has no row for the model. A figure the harness
+    reported itself (Cursor's) is not used: every dollar here has one source."""
+    price = llm_prices.price_for(r["model"])
+    if price is None:
+        return None
+    return price.cost_exact(input_tokens=int(r["input"]), output_tokens=int(r["output"]),
+                            cache_write_5m_tokens=int(r["cache_write"]) - int(r["cache_write_1h"]),
+                            cache_write_1h_tokens=int(r["cache_write_1h"]),
+                            cache_read_tokens=int(r["cache_read"]), fast=bool(r.get("fast")),
+                            us_only=bool(r.get("us_only")))
+
+
+def _tokens(r: dict[str, Any]) -> int:
+    return int(r["input"]) + int(r["output"]) + int(r["cache_write"]) + int(r["cache_read"])
+
+
+def agent_responses(since_epoch: float, *, allow_network: bool = False
+                    ) -> tuple[list[dict[str, Any]], list[str]]:
+    """(this machine's coding-agent responses since `since_epoch`, notes on
+    what is left out): Claude Code's transcripts, Codex CLI's rollouts and,
+    when its Admin API read is scoped to one person (CURSOR_ADMIN_USER_EMAIL),
+    Cursor's. A team-wide Cursor read is somebody else's usage too, so it is
+    left out and said. Raises when a reader fails: a figure missing a source
+    it should have read is not this machine's spend."""
+    notes: list[str] = []
+    proj = _claude_projects_dir()
+    out = _responses(proj, since_epoch) if proj.is_dir() else []
+    out += harness_usage.codex_responses(since_epoch)
+    if harness_usage.cursor_enabled():
+        if harness_usage.cursor_email():
+            out += harness_usage.cursor_responses(since_epoch, month_start=_month_start_epoch(),
+                                                  allow_network=allow_network)
+            notes += _source_notes(_sources(True))
+        else:
+            notes.append("Cursor's Admin API key reads the whole team's usage, so Cursor is "
+                         "left out; set CURSOR_ADMIN_USER_EMAIL to count one person's")
+    return out, notes
+
+
+def month_agent_usage(*, allow_network: bool = False) -> dict[str, Any]:
+    """This machine's coding-agent spend this month (UTC), at list price:
+    {usd, usd_cents, unpriced_tokens, unpriced_models, agents, providers,
+    notes, month_start}. usd covers priced tokens only; usd_cents is it
+    rounded up to the cent, as text."""
+    since = _month_start_epoch()
+    responses, notes = agent_responses(since, allow_network=allow_network)
+    usd = Decimal(0)
+    unpriced = 0
+    unpriced_models: set[str] = set()
+    agents: set[str] = set()
+    providers: set[str] = set()
+    for r in responses:
+        agents.add(r.get("harness") or harness_usage.HARNESS_CLAUDE)
+        got = list_price_usd(r)
+        if got is None:
+            unpriced += _tokens(r)
+            unpriced_models.add(str(r["model"]))
+            continue
+        usd += got
+        price = llm_prices.price_for(r["model"])
+        if price is not None:
+            providers.add(price.provider)
+    cents = usd.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    return {"usd": float(usd), "usd_cents": format(cents, "f"), "unpriced_tokens": unpriced,
+            "unpriced_models": sorted(unpriced_models),
+            "agents": sorted(agents), "providers": sorted(providers), "notes": notes,
+            "month_start": since}
+
+
+def price_source(providers: list[str] | tuple[str, ...]) -> str:
+    """Where the dollars' rates come from, for a reason a person reads."""
+    names = {"anthropic": "Anthropic", "openai": "OpenAI"}
+    parts = [f"{names.get(p, p)}'s as of {llm_prices.AS_OF_BY_PROVIDER.get(p, llm_prices.AS_OF)}"
+             f" ({llm_prices.SOURCES.get(p, '')})" for p in providers] or [
+        f"as of {llm_prices.AS_OF}"]
+    return "list prices from llm_prices, " + ", ".join(parts)
+
+
+def _org_dirs(cwd: str | None) -> list[Path]:
+    """The org model dirs the guard reads from `cwd`, found without
+    importing the org package (finops.org.store.resolve_dir's rule)."""
+    from . import guard_paths
+    env = os.environ.get("FINOPS_ORG_DIR", "").strip()
+    if env:
+        return [Path(env).expanduser()]
+    out: list[Path] = []
+    root = guard_paths.git_root(cwd)
+    if root is not None:
+        out.append(Path(root) / "nable.org")
+    out.append(guard_paths.data_dir() / "org")
+    return out
+
+
+def has_org_budgets(cwd: str | None = None) -> bool:
+    """Whether any org model dir the guard reads from `cwd` holds a
+    budgets.yaml: a stat or three, so a call with none costs nothing more."""
+    return any((d / "budgets.yaml").is_file() for d in _org_dirs(cwd))
+
+
+_SCOPE_WORDS = {"person": "the monthly budget for {subject}",
+                "per_person": "the per person budget of {subject}",
+                "team": "the monthly budget of {subject}",
+                "org": "the org's monthly budget ({subject})"}
+
+
+def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
+    """The org model's AI budgets against this machine's month: None when
+    no budgets.yaml is there or none applies, else {verdict, hit, usd, pct,
+    person, person_source, usage, hits}, `hit` the budget furthest past its
+    line. Raises when the org model or the usage cannot be read: the caller
+    decides what that means (the guard: no opinion)."""
+    if not has_org_budgets(cwd):
+        return None
+    from . import guard_org
+    model = guard_org.load_model(cwd)
+    person, source = developer(cwd)
+    hits = model.ai_budgets_for(person, strict=True)
+    if not hits:
+        return None
+    usage = month_agent_usage(allow_network=False)
+    rows = []
+    for h in hits:
+        pct = usage["usd"] / h["usd"] if h["usd"] > 0 else 0.0
+        rows.append({**h, "pct": pct, "verdict": _verdict(pct)})
+    worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
+    return {"verdict": worst["verdict"], "hit": worst, "usd": usage["usd"], "pct": worst["pct"],
+            "person": person, "person_source": source, "usage": usage, "hits": rows}
+
+
+def org_budget_words(st: dict[str, Any]) -> str:
+    """The figure and the budget, as a reason says them: the file and fact
+    key, the dollars and where their rates come from, and that they are
+    this machine's alone."""
+    h, u = st["hit"], st["usage"]
+    what = _SCOPE_WORDS[h["scope"]].format(subject=h["subject"])
+    agents = ", ".join(_AGENT_NAMES.get(a, a) for a in u["agents"]) or "no agent"
+    text = (f"This machine's coding agents ({agents}) have spent "
+            f"${Decimal(u['usd_cents']):,.2f} in "
+            f"list-price-equivalent dollars this month, {h['pct'] * 100:.0f}% of "
+            f"{what}, ${h['usd']:,.2f} ({h['file'] or 'budgets.yaml'}, fact {h['key']}). "
+            f"Priced at {price_source(u['providers'])}: usage, not an invoice, and "
+            "this machine only: the person's other machines are not counted")
+    if h["scope"] in ("team", "org"):
+        text += ", nor anyone else's, so the figure can only under-count"
+    if u["unpriced_tokens"]:
+        text += (f". {u['unpriced_tokens']:,} tokens from {', '.join(u['unpriced_models'])} "
+                 "are not priced (llm_prices has no cited rate) and are not in the figure")
+    for note in u["notes"]:
+        text += f". {note.rstrip('.')}"
+    return text

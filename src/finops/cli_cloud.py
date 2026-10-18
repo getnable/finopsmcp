@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`nable cloud connect` and `nable cloud status`: bring this machine's org model
-and guard ledger into a paid workspace, and see what the workspace holds.
+"""`nable cloud connect` and `nable cloud status`: bring this machine's org model,
+guard ledger and coding-agent usage into a paid workspace, and see what the
+workspace holds.
 
     nable cloud connect --box https://HOST [--org-dir DIR] [--out PATH] [--json]
-                        [--send --confirm CODE [--key-file PATH] [--as WHO]]
+                        [--as WHO] [--no-agent-usage]
+                        [--send --confirm CODE [--key-file PATH]]
     nable cloud status  --box https://HOST [--key-file PATH] [--json]
 
 `connect` is a dry run unless --send: it builds the payload, writes the exact
@@ -16,6 +18,14 @@ the bytes, and it the box, that the code names.
 A send is a person's decision, as `nable org confirm` is: without a terminal
 (stdin and stdout) it refuses unless --as names who decided. The guard asks
 before an agent runs --send, --out or `cloud status` (guard._SELF_RULES).
+
+Coding-agent usage is sent as the developer who sends it, the rule `nable
+org` uses for who decided: --as WHO, else at a terminal git's user.email, then
+$USER. The dry run shows that name and builds the records with it, so the
+confirm code covers it: a dry run made with one --as and a send with another
+are two payloads, and the send is refused. Without a terminal and without
+--as there is no developer, and the records are left out (said in the dry
+run). --no-agent-usage leaves them out on purpose.
 
 The workspace key is a bound analyst key made on the workspace's /workspace
 page, read from NABLE_WORKSPACE_KEY, a --key-file with mode 0600, or a hidden
@@ -43,6 +53,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +133,11 @@ def add_parser(sub) -> None:
     c.add_argument("--confirm", metavar="CODE",
                    help="the confirm code the dry run printed for this box")
     c.add_argument("--as", dest="cloud_as", metavar="WHO",
-                   help="who decided to send, when this does not run at a terminal")
+                   help="who decided to send, when this does not run at a terminal; also "
+                        "the developer coding-agent usage is sent as (default at a "
+                        "terminal: git user.email, then $USER)")
+    c.add_argument("--no-agent-usage", dest="no_agent_usage", action="store_true",
+                   help="leave this machine's coding-agent usage out of the payload")
 
 
 def refuse_extras(extras: list[str], *, as_json: bool, stdout: Any = None,
@@ -155,6 +170,26 @@ def _is_tty() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def _git_email() -> str | None:
+    """git's user.email where this runs, or None (the `nable org` rule)."""
+    from .org.cli import _git_email as org_git_email
+    return org_git_email()
+
+
+def _developer(who: str, at_terminal: bool) -> tuple[str | None, str]:
+    """(the developer coding-agent usage is sent as, where the name came
+    from): --as, else at a terminal git's user.email, then $USER."""
+    if who:
+        return who, "--as"
+    if not at_terminal:
+        return None, ""
+    email = _git_email()
+    if email:
+        return email, "git user.email"
+    user = os.environ.get("USER", "").strip()
+    return (user, "$USER") if user else (None, "")
 
 
 def _terminal_prompt() -> Callable[[str], str] | None:
@@ -200,9 +235,11 @@ def _status_text(box: str, st: Mapping[str, Any]) -> str:
 def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         environ: Mapping[str, str] | None = None,
         prompt: Callable[[str], str] | None | bool = True,
-        stdout: Any = None, stderr: Any = None, terminal: bool | None = None) -> int:
+        stdout: Any = None, stderr: Any = None, terminal: bool | None = None,
+        now: datetime | None = None) -> int:
     """`prompt` True means a hidden prompt when stdin is a terminal; None
-    means never ask. `terminal` None means whether stdin and stdout are one."""
+    means never ask. `terminal` None means whether stdin and stdout are one.
+    `now` fixes today for the coding-agent usage window."""
     out = stdout or sys.stdout
     err = stderr or sys.stderr
     as_json = bool(getattr(args, "json", False))
@@ -250,7 +287,10 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         return _fail("usage", EXIT_USAGE, "sending is a person's decision: run it at your own "
                      "terminal, or pass --as WHO (your name or email) to say who decided",
                      as_json=as_json, out=out, err=err)
-    payload = cc.build(org_dir=getattr(args, "org_dir", None))
+    developer, developer_from = _developer(who, at_terminal)
+    no_usage = bool(getattr(args, "no_agent_usage", False))
+    payload = cc.build(org_dir=getattr(args, "org_dir", None), developer=developer,
+                       developer_from=developer_from, agent_usage=not no_usage, now=now)
     if not sending:
         if not payload.data:
             if as_json:
