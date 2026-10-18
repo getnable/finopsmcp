@@ -58,7 +58,9 @@ coding-agent spend a person can carry into a paid workspace.
   the days, the developer, the agents, the models, the projects named, the
   tokens, and the USD with its basis and price source, and the confirm code
   covers every record. No prompt, file content, path, host name or machine id
-  is in a record. Cursor counts only when its Admin API read is scoped to one
+  is in a record: a model logged as a path is sent as `unknown`, and a repo
+  whose identity is not a plain name (a directory name with a tab in it) as
+  `unmapped`. Cursor counts only when its Admin API read is scoped to one
   person (`CURSOR_ADMIN_USER_EMAIL`). A send goes whole each time (the box
   replaces records by key) and is refused before anything leaves when the
   box's status does not list `agent_usage` among what it accepts.

@@ -451,3 +451,20 @@ def test_the_source_file_is_one_of_the_guards_own_files(laptop):
     assert guard_paths.match_file(str(path)) is not None
     v = guard.gate_command(f"echo 0123 > {path}", record=False)
     assert v is not None and v["decision"] == "ask"
+
+
+def test_a_repo_whose_identity_is_not_a_slug_is_sent_unmapped(laptop, monkeypatch):
+    """The box takes a repo's identity, never a path; a directory name it
+    would refuse makes the record unmapped rather than the batch refused."""
+    odd = _repo(laptop["home"] / "work" / "naïve\tname", None)
+    org = Path(os.environ["FINOPS_ORG_DIR"]) / "owners.yaml"
+    org.write_text(ORG + "- fact: owner\n  subject: {kind: repo_path, id: 'naïve\tname//.'}\n"
+                         "  value: {team: payments}\n  source: human\n  status: confirmed\n")
+    _claude(laptop["claude"], "s-10", NOW - timedelta(days=6), cwd=str(odd))
+    recs = [r for r in _records(_build()) if r["day"] == "2026-10-12"]
+    assert [r["project"] for r in recs] == ["unmapped"]
+
+
+def test_a_developer_name_with_a_control_character_builds_no_record(laptop):
+    p = _build(developer="alice\nbob")
+    assert p.usage["records"] == 0 and "control character" in p.usage["left_out"]

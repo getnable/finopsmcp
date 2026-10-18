@@ -135,6 +135,9 @@ _AGENT_SHOWN = {"claude_code": "Claude Code", "codex": "Codex", "cursor": "Curso
 UNMAPPED = "unmapped"
 _MODEL_MAX = 128
 _DEVELOPER_MAX = 254
+# A project the box takes: a repo's identity, never a path. One that does not
+# fit (a directory name with characters a slug never has) is sent "unmapped".
+_PROJECT_RE = re.compile(r"^(?![./~])(?!.*//)[A-Za-z0-9._~@+:/ -]{1,256}$")
 TIMEOUT_S = 30.0
 _KEY_MAX = 512
 
@@ -318,6 +321,9 @@ def build(*, org_dir: str | os.PathLike | None = None,
     elif not (developer or "").strip():
         usage = _usage_left_out(left_out or "no developer is named: run this at your own "
                                              "terminal, or pass --as WHO")
+    elif any(ord(c) < 0x20 or ord(c) == 0x7f for c in developer):
+        usage = _usage_left_out("the developer's name holds a control character; pass --as "
+                                "WHO with a plain name or email")
     else:
         records, usage = agent_usage_records(developer=developer.strip(),
                                              developer_from=developer_from,
@@ -467,7 +473,8 @@ def agent_usage_records(*, developer: str, developer_from: str = "",
                 root = git_root(cwd) if os.path.isdir(cwd) else None
                 if root is not None:
                     ident = repo_identity(root)
-                    name = ident if ident and ident.lower() in mapped else UNMAPPED
+                    name = (ident if ident and ident.lower() in mapped
+                            and _PROJECT_RE.match(ident) else UNMAPPED)
             except OSError:
                 name = UNMAPPED
             projects[cwd] = name
