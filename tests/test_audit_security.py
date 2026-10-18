@@ -560,14 +560,23 @@ def test_a_harmless_read_is_still_not_gated():
 def test_no_mcp_tool_can_send_to_a_workspace():
     """PASSES TODAY, and guards D58: `nable cloud connect` is the one way the
     org model and the guard ledger leave the machine, and only a person at
-    the CLI with the sha256 they were shown can send. No MCP tool imports it,
+    the CLI with the confirm code they were shown can send. No MCP tool imports it,
     so an agent cannot carry them out, with or without a key."""
     def naming(word):
         return sorted(p.relative_to(_SRC).as_posix() for p in _SRC.rglob("*.py")
                       if p.name not in ("cloud_connect.py", "cli_cloud.py")
                       and word in p.read_text(encoding="utf-8"))
-    assert naming("cloud_connect") == [], "something but the cloud CLI reaches the sender"
-    assert naming("cli_cloud") == ["setup_wizard.py"], "the cloud CLI is reached elsewhere"
+    # The guard names both only in the rules that ask before an agent runs
+    # them (guard._SELF_RULES), and imports neither.
+    assert naming("cloud_connect") == ["guard.py"], "something but the cloud CLI reaches the sender"
+    assert naming("cli_cloud") == ["guard.py", "setup_wizard.py"], \
+        "the cloud CLI is reached elsewhere"
+    import ast
+    tree = ast.parse((_SRC / "guard.py").read_text(encoding="utf-8"))
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
+                for a in n.names} | {n.module or "" for n in ast.walk(tree)
+                                     if isinstance(n, ast.ImportFrom)}
+    assert not any("cloud_connect" in m or "cli_cloud" in m for m in imported), imported
     tools = _registered_tools()
     for name in tools:
         assert "cloud_connect" not in name and "free_tool" not in name, name
