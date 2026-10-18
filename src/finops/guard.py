@@ -5177,7 +5177,7 @@ _BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session
 # surely. Any call asks.
 _CLOUD_BUDGET_TOOLS = ("set_budget", "delete_budget", "sync_budgets_from_yaml")
 _CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change", "org_change",
-                 "pack_change", "protected_write", "learning_change")
+                 "pack_change", "protected_write", "learning_change", "cloud_connect")
 # Verdicts on an MCP call that the infrastructure it amounts to is judged
 # with: a change to the guard or its files, and code too long to read.
 _JUDGED_WITH = (*_CHANGE_TYPES, "oversize_command")
@@ -5317,6 +5317,25 @@ _SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for
     # packs.trusted_keys would trust; a secret set for a pack hands it a
     # credential from nable's vault. Reading (list, audit, search, validate,
     # new, which writes only the directory it is given) stays silent.
+    # `nable cloud connect --send` carries this machine's org model, guard
+    # ledger and workspace key to the box it names, and `nable cloud status`
+    # the key: what leaves is a person's consent, given in their own
+    # terminal (the CLI refuses --send without one unless --as names who).
+    # `--out` writes the payload wherever it names and needs no key, so an
+    # agent could aim it at a file the guard reads (the off switch). The dry
+    # run with its default file, and --help, stay silent.
+    (_VerbWithFlag("cloud-connect-send", _NABLE, rf"(?<!\S)cloud{_END}",
+                   rf"(?<!\S)(?:--send(?:=\S*)?|status){_END}"),
+     "cloud_connect", ("sending this machine's org model, guard ledger or workspace key "
+                       "to a box")),
+    (_VerbWithFlag("cloud-connect-out", _NABLE, rf"(?<!\S)cloud{_END}",
+                   r"(?<!\S)--out(?:=|\s|$)"),
+     "cloud_connect", "writing the cloud connect payload to a path it chose"),
+    (_PythonApiCall("cloud-connect-api",
+                    r"(?<![\w-])(?:finops\.)?(?:cloud_connect|cli_cloud)(?![\w-])",
+                    r"send|status|save|run|main"),
+     "cloud_connect", ("sending this machine's org model, guard ledger or workspace key "
+                       "to a box")),
     (_VerbWithFlag("pack-change", _NABLE,
                    rf"(?<!\S)pack(?:\s+-\S+)*\s+(?:install|update|remove|sign|keygen"
                    rf"|secret(?:\s+-\S+)*\s+(?:set|remove)){_END}",

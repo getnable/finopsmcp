@@ -217,6 +217,14 @@
       "required": false,
       "disabled_by": "FINOPS_AIRGAP=1",
       "govcloud_equivalent": null
+    },
+    {
+      "host": "the box you name with nable cloud connect --box https://HOST",
+      "purpose": "Your paid workspace: nable cloud connect sends the org model files and the guard ledger's lines as stored, over HTTPS POST to /api/free-tool/connect, only with --send and --confirm set to the sha256 of the payload its dry run showed and saved; nable cloud connect --send and nable cloud status read /api/free-tool/status. Nothing is sent to it otherwise, and no host is built in.",
+      "category": "user_named_workspace",
+      "required": false,
+      "disabled_by": "FINOPS_AIRGAP=1 (and nothing is sent without --send --confirm CODE, the code a dry run printed for this box)",
+      "govcloud_equivalent": null
     }
   ]
 }

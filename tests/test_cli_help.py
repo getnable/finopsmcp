@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 FINOPS = [sys.executable, "-m", "finops.setup_wizard"]
+# This checkout's package, whatever the interpreter has installed.
+SRC = str(Path(__file__).resolve().parents[1] / "src")
 
 
 def _run(args, **kw):
     return subprocess.run(
         [sys.executable, "-c", "from finops.setup_wizard import main; main()"] ,
         input=kw.pop("input", ""), capture_output=True, text=True,
-        env={"PATH": "/usr/bin:/bin", "NABLE_NO_TELEMETRY": "1", "HOME": kw.pop("home", "/tmp")},
+        env={"PATH": "/usr/bin:/bin", "NABLE_NO_TELEMETRY": "1", "HOME": kw.pop("home", "/tmp"),
+             "PYTHONPATH": SRC},
         timeout=60,
     )
 
@@ -26,7 +30,7 @@ def _help_text():
     r = subprocess.run(
         [sys.executable, "-c", "import sys; sys.argv=['finops','--help']; from finops.setup_wizard import main; main()"],
         capture_output=True, text=True, timeout=60,
-        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp"},
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC},
     )
     return r.stdout + r.stderr
 
@@ -58,7 +62,7 @@ def _bad_cmd(cmd):
     return subprocess.run(
         [sys.executable, "-c", f"import sys; sys.argv=['finops','{cmd}']; from finops.setup_wizard import main; main()"],
         capture_output=True, text=True, timeout=60,
-        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp"},
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC},
     )
 
 
@@ -82,8 +86,7 @@ def test_a_subcommand_help_lists_its_own_actions(tmp_path):
     top-level layout: their actions under "other", plus the top level's
     "setup  Pick providers from the full menu" and "--version", neither of
     which the subcommand takes."""
-    from pathlib import Path
-    src = str(Path(__file__).resolve().parents[1] / "src")
+    src = SRC
     for cmd, action in (("org", "status"), ("learn", "infer"), ("pack", "validate")):
         r = subprocess.run(
             [sys.executable, "-m", "finops.entry", cmd, "--help"], check=False,
@@ -95,3 +98,19 @@ def test_a_subcommand_help_lists_its_own_actions(tmp_path):
         assert action in r.stdout, cmd
         assert "Pick providers from the full menu" not in r.stdout, cmd
         assert "--version" not in r.stdout, cmd
+
+
+def test_cloud_is_registered_and_runs_though_not_yet_listed():
+    """`nable cloud` is registered and answers its own --help. It is left out
+    of the top-level list (as `pricing` is) until CAPABILITIES.md's CLI
+    section lists it, which tests/test_capabilities_doc_counts.py holds to
+    that list; listing it then is moving it from _HIDDEN to the account
+    group in the same change."""
+    out = _help_text()
+    assert "\n  cloud " not in out.split("\noptions\n", 1)[0]
+    r = subprocess.run(
+        [sys.executable, "-c", ("import sys; sys.argv=['finops','cloud','--help']; "
+                                "from finops.setup_wizard import main; main()")],
+        capture_output=True, text=True, timeout=60, check=False,
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC})
+    assert r.returncode == 0 and "connect" in r.stdout and "status" in r.stdout, r.stderr

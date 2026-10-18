@@ -246,6 +246,76 @@ regions, Multi-AZ included, from cited Price List rows.
   and $1.143). Aurora, Oracle, SQL Server and anything not listed get None.
   Every us-east-1 Single-AZ row of `RDS_HOURLY` and `RDS_HOURLY_POSTGRES`
   agrees with it; `rds_hourly` and those tables are unchanged.
+- **`nable cloud connect`: the org model and the guard ledger, into a paid
+  workspace, exactly as shown.** A dry run by default: it builds the payload
+  from the org model files (owners, teams, accounts, environments, tags,
+  policy, freezes, approvals) in the resolved org dir and the guard ledger's
+  lines exactly as stored, and nothing nable adds of its own (no hostname,
+  user name or machine id). The ledger's records are the agent's commands
+  and the paths the guard judged, with credentials redacted when they were
+  written and nothing else changed, so they can name absolute paths, hosts
+  and user names; the dry run counts the records that do and points at the
+  saved file. It checks the ledger's hash chain on those very bytes; a chain
+  that breaks is shown, with the record it breaks at, and left out. It prints
+  the destination host, the file names, the record counts, the byte size,
+  the payload's sha256 and a confirm code (the sha256 of the box, a newline
+  and the bytes), and saves the exact bytes (0600, beside the ledger, or
+  `--out`). It opens no connection. `--out` never names one of the guard's
+  own files (its off switch, the ledger, the org model, harness settings),
+  a path in nable's data directory, or anything but a regular file of the
+  user's.
+  - `--send --confirm CODE` builds the payload again and refuses unless the
+    code is the one for these bytes and this box: the payload changed since
+    you looked, or the dry run was for another box. A send is a person's
+    decision, as `nable org confirm` is: without a terminal it refuses
+    unless `--as WHO` names who decided, and the guard asks before an agent
+    runs `--send`, `--out` or `nable cloud status`, in the CLI's forms and
+    through `cloud_connect` and `cli_cloud` in Python, with no one-time
+    approval out of band. It asks the box what the workspace holds, then POSTs the rest
+    to `/api/free-tool/connect` as ordered batches of at most 256 KiB, each
+    a slice of the bytes shown, cut where a line ends. A send that stopped
+    resumes from the head the box reports.
+  - HTTPS only (`https://host[:port]`, no path, no user info); http,
+    another scheme, a redirect and air-gap mode are refused.
+  - The workspace key (an analyst key bound to the workspace, made on its
+    /workspace page) is read from the new `NABLE_WORKSPACE_KEY`, a
+    `--key-file` with mode 0600, or a hidden prompt. It is never taken from
+    the command line (`--key`, a word left over and a flag the command does
+    not have are refused, and none of them is repeated; nor is a value
+    argparse would quote back, such as `--send=X` or an abbreviation, since
+    the cloud parsers take no abbreviation and never print what they could
+    not read), and never stored, printed or logged.
+  - An org file that is a symlink, is not a regular file, is over 128 KiB or
+    is not UTF-8 is left out and named; a repo's `nable.org/` nobody trusted
+    here is not sent. A ledger over 50,000 records or 32 MiB, the most a
+    workspace holds, is left out and says so.
+  - `nable cloud status --box https://HOST` shows what the workspace holds:
+    org model versions and each ledger chain's records and head.
+  - docs/network-manifest.json lists the box a person names as the
+    `user_named_workspace` category. Exit codes: 0 done, 1 refused or not
+    reached, 2 a usage error, 3 nothing to send.
+- **Two usage counts, under a consent that names them.**
+  `commitments_status_run`, once per `nable commitments status` that read or
+  tried to: the exit class (0, 1 or 2), how many commitments were read, how
+  many of those end within 90 days, how many services were not read, and
+  whether `--json` was on. `guard_commitment_asks`: how many guard ledger
+  records asked before buying a commitment since the last count sent, and
+  the window in days, counted from the local ledger at most once a day from
+  a CLI or MCP start, never from inside the guard hook (which imports no
+  telemetry). Each event is a closed allow-list of integers, booleans and
+  enumerations, with counts clamped at 100,000, so no account id, ARN, dollar
+  figure, command, path or resource name travels in one. They have no prompt
+  of their own: the consent prompt names them, and they are sent only under
+  a yes to that prompt (stored as consent version 2) or `NABLE_TELEMETRY=1`.
+  A yes stored by the earlier prompt keeps the rest of telemetry on and sends
+  neither count, and that person is asked once more, by the same rules.
+  `NABLE_NO_TELEMETRY`, `DO_NOT_TRACK`, CI and air-gap mode send nothing, and
+  without consent the ledger is not read for it. A count whose
+  place in the ledger cannot be remembered is not sent, so no ask is counted
+  twice.
+- **Guard ledger read helpers.** `guard_ledger.count_asks`, `chain_of` and
+  `stored_lines` read the ledger for the two features above; the append path
+  and the record format are unchanged.
 
 ## 0.12.0
 
