@@ -33,10 +33,16 @@ floor for most other regions, never a quote for them.
 PRICE_SOURCES below names the offer file, version and filter each table was
 read from, and the date it was read. tests/test_price_sources.py fails on a
 priced constant here that has no entry, and on an entry without a date.
+
+RDS is the one service priced outside us-east-1 too: rds_rate() answers from
+price_data/rds_on_demand.json, sixteen regions' listed on-demand rows with
+their SKUs, Multi-AZ as its own listed row (see rds_rate).
 """
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from pathlib import Path
 
 # The date every AWS row below was last compared with the public Price List
 # (https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/index.json).
@@ -122,6 +128,12 @@ PRICE_SOURCES: dict[str, dict[str, str]] = {
                              "license required", "as_of": AS_OF},
     "RDS_HOURLY_POSTGRES": {"source": f"{_RDS_OFFER}, OnDemand, Single-AZ, PostgreSQL",
                             "as_of": AS_OF},
+    "RDS_ON_DEMAND_JSON": {"source": "AWS Price List, AmazonRDS regional offers, version "
+                                     "20261006224050 (published 2026-10-06), 16 regions, "
+                                     "OnDemand, MySQL, PostgreSQL and MariaDB, Single-AZ and "
+                                     "Multi-AZ, No license required, current generation; each "
+                                     "row carries its SKU (scripts/build_rds_price_tables.py)",
+                           "as_of": "2026-10-17"},
 }
 
 # Constants here that are not read from a price source: a convention, or a
@@ -399,7 +411,8 @@ EC2_HOURLY: dict[str, float] = {
 # instance is Multi-AZ. The offer lists Multi-AZ at two Single-AZ hours to
 # within its third decimal, not exactly: db.t4g.medium Multi-AZ is $0.129
 # against 2 x $0.065, db.r6g.xlarge $0.859 against 2 x $0.43, db.t4g.small
-# $0.065 against 2 x $0.032. Doubling is within 0.8% either way. Callers that do not know the engine use this table;
+# $0.065 against 2 x $0.032. Doubling is within 0.8% either way; rds_rate below
+# has the listed Multi-AZ row itself. Callers that do not know the engine use this table;
 # PostgreSQL has its own rates below (rds_hourly picks between them).
 RDS_HOURLY: dict[str, float] = {
     "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
@@ -453,6 +466,89 @@ def rds_hourly(instance_class: str, engine: str) -> float | None:
     SQL Server, Oracle and Db2 bill at other rates, and get no figure rather
     than a MySQL one."""
     return _RDS_BY_ENGINE.get(engine.lower(), {}).get(instance_class)
+
+
+# ── RDS by region, Multi-AZ included ─────────────────────────────────────────
+#
+# The tables above are us-east-1 Single-AZ, and a Multi-AZ figure built from
+# them doubles the hour. The offer lists Multi-AZ as its own row, and it is
+# not always double: PostgreSQL db.r5d.xlarge in us-east-1 is $0.571 Single-AZ
+# and $1.143 Multi-AZ. scripts/build_rds_price_tables.py writes every listed
+# row for sixteen regions into price_data/rds_on_demand.json (MySQL,
+# PostgreSQL and MariaDB, No license required, current generation), each with
+# its SKU and the offer version it came from. It is read on first use: the
+# guard's hook imports this module and must not pay for a table it never asks.
+RDS_ON_DEMAND_JSON = "price_data/rds_on_demand.json"
+_RDS_REGIONAL: dict[str, dict] | None = None
+
+
+@dataclass(frozen=True)
+class RdsRate:
+    """One listed RDS on-demand rate.
+
+    hourly_usd is the USD price per instance hour exactly as the offer lists
+    it (a decimal string such as "0.1890000000"): parse it with Decimal, not
+    float, where the digits matter. engine is mysql, mariadb or postgres;
+    deployment is Single-AZ or Multi-AZ; source names the regional offer, its
+    version and the SKU; as_of is the day that offer was read."""
+
+    hourly_usd: str
+    region: str
+    engine: str
+    deployment: str
+    sku: str
+    source: str
+    as_of: str
+
+
+def _rds_regional() -> dict[str, dict]:
+    """{region: {"version", "read", "rows": {(engine, deployment, class): (usd, sku)}}},
+    read once. A table that cannot be read is an empty one: no figure, never
+    a guessed one."""
+    global _RDS_REGIONAL
+    if _RDS_REGIONAL is None:
+        import json
+        table: dict[str, dict] = {}
+        try:
+            raw = json.loads((Path(__file__).parent / RDS_ON_DEMAND_JSON)
+                             .read_text(encoding="utf-8"))
+            for region, entry in raw["regions"].items():
+                table[region] = {
+                    "version": str(entry["version"]), "read": str(entry["read"]),
+                    "rows": {(e, d, c): (usd, sku) for e, d, c, usd, sku in entry["rows"]},
+                }
+        except (OSError, ValueError, KeyError, TypeError):
+            table = {}
+        _RDS_REGIONAL = table
+    return _RDS_REGIONAL
+
+
+def rds_rate(instance_class: str, engine: str, region: str, *,
+             multi_az: bool = False) -> RdsRate | None:
+    """The listed on-demand rate for one RDS instance class, or None.
+
+    engine is RDS's own id (mysql, mariadb or postgres, any case); region a
+    region code. None for anything the table does not hold: Aurora, Oracle,
+    SQL Server and Db2 (other rates, licence included or brought), a region
+    outside the sixteen, a class not listed there, a previous-generation
+    class. multi_az picks the offer's Multi-AZ row, which is its own listed
+    price, never twice the Single-AZ hour."""
+    if not all(isinstance(x, str) for x in (instance_class, engine, region)):
+        return None
+    entry = _rds_regional().get(region.strip().lower())
+    if entry is None:
+        return None
+    eng = engine.strip().lower()
+    deployment = "Multi-AZ" if multi_az else "Single-AZ"
+    hit = entry["rows"].get((eng, deployment, instance_class.strip()))
+    if hit is None:
+        return None
+    usd, sku = hit
+    where = region.strip().lower()
+    return RdsRate(hourly_usd=usd, region=where, engine=eng, deployment=deployment, sku=sku,
+                   source=(f"AWS Price List, AmazonRDS {where} offer, version "
+                           f"{entry['version']}, SKU {sku}"),
+                   as_of=entry["read"])
 
 
 # Rounded to cents at definition, for the reason given above ALB_PER_MONTH.

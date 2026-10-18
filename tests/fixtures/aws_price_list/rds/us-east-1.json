@@ -1,0 +1,421 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "offerCode": "AmazonRDS",
+ "version": "20261006224050",
+ "publicationDate": "2026-10-06T22:40:50Z",
+ "products": {
+  "C86H957YE4QF4727": {
+   "sku": "C86H957YE4QF4727",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0002",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "SF96G6SBN7X5NVXR": {
+   "sku": "SF96G6SBN7X5NVXR",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "Multi-AZUsage:db.m5.large",
+    "operation": "CreateDBInstance:0002",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "8",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "AKNJJ56CWW4M3EDB": {
+   "sku": "AKNJJ56CWW4M3EDB",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r5d.xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "4",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "memory": "32 GiB",
+    "storage": "1 x 150 NVMe SSD",
+    "networkPerformance": "Up to 10 Gbps",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "InstanceUsage:db.r5d.xl",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R5d",
+    "normalizationSizeFactor": "8",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "UAQRT2D6S5C7EHV5": {
+   "sku": "UAQRT2D6S5C7EHV5",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r5d.xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "4",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "memory": "32 GiB",
+    "storage": "1 x 150 NVMe SSD",
+    "networkPerformance": "Up to 10 Gbps",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "Multi-AZUsage:db.r5d.xl",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R5d",
+    "normalizationSizeFactor": "16",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "C4ERBAHB6DJ9BCDR": {
+   "sku": "C4ERBAHB6DJ9BCDR",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "16 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "InstanceUsage:db.r6g.large",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R6G",
+    "normalizationSizeFactor": "4",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "KCDKC3Q4QN7WUZWA": {
+   "sku": "KCDKC3Q4QN7WUZWA",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "16 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "Multi-AZUsage:db.r6g.large",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R6G",
+    "normalizationSizeFactor": "8",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "5J8PBWJNX88YGMQK": {
+   "sku": "5J8PBWJNX88YGMQK",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.t3.micro",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Skylake E5 2686 v5 (2.5 GHz)",
+    "memory": "1 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Low to Moderate",
+    "processorArchitecture": "64-bit",
+    "engineCode": "18",
+    "databaseEngine": "MariaDB",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "InstanceUsage:db.t3.micro",
+    "operation": "CreateDBInstance:0018",
+    "instanceTypeFamily": "T3",
+    "normalizationSizeFactor": "0.5",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "WQ7SK4J5729AES72": {
+   "sku": "WQ7SK4J5729AES72",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "db.t3.micro",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Skylake E5 2686 v5 (2.5 GHz)",
+    "memory": "1 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Low to Moderate",
+    "processorArchitecture": "64-bit",
+    "engineCode": "18",
+    "databaseEngine": "MariaDB",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "Multi-AZUsage:db.t3.micro",
+    "operation": "CreateDBInstance:0018",
+    "instanceTypeFamily": "T3",
+    "normalizationSizeFactor": "1",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  }
+ },
+ "terms": {
+  "OnDemand": {
+   "C86H957YE4QF4727": {
+    "C86H957YE4QF4727.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "C86H957YE4QF4727",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "C86H957YE4QF4727.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "C86H957YE4QF4727.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.171 per RDS db.m5.large Single-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1710000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "SF96G6SBN7X5NVXR": {
+    "SF96G6SBN7X5NVXR.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "SF96G6SBN7X5NVXR",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "SF96G6SBN7X5NVXR.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "SF96G6SBN7X5NVXR.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.342 per RDS db.m5.large Multi-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.3420000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "AKNJJ56CWW4M3EDB": {
+    "AKNJJ56CWW4M3EDB.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "AKNJJ56CWW4M3EDB",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "AKNJJ56CWW4M3EDB.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "AKNJJ56CWW4M3EDB.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.571 per RDS db.r5d.xlarge Single-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.5710000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "UAQRT2D6S5C7EHV5": {
+    "UAQRT2D6S5C7EHV5.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "UAQRT2D6S5C7EHV5",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "UAQRT2D6S5C7EHV5.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "UAQRT2D6S5C7EHV5.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 1.143 per RDS db.r5d.xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "1.1430000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "C4ERBAHB6DJ9BCDR": {
+    "C4ERBAHB6DJ9BCDR.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "C4ERBAHB6DJ9BCDR",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "C4ERBAHB6DJ9BCDR.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "C4ERBAHB6DJ9BCDR.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.225 per RDS db.r6g.large Single-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.2250000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "KCDKC3Q4QN7WUZWA": {
+    "KCDKC3Q4QN7WUZWA.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "KCDKC3Q4QN7WUZWA",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "KCDKC3Q4QN7WUZWA.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "KCDKC3Q4QN7WUZWA.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.45 per RDS db.r6g.large Multi-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.4500000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "5J8PBWJNX88YGMQK": {
+    "5J8PBWJNX88YGMQK.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "5J8PBWJNX88YGMQK",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "5J8PBWJNX88YGMQK.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "5J8PBWJNX88YGMQK.JRTCKXETXF.6YS6EN2CT7",
+       "description": "USD 0.017 per db.t3.micro Single-AZ instance hour (or partial hour) running MariaDB",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.0170000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "WQ7SK4J5729AES72": {
+    "WQ7SK4J5729AES72.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "WQ7SK4J5729AES72",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "WQ7SK4J5729AES72.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "WQ7SK4J5729AES72.JRTCKXETXF.6YS6EN2CT7",
+       "description": "USD 0.034 per db.t3.micro Multi-AZ instance hour (or partial hour) running MariaDB",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.0340000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   }
+  }
+ }
+}

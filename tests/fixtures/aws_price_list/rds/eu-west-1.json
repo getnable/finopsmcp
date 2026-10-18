@@ -1,0 +1,788 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "offerCode": "AmazonRDS",
+ "version": "20261006224050",
+ "publicationDate": "2026-10-06T22:40:50Z",
+ "products": {
+  "3QX5CT7T6GM9PH8R": {
+   "sku": "3QX5CT7T6GM9PH8R",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0002",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "CWX8VJJC7RHPGPN8": {
+   "sku": "CWX8VJJC7RHPGPN8",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "EU-Multi-AZUsage:db.m5.large",
+    "operation": "CreateDBInstance:0002",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "8",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "TBNX4UCY7PQVP8S3": {
+   "sku": "TBNX4UCY7PQVP8S3",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r6g.xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "4",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "32 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "EU-Multi-AZUsage:db.r6g.xl",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R6G",
+    "normalizationSizeFactor": "16",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "7S8ASG4BXPUZ394J": {
+   "sku": "7S8ASG4BXPUZ394J",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r6g.xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "4",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "32 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.r6g.xl",
+    "operation": "CreateDBInstance:0014",
+    "instanceTypeFamily": "R6G",
+    "normalizationSizeFactor": "8",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "8SG8VRDN66R8UTE9": {
+   "sku": "8SG8VRDN66R8UTE9",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.t4g.micro",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "1 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 5 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ",
+    "usagetype": "EU-Multi-AZUsage:db.t4g.micro",
+    "operation": "CreateDBInstance:0002",
+    "instanceTypeFamily": "T4G",
+    "normalizationSizeFactor": "1",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "GTUCDXE9SAFY8AU7": {
+   "sku": "GTUCDXE9SAFY8AU7",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.t4g.micro",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "1 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 5 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.t4g.micro",
+    "operation": "CreateDBInstance:0002",
+    "instanceTypeFamily": "T4G",
+    "normalizationSizeFactor": "0.5",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "HMCDZN9Q2DJZ9Q5D": {
+   "sku": "HMCDZN9Q2DJZ9Q5D",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "18",
+    "databaseEngine": "MariaDB",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0018",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "DQYXUS3RESNC7PXF": {
+   "sku": "DQYXUS3RESNC7PXF",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "14",
+    "databaseEngine": "PostgreSQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0014",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "T9BUG3VUJUWZA883": {
+   "sku": "T9BUG3VUJUWZA883",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5d.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "memory": "8 GiB",
+    "storage": "1 x 75 NVMe SSD",
+    "networkPerformance": "Up to 10 Gbps",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Multi-AZ (readable standbys)",
+    "usagetype": "EU-Multi-AZClusterUsage:db.m5d.large",
+    "operation": "CreateDBInstance:0002",
+    "instanceTypeFamily": "M5d",
+    "normalizationSizeFactor": "12",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "44AZSRUPDZYKH672": {
+   "sku": "44AZSRUPDZYKH672",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "physicalProcessor": "AWS Graviton2",
+    "memory": "16 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "16",
+    "databaseEngine": "Aurora MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.r6g.large",
+    "operation": "CreateDBInstance:0016",
+    "instanceTypeFamily": "R6G",
+    "normalizationSizeFactor": "4",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "R24874HCCK8ZNYZ7": {
+   "sku": "R24874HCCK8ZNYZ7",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "5",
+    "databaseEngine": "Oracle",
+    "databaseEdition": "Enterprise",
+    "licenseModel": "Bring your own license",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0005",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "C42YQHEF4ABVYH7N": {
+   "sku": "C42YQHEF4ABVYH7N",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Up to 10 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "12",
+    "databaseEngine": "SQL Server",
+    "databaseEdition": "Standard",
+    "licenseModel": "License included",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.large",
+    "operation": "CreateDBInstance:0012",
+    "dedicatedEbsThroughput": "Up to 2120 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "NA",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "RKV4CBZES262QAYX": {
+   "sku": "RKV4CBZES262QAYX",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Outposts",
+    "instanceType": "db.m5.24xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "General purpose",
+    "vcpu": "96",
+    "physicalProcessor": "Intel Xeon Platinum 8175",
+    "clockSpeed": "2.5 GHz",
+    "memory": "384 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "25 Gigabit",
+    "processorArchitecture": "64-bit",
+    "engineCode": "210",
+    "databaseEngine": "MySQL (on-premise for Outpost)",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m5.24xl",
+    "operation": "CreateDBInstance:0210",
+    "dedicatedEbsThroughput": "12000 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M5",
+    "normalizationSizeFactor": "192",
+    "processorFeatures": "Intel AVX, Intel AVX2, Intel AVX512, Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "T5J6NXJJ7Y8WYPS4": {
+   "sku": "T5J6NXJJ7Y8WYPS4",
+   "productFamily": "Database Instance",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "db.m4.large",
+    "currentGeneration": "No",
+    "instanceFamily": "General purpose",
+    "vcpu": "2",
+    "physicalProcessor": "Intel Xeon E5-2676 v3 (Haswell)",
+    "clockSpeed": "2.4 GHz",
+    "memory": "8 GiB",
+    "storage": "EBS Only",
+    "networkPerformance": "Moderate",
+    "processorArchitecture": "64-bit",
+    "engineCode": "2",
+    "databaseEngine": "MySQL",
+    "licenseModel": "No license required",
+    "deploymentOption": "Single-AZ",
+    "usagetype": "EU-InstanceUsage:db.m4.large",
+    "operation": "CreateDBInstance:0002",
+    "dedicatedEbsThroughput": "450 Mbps",
+    "enhancedNetworkingSupported": "Yes",
+    "instanceTypeFamily": "M4",
+    "normalizationSizeFactor": "4",
+    "processorFeatures": "Intel AVX; Intel AVX2; Intel Turbo",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service",
+    "unbundledLicensing": "FALSE"
+   }
+  },
+  "MQ3TMHCN32BA7CE9": {
+   "sku": "MQ3TMHCN32BA7CE9",
+   "productFamily": "Database Storage",
+   "attributes": {
+    "servicecode": "AmazonRDS",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "storageMedia": "SSD",
+    "volumeType": "Provisioned IOPS",
+    "minVolumeSize": "100 GB",
+    "maxVolumeSize": "16 TB",
+    "engineCode": "0",
+    "databaseEngine": "Any",
+    "deploymentOption": "Multi-AZ (readable standbys)",
+    "usagetype": "EU-RDS:Multi-AZCluster-PIOPS-Storage",
+    "operation": "CreateDBInstance",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon Relational Database Service"
+   }
+  }
+ },
+ "terms": {
+  "OnDemand": {
+   "3QX5CT7T6GM9PH8R": {
+    "3QX5CT7T6GM9PH8R.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "3QX5CT7T6GM9PH8R",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "3QX5CT7T6GM9PH8R.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "3QX5CT7T6GM9PH8R.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.189 per RDS db.m5.large Single-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1890000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "CWX8VJJC7RHPGPN8": {
+    "CWX8VJJC7RHPGPN8.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "CWX8VJJC7RHPGPN8",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "CWX8VJJC7RHPGPN8.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "CWX8VJJC7RHPGPN8.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.378 per RDS db.m5.large Multi-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.3780000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "TBNX4UCY7PQVP8S3": {
+    "TBNX4UCY7PQVP8S3.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "TBNX4UCY7PQVP8S3",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "TBNX4UCY7PQVP8S3.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "TBNX4UCY7PQVP8S3.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 1.007 per RDS db.r6g.xlarge Multi-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "1.0070000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "7S8ASG4BXPUZ394J": {
+    "7S8ASG4BXPUZ394J.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "7S8ASG4BXPUZ394J",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "7S8ASG4BXPUZ394J.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "7S8ASG4BXPUZ394J.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.504 per RDS db.r6g.xlarge Single-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.5040000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "8SG8VRDN66R8UTE9": {
+    "8SG8VRDN66R8UTE9.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "8SG8VRDN66R8UTE9",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "8SG8VRDN66R8UTE9.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "8SG8VRDN66R8UTE9.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.035 per RDS db.t4g.micro Multi-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.0350000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "GTUCDXE9SAFY8AU7": {
+    "GTUCDXE9SAFY8AU7.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "GTUCDXE9SAFY8AU7",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "GTUCDXE9SAFY8AU7.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "GTUCDXE9SAFY8AU7.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.017 per RDS db.t4g.micro Single-AZ instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.0170000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "HMCDZN9Q2DJZ9Q5D": {
+    "HMCDZN9Q2DJZ9Q5D.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "HMCDZN9Q2DJZ9Q5D",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "HMCDZN9Q2DJZ9Q5D.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "HMCDZN9Q2DJZ9Q5D.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.189 per RDS db.m5.large Single-AZ instance hour (or partial hour) running MariaDB",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1890000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "DQYXUS3RESNC7PXF": {
+    "DQYXUS3RESNC7PXF.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "DQYXUS3RESNC7PXF",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "DQYXUS3RESNC7PXF.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "DQYXUS3RESNC7PXF.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.197 per RDS db.m5.large Single-AZ instance hour (or partial hour) running PostgreSQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1970000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "T9BUG3VUJUWZA883": {
+    "T9BUG3VUJUWZA883.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "T9BUG3VUJUWZA883",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "T9BUG3VUJUWZA883.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "T9BUG3VUJUWZA883.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.648 per RDS db.m5d.large Multi-AZ (two readable standbys) instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.6480000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "44AZSRUPDZYKH672": {
+    "44AZSRUPDZYKH672.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "44AZSRUPDZYKH672",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "44AZSRUPDZYKH672.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "44AZSRUPDZYKH672.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$ 0.286 per RDS db.r6g.large Single-AZ instance hour (or partial hour) running Aurora MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.2860000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "R24874HCCK8ZNYZ7": {
+    "R24874HCCK8ZNYZ7.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "R24874HCCK8ZNYZ7",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "R24874HCCK8ZNYZ7.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "R24874HCCK8ZNYZ7.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.189 per RDS db.m5.large Single-AZ instance hour (or partial hour) running Oracle EE (BYOL)",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1890000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "C42YQHEF4ABVYH7N": {
+    "C42YQHEF4ABVYH7N.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "C42YQHEF4ABVYH7N",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "C42YQHEF4ABVYH7N.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "C42YQHEF4ABVYH7N.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.996 per RDS db.m5.large Single-AZ instance hour (or partial hour) running SQL Server SE (LI)",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.9960000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "RKV4CBZES262QAYX": {
+    "RKV4CBZES262QAYX.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "RKV4CBZES262QAYX",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "RKV4CBZES262QAYX.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "RKV4CBZES262QAYX.JRTCKXETXF.6YS6EN2CT7",
+       "description": "USD 3.936 per db.m5.24xl Single-AZ instance hour (or partial hour) running MySQL on Outposts",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "3.9360000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "T5J6NXJJ7Y8WYPS4": {
+    "T5J6NXJJ7Y8WYPS4.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "T5J6NXJJ7Y8WYPS4",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "T5J6NXJJ7Y8WYPS4.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "T5J6NXJJ7Y8WYPS4.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.193 per RDS db.m4.large instance hour (or partial hour) running MySQL",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1930000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "MQ3TMHCN32BA7CE9": {
+    "MQ3TMHCN32BA7CE9.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "MQ3TMHCN32BA7CE9",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "MQ3TMHCN32BA7CE9.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "MQ3TMHCN32BA7CE9.JRTCKXETXF.6YS6EN2CT7",
+       "description": "USD $0.414 per GB-month of Multi-AZ Provisioned IOPS Storage",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "GB-Mo",
+       "pricePerUnit": {
+        "USD": "0.4140000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   }
+  }
+ }
+}
