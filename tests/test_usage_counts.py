@@ -55,6 +55,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(tel, "_CONSENT_FILE", tmp_path / ".telemetry")
     monkeypatch.setattr(tel, "_ID_FILE", tmp_path / ".install_id")
     monkeypatch.setattr(tel, "_COUNTS_FILE", tmp_path / ".usage_counts")
+    monkeypatch.setattr(tel, "_COUNTS_STARTED", False)
     for var in ("NABLE_TELEMETRY", "NABLE_NO_TELEMETRY", "DO_NOT_TRACK", "FINOPS_AIRGAP",
                 *tel._CI_ENV_VARS):
         monkeypatch.delenv(var, raising=False)
@@ -383,7 +384,28 @@ def test_start_usage_counts_runs_in_the_background_and_only_with_consent(monkeyp
     assert started == [], "a thread was started for a person who never agreed"
     _consent(monkeypatch)
     tel.start_usage_counts()
-    assert started == [tel.count_guard_asks]
+    tel.start_usage_counts()
+    assert started == [tel.count_guard_asks], "counted twice from one process"
+
+
+def test_two_processes_at_once_count_once(monkeypatch, sent):
+    """A start while another process holds the count's lock counts nothing."""
+    import fcntl
+    import os
+
+    _consent(monkeypatch)
+    _write_ledger(guard_ledger.ledger_path(), [_ask(NOW)])
+    tel = _tel()
+    tel._COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock = tel._COUNTS_FILE.with_name(tel._COUNTS_FILE.name + ".lock")
+    other = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert tel.count_guard_asks(now=NOW) is False
+    finally:
+        os.close(other)
+    assert tel.count_guard_asks(now=NOW) is True
+    assert len(_events(sent, "guard_commitment_asks")) == 1
 
 
 _PROBE = ("import sys, json;"

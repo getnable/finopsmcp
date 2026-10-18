@@ -405,14 +405,34 @@ def test_the_key_from_a_file_only_with_mode_0600(tmp_path):
         cc.read_key(key_file=str(link), environ={}, prompt=None)
 
 
+def _within(seconds, fn):
+    """fn()'s result or exception, failing the test if it has not returned in
+    time (a blocking open of a FIFO never returns)."""
+    import threading
+    box: dict = {}
+
+    def go():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test
+            box["error"] = exc
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    t.join(seconds)
+    assert not t.is_alive(), "it waited on a FIFO"
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
 def test_a_fifo_in_a_key_file_s_or_an_org_file_s_place_never_hangs(org_dir, tmp_path):
     fifo = tmp_path / "key"
     os.mkfifo(fifo, 0o600)
     with pytest.raises(cc.ConnectError, match="regular file"):
-        cc.read_key(key_file=str(fifo), environ={}, prompt=None)
+        _within(5, lambda: cc.read_key(key_file=str(fifo), environ={}, prompt=None))
     (org_dir / "teams.yaml").unlink()
     os.mkfifo(org_dir / "teams.yaml")
-    p = cc.build()
+    p = _within(5, cc.build)
     assert p.org["not_read"]["teams.yaml"] == "not a regular file"
 
 

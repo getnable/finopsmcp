@@ -57,6 +57,7 @@ because events carried too little. Better than a default nobody agreed to.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -753,10 +754,44 @@ def _write_counts_state(state: dict) -> None:
         pass
 
 
+_COUNTS_STARTED = False
+
+
+@contextlib.contextmanager
+def _counts_lock():
+    """Whether this process alone may count now: a non-blocking lock on a
+    file beside the state, so two starts at once (a CLI and an editor's MCP
+    server) never both count the same window. No lock, no count."""
+    fd = None
+    held = False
+    try:
+        _COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(_COUNTS_FILE.with_name(_COUNTS_FILE.name + ".lock"),
+                     os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            import fcntl
+        except ImportError:
+            held = True                         # no flock (Windows): best effort
+        else:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = True
+            except OSError:
+                held = False
+    except OSError:
+        held = False
+    try:
+        yield held
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def count_guard_asks(now: datetime | None = None) -> bool:
     """Count the guard's commitment asks since the last count sent, and send
-    the count: at most once a UTC day, and only under consent (without it
-    the ledger is not read for this). True when an event was sent.
+    the count: at most once a UTC day, one process at a time, and only under
+    consent (without it the ledger is not read for this). True when an
+    event was sent.
 
     The state remembers the record the last count ended on, by line and
     hash, so a record is counted once; a ledger rewritten since is counted
@@ -766,44 +801,55 @@ def count_guard_asks(now: datetime | None = None) -> bool:
     try:
         if _is_opted_out():
             return False
-        now = now or datetime.now(UTC)
-        today = now.astimezone(UTC).date().isoformat()
-        state = _read_counts_state()
-        if state.get("day") == today:
-            return False
-        from . import guard_ledger
-        try:
-            got = guard_ledger.count_asks("purchase_commitment", after=state.get("through"))
-        except OSError:
-            return False                    # not read: nothing is sent, never a zero
-        if got is None:
-            return False                    # no ledger: nothing to count
-        start = None
-        for raw in (state.get("sent_at"), got.get("first_ts")):
-            try:
-                start = datetime.fromisoformat(raw) if raw else None
-            except (TypeError, ValueError):
-                start = None
-            if start is not None and start.tzinfo is not None:
-                break
-            start = None
-        seconds = max(0.0, (now - start).total_seconds()) if start is not None else 0.0
-        window = int(-(-seconds // 86400)) if seconds else 0
-        _write_counts_state({"day": today, "sent_at": now.isoformat(),
-                             "through": got.get("through") or state.get("through")})
-        return send_usage("guard_commitment_asks",
-                          {"asks": int(got["asks"]), "window_days": window})
+        with _counts_lock() as mine:
+            return mine and _count_guard_asks(now or datetime.now(UTC))
     except Exception:
         return False
+
+
+def _count_guard_asks(now: datetime) -> bool:
+    """count_guard_asks, under its lock."""
+    today = now.astimezone(UTC).date().isoformat()
+    state = _read_counts_state()
+    if state.get("day") == today:
+        return False
+    from . import guard_ledger
+    try:
+        got = guard_ledger.count_asks("purchase_commitment", after=state.get("through"))
+    except OSError:
+        return False                        # not read: nothing is sent, never a zero
+    if got is None:
+        return False                        # no ledger: nothing to count
+    start = None
+    for raw in (state.get("sent_at"), got.get("first_ts")):
+        try:
+            start = datetime.fromisoformat(raw) if raw else None
+        except (TypeError, ValueError):
+            start = None
+        if start is not None and start.tzinfo is not None:
+            break
+        start = None
+    seconds = max(0.0, (now - start).total_seconds()) if start is not None else 0.0
+    window = int(-(-seconds // 86400)) if seconds else 0
+    _write_counts_state({"day": today, "sent_at": now.isoformat(),
+                         "through": got.get("through") or state.get("through")})
+    return send_usage("guard_commitment_asks",
+                      {"asks": int(got["asks"]), "window_days": window})
 
 
 def start_usage_counts() -> None:
     """The daily asks count, from a CLI or MCP start, on a daemon thread so
     no start waits for it. Nothing starts without consent. The guard hook
-    never calls this: it never imports this module."""
+    never calls this: it never imports this module. Once a process: a CLI
+    command can reach both this and the MCP server's start."""
+    global _COUNTS_STARTED
     try:
         if _is_opted_out():
             return
+        with _lock:
+            if _COUNTS_STARTED:
+                return
+            _COUNTS_STARTED = True
         in_background(count_guard_asks)
     except Exception:
         pass
