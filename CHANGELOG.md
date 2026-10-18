@@ -94,7 +94,13 @@ regions, Multi-AZ included, from cited Price List rows.
     term, with the term's parameter anywhere in the code, a dict built
     before the call included. The AWS CLI run as `python -m awscli` is read
     as `aws`, and an aws command whose service or operation is a variable or
-    a substitution asks, since the guard cannot read what it runs.
+    a substitution asks, since the guard cannot read what it runs. So does
+    one whose service or operation xargs, parallel or find's -exec fills in
+    (`... | xargs -I{} aws ec2 {} ...`, the -I string in its place, `find
+    ... -exec aws ec2 {} ...`, or `... | xargs aws rds` with nothing after
+    the service), and a Capacity Reservation or Bedrock Provisioned
+    Throughput they hand words the guard never sees, which may be its term.
+    `xargs grep aws` and `xargs -I{} aws s3 cp {} .` say nothing.
   - These come from one table (`COMMITMENT_PURCHASES` in guard.py), which
     also drives the commitment floor, `nable guard reconcile` and the
     commitments-bounds pack's rule. A purchase added to it without a test
@@ -113,7 +119,11 @@ regions, Multi-AZ included, from cited Price List rows.
     The pricer holds to the same rule: `aws ec2 run-instances
     --instance-type p5.48xlarge --count 8 # --dry-run` read as a launch and
     was then left unpriced as a dry run, so it passed with no figure and no
-    ask; it is priced, and asks.
+    ask; it is priced, and asks. A dry run excuses only the command it is
+    in: a real one in a subshell, a group or a substitution elsewhere in the
+    line (`(aws ec2 describe-instances --dry-run); aws ec2 run-instances ...
+    # --dry-run`) excuses no other, whether a launch, a Capacity Reservation
+    or a fleet.
   - An MCP shell tool that takes the program in `command` and argv in
     `args`, `argv` or `arguments` is judged as the joined command line.
   - Never weaker than an ask: no policy (escalate_one_way_doors off, a high
@@ -167,7 +177,8 @@ regions, Multi-AZ included, from cited Price List rows.
     active state in your account after it has been delivered") and does not
     say it cannot be cancelled. With `--cli-input-json file://...` the term
     may be in the file: the floor holds, and the ask says the guard did not
-    read it.
+    read it. Added up with other changes in one command, its total is said
+    as billed hourly over its commitment term, never as a one-off order.
   - Without one it is priced the way `run-instances` is: count x hourly x
     730 a month, judged on the launch threshold; with `--end-date-type
     limited` and an end under a month away, for the hours until then. The

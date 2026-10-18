@@ -532,6 +532,80 @@ def test_a_launch_with_a_dry_run_in_a_comment_is_priced_too():
     assert v["estimate"]["instance_type"] == "m5.large"
 
 
+# A real dry run elsewhere in the line, where the pricer reads none (in a
+# subshell, a group or a substitution), used to pay for the fake one: the
+# shell's count of dry runs was compared with the pricer's, not the commands.
+REAL_DRY_ELSEWHERE = ["(aws ec2 describe-instances --dry-run); ",
+                      "true && (aws ec2 describe-instances --dry-run) && ",
+                      "{ aws ec2 describe-instances --dry-run; }; ",
+                      "echo $(aws ec2 describe-instances --dry-run); "]
+LAUNCH = "aws ec2 run-instances --instance-type p5.48xlarge --count 8"
+
+
+@pytest.mark.parametrize("tail", ["  # --dry-run", " --client-token 'a --dry-run'"])
+@pytest.mark.parametrize("before", REAL_DRY_ELSEWHERE)
+def test_a_real_dry_run_elsewhere_does_not_excuse_a_fake_one(before, tail):
+    v = g.gate_command(before + LAUNCH + tail, record=False)
+    assert v is not None and v["decision"] == "ask", v
+    assert v["monthly_delta_usd"] == round(MONTHLY, 2), v["reason"]
+    v = g.gate_command(before + BASE + tail, record=False)
+    assert v is not None and v["decision"] == "ask" and v["action_type"] == "infra_apply", v
+    assert v["monthly_delta_usd"] == round(MONTHLY, 2), v["reason"]
+    assert g.CAPACITY_BILLING in v["reason"]
+    v = g.gate_command(before + COMMIT + tail, record=False)
+    assert v["decision"] == "ask" and v["action_type"] == "purchase_commitment"
+    assert _usd(TERM_TOTAL) in v["reason"], v["reason"]
+    assert "offering id" not in v["reason"]
+    v = g.gate_command(before + FLEET + tail, record=False)
+    assert v is not None and v["decision"] == "ask", v
+    assert "Capacity Reservation Fleet" in v["reason"] and "No figure" in v["reason"]
+
+
+@pytest.mark.parametrize("cmd", [
+    f"(aws ec2 describe-instances --dry-run); {LAUNCH} --dry-run",
+    f"(aws ec2 describe-instances --dry-run); {BASE} --dry-run",
+    f"{{ {COMMIT} --dry-run; }}",
+    f"bash -c '{FLEET} --dry-run'",
+    f"bash -c '{COMMIT} --dry-run' && (aws ec2 describe-instances --dry-run)",
+])
+def test_a_real_dry_run_in_a_group_or_a_shell_still_buys_nothing(cmd):
+    assert g.gate_command(cmd, record=False) is None, cmd
+
+
+def test_a_real_dry_run_beside_a_launch_is_left_out_of_its_figure_wherever_it_sits():
+    v = g.gate_command(f"bash -c '{LAUNCH} --dry-run' && aws ec2 run-instances "
+                       "--instance-type m5.large --count 40", record=False)
+    assert v["estimate"]["instance_type"] == "m5.large", v["reason"]
+
+
+# ── two or more in one command ───────────────────────────────────────────────
+
+def test_commitments_added_up_are_billed_hourly_over_their_terms_not_one_off():
+    """A commitment's figure is its term's hourly billing, not an order paid
+    up front: added to others, it is said so."""
+    two = f"{COMMIT} && {COMMIT.replace('us-east-1a', 'us-east-1b')}"
+    for est in (g.estimate_command_monthly_cost(two), g.gate_command(two, record=False)):
+        line = est.get("line") or est["reason"]
+        assert "one-off" not in line, line
+        assert (f"2 changes in this command, together {_usd(2 * TERM_TOTAL)} billed hourly "
+                "over 2 commitment terms") in line, line
+    est = g.estimate_command_monthly_cost(two)
+    assert est["total_usd"] == round(2 * TERM_TOTAL, 2)
+    mixed = g.estimate_command_monthly_cost(f"{LAUNCH} && {COMMIT}")
+    assert mixed["monthly_usd"] == round(MONTHLY, 2)
+    assert (f"together {_usd(MONTHLY)}/mo plus {_usd(TERM_TOTAL)} billed hourly over a "
+            "commitment term") in mixed["line"].replace("~", ""), mixed["line"]
+    assert "one-off" not in mixed["line"]
+    # An order that is paid up front is still called one.
+    ri = ("aws ec2 purchase-reserved-instances-offering --reserved-instances-offering-id o-1 "
+          "--instance-count 2 --limit-price Amount=5000,CurrencyCode=USD")
+    both = g.estimate_command_monthly_cost(f"{ri} && {COMMIT}")
+    assert ("together $5,000 in one-off orders plus "
+            f"{_usd(TERM_TOTAL)} billed hourly over a commitment term") in both["line"], \
+        both["line"]
+    assert both["total_usd"] == round(5000 + TERM_TOTAL, 2)
+
+
 # ── the read-only key ─────────────────────────────────────────────────────────
 
 def test_creating_one_is_a_dangerous_action_with_its_own_probe():

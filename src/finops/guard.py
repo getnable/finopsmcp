@@ -114,6 +114,7 @@ import bisect
 import contextlib
 import contextvars
 import functools
+import itertools
 import json
 import os
 import re
@@ -1179,11 +1180,35 @@ _PYTHON_CAPACITY_CALLS = (r"\bcreate_capacity_reservation(?:_fleet)?\b"
                           r"|_make_api_call\( ?CreateCapacityReservation(?:Fleet)?\b")
 
 
+# xargs and parallel run the command after them with words they read (stdin,
+# or parallel's `:::`), put where the replacement string is (`-I{}`, `-i`,
+# `--replace`, BSD's `-J`) or after the command's own words; find's -exec and
+# -ok put a path where `{}` is. The command they run is the first word that
+# is not one of their options, an option's value, or a program that only
+# runs the command after it: `xargs -n 1 -I % sh -c 'aws ...'` runs aws,
+# `xargs grep aws` does not.
+_FEEDER_RE = re.compile(r"(?<![^\s;&|(])(?:(?:[^\s;&|()]*/)?(xargs|parallel)"
+                        r"|(-exec(?:dir)?|-ok(?:dir)?))(?!\S)")
+_FEEDER_VALUED = frozenset({"-a", "-d", "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
+                            "-j", "--jobs", "--arg-file", "--delimiter", "--eof", "--max-args",
+                            "--max-lines", "--max-procs", "--max-chars"})
+_FEEDER_WRAPPERS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "env", "sudo", "nice",
+                              "nohup", "time", "command", "exec", "timeout", "stdbuf"})
+_REPLACE_FLAG_RE = re.compile(r"-[IJi](.*)|--replace(?:=(.*))?")
+_AWS_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+_WORD_RE = re.compile(r"\S+")
+# The purchases that are a commitment only with a flag, which fed words may hold.
+_TERM_ONLY = frozenset((p.service, p.verb) for p in COMMITMENT_PURCHASES if p.when)
+
+
 class _AwsUnresolved:
-    """`aws rds $VERB ...`, `aws $SERVICE ...`, `aws rds $(...)`: an AWS
-    command whose service or operation the shell fills in, so the guard
-    cannot read which operation runs. A heuristic, so it only ever asks, and
-    a commitment floor holds for it (it may be a purchase)."""
+    """`aws rds $VERB ...`, `aws $SERVICE ...`, `aws rds $(...)`, `... | xargs
+    -I{} aws rds {} ...`, `... | xargs aws rds`, `find ... -exec aws rds {}
+    ...`: an AWS command whose service or operation the shell, xargs,
+    parallel or find fills in, so the guard cannot read which operation runs;
+    or a purchase that is a commitment only with a term, given flags the
+    guard never sees. A heuristic, so it only ever asks, and a commitment
+    floor holds for it (it may be a purchase)."""
 
     pattern = "aws-unresolved-operation"
     _re = re.compile(r"aws (?:[a-z0-9-]+ )?[$`]")
@@ -1192,6 +1217,50 @@ class _AwsUnresolved:
         for m in self._re.finditer(cmd):
             if m.start() == 0 or cmd[m.start() - 1] in " ;&|()/":
                 yield m
+        if any(name in cmd for name in ("xargs", "parallel", "-exec", "-ok")):
+            yield from self._fed(cmd)
+
+    @staticmethod
+    def _fed(cmd: str):
+        """The `aws` word of each command xargs, parallel or find runs whose
+        service or operation is a word it is fed, or that buys a purchase in
+        _TERM_ONLY with words it is fed. One shell command at a time."""
+        pos = 0
+        while (feeder := _FEEDER_RE.search(cmd, pos)) is not None:
+            brk = _COMMAND_BREAK_RE.search(cmd, feeder.end())
+            end = brk.start() if brk else len(cmd)
+            pos = brk.end() if brk else len(cmd)
+            parallel = feeder.group(1) == "parallel"
+            marks, value_of, aws = {"{}"}, None, None
+            replaced = feeder.group(2) is not None      # find puts the path at `{}` only
+            words = _WORD_RE.finditer(cmd, feeder.end(), end)
+            for m in words:
+                w = m.group()
+                if value_of is not None:
+                    if value_of in ("-I", "-J"):
+                        marks.add(w)
+                        replaced = True
+                    value_of = None
+                elif w in _FEEDER_VALUED:
+                    value_of = w
+                elif w.startswith("-"):
+                    flag = _REPLACE_FLAG_RE.fullmatch(w)
+                    if flag is not None:
+                        marks.add(flag.group(1) or flag.group(2) or "{}")
+                        replaced = True
+                elif not ("=" in w or w.isdigit()
+                          or w.rsplit("/", 1)[-1] in _FEEDER_WRAPPERS):
+                    aws = m if w.rsplit("/", 1)[-1] == "aws" else None
+                    break
+            if aws is None:
+                continue
+            named = [m.group() for m in itertools.islice(words, 2)]
+            unread = len(named) < 2 or any(w.startswith("-") or not _AWS_NAME_RE.fullmatch(w)
+                                           or any(k in w for k in marks) for w in named)
+            if unread or (tuple(named) in _TERM_ONLY and (
+                    parallel or not replaced
+                    or any(k in m.group() for m in words for k in marks))):
+                yield aws
 
     def search(self, cmd: str) -> re.Match[str] | None:
         return next(self._hits(cmd), None)
@@ -2152,6 +2221,8 @@ def _capacity_quote(cmd: str) -> tuple[dict[str, Any] | None, str]:
         return {
             "monthly_usd": None,       # a term total, billed from when it is delivered
             "total_usd": round(total, 2),
+            # Billed by the hour over the term, not paid up front (_added_up).
+            "total_kind": "term",
             "commitment_hours": round(held, 2),
             "hourly_usd": rate.hourly, "instance_type": itype, "count": n,
             "basis": rate.basis,
@@ -2192,9 +2263,8 @@ def _unpriced_reservation(command: str) -> str | None:
     if _SPECIAL_RULES["python-boto3-capacity-reservation"].search(norm):
         return (f"this looks like Python code that creates an EC2 Capacity Reservation, and "
                 f"{CAPACITY_BILLING}. No figure: the guard does not price Python code")
-    dry_runs = _dry_runs(command)
     for form in next(_pricing_forms(command), []):
-        excused = _excused(form, dry_runs)
+        excused = _excused(form, command)
         for seg, at in _commands_in(form):
             if at in excused:
                 continue
@@ -2838,10 +2908,7 @@ def _commands_in(form: str):
 def _dry_runs(command: str) -> int | None:
     """How many of the command's shell commands hand the CLI a dry run as an
     argument of its own (_shell_view), or None when the shell's reading
-    cannot be had. Pricing excuses no more dry runs than this: the forms it
-    reads keep a comment's text and drop quotes, so `# --dry-run` and
-    `--client-token 'x --dry-run'` look like dry runs there, and a launch
-    that is no dry run went unpriced and through."""
+    cannot be had."""
     if "dry" not in command:
         return 0
     found = [0]
@@ -2853,23 +2920,46 @@ def _dry_runs(command: str) -> int | None:
     return None if _shell_view(command, count) is _UNREADABLE else found[0]
 
 
-def _excused(form: str, dry_runs: int | None) -> frozenset[int]:
+def _excused(form: str, command: str | None) -> frozenset[int]:
     """The offsets of the commands in `form` that are dry runs pricing may
-    leave out: all of them when the shell reads at least as many, none
-    otherwise (then each is priced as if it ran)."""
-    dry = frozenset(at for seg, at in _commands_in(form) if "dry" in seg and _inert(seg))
-    return dry if dry_runs is not None and len(dry) <= dry_runs else frozenset()
+    leave out: each one the shell, reading that same command, hands the CLI
+    the flag as an argument of its own (_dry_runs). The forms keep a
+    comment's text and drop quotes, so `# --dry-run` and `--client-token 'x
+    --dry-run'` look like dry runs there. Comparing the shell's count of dry
+    runs with the form's let a real one the form does not see, in `( ... )`
+    or `$( ... )`, pay for a fake one on a launch, which then went unpriced.
+
+    The same command is the one at the same place in the text `form` was
+    read from (_price_rewrite, split at the same breaks: reading only takes
+    breaks away), and only when it reads as the same command. Anything else,
+    or no `command`, and nothing is excused: each is priced as if it ran."""
+    if not command:
+        return frozenset()
+    dry = [(i, seg, at) for i, (seg, at) in enumerate(_commands_in(form))
+           if "dry" in seg and _inert(seg)]
+    if not dry or len(dry) > _SHELL_VIEW_MAX_COMMANDS:
+        return frozenset()
+    n = len(_COMMAND_BREAK_RE.findall(form)) + 1
+    for split in (False, True):
+        raw = [seg for seg, _at in _commands_in(_price_rewrite(command, split))]
+        if len(raw) == n:
+            break
+    else:
+        return frozenset()
+    return frozenset(at for i, seg, at in dry
+                     if " ".join(_strip_aws_global_options(_flatten(raw[i])).split())
+                     == " ".join(seg.split()) and _dry_runs(raw[i]))
 
 
-def _price_form(form: str, cwd: str | None, dry_runs: int | None = 0
+def _price_form(form: str, cwd: str | None, command: str | None = None
                 ) -> tuple[list[dict[str, Any]], int]:
     """(figures, how many changes had none) for each command in `form`: the
     first pricer whose command it is prices it, and a command it cannot price
     does not stop the others. A dry run costs nothing and is not priced, when
-    the shell agrees it is one (`dry_runs`, _excused)."""
+    the shell agrees that command of `command` is one (_excused)."""
     parts: list[dict[str, Any]] = []
     unpriced = 0
-    excused = _excused(form, dry_runs)
+    excused = _excused(form, command)
     for seg, at in _commands_in(form):
         if at in excused:
             continue
@@ -2889,27 +2979,35 @@ def _price_form(form: str, cwd: str | None, dry_runs: int | None = 0
 
 def _added_up(parts: list[dict[str, Any]], unpriced: int) -> dict[str, Any] | None:
     """One estimate for the whole command: a single figure as the pricer
-    gave it, several added up (only what adds cost counts toward the total)."""
+    gave it, several added up (only what adds cost counts toward the total).
+    A total is an order paid once, or a commitment's term ("total_kind"
+    "term"), which bills by the hour while it is active; each is said as
+    what it is."""
     if not parts:
         return None
     est = parts[0]
     if len(parts) > 1:
         monthly = [p["monthly_usd"] for p in parts
                    if isinstance(p.get("monthly_usd"), (int, float)) and p["monthly_usd"] > 0]
-        one_off = [p["total_usd"] for p in parts
-                   if p.get("monthly_usd") is None and isinstance(p.get("total_usd"), (int, float))]
-        if monthly or one_off:
+        totals = [p for p in parts
+                  if p.get("monthly_usd") is None and isinstance(p.get("total_usd"), (int, float))]
+        one_off = [p["total_usd"] for p in totals if p.get("total_kind") != "term"]
+        terms = [p["total_usd"] for p in totals if p.get("total_kind") == "term"]
+        if monthly or totals:
             total = round(sum(monthly), 2) if monthly else None
             said = ([f"~${total:,.0f}/mo"] if total is not None else []) + \
-                   ([f"${sum(one_off):,.0f} in one-off orders"] if one_off else [])
+                   ([f"${sum(one_off):,.0f} in one-off orders"] if one_off else []) + \
+                   ([f"${sum(terms):,.0f} billed hourly over "
+                     + ("a commitment term" if len(terms) == 1
+                        else f"{len(terms)} commitment terms")] if terms else [])
             est = {"monthly_usd": total,
                    "basis": "; ".join(dict.fromkeys(str(p.get("basis")) for p in parts)),
                    "parts": parts,
                    "line": ("; ".join(p["line"] for p in parts)
                             + f"; {len(parts)} changes in this command, together "
                             + " plus ".join(said))}
-            if one_off:
-                est["total_usd"] = round(sum(one_off), 2)
+            if totals:
+                est["total_usd"] = round(sum(one_off) + sum(terms), 2)
             books = list(dict.fromkeys(p["price_book"]["pack"] for p in parts
                                        if p.get("price_book")))
             if books:
@@ -2980,11 +3078,10 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
         if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
             return None
         token = _PRICING_REGION.set(_named_region(command))
-        dry_runs = _dry_runs(command)
         for forms in _pricing_forms(command):
             best: dict[str, Any] | None = None
             for form in forms:
-                parts, unpriced = _price_form(form, cwd, dry_runs)
+                parts, unpriced = _price_form(form, cwd, command)
                 # Each part says on its own when its figure is us-east-1's for
                 # a command that names another region.
                 est = _added_up([_with_region(p, command) for p in parts], unpriced)
