@@ -197,10 +197,21 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     ("spot-fleet-terminate", "terminate_instance"),
     (r"\baws\s+ec2\s+release-address\b", "release_ip"),
     (r"\baws\s+ec2\s+delete-snapshot\b", "snapshot_delete"),
+    # Every way the AWS CLI buys a commitment: a term of capacity paid for
+    # whether it is used or not. Each verb is an operation in botocore's
+    # service model (tests/test_guard_commitment_purchase.py pins them).
     (r"\baws\s+(?:savingsplans\s+create-savings-plan|"
      r"ec2\s+purchase-reserved-instances-offering|"
      r"ec2\s+purchase-host-reservation|"
-     r"rds\s+purchase-reserved-db-instances-offering)", "purchase_commitment"),
+     r"ec2\s+purchase-scheduled-instances|"
+     r"ec2\s+purchase-capacity-block|"
+     r"ec2\s+accept-reserved-instances-exchange-quote|"
+     r"rds\s+purchase-reserved-db-instances-offering|"
+     r"elasticache\s+purchase-reserved-cache-nodes-offering|"
+     r"memorydb\s+purchase-reserved-nodes-offering|"
+     r"redshift\s+purchase-reserved-node-offering|"
+     r"opensearch\s+purchase-reserved-instance-offering|"
+     r"es\s+purchase-reserved-elasticsearch-instance-offering)", "purchase_commitment"),
     # delete-*, and the batch forms (ecr batch-delete-image, dynamodb
     # batch-delete-item) that delete many at once.
     (r"\baws\s+\S+\s+(?:batch-)?delete-[a-z0-9-]+", "delete_resource"),
@@ -213,8 +224,10 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bgcloud\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baz\s+(?:\S+\s+)*delete\b", "delete_resource"),
     # Heuristics. These cannot see what will actually run, so they only ever
-    # ask: a Python one-liner that imports boto3 and calls a delete or a
-    # terminate, and a base64 payload decoded straight into a shell.
+    # ask: a Python one-liner that imports boto3 and buys a commitment, one
+    # that calls a delete or a terminate, and a base64 payload decoded
+    # straight into a shell.
+    ("python-boto3-purchase", "purchase_commitment"),
     ("python-boto3-delete", "delete_resource"),
     ("base64-to-shell", "delete_resource"),
 ]
@@ -716,7 +729,7 @@ class _Lazy:
 # The operators between shell commands in a normalized command.
 _COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
 _SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
-_CROSS_SEGMENT = frozenset({"python-boto3-delete", "base64-to-shell"})
+_CROSS_SEGMENT = frozenset({"python-boto3-delete", "python-boto3-purchase", "base64-to-shell"})
 _CLI_WORD_RE = re.compile(r"(?<![\w./-])(?:aws|kubectl|helm|terraform|tofu|terragrunt|pulumi|"
                           r"gcloud|az|cdk|sam|doctl|eksctl|gsutil)(?![\w.-])")
 _AWS_EC2_RE = re.compile(r"aws\s+ec2\s")
@@ -984,6 +997,17 @@ class _PythonBoto3Delete:
         return self.search(cmd)
 
 
+class _PythonBoto3Purchase(_PythonBoto3Delete):
+    """`python3 -c "import boto3; ...purchase_reserved_db_instances_offering(...)"`:
+    a commitment bought through the SDK. The same heuristic as the delete
+    one, so it only ever asks."""
+
+    pattern = "python-boto3-purchase"
+    _delete = re.compile(r"\b(?:purchase_(?:reserved_\w+|capacity_block\w*|host_reservation|"
+                         r"scheduled_instances)|accept_reserved_instances_exchange_quote|"
+                         r"create_savings_plan)\b")
+
+
 class _Base64ToShell:
     """`... | base64 -d | sh`: a script decoded straight into a shell, so the
     guard never sees the command. A heuristic, so it only ever asks."""
@@ -1020,7 +1044,8 @@ _SPECIAL_RULES = {r.pattern: r for r in (
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
     _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
-    _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _Base64ToShell(),
+    _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _PythonBoto3Purchase(),
+    _Base64ToShell(),
 )}
 
 
@@ -1030,6 +1055,8 @@ def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
 
 _ONE_WAY_RULES = _compile(_ONE_WAY_CLASSIFIERS)
 _TWO_WAY_RULES = _compile(_TWO_WAY_CLASSIFIERS)
+_COMMITMENT = ("one_way", "purchase_commitment")
+_COMMITMENT_RULES = [rule for rule, action in _ONE_WAY_RULES if action == "purchase_commitment"]
 
 
 def classify_command(command: str) -> tuple[str, str] | None:
@@ -1082,6 +1109,32 @@ def _classify_live(cmd: str) -> tuple[str, str] | None:
             if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
                 return (door, action)
     return None
+
+
+def _commitment_live(cmd: str) -> tuple[str, str] | None:
+    """_classify_live with the commitment purchase rules alone."""
+    hits = [rule for rule in _COMMITMENT_RULES if rule.search(cmd) is not None]
+    if not hits:
+        return None
+    if _SUBSTITUTION_RE.search(cmd):
+        return _COMMITMENT
+    segs = _Segments(cmd)
+    for rule in hits:
+        if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
+            return _COMMITMENT
+    return None
+
+
+def _buys_commitment(command: str) -> bool:
+    """Does the command buy a commitment, read the way classify_command reads
+    it? Asked on its own because classification stops at the first one-way
+    rule: `aws ec2 terminate-instances ... && aws savingsplans
+    create-savings-plan ...` is a terminate there, and the purchase in it
+    must still never be let through (_commitment_floor)."""
+    if len(command) > MAX_JUDGED_CHARS:
+        return False
+    return any(_worst_reading(form, _commitment_live) is not None
+               for form in _quoting_splits(command))
 
 
 def _strict() -> bool:
@@ -1638,6 +1691,27 @@ def _price_reserved_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
         "line": (f"{count} Reserved Instance{'s' if count != 1 else ''}, the order capped "
                  f"at ${ceiling:,.0f} ({basis})"),
     }
+
+
+# A commitment purchase with no price in the command: the offering id fixes
+# the price, and reading an offering needs the network, so no figure is shown
+# and none is guessed. How many it buys is in the command, and is said.
+_COMMITMENT_COUNTS = (("db-instance-count", "DB instance"), ("cache-node-count", "cache node"),
+                      ("node-count", "node"), ("instance-count", "instance"))
+_NO_COMMITMENT_FIGURE = ("No figure: the offering id fixes the price, which the guard cannot "
+                         "look up offline")
+
+
+def _commitment_unpriced(command: str) -> str:
+    """The sentence an unpriced commitment purchase gets in place of a figure."""
+    norm = _normalize(command)
+    counts = []
+    for flag, noun in _COMMITMENT_COUNTS:
+        n = _num(_flag(norm, flag))
+        if n is not None and n.is_integer():
+            counts.append(f"{int(n):,} {noun}{'s' if n != 1 else ''}")
+    return (f"{_NO_COMMITMENT_FIGURE}"
+            + (f" (the order is for {' and '.join(counts)})" if counts else "") + ". ")
 
 
 def _leading_names(cmd: str, verb_end: int) -> int:
@@ -3112,6 +3186,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     lens = budget_lens(command, est, team=org.team()[0] if est is not None else None)
     over = lens is not None and lens["state"] == "over"
     cost = f"{_cost_line(est)}. " if est else ""
+    if est is None and action_type == "purchase_commitment":
+        cost = _commitment_unpriced(command)
     if destroys:
         shown = ", ".join(destroys[:3]) + (f" and {len(destroys) - 3} more" if len(destroys) > 3 else "")
         cost = (f"The saved plan destroys {len(destroys)} "
@@ -3558,6 +3634,10 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         # Installed guard-rule packs may tighten any of that, never loosen it.
         v, pack_error, pack_problem = _with_packs(
             v, forms=forms, commands=() if forms else (command,), cwd=cwd)
+        # Nothing above lets a commitment purchase through without a person.
+        buys = not forms and _buys_commitment(command)
+        if buys:
+            v = _commitment_floor(v, command)
         if record:
             _record_pack_trouble(pack_error, pack_problem, judged=v is not None or stop is not None,
                                  harness=harness, tool=tool, command=command,
@@ -3572,7 +3652,7 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         if record:
             answer, recorded = _out_of_band(answer, recorded, kind="shell", text=command,
                                             cwd=cwd, harness=harness, session_id=session_id,
-                                            tool=tool)
+                                            tool=tool, commitment=buys)
         if record:
             if history_error is not None:
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
@@ -3844,20 +3924,54 @@ _MAYBE_DENY_ONLY = ("codex", "gemini", "cline", "copilot")
 _NO_OUT_OF_BAND = ("ai_budget", "oversize_command")
 _POLICY_DENY_NOTE = (" This is denied by policy, not waiting for a person, so a one-time "
                      "approval (`nable guard approve`) cannot let it through.")
+# A commitment purchase is not lifted by a one-time approval either: the
+# approval is an id an agent can wait on, and money committed for a term is
+# bought by a person, in their own terminal, or from an agent that can ask.
+_COMMITMENT_NOT_APPROVABLE = (" A commitment purchase is never approved out of band, so "
+                              "`nable guard approve` cannot let it through: a person runs it "
+                              "in their own terminal, or from an agent that can ask.")
+
+# ── The commitment floor ──────────────────────────────────────────────────────
+# A commitment purchase is never weaker than an ask, whatever a policy, a
+# pack, a learned threshold, a one-time approval or the allowed-actions list
+# says; a deny (a pack's, the allowlist's, a hard budget stop) stays a deny.
+# The policy gate holds the same floor (policy.evaluate_action_gate); this is
+# the guard's own, applied to the final verdict, so no layer added later can
+# open it.
+_COMMITMENT_FLOOR = ("A commitment purchase always asks a person, whatever the policy, a "
+                     "pack, a learned threshold or the allowed-actions list says.")
+
+
+def _commitment_floor(v: dict[str, Any] | None, command: str, *, via: str = ""
+                      ) -> dict[str, Any] | None:
+    """`v` when it already asks or denies; otherwise an ask for the
+    commitment purchase in `command`."""
+    if v is not None and _SEVERITY.get(str(v.get("decision")), 0) >= _SEVERITY["ask"]:
+        return v
+    opening, closing = _one_way_sentence(command, "purchase_commitment", cwd=None)
+    est = (v or {}).get("estimate")
+    cost = f"{_cost_line(est)}. " if est else _commitment_unpriced(command)
+    lead = f"{via}. " if via else f"{opening}. "
+    return {**(v or {}), "decision": "ask", "action_type": "purchase_commitment",
+            "door": "one_way", "rule": "commitment_floor",
+            "reason": f"nable guard: {lead}{_sentence(cost)}{_COMMITMENT_FLOOR} {closing}"}
 
 
 def _out_of_band(answer: dict[str, Any], recorded: dict[str, Any] | None, *, kind: str,
                  text: Any, cwd: str | None, harness: str, session_id: Any,
-                 tool: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
+                 tool: Any, commitment: bool = False
+                 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """(answer, recorded) for a harness that cannot ask (guard_approvals).
 
     An ask the identical call already had a person approve, once, from their
     own terminal becomes an allow, recorded with approved_out_of_band and
     who approved. Any other ask gets a pending approval: its id and the
     command a person runs join the reason, and the ledger line carries the
-    id. A deny says a one-time approval cannot lift it. Elsewhere, and on
-    any error, the verdict is left as it was: in these harnesses an ask is
-    a deny either way."""
+    id. A deny says a one-time approval cannot lift it, and so does an ask
+    about a call that buys a commitment (`commitment`, or its action type),
+    which no approval is ever taken or offered for. Elsewhere, and on any
+    error, the verdict is left as it was: in these harnesses an ask is a deny
+    either way."""
     if harness not in _MAYBE_DENY_ONLY or recorded is None or not answer.get("reason"):
         return answer, recorded
     decision = answer.get("decision")
@@ -3869,6 +3983,9 @@ def _out_of_band(answer: dict[str, Any], recorded: dict[str, Any] | None, *, kin
             return answer, recorded
         if decision == "deny":
             reason = answer["reason"].rstrip() + _POLICY_DENY_NOTE
+            return {**answer, "reason": reason}, {**recorded, "reason": reason}
+        if commitment or answer.get("action_type") == "purchase_commitment":
+            reason = answer["reason"].rstrip() + _COMMITMENT_NOT_APPROVABLE
             return {**answer, "reason": reason}, {**recorded, "reason": reason}
         if answer.get("action_type") in (*_NO_OUT_OF_BAND, *_CHANGE_TYPES):
             return answer, recorded
@@ -4006,6 +4123,16 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         worst, pack_error, pack_problem = _with_packs(
             worst, commands=tuple(dict.fromkeys(commands)), tool=tool_name, args=arguments,
             cwd=cwd if isinstance(cwd, str) else None)
+        # Nothing above lets a commitment purchase through without a person.
+        buying = next((act for act in actions if not act.unchecked and (
+            act.hit == _COMMITMENT or (act.hit is None and _buys_commitment(act.command)))),
+            None)
+        if buying is not None:
+            via = (f"{tool_name} would {buying.summary}" if buying.summary
+                   else f"{tool_name} amounts to `{buying.command}`")
+            floored = _commitment_floor(worst, buying.command, via=via)
+            if floored is not worst:
+                worst, summary = floored, buying.command
         if record:
             _record_pack_trouble(pack_error, pack_problem,
                                  judged=worst is not None or stop is not None, harness=harness,
@@ -4018,7 +4145,7 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                                             text=(tool_name, arguments),
                                             cwd=cwd if isinstance(cwd, str) else None,
                                             harness=harness, session_id=session_id,
-                                            tool=tool_name)
+                                            tool=tool_name, commitment=buying is not None)
             if stop is not None:
                 _record({**stop, "harness": harness, "mcp_tool": tool_name}, tool=tool_name,
                         command=summary, session_id=session_id)

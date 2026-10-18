@@ -8,7 +8,7 @@ not this package; `nable serve` says so and exits.) nable sends your bill
 nowhere. In an editor, the answers you ask for reach the model you chat with,
 as every MCP tool result does; the CLI involves no model.
 
-At a glance: **203 MCP tools, 59 CLI commands, 20 sources of spend.** Read-only
+At a glance: **203 MCP tools, 60 CLI commands, 20 sources of spend.** Read-only
 toward your cloud. Credentials stay in nable's encrypted local vault, never
 routed through any model.
 
@@ -101,12 +101,12 @@ nable's local vault, whose key is a 0600 file with a copy in your OS keyring.
 
 ---
 
-## CLI (59 commands)
+## CLI (60 commands)
 
 As `nable --help` groups them:
 
 ```
-get answers   scan  brief  why  ai-budget  ai-costs  budget
+get answers   scan  brief  why  commitments  ai-budget  ai-costs  budget
 start here    welcome  connect  org  learn  setup  doctor  tools  serve
               upgrade
 clouds        aws  aws-cur  azure  gcp
