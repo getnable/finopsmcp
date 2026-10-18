@@ -49,6 +49,7 @@ import re
 import stat
 import sys
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -661,6 +662,114 @@ def read(days: float | None = None, path: Path | None = None, *,
                 continue
             out.append(rec)
     return out
+
+
+# ── read helpers for the free tool's own counts and its connect ──────────────
+# Read only: nothing below writes the ledger or changes a record, and the hook
+# calls none of it. telemetry.count_guard_asks reads count_asks at most once a
+# day, from a CLI or MCP start; `nable cloud connect` reads stored_lines.
+
+def _complete_lines(fh: Any) -> Iterator[tuple[int, bytes]]:
+    """(line number, line without its newline) for each line that ends in a
+    newline. A last line still being written (append holds the lock, a reader
+    does not take it) has none yet, and is left for the next read."""
+    for n, raw in enumerate(fh, start=1):
+        if raw.endswith(b"\n"):
+            yield n, raw[:-1]
+
+
+def count_asks(action_type: str, *, after: dict[str, Any] | None = None,
+               path: Path | None = None) -> dict[str, Any] | None:
+    """Counts only: verdicts with decision ask and this action_type, after
+    the record `after` names ({line, hash, ts}: what the last call returned
+    as `through`). When that line no longer holds that hash (the file was
+    rewritten or replaced), records newer than its ts are counted instead.
+
+    {"asks": n, "through": {line, hash, ts} of the last record read (None
+    when none was), "first_ts": the first record's ts after `after`}, or
+    None when there is no ledger. Raises OSError on one that cannot be read
+    (a symlink included): the caller says not read, never zero."""
+    path = path or ledger_path()
+    if _symlink_target(path) is not None:
+        raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
+    try:
+        fh = path.open("rb")
+    except FileNotFoundError:
+        return None
+    mark = after if isinstance(after, dict) else {}
+    mark_line = mark.get("line") if isinstance(mark.get("line"), int) else None
+    mark_ts = _ts({"ts": mark.get("ts")}) if mark.get("ts") else None
+    by_line = {"asks": 0, "first_ts": None}
+    by_time = {"asks": 0, "first_ts": None}
+    held = False                       # the marked line still holds its hash
+    through = None
+    with fh:
+        for n, line in _complete_lines(fh):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            ts = _ts(rec)
+            if n == mark_line and _sha(line) == mark.get("hash"):
+                held = True
+            through = {"line": n, "hash": _sha(line), "ts": rec.get("ts")}
+            hit = (not is_outcome(rec) and rec.get("decision") == "ask"
+                   and rec.get("action_type") == action_type)
+            for tally, inside in ((by_line, mark_line is None or n > mark_line),
+                                  (by_time, mark_ts is None
+                                   or (ts is not None and ts > mark_ts))):
+                if not inside:
+                    continue
+                if tally["first_ts"] is None and rec.get("ts"):
+                    tally["first_ts"] = rec.get("ts")
+                if hit:
+                    tally["asks"] += 1
+    chosen = by_line if (held or mark_line is None) else by_time
+    return {"asks": chosen["asks"], "first_ts": chosen["first_ts"], "through": through}
+
+
+def chain_of(lines: list[bytes]) -> dict[str, Any]:
+    """verify()'s walk over lines already read: {ok, records, head} and, at
+    the first break, broken_at and problem. For checking exactly the bytes a
+    caller is about to hand on, rather than the file read again."""
+    prev = GENESIS
+    for n, line in enumerate(lines, start=1):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            rec = None
+        if not isinstance(rec, dict):
+            return {"ok": False, "records": n - 1, "head": prev, "broken_at": n,
+                    "problem": "line is not a ledger record"}
+        if rec.get("prev") != prev:
+            return {"ok": False, "records": n - 1, "head": prev, "broken_at": n,
+                    "problem": "prev does not match the line before it: a record "
+                               "was edited, removed or reordered"}
+        prev = _sha(line)
+    return {"ok": True, "records": len(lines), "head": prev}
+
+
+def stored_lines(path: Path | None = None) -> dict[str, Any]:
+    """The ledger's lines exactly as stored, newline-terminated ones only,
+    and their chain: {"lines": [bytes], "chain": chain_of(lines), "partial":
+    whether a last line without its newline was left out, "path"}. No
+    ledger is no lines. Raises OSError on one that cannot be read, a
+    symlink included (what append() refuses to write, nothing hands on)."""
+    path = path or ledger_path()
+    if _symlink_target(path) is not None:
+        raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
+    try:
+        fh = path.open("rb")
+    except FileNotFoundError:
+        return {"lines": [], "chain": chain_of([]), "partial": False, "path": str(path)}
+    with fh:
+        raw = fh.read()
+    body, _, tail = raw.rpartition(b"\n")
+    lines = body.split(b"\n") if body or raw.startswith(b"\n") else []
+    return {"lines": lines, "chain": chain_of(lines), "partial": bool(tail),
+            "path": str(path)}
 
 
 # ── ask outcomes ──────────────────────────────────────────────────────────────

@@ -246,6 +246,55 @@ regions, Multi-AZ included, from cited Price List rows.
   and $1.143). Aurora, Oracle, SQL Server and anything not listed get None.
   Every us-east-1 Single-AZ row of `RDS_HOURLY` and `RDS_HOURLY_POSTGRES`
   agrees with it; `rds_hourly` and those tables are unchanged.
+- **`nable cloud connect`: the org model and the guard ledger, into a paid
+  workspace, exactly as shown.** A dry run by default: it builds the payload
+  from the org model files (owners, teams, accounts, environments, tags,
+  policy, freezes, approvals) in the resolved org dir and the guard ledger's
+  lines exactly as stored, which were redacted when they were written, and
+  nothing else (no hostname, path, user name or machine id). It checks the
+  ledger's hash chain on those very bytes; a chain that breaks is shown, with
+  the record it breaks at, and left out. It prints the destination host, the
+  file names, the record counts, the byte size and the payload's sha256, and
+  saves the exact bytes (0600, beside the ledger, or `--out`). It opens no
+  connection.
+  - `--send --confirm SHA256` builds the payload again and refuses, "the
+    payload changed since you looked", unless its sha256 is the one
+    confirmed. It asks the box what the workspace holds, then POSTs the rest
+    to `/api/free-tool/connect` as ordered batches of at most 256 KiB, each
+    a slice of the bytes shown, cut where a line ends. A send that stopped
+    resumes from the head the box reports.
+  - HTTPS only (`https://host[:port]`, no path, no user info); http,
+    another scheme, a redirect and air-gap mode are refused.
+  - The workspace key (an analyst key bound to the workspace, made on its
+    /workspace page) is read from the new `NABLE_WORKSPACE_KEY`, a
+    `--key-file` with mode 0600, or a hidden prompt. It is never taken from
+    the command line (`--key` is refused without being echoed), and never
+    stored, printed or logged.
+  - An org file that is a symlink, is not a regular file, is over 128 KiB or
+    is not UTF-8 is left out and named; a repo's `nable.org/` nobody trusted
+    here is not sent. A ledger over 50,000 records or 32 MiB, the most a
+    workspace holds, is left out and says so.
+  - `nable cloud status --box https://HOST` shows what the workspace holds:
+    org model versions and each ledger chain's records and head.
+  - docs/network-manifest.json lists the box a person names as the
+    `user_named_workspace` category. Exit codes: 0 done, 1 refused or not
+    reached, 2 a usage error, 3 nothing to send.
+- **Two usage counts, under the consent telemetry already asks for.**
+  `commitments_status_run`, once per `nable commitments status` that read or
+  tried to: the exit class (0, 1 or 2), how many commitments were read, how
+  many of those end within 90 days, how many services were not read, and
+  whether `--json` was on. `guard_commitment_asks`: how many guard ledger
+  records asked before buying a commitment since the last count sent, and
+  the window in days, counted from the local ledger at most once a day from
+  a CLI or MCP start, never from inside the guard hook (which imports no
+  telemetry). Each event is a closed allow-list of integers, booleans and
+  enumerations, with counts clamped at 100,000, so no account id, ARN, dollar
+  figure, command, path or resource name travels in one. There is no new
+  prompt. `NABLE_NO_TELEMETRY`, `DO_NOT_TRACK`, CI and air-gap mode send
+  nothing, and without consent the ledger is not read for it.
+- **Guard ledger read helpers.** `guard_ledger.count_asks`, `chain_of` and
+  `stored_lines` read the ledger for the two features above; the append path
+  and the record format are unchanged.
 
 ## 0.12.0
 

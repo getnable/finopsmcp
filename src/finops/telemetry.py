@@ -17,6 +17,26 @@ that crashed on import, and it was invisible for two months because no event
 carried a version or an interpreter. A tool that cannot see which of its own
 builds is running cannot tell a quiet outage from low demand.
 
+Two usage counts, sent under the same consent, with no new prompt:
+  - commitments_status_run, once per `nable commitments status` that read
+    or tried to: its exit class (0 every read succeeded and nothing ends
+    inside a --fail-within window, 1 a commitment read ends within it, 2
+    something could not be read or checked), how many commitments were read,
+    how many of those end within 90 days, how many services were not read,
+    and whether --json was on. A --dry-run or a usage error is not a run.
+  - guard_commitment_asks: how many guard ledger records have decision ask
+    and action_type purchase_commitment since the last count sent, and the
+    window that count covers, in days. Counted from the local ledger at most
+    once a day, from a CLI or MCP start, on a background thread, and never
+    from inside the guard hook: the hook imports no telemetry. No ledger, or
+    one that cannot be read, sends nothing, never a zero.
+  Each is a closed allow-list of integers, booleans and enumerations
+  (USAGE_EVENTS). A property off the list or of the wrong kind never leaves,
+  and a count is clamped at COUNT_MAX, so no identifier fits in one. Neither
+  carries an account id, an ARN, a dollar figure, a command, a path or a
+  resource name. Without consent nothing is counted: the ledger is not even
+  read for it.
+
 What we never collect:
   - Cloud account IDs, ARNs, or credentials
   - Cost figures or billing data
@@ -42,7 +62,7 @@ import json
 import os
 import threading
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +72,9 @@ _POSTHOG_KEY  = os.environ.get("NABLE_POSTHOG_KEY", "phc_zcaQqoAXrSghjtbE6VB83p4
 _POSTHOG_HOST = "https://us.i.posthog.com"
 _ID_FILE      = Path.home() / ".config" / "finops" / ".install_id"
 _CONSENT_FILE = Path.home() / ".config" / "finops" / ".telemetry"
+# Where the daily asks count remembers what it last sent. Written only while
+# telemetry is on, like the install id.
+_COUNTS_FILE  = Path.home() / ".config" / "finops" / ".usage_counts"
 _OPT_OUT_ENV  = "NABLE_NO_TELEMETRY"   # hard override, always wins
 _OPT_IN_ENV   = "NABLE_TELEMETRY"      # opt-in: nothing is sent without it
 
@@ -641,3 +664,141 @@ def ping_startup(provider_count: int = 0, plan: str = "free") -> None:
     except Exception:
         ver = ""
     ping({"event_type": "startup", "surface": _startup_surface(), "version": ver})
+    # The MCP start is one of the two places the daily asks count runs from.
+    start_usage_counts()
+
+
+# ─── Usage counts: two events, counts only ───────────────────────────────────
+#
+# What `nable commitments status` and the guard's commitment asks are used for,
+# as counts. Each event is a closed allow-list: a property not named here, or
+# not of its kind, is dropped before anything is sent. An enumeration is the
+# tuple of its values. int never accepts a bool (True is an int in Python, and
+# a flag is not a count).
+
+USAGE_EVENTS: dict[str, dict[str, object]] = {
+    "commitments_status_run": {
+        "exit_class": (0, 1, 2),
+        "commitments_read": int,
+        "ending_within_90_days": int,
+        "services_not_read": int,
+        "json": bool,
+    },
+    "guard_commitment_asks": {
+        "asks": int,
+        "window_days": int,
+    },
+}
+# The largest count an event carries. An account id is twelve digits, so it
+# cannot ride in a count; a real count this large is reported as this.
+COUNT_MAX = 100_000
+
+
+def usage_props(event: str, raw: dict) -> "dict | None":
+    """The allow-listed properties of one usage event, or None for an event
+    that is not one of USAGE_EVENTS."""
+    spec = USAGE_EVENTS.get(event)
+    if spec is None:
+        return None
+    out: dict = {}
+    for name, kind in spec.items():
+        value = raw.get(name) if isinstance(raw, dict) else None
+        if isinstance(kind, tuple):
+            if type(value) is int and value in kind:
+                out[name] = value
+        elif kind is bool:
+            if type(value) is bool:
+                out[name] = value
+        elif type(value) is int:
+            out[name] = min(max(value, 0), COUNT_MAX)
+    return out
+
+
+def send_usage(event: str, raw: dict) -> bool:
+    """Send one usage event, only under consent. True when it was handed to
+    the sender (which waits at most _SEND_WAIT_S and never raises)."""
+    if _is_opted_out():
+        return False
+    props = usage_props(event, raw)
+    if props is None:
+        return False
+    _send_event(_get_install_id(), event, props)
+    return True
+
+
+def _read_counts_state() -> dict:
+    try:
+        state = json.loads(_COUNTS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _write_counts_state(state: dict) -> None:
+    """Atomically, 0600. A filesystem that refuses just means the next start
+    counts again from the same place."""
+    try:
+        _COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _COUNTS_FILE.with_name(_COUNTS_FILE.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(state))
+        os.replace(tmp, _COUNTS_FILE)
+    except Exception:
+        pass
+
+
+def count_guard_asks(now: datetime | None = None) -> bool:
+    """Count the guard's commitment asks since the last count sent, and send
+    the count: at most once a UTC day, and only under consent (without it
+    the ledger is not read for this). True when an event was sent.
+
+    The state remembers the record the last count ended on, by line and
+    hash, so a record is counted once; a ledger rewritten since is counted
+    by time instead. The state is written before the send: a process that
+    exits mid-send loses that window's count rather than counting it twice.
+    Never raises."""
+    try:
+        if _is_opted_out():
+            return False
+        now = now or datetime.now(UTC)
+        today = now.astimezone(UTC).date().isoformat()
+        state = _read_counts_state()
+        if state.get("day") == today:
+            return False
+        from . import guard_ledger
+        try:
+            got = guard_ledger.count_asks("purchase_commitment", after=state.get("through"))
+        except OSError:
+            return False                    # not read: nothing is sent, never a zero
+        if got is None:
+            return False                    # no ledger: nothing to count
+        start = None
+        for raw in (state.get("sent_at"), got.get("first_ts")):
+            try:
+                start = datetime.fromisoformat(raw) if raw else None
+            except (TypeError, ValueError):
+                start = None
+            if start is not None and start.tzinfo is not None:
+                break
+            start = None
+        seconds = max(0.0, (now - start).total_seconds()) if start is not None else 0.0
+        window = int(-(-seconds // 86400)) if seconds else 0
+        _write_counts_state({"day": today, "sent_at": now.isoformat(),
+                             "through": got.get("through") or state.get("through")})
+        return send_usage("guard_commitment_asks",
+                          {"asks": int(got["asks"]), "window_days": window})
+    except Exception:
+        return False
+
+
+def start_usage_counts() -> None:
+    """The daily asks count, from a CLI or MCP start, on a daemon thread so
+    no start waits for it. Nothing starts without consent. The guard hook
+    never calls this: it never imports this module."""
+    try:
+        if _is_opted_out():
+            return
+        in_background(count_guard_asks)
+    except Exception:
+        pass

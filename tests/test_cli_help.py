@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 FINOPS = [sys.executable, "-m", "finops.setup_wizard"]
+# This checkout's package, whatever the interpreter has installed.
+SRC = str(Path(__file__).resolve().parents[1] / "src")
 
 
 def _run(args, **kw):
     return subprocess.run(
         [sys.executable, "-c", "from finops.setup_wizard import main; main()"] ,
         input=kw.pop("input", ""), capture_output=True, text=True,
-        env={"PATH": "/usr/bin:/bin", "NABLE_NO_TELEMETRY": "1", "HOME": kw.pop("home", "/tmp")},
+        env={"PATH": "/usr/bin:/bin", "NABLE_NO_TELEMETRY": "1", "HOME": kw.pop("home", "/tmp"),
+             "PYTHONPATH": SRC},
         timeout=60,
     )
 
@@ -26,7 +30,7 @@ def _help_text():
     r = subprocess.run(
         [sys.executable, "-c", "import sys; sys.argv=['finops','--help']; from finops.setup_wizard import main; main()"],
         capture_output=True, text=True, timeout=60,
-        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp"},
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC},
     )
     return r.stdout + r.stderr
 
@@ -50,7 +54,7 @@ def test_help_has_no_other_bucket():
 def test_help_covers_all_commands():
     out = _help_text()
     for cmd in ("welcome", "doctor", "aws", "gcp", "azure", "openai", "slack",
-                "login", "vault", "guard", "iam-template", "serve"):
+                "login", "vault", "guard", "iam-template", "serve", "cloud"):
         assert cmd in out, f"{cmd} missing from --help"
 
 
@@ -58,7 +62,7 @@ def _bad_cmd(cmd):
     return subprocess.run(
         [sys.executable, "-c", f"import sys; sys.argv=['finops','{cmd}']; from finops.setup_wizard import main; main()"],
         capture_output=True, text=True, timeout=60,
-        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp"},
+        env={"NABLE_NO_TELEMETRY": "1", "HOME": "/tmp", "PYTHONPATH": SRC},
     )
 
 
@@ -82,8 +86,7 @@ def test_a_subcommand_help_lists_its_own_actions(tmp_path):
     top-level layout: their actions under "other", plus the top level's
     "setup  Pick providers from the full menu" and "--version", neither of
     which the subcommand takes."""
-    from pathlib import Path
-    src = str(Path(__file__).resolve().parents[1] / "src")
+    src = SRC
     for cmd, action in (("org", "status"), ("learn", "infer"), ("pack", "validate")):
         r = subprocess.run(
             [sys.executable, "-m", "finops.entry", cmd, "--help"], check=False,
@@ -95,3 +98,9 @@ def test_a_subcommand_help_lists_its_own_actions(tmp_path):
         assert action in r.stdout, cmd
         assert "Pick providers from the full menu" not in r.stdout, cmd
         assert "--version" not in r.stdout, cmd
+
+
+def test_cloud_is_listed_with_the_account_commands():
+    out = _help_text()
+    group = out.split("account & billing", 1)[1].split("\n\n", 1)[0]
+    assert "\n  cloud " in group, group
