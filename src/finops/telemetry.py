@@ -17,7 +17,10 @@ that crashed on import, and it was invisible for two months because no event
 carried a version or an interpreter. A tool that cannot see which of its own
 builds is running cannot tell a quiet outage from low demand.
 
-Two usage counts, sent under the same consent, with no new prompt:
+Two usage counts, sent only under a consent given to the prompt that names
+them (the consent prompt names them since CONSENT_VERSION 2), or under
+NABLE_TELEMETRY=1. A yes stored by the earlier prompt covers the rest of this
+list and not these, and that person is asked once more, by the same rules:
   - commitments_status_run, once per `nable commitments status` that read
     or tried to: its exit class (0 every read succeeded and nothing ends
     inside a --fail-within window, 1 a commitment read ends within it, 2
@@ -117,6 +120,12 @@ def _opt_in_env() -> "bool | None":
 # per released version, three runs each, seconds apart, never returning.
 
 
+# The prompt a stored yes was given to. 1 is the prompt before the usage
+# counts were named (its file says just "yes"); 2 names them. A yes to an
+# earlier prompt covers only what that prompt showed.
+CONSENT_VERSION = 2
+
+
 def _stored_consent() -> bool | None:
     """The answer the user gave once, or None if they have never been asked."""
     try:
@@ -127,11 +136,27 @@ def _stored_consent() -> bool | None:
         return None
 
 
+def _consent_version() -> int:
+    """The prompt version a stored yes answered: "yes 2" is 2, a bare "yes"
+    (written before versions were kept) is 1, and anything else is 0."""
+    try:
+        words = _CONSENT_FILE.read_text().strip().lower().split()
+    except (OSError, ValueError):
+        return 0
+    if not words or not words[0].startswith("y"):
+        return 0
+    try:
+        return int(words[1]) if len(words) > 1 else 1
+    except ValueError:
+        return 1
+
+
 def _store_consent(agreed: bool) -> None:
-    """Record the answer so the question is asked exactly once, ever."""
+    """Record the answer so the question is asked exactly once, ever (and
+    once more only when a yes predates what the prompt now names)."""
     try:
         _CONSENT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CONSENT_FILE.write_text("yes" if agreed else "no")
+        _CONSENT_FILE.write_text(f"yes {CONSENT_VERSION}" if agreed else "no")
         try:
             _CONSENT_FILE.chmod(0o600)
         except OSError:
@@ -156,8 +181,11 @@ def _can_ask() -> bool:
     """
     import sys
 
-    if _stored_consent() is not None:
+    stored = _stored_consent()
+    if stored is False:
         return False                       # asked once already. Once means once.
+    if stored is True and _consent_version() >= CONSENT_VERSION:
+        return False                       # a yes to everything the prompt names
     if os.environ.get(_OPT_OUT_ENV, "").strip() not in ("", "0", "false", "no"):
         return False                       # they already said no, louder
     if _opt_in_env() is not None:
@@ -185,7 +213,10 @@ def prompt_for_consent() -> bool | None:
         print()
         print("  Share anonymous usage data? It is off unless you say yes.")
         print("  Sent:     which commands ran, how many providers are connected,")
-        print("            nable + Python version, OS family.")
+        print("            nable + Python version, OS family, and two counts: how")
+        print("            many commitments `nable commitments status` read and how")
+        print("            many end within 90 days, and how many times the guard asked")
+        print("            before an agent bought one.")
         print("  Never:    cost figures, account IDs, resource names, file paths,")
         print("            credentials, or your IP.")
         try:
@@ -716,10 +747,22 @@ def usage_props(event: str, raw: dict) -> dict | None:
     return out
 
 
-def send_usage(event: str, raw: dict) -> bool:
-    """Send one usage event, only under consent. True when it was handed to
-    the sender (which waits at most _SEND_WAIT_S and never raises)."""
+def usage_consented() -> bool:
+    """Telemetry is on, and the consent behind it named the usage counts: a
+    yes to the prompt of CONSENT_VERSION or later, or NABLE_TELEMETRY=1
+    (whose documentation names them). A yes to an earlier prompt is not one."""
     if _is_opted_out():
+        return False
+    if _opt_in_env() is True:
+        return True
+    return _consent_version() >= CONSENT_VERSION
+
+
+def send_usage(event: str, raw: dict) -> bool:
+    """Send one usage event, only under a consent that named it. True when
+    it was handed to the sender (which waits at most _SEND_WAIT_S and never
+    raises)."""
+    if not usage_consented():
         return False
     props = usage_props(event, raw)
     if props is None:
@@ -801,7 +844,7 @@ def count_guard_asks(now: datetime | None = None) -> bool:
     exits mid-send loses that window's count rather than counting it twice,
     and a state that cannot be written sends nothing. Never raises."""
     try:
-        if _is_opted_out():
+        if not usage_consented():
             return False
         with _counts_lock() as mine:
             return mine and _count_guard_asks(now or datetime.now(UTC))
@@ -847,7 +890,7 @@ def start_usage_counts() -> None:
     command can reach both this and the MCP server's start."""
     global _COUNTS_STARTED
     with contextlib.suppress(Exception):
-        if _is_opted_out():
+        if not usage_consented():
             return
         with _lock:
             if _COUNTS_STARTED:

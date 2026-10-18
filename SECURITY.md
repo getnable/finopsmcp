@@ -32,8 +32,11 @@ only:
 - runtime facts: nable version, Python major.minor, OS family, install method
   (uvx, pipx, venv, docker, system), environment kind, whether a terminal is
   attached, whether it runs in a container, and the age of the install id;
-- two usage counts, under the same consent and with no new prompt.
-  `commitments_status_run`, once per `nable commitments status` that read or
+- two usage counts, only under a consent that named them: a yes to the
+  consent prompt, which names them (the consent prompt names them from
+  0.13.0), or `NABLE_TELEMETRY=1`. A yes given to the prompt before it named
+  them covers the rest of this list and not these, and that person is asked
+  once more, by the same rules. `commitments_status_run`, once per `nable commitments status` that read or
   tried to: its exit class (0, 1 or 2), how many commitments were read, how
   many of those end within 90 days, how many services were not read, and
   whether `--json` was on. `guard_commitment_asks`: how many guard ledger
@@ -52,15 +55,25 @@ hostnames, usernames, credentials or your query text.
 org model files in your org dir and the guard ledger's lines, exactly as
 stored, to a paid workspace you name with `--box https://HOST`. Without
 `--send` it is a dry run that opens no connection: it prints the destination
-host, the files, the record counts, the size and the sha256, and saves the
-exact bytes (0600) for you to read. `--send --confirm SHA256` sends those bytes
-and nothing else, and refuses when they changed since you looked. It POSTs to
+host, the files, the record counts, the size, the sha256 and a confirm code,
+and saves the exact bytes (0600) for you to read. `--send --confirm CODE`
+sends those bytes and nothing else to that box: the code is the sha256 of the
+box, a newline and the bytes, so it refuses when they changed since you
+looked or when the dry run was for another box. A send is a person's
+decision: without a terminal it refuses unless `--as WHO` names who decided,
+and the guard asks before an agent runs `--send`, `--out` or `nable cloud
+status`. `--out` never writes one of the guard's own files, nable's data
+directory, or anything but a regular file of yours. It POSTs to
 `https://HOST/api/free-tool/connect` and reads `/api/free-tool/status`, over
 HTTPS only, follows no redirect, and is refused under `FINOPS_AIRGAP=1`. The
 workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
 0600, or a hidden prompt; it is never an argument, and it is never stored,
-printed or logged. No host is built in, and nothing about the machine (its
-name, your user name, a path) is in the payload.
+printed or logged. No host is built in, and nable adds nothing about the
+machine (its name, your user name) of its own. The ledger's records are the
+agent's commands and the paths the guard judged, as recorded, with
+credentials redacted and nothing else changed, so they can name absolute
+paths, hosts and user names (`ssh deploy@db1.internal`, `/home/you/...`);
+the dry run counts the records that do and points at the saved file.
 
 **Version check.** To tell you when your build is out of date, nable makes one
 GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run

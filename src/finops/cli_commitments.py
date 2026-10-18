@@ -95,9 +95,9 @@ def exit_class(code: int) -> int:
 
 def _count_run(code: int, commitments: list[dict], missed: list[cs.NotRead] | None, *,
                as_json: bool) -> None:
-    """The commitments_status_run usage count, sent only under the telemetry
-    consent that already exists (telemetry.send_usage decides, and drops
-    anything off its allow-list). Counts only: what was read never leaves.
+    """The commitments_status_run usage count, sent only under a telemetry
+    consent that named it (telemetry.send_usage decides, and drops anything
+    off its allow-list). Counts only: what was read never leaves.
     `missed` None means nothing was read, so every service is not read."""
     try:
         from . import telemetry

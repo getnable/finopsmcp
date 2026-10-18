@@ -3,28 +3,37 @@
 and guard ledger into a paid workspace, and see what the workspace holds.
 
     nable cloud connect --box https://HOST [--org-dir DIR] [--out PATH] [--json]
-                        [--send --confirm SHA256 [--key-file PATH]]
+                        [--send --confirm CODE [--key-file PATH] [--as WHO]]
     nable cloud status  --box https://HOST [--key-file PATH] [--json]
 
 `connect` is a dry run unless --send: it builds the payload, writes the exact
-bytes to a file, and prints where they would go, what is in them, their size
-and their sha256 (finops.cloud_connect says what the payload holds and why).
-`--send --confirm SHA256` sends those bytes, and only while they are still the
-bytes that sha256 names.
+bytes to a file, and prints where they would go, what is in them, their size,
+their sha256 and the confirm code, the sha256 of the box, a newline and the
+bytes (finops.cloud_connect says what the payload holds and why). `--send
+--confirm CODE` sends those bytes to that box, and only while they are still
+the bytes, and it the box, that the code names.
+
+A send is a person's decision, as `nable org confirm` is: without a terminal
+(stdin and stdout) it refuses unless --as names who decided. The guard asks
+before an agent runs --send, --out or `cloud status` (guard._SELF_RULES).
 
 The workspace key is a bound analyst key made on the workspace's /workspace
 page, read from NABLE_WORKSPACE_KEY, a --key-file with mode 0600, or a hidden
 prompt at a terminal. It is never an argument: a --key given anyway is refused
 without being echoed or used, and so is any word left over or any flag this
-command does not have, since either could be one. None of them is repeated.
+command does not have, since either could be one. None of them is repeated,
+and neither is a value argparse would quote back (--send=X, an abbreviation):
+these parsers take no abbreviation and never print what they could not read.
 
 Exit codes:
     0  the dry run was built, the send finished, or the status was read
-    1  refused or not reached: the payload changed since the dry run, the box
-       said no or could not be reached, or FINOPS_AIRGAP is set
+    1  refused or not reached: the payload changed since the dry run or the
+       dry run was for another box, the box said no or could not be reached,
+       or FINOPS_AIRGAP is set
     2  a usage error: a box that is not https://host, --send without
-       --confirm, no workspace key, a key file that is not 0600, or a key on
-       the command line
+       --confirm or without a terminal or --as, an --out nable never writes,
+       no workspace key, a key file that is not 0600, or a key on the
+       command line
     3  nothing to send: no org model and no ledger records here
 """
 from __future__ import annotations
@@ -44,10 +53,28 @@ EXIT_REFUSED = 1
 EXIT_USAGE = 2
 EXIT_NOTHING = 3
 
+_PARSE_ERROR = ("the command line was not read, and is not repeated here: a workspace key is "
+                "never taken from the command line, and any of it could be one. "
+                "`nable cloud connect --help` lists the options (none is abbreviated).")
+
 _ARGV_KEY = ("the workspace key is never taken from the command line, so it was not used "
              "(and is not repeated here). Set NABLE_WORKSPACE_KEY, pass --key-file with a "
              "0600 file, or run at a terminal to be asked. A key typed on a command line "
              "is in your shell history: revoke it on /workspace and make another.")
+
+
+# argparse's errors that quote nothing a person typed. Every other one
+# (an explicit value a flag does not take, an ambiguous abbreviation, an
+# invalid choice) prints the word back, value and all.
+_SAFE_ERRORS = ("the following arguments are required:", "expected one argument")
+
+
+def _quiet_error(parser: argparse.ArgumentParser):
+    def error(message: str):
+        parser.print_usage(sys.stderr)
+        said = message if any(m in message for m in _SAFE_ERRORS) else _PARSE_ERROR
+        parser.exit(EXIT_USAGE, f"nable cloud: {said}\n")
+    return error
 
 
 def add_parser(sub) -> None:
@@ -55,22 +82,25 @@ def add_parser(sub) -> None:
     p = sub.add_parser(
         "cloud",
         help="Bring your org model and guard ledger into a paid workspace (a dry run first)",
+        allow_abbrev=False,
     )
+    p.error = _quiet_error(p)
     actions = p.add_subparsers(dest="cloud_action", metavar="<action>")
     c = actions.add_parser(
-        "connect",
+        "connect", allow_abbrev=False,
         help="show, then send, your org model and guard ledger to a paid workspace",
         description=("Builds the payload from the org model files in your org dir and the "
                      "guard ledger's lines as stored, saves the exact bytes, and prints "
-                     "their destination, contents, size and sha256. Nothing is sent "
-                     "without --send --confirm SHA256."),
+                     "their destination, contents, size, sha256 and confirm code. Nothing "
+                     "is sent without --send --confirm CODE, at a terminal or with --as."),
         epilog="exit codes:\n  0  done\n  1  refused or not reached\n  2  usage error\n"
                "  3  nothing to send",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     s = actions.add_parser(
-        "status", help="what the workspace holds from the free tool",
+        "status", help="what the workspace holds from the free tool", allow_abbrev=False,
         description="What the workspace holds: org model versions and ledger chains.")
     for q in (c, s):
+        q.error = _quiet_error(q)
         q.add_argument("--box", required=True, metavar="https://HOST",
                        help="the paid workspace's address (https only)")
         q.add_argument("--key-file", metavar="PATH",
@@ -88,9 +118,11 @@ def add_parser(sub) -> None:
                    help=f"where to save the payload (default: {cc.PAYLOAD_NAME} beside the "
                         "guard ledger)")
     c.add_argument("--send", action="store_true",
-                   help="send the payload; needs --confirm with the sha256 the dry run printed")
-    c.add_argument("--confirm", metavar="SHA256",
-                   help="the payload's sha256, as the dry run printed it")
+                   help="send the payload; needs --confirm with the code the dry run printed")
+    c.add_argument("--confirm", metavar="CODE",
+                   help="the confirm code the dry run printed for this box")
+    c.add_argument("--as", dest="cloud_as", metavar="WHO",
+                   help="who decided to send, when this does not run at a terminal")
 
 
 def refuse_extras(extras: list[str], *, as_json: bool, stdout: Any = None,
@@ -116,6 +148,13 @@ def _fail(klass: str, code: int, message: str, *, as_json: bool, out: Any, err: 
     if as_json:
         print(_err_doc(klass, code, message), file=out)
     return code
+
+
+def _is_tty() -> bool:
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
 
 
 def _terminal_prompt() -> Callable[[str], str] | None:
@@ -161,15 +200,15 @@ def _status_text(box: str, st: Mapping[str, Any]) -> str:
 def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         environ: Mapping[str, str] | None = None,
         prompt: Callable[[str], str] | None | bool = True,
-        stdout: Any = None, stderr: Any = None) -> int:
+        stdout: Any = None, stderr: Any = None, terminal: bool | None = None) -> int:
     """`prompt` True means a hidden prompt when stdin is a terminal; None
-    means never ask."""
+    means never ask. `terminal` None means whether stdin and stdout are one."""
     out = stdout or sys.stdout
     err = stderr or sys.stderr
     as_json = bool(getattr(args, "json", False))
     action = getattr(args, "cloud_action", None)
     if action not in ("connect", "status"):
-        print("usage: nable cloud connect --box https://HOST [--send --confirm SHA256]\n"
+        print("usage: nable cloud connect --box https://HOST [--send --confirm CODE]\n"
               "       nable cloud status --box https://HOST", file=err)
         return EXIT_USAGE
     if getattr(args, "argv_key", None) is not None or getattr(args, "leftover", None):
@@ -200,11 +239,17 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
     sending = bool(getattr(args, "send", False))
     confirm = str(getattr(args, "confirm", None) or "").strip().lower()
     if sending and not confirm:
-        return _fail("usage", EXIT_USAGE, "--send needs --confirm SHA256, the sha256 the dry "
+        return _fail("usage", EXIT_USAGE, "--send needs --confirm CODE, the confirm code the dry "
                      "run printed for the bytes it saved", as_json=as_json, out=out, err=err)
     if confirm and not sending:
         return _fail("usage", EXIT_USAGE, "--confirm goes with --send; without --send this "
                      "is a dry run", as_json=as_json, out=out, err=err)
+    who = str(getattr(args, "cloud_as", None) or "").strip()
+    at_terminal = _is_tty() if terminal is None else terminal
+    if sending and not who and not at_terminal:
+        return _fail("usage", EXIT_USAGE, "sending is a person's decision: run it at your own "
+                     "terminal, or pass --as WHO (your name or email) to say who decided",
+                     as_json=as_json, out=out, err=err)
     payload = cc.build(org_dir=getattr(args, "org_dir", None))
     if not sending:
         if not payload.data:
@@ -213,7 +258,10 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
             else:
                 print(cc.describe(payload, box, None), file=out)
             return EXIT_NOTHING
-        saved = cc.save(payload, Path(args.out) if getattr(args, "out", None) else None)
+        try:
+            saved = cc.save(payload, Path(args.out) if getattr(args, "out", None) else None)
+        except cc.ConnectError as exc:
+            return _fail("usage", EXIT_USAGE, str(exc), as_json=as_json, out=out, err=err)
         if as_json:
             doc = cc.summary(payload, box, saved)
             doc["airgap"] = cc._airgap()
@@ -225,11 +273,12 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
                       file=out)
         return EXIT_OK
 
-    if payload.sha256 != confirm:
+    if cc.confirm_code(payload, box) != confirm:
         return _fail("payload_changed", EXIT_REFUSED,
-                     "the payload changed since you looked: its sha256 is now "
-                     f"{payload.sha256}, not the one confirmed. Run the dry run again, read "
-                     "what it saved, and confirm the new sha256.",
+                     f"the confirm code is not the one for these bytes and {cc.host_of(box)}: "
+                     "the payload changed since you looked, or the dry run was for another "
+                     f"box. Run the dry run again with --box {box}, read what it saved, and "
+                     "confirm the code it prints.",
                      as_json=as_json, out=out, err=err)
     if not payload.data:
         return _fail("nothing", EXIT_NOTHING, "nothing to send", as_json=as_json, out=out,
@@ -239,17 +288,18 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
     except cc.ConnectError as exc:
         return _fail("no_key", EXIT_USAGE, str(exc), as_json=as_json, out=out, err=err)
     chrome = err if as_json else out
-    print(f"nable cloud connect: sending to {box} (host {cc.host_of(box)})", file=chrome)
-    print(f"  payload sha256 {payload.sha256} confirmed, {len(payload.data):,} bytes",
-          file=chrome)
+    print(f"nable cloud connect: sending to {box} (host {cc.host_of(box)})"
+          + (f", as {who} decided" if who else ""), file=chrome)
+    print(f"  payload sha256 {payload.sha256} confirmed for this box, "
+          f"{len(payload.data):,} bytes", file=chrome)
     try:
         result = cc.send(payload, box, k, opener=opener,
                          say=lambda line: print(line, file=chrome))
     except cc.ConnectError as exc:
         return _fail("refused", EXIT_REFUSED, str(exc), as_json=as_json, out=out, err=err)
     if as_json:
-        print(json.dumps({"sent": True, "sha256": payload.sha256, **result}, indent=2,
-                         default=str), file=out)
+        print(json.dumps({"sent": True, "sha256": payload.sha256, "decided_by": who or None,
+                          **result}, indent=2, default=str), file=out)
     else:
         held = result["bytes_already_held"]
         print(f"Sent {result['bytes_sent']:,} bytes in {result['batches']} batch(es)"

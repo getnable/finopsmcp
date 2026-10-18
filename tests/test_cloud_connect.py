@@ -250,7 +250,7 @@ def test_the_dry_run_saves_exactly_the_bytes_and_says_what_and_where(ledger, org
     for shown in ("box.example.com:8443", "owners.yaml", "teams.yaml", "5 records",
                   f"{len(p.data):,} bytes", p.sha256, str(out), "Nothing was sent"):
         assert shown in text, shown
-    assert f"--confirm {p.sha256}" in text
+    assert f"--confirm {cc.confirm_code(p, 'https://box.example.com:8443')}" in text
 
 
 def test_the_default_payload_file_sits_beside_the_ledger(ledger, org_dir):
@@ -258,13 +258,65 @@ def test_the_default_payload_file_sits_beside_the_ledger(ledger, org_dir):
     assert out.parent == guard_ledger.ledger_path().parent
 
 
-def test_saving_never_follows_a_symlink(ledger, org_dir, tmp_path):
+def test_saving_never_follows_or_replaces_a_symlink(ledger, org_dir, tmp_path):
     target = tmp_path / "elsewhere"
     target.write_text("keep me")
     link = tmp_path / "payload.jsonl"
     link.symlink_to(target)
-    cc.save(cc.build(), link)
-    assert target.read_text() == "keep me" and not link.is_symlink()
+    with pytest.raises(cc.ConnectError, match="not a regular file"):
+        cc.save(cc.build(), link)
+    assert target.read_text() == "keep me" and link.is_symlink()
+
+
+def test_saving_refuses_the_guards_own_files_and_nables_data_dir(ledger, org_dir, tmp_path,
+                                                                 monkeypatch):
+    """--out is the one path a dry run writes, and it needs no key: pointed at
+    the guard's off switch it would turn the guard off, so a protected path, a
+    path in nable's data dir other than the default, and anything that is
+    not a regular file of the user's are refused, and nothing is written."""
+    from finops import guard_paths, guard_plugin
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(guard_plugin.data_root()))
+    claude = tmp_path / "proj" / ".claude"
+    claude.mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "proj"))
+    for path in (guard_plugin.off_flag_path(), guard_ledger.ledger_path(),
+                 claude / "settings.json", guard_paths.data_dir() / "anything.jsonl",
+                 org_dir / "owners.yaml"):
+        before = path.read_bytes() if path.exists() else None
+        with pytest.raises(cc.ConnectError):
+            cc.save(cc.build(), path)
+        assert (path.read_bytes() if path.exists() else None) == before, path
+    assert not guard_plugin.is_off()
+    (tmp_path / "a-dir").mkdir()
+    with pytest.raises(cc.ConnectError, match="not a regular file"):
+        cc.save(cc.build(), tmp_path / "a-dir")
+    assert cc.save(cc.build()) == cc.default_out()
+
+
+def test_the_confirm_code_names_the_box_as_well_as_the_bytes(ledger, org_dir):
+    p = cc.build()
+    code = cc.confirm_code(p, BOX)
+    assert code == SHA(f"{BOX}\n".encode() + p.data).hexdigest()
+    assert code != cc.confirm_code(p, "https://other.example.com") != p.sha256
+    assert f"--confirm {code}" in cc.describe(p, BOX, None)
+    assert cc.summary(p, BOX, None)["confirm_sha256"] == code
+
+
+def test_the_dry_run_says_the_records_can_name_paths_hosts_and_users(org_dir):
+    """The ledger's records are the agent's commands and the paths the guard
+    judged, credentials redacted and nothing else changed: they can name a
+    path, a host and a user, and the dry run says how many do."""
+    recs = records(3)
+    recs[0]["command"] = ("cd /home/alice/acme-prod && ssh deploy@db1.internal.acme.example "
+                          "terraform apply")
+    recs[1]["protected_path"] = "/srv/build-box-17/alice/acme/nable.org"
+    write_ledger(recs)
+    p = cc.build()
+    assert b"/home/alice" in p.data and b"deploy@db1.internal.acme.example" in p.data
+    assert p.ledger["records_naming"] == 2
+    text = cc.describe(p, BOX, None)
+    assert "2 of them name a path, a host or a user" in text
+    assert "redacted when written" not in text
 
 
 # ── C4: the box, the key, the send ───────────────────────────────────────────

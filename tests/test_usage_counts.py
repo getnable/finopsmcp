@@ -8,9 +8,11 @@ What has to stay true (D57):
   - nothing a person or an account is named by reaches one: no account id,
     ARN, dollar figure, command, path or resource name, whatever the inputs
     held;
-  - they are sent only under the consent that exists (a stored yes, or
-    NABLE_TELEMETRY=1), never with NABLE_NO_TELEMETRY, in CI, in air-gap mode
-    or without consent, and there is no new prompt;
+  - they are sent only under a consent that named them: a yes to the
+    prompt that lists them, or NABLE_TELEMETRY=1; never under a yes given to
+    the prompt before it named them (that person is asked once more, by the
+    same rules), never with NABLE_NO_TELEMETRY, in CI, in air-gap mode or
+    without consent;
   - asks are counted from the local guard ledger at most once a day, from a
     CLI or MCP start, never from inside the guard hook, which imports no
     telemetry at all.
@@ -84,7 +86,7 @@ def forbidden(monkeypatch):
 def _consent(monkeypatch, how: str = "stored"):
     tel = _tel()
     if how == "stored":
-        tel._CONSENT_FILE.write_text("yes")
+        tel._store_consent(True)
     else:
         monkeypatch.setenv("NABLE_TELEMETRY", "1")
 
@@ -286,13 +288,45 @@ def test_without_consent_the_ledger_is_not_even_read(monkeypatch, forbidden):
     assert _tel().count_guard_asks(now=NOW) is False
 
 
-def test_there_is_no_new_prompt(monkeypatch):
-    """The only question is the one consent prompt that already exists."""
+def test_there_is_no_prompt_of_their_own(monkeypatch):
+    """The only question is the one consent prompt, which names them."""
     import inspect
     tel = _tel()
     for fn in (tel.count_guard_asks, tel.send_usage, tel.start_usage_counts,
                cli.run):
         assert "input(" not in inspect.getsource(fn), fn.__name__
+
+
+def test_a_yes_given_before_the_prompt_named_them_sends_no_count(monkeypatch, forbidden):
+    """What leaves is what was shown: a yes stored by the prompt that listed
+    commands, providers and versions does not cover commitment counts or the
+    guard's asks. The rest of telemetry stays on under it."""
+    tel = _tel()
+    tel._CONSENT_FILE.write_text("yes")
+    assert tel._is_opted_out() is False
+    _write_ledger(guard_ledger.ledger_path(), [_ask(NOW - timedelta(days=1))])
+    with FakeSession(creds=False) as sess:
+        _run(sess)
+    assert tel.count_guard_asks(now=NOW) is False
+    assert tel.send_usage("guard_commitment_asks", {"asks": 1, "window_days": 1}) is False
+    assert not tel._COUNTS_FILE.exists()
+
+
+def test_that_person_is_asked_once_more_and_a_yes_then_covers_them(monkeypatch, sent):
+    import builtins
+    import sys
+    tel = _tel()
+    tel._CONSENT_FILE.write_text("yes")
+    for stream in (sys.stdin, sys.stdout):
+        monkeypatch.setattr(stream, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(tel, "is_ci", lambda: False)
+    assert tel._can_ask() is True
+    monkeypatch.setattr(builtins, "input", lambda *_a: "y")
+    assert tel.prompt_for_consent() is True
+    assert tel._can_ask() is False, "asked twice"
+    assert tel.send_usage("guard_commitment_asks", {"asks": 1, "window_days": 1}) is True
+    tel._CONSENT_FILE.write_text("no")
+    assert tel._can_ask() is False, "a no is asked again"
 
 
 def test_asks_are_counted_at_most_once_a_day_and_only_the_new_ones(monkeypatch, sent):
@@ -474,7 +508,7 @@ def test_telemetry_docstring_and_security_md_say_what_the_counts_are():
     for text in (doc, sec):
         for phrase in ("commitments_status_run", "guard_commitment_asks",
                        "at most once a day", "never from inside the guard hook",
-                       "no new prompt"):
+                       "the consent prompt names them"):
             assert phrase in text, phrase
         for never in ("account id", "dollar", "command", "resource name"):
             assert never in text.lower(), never

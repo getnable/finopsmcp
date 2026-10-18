@@ -88,8 +88,8 @@ instance metadata.
 | `nable upgrade [VERSION]` | see [Exit codes](#exit-codes) | | 0, 1 |
 | `nable uninstall --yes [--purge] [--dry-run]` | removes nable's editor entries and hooks; `--dry-run` changes nothing | | 0 |
 | `nable tools`, `nable agents` | what to ask; the agent team and its setup | | 0 |
-| `nable cloud connect --box https://HOST` | a dry run: the destination host, the org model files and guard ledger records it would send, their size and sha256; saves those exact bytes beside the ledger; opens no connection | the same, as one document | 0, 3 |
-| `nable cloud connect --box https://HOST --send --confirm SHA256` | with `NABLE_WORKSPACE_KEY` set, sends what the workspace does not hold yet; without a key, "no workspace key" | `{"sent": true, ...}` | 0, 1, 2 |
+| `nable cloud connect --box https://HOST` | a dry run: the destination host, the org model files and guard ledger records it would send, how many records name a path, a host or a user, their size, sha256 and the confirm code for this box; saves those exact bytes beside the ledger; opens no connection | the same, as one document | 0, 3 |
+| `nable cloud connect --box https://HOST --send --confirm CODE --as WHO` | with `NABLE_WORKSPACE_KEY` set, sends what the workspace does not hold yet; without a terminal and without `--as`, "sending is a person's decision"; without a key, "no workspace key" | `{"sent": true, ...}` | 0, 1, 2 |
 | `nable cloud status --box https://HOST` | what the workspace holds from the free tool; without a key, "no workspace key" | the box's answer | 0, 1, 2 |
 | `nable serve`, `nable credits` | "a hosted/enterprise feature" on stderr, nothing on stdout | | 1 |
 | `nable` with no arguments | the MCP server on stdio (stdin is not a terminal); exits when stdin closes | | 0 |
@@ -158,7 +158,7 @@ code), and 0 means it did its job. The rest, per command:
 | `license-status` | 1 the key is invalid or expired |
 | `license`, `login` | 1 nothing was activated |
 | `serve`, `credits` | 1 the feature is not in this package (`EXIT_NOT_IN_THIS_PACKAGE`); the reason on stderr, stdout empty |
-| `cloud connect`, `cloud status` | 1 refused or not reached: the payload changed since the dry run, the box said no or could not be reached, or `FINOPS_AIRGAP` is set; 2 a box that is not `https://host`, `--send` without `--confirm`, no workspace key, a key file that is not 0600, or a key on the command line; 3 nothing to send |
+| `cloud connect`, `cloud status` | 1 refused or not reached: the payload changed since the dry run or the dry run was for another box, the box said no or could not be reached, or `FINOPS_AIRGAP` is set; 2 a box that is not `https://host`, `--send` without `--confirm`, `--send` with no terminal and no `--as`, an `--out` nable never writes (one of the guard's own files, nable's data directory, anything but a regular file of yours), no workspace key, a key file that is not 0600, or a key on the command line; 3 nothing to send |
 
 `nable upgrade` moves every pin nable wrote: the CLI in this environment, the
 `finops-mcp==X` argument in Claude Desktop's, Cursor's and Claude Code's MCP

@@ -2,7 +2,7 @@
 """`nable cloud connect` and `nable cloud status` on the command line.
 
     nable cloud connect --box https://HOST [--org-dir DIR] [--out PATH] [--json]
-                        [--send --confirm SHA256 [--key-file PATH]]
+                        [--send --confirm CODE [--key-file PATH] [--as WHO]]
     nable cloud status  --box https://HOST [--key-file PATH] [--json]
 
 A dry run unless --send. The workspace key is never an argument: a --key on
@@ -50,18 +50,22 @@ def _parse(*argv):
     return p.parse_args(["cloud", *argv])
 
 
-def _run(*argv, opener=no_opener, environ=None, prompt=None):
+def _run(*argv, opener=no_opener, environ=None, prompt=None, terminal=True):
+    """`terminal`: whether a person is at a terminal (stdin and stdout)."""
     out, err = io.StringIO(), io.StringIO()
     code = cli_cloud.run(_parse(*argv), opener=opener, environ=environ or {},
-                         prompt=prompt, stdout=out, stderr=err)
+                         prompt=prompt, stdout=out, stderr=err, terminal=terminal)
     return code, out.getvalue(), err.getvalue()
 
 
-def _sha(machine, *argv) -> str:
-    code, out, _ = _run("connect", "--box", BOX, "--json",
+def _sha(machine, *argv, box=BOX) -> str:
+    """The confirm code a dry run for `box` prints."""
+    code, out, _ = _run("connect", "--box", box, "--json",
                         "--out", str(machine / "p.jsonl"), *argv)
     assert code == 0
-    return json.loads(out)["payload"]["sha256"]
+    doc = json.loads(out)
+    assert doc["confirm_sha256"] == cc.confirm_code(cc.build(), box)
+    return doc["confirm_sha256"]
 
 
 # ── the dry run ──────────────────────────────────────────────────────────────
@@ -96,7 +100,7 @@ def test_air_gap_still_shows_the_dry_run_and_refuses_the_send(machine, monkeypat
     monkeypatch.setenv("FINOPS_AIRGAP", "1")
     code, out, _err = _run("connect", "--box", BOX, "--out", str(machine / "p"))
     assert code == 0 and "FINOPS_AIRGAP" in out
-    sha = cc.build().sha256
+    sha = cc.confirm_code(cc.build(), BOX)
     code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha,
                            environ={cc.KEY_ENV: KEY})
     assert code == cli_cloud.EXIT_REFUSED and "FINOPS_AIRGAP" in err
@@ -110,6 +114,41 @@ def test_a_send_needs_the_sha256_it_was_shown(machine):
     assert code == cli_cloud.EXIT_USAGE and "--confirm" in err
     code, _out, err = _run("connect", "--box", BOX, "--confirm", "a" * 64)
     assert code == cli_cloud.EXIT_USAGE and "--send" in err
+
+
+def test_a_send_to_another_box_than_the_dry_run_showed_is_refused(machine):
+    """The confirm code covers where the bytes go: a dry run read for one box
+    never sends them, or the key, to another."""
+    sha = _sha(machine)
+    box = Box()
+    code, _out, err = _run("connect", "--box", "https://box-b.attacker.example", "--send",
+                           "--confirm", sha, opener=box, environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED and box.requests == []
+    assert "another box" in err and KEY not in err
+    assert _run("connect", "--box", BOX, "--send", "--confirm", sha, opener=box,
+                environ={cc.KEY_ENV: KEY})[0] == 0
+
+
+def test_a_send_is_a_persons_decision_made_at_a_terminal(machine):
+    """Like `nable org confirm`: without a terminal, and with no person named
+    by --as, --send refuses and nothing is opened."""
+    sha = _sha(machine)
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha,
+                           environ={cc.KEY_ENV: KEY}, terminal=False)
+    assert code == cli_cloud.EXIT_USAGE and "--as" in err
+    box = Box()
+    code, out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha, "--as", "maria",
+                          opener=box, environ={cc.KEY_ENV: KEY}, terminal=False)
+    assert code == 0, err
+    assert "maria" in out and b"maria" not in b"".join(box.posted)
+
+
+def test_out_at_the_guards_off_switch_is_refused_and_the_guard_stays_on(machine):
+    from finops import guard_plugin
+    off = guard_plugin.off_flag_path()
+    code, _out, err = _run("connect", "--box", BOX, "--out", str(off))
+    assert code == cli_cloud.EXIT_USAGE and "guard" in err
+    assert not off.exists() and not guard_plugin.is_off()
 
 
 def test_a_payload_that_changed_since_the_dry_run_is_refused(machine):
@@ -159,7 +198,7 @@ def test_a_refusal_from_the_box_exits_1_and_says_why(machine):
     ["--key", KEY], [f"--key={KEY}"], ["--workspace-key", KEY], [KEY],
 ])
 def test_a_key_on_the_command_line_is_refused_unechoed_and_unused(machine, argv):
-    sha = cc.build().sha256
+    sha = cc.confirm_code(cc.build(), BOX)
     box = Box()
     code, out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha, *argv,
                           opener=box, environ={})
@@ -183,6 +222,22 @@ def test_a_key_on_the_real_command_line_is_not_echoed(machine, tmp_path, argv):
     assert "never taken from the command line" in r.stderr
     if "--json" in argv:
         assert json.loads(r.stdout)["error"]["exit_code"] == cli_cloud.EXIT_USAGE
+
+
+@pytest.mark.parametrize("argv", [
+    # argparse prints the value of a flag that takes none, and the whole
+    # word of an abbreviation two flags share, before nable sees either.
+    [f"--send={KEY}"], [f"--json={KEY}"], [f"--ke={KEY}"], [f"--key-f={KEY}"],
+    [f"--ou={KEY}"], ["--confirm"],
+])
+def test_a_flag_argparse_would_quote_back_is_not_echoed(machine, tmp_path, argv):
+    r = _nable(tmp_path, "cloud", "connect", "--box", BOX, *argv)
+    assert r.returncode == cli_cloud.EXIT_USAGE, r.stderr
+    assert KEY not in r.stdout + r.stderr, "the key was echoed"
+    r = _nable(tmp_path, "cloud", "status", "--box", BOX, *argv)
+    assert KEY not in r.stdout + r.stderr, "the key was echoed"
+    r = _nable(tmp_path, "cloud", KEY)
+    assert r.returncode == cli_cloud.EXIT_USAGE and KEY not in r.stdout + r.stderr
 
 
 def test_an_unknown_flag_elsewhere_still_names_itself(machine, tmp_path):

@@ -162,15 +162,15 @@ An `ns/name` install reads a registry index named by `packs.registry` in your or
 
 ## Bring it into a paid workspace
 
-Everything above runs on your machine and stays there. When you move to a paid workspace, `nable cloud connect` carries two things into it: your org model (the files in your org dir) and the guard's decision ledger, each line exactly as stored. It is a dry run first, and a dry run sends nothing: it prints where the bytes would go, which files and how many records, the size and the sha256, and saves those exact bytes for you to read.
+Everything above runs on your machine and stays there. When you move to a paid workspace, `nable cloud connect` carries two things into it: your org model (the files in your org dir) and the guard's decision ledger, each line exactly as stored. The ledger's records are your agents' commands and the paths the guard judged, with credentials redacted and nothing else changed, so they can name paths, hosts and user names; the dry run counts the records that do. It is a dry run first, and a dry run sends nothing: it prints where the bytes would go, which files and how many records, the size, the sha256 and a confirm code, and saves those exact bytes for you to read.
 
 ```bash
 nable cloud connect --box https://your-workspace.example.com                        # the dry run
-nable cloud connect --box https://your-workspace.example.com --send --confirm <sha256>
+nable cloud connect --box https://your-workspace.example.com --send --confirm <code>
 nable cloud status  --box https://your-workspace.example.com                        # what the workspace holds
 ```
 
-`--send` sends exactly the bytes the sha256 names, and refuses if anything changed since you looked. HTTPS only, and never in air-gap mode. The workspace key is an analyst key made on the workspace's /workspace page, read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode 0600, or a hidden prompt; it is never taken from the command line and never stored. A ledger whose hash chain breaks, and a repo's `nable.org/` you have not trusted, are shown and not sent.
+`--send` sends exactly the bytes the confirm code names, to the box it names (the code is the sha256 of the box, a newline and the bytes), and refuses if anything changed since you looked. Run it at your own terminal, or pass `--as WHO`; the guard asks before an agent runs it. HTTPS only, and never in air-gap mode. The workspace key is an analyst key made on the workspace's /workspace page, read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode 0600, or a hidden prompt; it is never taken from the command line and never stored. A ledger whose hash chain breaks, and a repo's `nable.org/` you have not trusted, are shown and not sent.
 
 ## Setup
 
@@ -401,7 +401,7 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 **Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. Every install starts with a 7-day trial of Pro features. Pro ($25/mo) adds ticket creation (Jira, Linear, GitHub Issues), email reports and digests sent on request, and the org-wide rollup across accounts. Team ($1,000/mo flat, unlimited seats) adds the conversational Slack bot and chat remediation. Forecasts, commitment recommendations, remediation PRs, and the Ledger are free today while their pricing is decided. Reports and alerts on a schedule, sent without anyone asking, are nable Cloud; this install sends them when you ask.
 
-**Does my billing data leave my machine?** nable never uploads it: it reads your cost data on your machine and sends it to no nable service, and telemetry is off unless you turn it on (and never carries cost figures). The one thing that sends your own files anywhere is `nable cloud connect --send`, which you run to carry your org model and guard ledger into a paid workspace, and only with the sha256 of the bytes its dry run showed you. In an editor, the answers you ask for reach the model you chat with, as every MCP tool result does; `nable scan` and the rest of the CLI involve no model. You can confirm the no-egress behavior in the source.
+**Does my billing data leave my machine?** nable never uploads it: it reads your cost data on your machine and sends it to no nable service, and telemetry is off unless you turn it on (and never carries cost figures). The one thing that sends your own files anywhere is `nable cloud connect --send`, which you run to carry your org model and guard ledger into a paid workspace, and only with the confirm code its dry run showed you for those bytes and that box. In an editor, the answers you ask for reach the model you chat with, as every MCP tool result does; `nable scan` and the rest of the CLI involve no model. You can confirm the no-egress behavior in the source.
 
 **What clouds and providers does it support?** AWS, Azure and GCP; Kubernetes (a kubeconfig estimate, or OpenCost); AI and LLM providers (OpenAI, Anthropic, Bedrock, Vertex AI, OpenRouter, LiteLLM, Langfuse); data platforms (Databricks, Snowflake, MongoDB Atlas); and SaaS (Datadog, New Relic, Cloudflare, Twilio, Vercel). Modal, Together, Replicate, Cohere and Mistral connect but return no spend figure yet (see Connectors).
 

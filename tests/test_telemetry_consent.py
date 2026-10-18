@@ -224,6 +224,9 @@ def test_the_prompt_names_what_is_and_is_not_collected(monkeypatch, capsys):
 
     for promised in ("cost", "account", "path", "credential"):
         assert promised in shown, f"the prompt never mentions {promised}"
+    # The two usage counts are named where they are sent.
+    for counted in ("commitments", "end within 90 days", "guard asked"):
+        assert counted in shown, f"the prompt never names {counted}"
     assert "off unless you say yes" in shown
     assert "nable_telemetry" in shown, "no way back for someone who changes their mind"
 

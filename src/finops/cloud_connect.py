@@ -21,22 +21,31 @@ The payload is one JSON object per line, keys sorted, no spaces:
     named. A repo's nable.org/ that nobody trusted on this machine (`nable
     org trust --here`) is not sent at all: its facts are somebody else's.
   * the guard ledger: each line exactly as stored, newline-terminated ones
-    only (guard_ledger.stored_lines). The commands in it were redacted when
-    they were written, and nothing here rewrites a line. The chain id is the
+    only (guard_ledger.stored_lines). A record is the agent's command and
+    the paths the guard judged, as the guard recorded them: credentials were
+    redacted when it was written, and nothing else was, so a record can name
+    an absolute path, a host and a user name (`ssh deploy@db1.internal`,
+    /home/alice/...). Nothing here rewrites a line. The chain id is the
     sha256 of the ledger's first line. The chain is checked on these very
     bytes; a chain that breaks is shown, with where, and left out whole.
 
-Nothing else: no hostname, no path, no user name, no machine id.
+Nothing else is added: no hostname, user name or machine id of nable's own.
+What the ledger's records name, they carry, and the dry run counts the
+records that name a path, a host or a user and points at the saved file.
 
 A dry run builds the payload, writes those exact bytes to a file (0600, beside
 the ledger unless --out names one), and prints the destination host, the file
-names, the record counts, the byte size and the payload's sha256. It opens no
-connection.
+names, the record counts, the byte size, the payload's sha256 and the confirm
+code: the sha256 of the box, a newline and the payload, so a code read for one
+box never sends to another. It opens no connection. --out never names one of
+the guard's own files (guard_paths), a path in nable's data dir other than the
+default, or anything but a regular file of the user's.
 
-A send (--send --confirm SHA256) builds the payload again and refuses unless
-its sha256 is the one confirmed: the bytes changed since the person looked
-(the guard appends a record with every agent call it judges, so a dry run goes
-stale). It asks the box what the workspace already holds (GET status), then
+A send (--send --confirm CODE) builds the payload again and refuses unless
+the code is the one for these bytes and this box: the bytes changed since the
+person looked (the guard appends a record with every agent call it judges, so
+a dry run goes stale), or the dry run was for another box. It asks the box
+what the workspace already holds (GET status), then
 POSTs the rest as ordered batches of at most BATCH_MAX bytes, each a slice of
 the bytes shown, cut where a line ends. A resumed send skips the org model the
 box already holds and the ledger lines up to the head it reports, and nothing
@@ -58,6 +67,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import stat
 import tempfile
 import urllib.error
@@ -111,6 +121,23 @@ class Payload:
 
 def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
+
+
+def confirm_code(payload: Payload, box: str) -> str:
+    """What --confirm takes: the sha256 of the box, a newline and the
+    payload. It names where the bytes go as well as the bytes."""
+    return _sha(f"{box}\n".encode() + payload.data)
+
+
+# A record that names an absolute path (/home/alice/..., or C:\\Users\\... as
+# JSON keeps it), a user at a host (deploy@db1), or a host name of three
+# labels or more with a letter in it (db1.internal.acme.example). A count for
+# the person, so it leans toward naming too many.
+_NAMING = re.compile(
+    r"(?<![\w.:/])/[^\s/\"'\\]+/[^\s\"'\\]+"
+    r"|\b[A-Za-z]:\\\\"
+    r"|\b[\w.-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+    r"|\b(?=[\w.-]*[A-Za-z])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+){2,}\b")
 
 
 def _line(doc: dict[str, Any]) -> bytes:
@@ -199,7 +226,9 @@ def _ledger(path: Path | None) -> dict[str, Any]:
         return out
     lines, chain = got["lines"], got["chain"]
     out.update(records=len(lines), ok=chain["ok"], head=chain["head"],
-               partial=got["partial"], lines=lines)
+               partial=got["partial"], lines=lines,
+               records_naming=sum(1 for x in lines
+                                  if _NAMING.search(x.decode("utf-8", "replace"))))
     if lines:
         out["chain_id"] = _sha(lines[0])
     if not chain["ok"]:
@@ -273,11 +302,50 @@ def default_out() -> Path:
     return guard_ledger.ledger_path().parent / PAYLOAD_NAME
 
 
+def _check_out(path: Path) -> None:
+    """ConnectError unless `path` is somewhere a payload may be written: not
+    one of the guard's own files (the off switch, the ledger, the org model,
+    harness settings: guard_paths), not in nable's data dir, and not there
+    already as anything but a regular file the user owns. A dry run needs no
+    key, so --out is the one thing an agent could aim at the guard."""
+    from . import guard_paths, guard_plugin
+
+    hit = guard_paths.match_file(str(path))
+    if hit is None:
+        # The name itself, its directory resolved: a link there names the
+        # link's own place, not where it points.
+        hit = guard_paths.match_file(str(Path(os.path.realpath(path.parent)) / path.name))
+    if hit is not None:
+        raise ConnectError(f"--out names {hit.shown}, {hit.what}; the guard's own files are "
+                           "never written by a dry run. Leave --out off to save beside "
+                           "the ledger, or name a file of your own.")
+    real = os.path.realpath(path)
+    for d in dict.fromkeys((guard_paths.data_dir(), guard_plugin.data_root(),
+                            guard_ledger.ledger_path().parent)):
+        if guard_paths.is_under(real, os.path.realpath(d)):
+            raise ConnectError(f"--out is in nable's data directory ({d}); leave --out off "
+                               "to save beside the ledger, or name a file outside it")
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ConnectError(f"--out could not be checked "
+                           f"({errno.errorcode.get(exc.errno or 0, 'os error')})") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise ConnectError("--out names something that is not a regular file (a link, a "
+                           "directory or a device), which is never replaced")
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+        raise ConnectError("--out names a file that belongs to another user")
+
+
 def save(payload: Payload, path: Path | None = None) -> Path:
     """Write the exact bytes to `path` (default_out()), 0600, through a temp
-    file swapped in, so an existing file or symlink there is replaced, never
-    written through."""
-    path = Path(path) if path else default_out()
+    file swapped in, so an existing file is replaced, never written through.
+    A path other than the default is checked first (_check_out)."""
+    if path is not None and Path(path) != default_out():
+        _check_out(Path(path).expanduser())
+    path = Path(path).expanduser() if path else default_out()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -531,6 +599,7 @@ def read_key(*, key_file: str | None = None, environ: Mapping[str, str] | None =
 
 def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
     """The dry run as one document."""
+    code = confirm_code(payload, box) if payload.data else None
     return {"dry_run": True, "sent": False, "destination": {"box": box,
                                                             "host": host_of(box)},
             "org_model": payload.org, "ledger": payload.ledger,
@@ -539,8 +608,9 @@ def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
                         "batches": len(plan(payload, None)),
                         "batch_max_bytes": BATCH_MAX,
                         "file": str(out) if out else None},
-            "confirm": (f"nable cloud connect --box {box} --send --confirm {payload.sha256}"
-                        if payload.data else None)}
+            "confirm_sha256": code,
+            "confirm": (f"nable cloud connect --box {box} --send --confirm {code}"
+                        if code else None)}
 
 
 def describe(payload: Payload, box: str, out: Path | None) -> str:
@@ -570,7 +640,12 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
         if led.get("left_out"):
             lines.append(f"  left out: {led['left_out']}")
         else:
-            lines.append("  sent as stored: the commands in them were redacted when written")
+            naming = led.get("records_naming") or 0
+            lines.append("  sent as stored: the agent's commands and the paths the guard "
+                         "judged, with credentials redacted and nothing else changed")
+            if naming:
+                lines.append(f"  {naming:,} of them name a path, a host or a user; read them in "
+                             "the saved file before you send")
     if led.get("partial"):
         lines.append("  the last record was still being written; it waits for the next connect")
     lines.append("")
@@ -585,9 +660,10 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
               f"  sha256 {payload.sha256}"]
     if out:
         lines.append(f"  saved to {out}: exactly the bytes that would leave")
-    lines += ["", "To send exactly these bytes:",
-              f"  nable cloud connect --box {box} --send --confirm {payload.sha256}",
-              (f"The workspace key is read from {KEY_ENV}, a --key-file with mode 0600, or "
-               "a hidden prompt, never from the command line. A resend skips what the "
-               "workspace already holds.")]
+    lines += ["", f"To send exactly these bytes to {host_of(box)}, at your own terminal:",
+              f"  nable cloud connect --box {box} --send --confirm {confirm_code(payload, box)}",
+              ("The confirm code is the sha256 of the box, a newline and these bytes, so it "
+               f"sends to {host_of(box)} alone. The workspace key is read from {KEY_ENV}, a "
+               "--key-file with mode 0600, or a hidden prompt, never from the command line. "
+               "A resend skips what the workspace already holds.")]
     return "\n".join(lines)
