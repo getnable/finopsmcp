@@ -26,6 +26,7 @@ from __future__ import annotations
 import functools
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 
 # The day each provider's rows were last read from its source. The Anthropic
 # rows were re-read from ANTHROPIC_SOURCE on 2026-10-13 and all matched; the
@@ -84,6 +85,35 @@ class ModelPrice:
         usd = (input_tokens * inp + output_tokens * out + cache_write_5m_tokens * w5
                + cache_write_1h_tokens * w1 + cache_read_tokens * rd) / 1_000_000
         return usd * (US_ONLY_MULTIPLIER if us_only else 1.0)
+
+    def cost_exact(self, *, input_tokens: int = 0, output_tokens: int = 0,
+                   cache_write_5m_tokens: int = 0, cache_write_1h_tokens: int = 0,
+                   cache_read_tokens: int = 0, fast: bool = False,
+                   us_only: bool = False) -> Decimal:
+        """cost(), in exact decimal arithmetic: every rate here is a decimal
+        of a few places, so a sum of these is exact to the cent's fraction,
+        and rounding it is the caller's choice (a cost rounds up)."""
+        def d(x: float) -> Decimal:
+            return Decimal(repr(x))
+        scale = Decimal(1)
+        inp, out = d(self.input), d(self.output)
+        if fast and self.model in FAST_MODE:
+            f_in, f_out = FAST_MODE[self.model]
+            scale = d(f_in) / d(self.input)
+            inp, out = d(f_in), d(f_out)
+        w5 = d(self.cache_write_5m if self.cache_write_5m is not None else self.input) * scale
+        w1 = d(self.cache_write_1h if self.cache_write_1h is not None else self.input) * scale
+        rd = d(self.cache_read if self.cache_read is not None else self.input) * scale
+        usd = (input_tokens * inp + output_tokens * out + cache_write_5m_tokens * w5
+               + cache_write_1h_tokens * w1 + cache_read_tokens * rd) / Decimal(1_000_000)
+        return usd * (d(US_ONLY_MULTIPLIER) if us_only else Decimal(1))
+
+    def citation(self) -> str:
+        """Which row of this table, from which page, read when: what a dollar
+        priced at it says it was priced at."""
+        return (f"llm_prices {self.model}: {self.provider} list price as of "
+                f"{AS_OF_BY_PROVIDER.get(self.provider, AS_OF)}, "
+                f"{SOURCES.get(self.provider, '')}")
 
 
 # ── Anthropic ─────────────────────────────────────────────────────────────────

@@ -75,6 +75,31 @@ credentials redacted and nothing else changed, so they can name absolute
 paths, hosts and user names (`ssh deploy@db1.internal`, `/home/you/...`);
 the dry run counts the records that do and points at the saved file.
 
+It also carries this machine's coding-agent usage, as `agent_usage` records:
+one per install id, UTC day, developer, agent, model and project, for the
+closed days of the last 35, with the tokens by direction, the
+list-price-equivalent dollars for tokens of a model `llm_prices` has a cited
+row for (`price_source` names the row), and the count of tokens it does not
+price. The install id is 128 random bits made once and kept beside the ledger;
+the developer is the sender (`--as WHO`, else at a terminal git's
+`user.email`, then `$USER`); the project is the repo's identity (its remote's
+slug) only when your org model names that repo in a repo_path fact, else
+`unmapped`. No prompt, response, file content, path, working directory, host
+name or machine id is in a record, and a model logged as a path is sent as
+`unknown`. Without a terminal and without `--as` there is no developer and no
+record; `--no-agent-usage` leaves them out. They are in the dry run's bytes and
+covered by its confirm code like everything else.
+
+**AI budgets in the org model.** `budgets.yaml` is an org model file like the
+others: the guard asks before an agent writes, moves or deletes it, in a
+repo's `nable.org/`, in nable's data directory and at `FINOPS_ORG_DIR`. The
+person a budget is matched by is `FINOPS_GUARD_PERSON`, else git's
+`user.email`, which the guard reads by running `git config --get user.email`
+once and keeps in `guard-person.json` beside the ledger (another of its own
+files) until git's config files change; the guard asks before an agent runs
+`git config` to change `user.email`. Nothing about a budget leaves the machine
+unless you send the org model.
+
 **Version check.** To tell you when your build is out of date, nable makes one
 GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run
 welcome or the MCP server starts (at most once per process, 2 second cap). It
