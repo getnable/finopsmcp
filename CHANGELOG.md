@@ -197,6 +197,17 @@ regions, Multi-AZ included, from cited Price List rows.
     an end date that cannot be read or has passed: each asks, with no figure
     and why. `aws ec2 create-capacity-reservation-fleet` asks with no figure,
     and so does Python that creates a reservation or a fleet without a term.
+- **A flag set twice to different values gets no figure.** The guard read
+  the first `--instance-type` or `--commitment`; argparse, which the AWS CLI is
+  built on, keeps the last. `create-capacity-reservation --instance-type
+  t3.micro --instance-type p5.48xlarge --instance-count 8` was priced as eight
+  t3.micros, `create-savings-plan --commitment 0.01 --commitment 250` as $7 a
+  month, and the same reservation without a term, or a launch written that
+  way, passed with no ask (the Savings Plan and launch cases were already in
+  0.12.0). Now any command the guard prices that sets one flag to two values
+  has no figure, the ask names the flag and both values, and a launch or a
+  reservation written that way asks instead of passing. The same value twice
+  is priced as before.
 - **`nable guard reconcile` reads each commitment purchase above.** Its
   CloudTrail event names come from the guard's table, each with its event
   source (OpenSearch's and Elasticsearch's under es.amazonaws.com), and a

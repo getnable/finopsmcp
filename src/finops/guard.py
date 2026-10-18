@@ -1600,6 +1600,20 @@ def _has_flag(cmd: str, name: str) -> bool:
     return re.search(rf"(?<!\S)--{re.escape(name)}(?![\w=-])", cmd) is not None
 
 
+_FLAG_VALUE_RE = re.compile(r"(?<!\S)--([A-Za-z0-9][\w-]*)(?:=|\s+)(?!-)(\S+)")
+
+
+def _repeated(cmd: str) -> list[tuple[str, list[str]]]:
+    """Each `--flag` one command sets more than once to different values, with
+    the values in order. _flag reads the first; argparse, which the AWS CLI is
+    built on, keeps the last; the guard relies on neither, so a figure read
+    from either value would be a guess (_price_form, _conflicting_flags)."""
+    seen: dict[str, list[str]] = {}
+    for m in _FLAG_VALUE_RE.finditer(cmd):
+        seen.setdefault(m.group(1), []).append(m.group(2))
+    return [(name, values) for name, values in seen.items() if len(set(values)) > 1]
+
+
 def _num(raw: str | None) -> float | None:
     try:
         v = float(raw) if raw is not None else None
@@ -2281,6 +2295,22 @@ def _unpriced_reservation(command: str) -> str | None:
     return None
 
 
+def _conflicting_flags(command: str) -> str | None:
+    """The ask for a command the guard would price that sets one flag to two
+    values; None when there is none. It has no figure (_price_form), and an
+    unpriced launch would otherwise pass the way a launch with no figure does."""
+    for form in next(_pricing_forms(command), []):
+        excused = _excused(form, command)
+        for seg, at in _commands_in(form):
+            if at in excused or not any(p.search(seg) for p, _ in _PRICERS):
+                continue
+            for name, values in _repeated(seg)[:1]:
+                shown = ", then ".join(v if len(v) <= 40 else v[:37] + "..." for v in values[:3])
+                return (f"this sets --{name} more than once ({shown}). No figure: the guard "
+                        "does not guess which value the command uses")
+    return None
+
+
 # A commitment purchase with no price in the command: the offering id fixes
 # the price, and reading an offering needs the network, so no figure is shown
 # and none is guessed. How many it buys is in the command, and is said.
@@ -2301,6 +2331,9 @@ def _capacity_unpriced(seg: str) -> str:
 
 def _commitment_unpriced(command: str) -> str:
     """The sentence an unpriced commitment purchase gets in place of a figure."""
+    conflict = _conflicting_flags(command)
+    if conflict:
+        return f"{conflict[0].upper()}{conflict[1:]}. "
     norm = _normalize(command)
     for seg, _at in _commands_in(norm):
         if _CAPACITY_RESERVATION_RE.search(seg) and (
@@ -2965,6 +2998,9 @@ def _price_form(form: str, cwd: str | None, command: str | None = None
             continue
         for pattern, pricer in _PRICERS:
             if pattern.search(seg):
+                if _repeated(seg):
+                    unpriced += 1      # no figure rather than one read from a guess
+                    break
                 try:
                     est = pricer(seg, cwd=cwd, whole=form, at=at)
                 except Exception:
@@ -4065,6 +4101,9 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         reserved = _unpriced_reservation(command)
         if reserved:
             return verdict("ask", f"{reserved}.{cost} Confirm to proceed.", est=est)
+        conflicted = _conflicting_flags(command)
+        if conflicted:
+            return verdict("ask", f"{conflicted}.{cost} Confirm to proceed.", est=est)
         if _strict():
             return verdict("ask", "this changes infrastructure and therefore the "
                            f"bill.{cost} Cost it first (ask nable to "
