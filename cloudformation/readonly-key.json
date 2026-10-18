@@ -43,6 +43,15 @@
       "Default": "true",
       "Description": "Free. Finds where your Cost and Usage Report is delivered, so it can be read in place of Cost Explorer. Reading the report itself is a separate grant, scoped to its bucket. Set to false to leave statement OptionalCurDiscovery out."
     },
+    "IncludeCommitments": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "Free reads. Unlocks `nable commitments status`: the RDS, EC2 and ElastiCache reservations and the Savings Plans this account holds, with their end dates. Describe only; nothing here can buy a commitment. Set to false to leave statement OptionalCommitments out."
+    },
     "IncludeOrganizations": {
       "Type": "String",
       "AllowedValues": [
@@ -82,6 +91,14 @@
       "Fn::Equals": [
         {
           "Ref": "IncludeCurDiscovery"
+        },
+        "true"
+      ]
+    },
+    "IncludeCommitments": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeCommitments"
         },
         "true"
       ]
@@ -218,6 +235,25 @@
                   "Effect": "Allow",
                   "Action": [
                     "cur:DescribeReportDefinitions"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            },
+            {
+              "Fn::If": [
+                "IncludeCommitments",
+                {
+                  "Sid": "OptionalCommitments",
+                  "Effect": "Allow",
+                  "Action": [
+                    "rds:DescribeReservedDBInstances",
+                    "ec2:DescribeReservedInstances",
+                    "elasticache:DescribeReservedCacheNodes",
+                    "savingsplans:DescribeSavingsPlans"
                   ],
                   "Resource": "*"
                 },

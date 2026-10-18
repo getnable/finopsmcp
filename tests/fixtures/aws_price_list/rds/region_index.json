@@ -1,0 +1,71 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "publicationDate": "2026-10-06T22:40:50Z",
+ "regions": {
+  "us-east-1": {
+   "regionCode": "us-east-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/us-east-1/index.json"
+  },
+  "us-east-2": {
+   "regionCode": "us-east-2",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/us-east-2/index.json"
+  },
+  "us-west-1": {
+   "regionCode": "us-west-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/us-west-1/index.json"
+  },
+  "us-west-2": {
+   "regionCode": "us-west-2",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/us-west-2/index.json"
+  },
+  "ca-central-1": {
+   "regionCode": "ca-central-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ca-central-1/index.json"
+  },
+  "eu-west-1": {
+   "regionCode": "eu-west-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/eu-west-1/index.json"
+  },
+  "eu-west-2": {
+   "regionCode": "eu-west-2",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/eu-west-2/index.json"
+  },
+  "eu-west-3": {
+   "regionCode": "eu-west-3",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/eu-west-3/index.json"
+  },
+  "eu-central-1": {
+   "regionCode": "eu-central-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/eu-central-1/index.json"
+  },
+  "eu-north-1": {
+   "regionCode": "eu-north-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/eu-north-1/index.json"
+  },
+  "ap-south-1": {
+   "regionCode": "ap-south-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ap-south-1/index.json"
+  },
+  "ap-southeast-1": {
+   "regionCode": "ap-southeast-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ap-southeast-1/index.json"
+  },
+  "ap-southeast-2": {
+   "regionCode": "ap-southeast-2",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ap-southeast-2/index.json"
+  },
+  "ap-northeast-1": {
+   "regionCode": "ap-northeast-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ap-northeast-1/index.json"
+  },
+  "ap-northeast-2": {
+   "regionCode": "ap-northeast-2",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/ap-northeast-2/index.json"
+  },
+  "sa-east-1": {
+   "regionCode": "sa-east-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonRDS/20261006224050/sa-east-1/index.json"
+  }
+ }
+}

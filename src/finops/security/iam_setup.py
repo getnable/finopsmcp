@@ -101,6 +101,19 @@ _OPTIONAL_GROUPS: list[tuple[str, str, str, list[str]]] = [
       "read in place of Cost Explorer. Reading the report itself is a separate "
       "grant, scoped to its bucket."),
      ["cur:DescribeReportDefinitions"]),
+    # Reading the commitments an account holds. Describe only: buying one
+    # (rds:Purchase*, ec2:Purchase*, savingsplans:Create*) is in
+    # _DANGEROUS_ACTIONS_PREFIXES below, and nothing here can.
+    ("OptionalCommitments", "IncludeCommitments",
+     ("Free reads. Unlocks `nable commitments status`: the RDS, EC2 and ElastiCache "
+      "reservations and the Savings Plans this account holds, with their end dates. "
+      "Describe only; nothing here can buy a commitment."),
+     [
+         "rds:DescribeReservedDBInstances",
+         "ec2:DescribeReservedInstances",
+         "elasticache:DescribeReservedCacheNodes",
+         "savingsplans:DescribeSavingsPlans",
+     ]),
     ("OptionalOrganizations", "IncludeOrganizations",
      ("Free. Unlocks the org rollup: listing member accounts and organizational "
       "units from the management account."),
@@ -173,6 +186,38 @@ _DANGEROUS_ACTIONS_PREFIXES = [
     "lambda:Create", "lambda:Delete", "lambda:Update", "lambda:Invoke",
     "logs:Put", "logs:Create", "logs:Delete",  # logs writes (e.g. PutRetentionPolicy)
     "sts:Assume",  # AssumeRole et al — escalation primitive, not a read
+    # Buying a commitment: money for a term, one month to three years. A
+    # read-only key that can do this is not read-only. The same purchases the
+    # guard asks about (guard.py, purchase_commitment).
+    "rds:Purchase", "ec2:Purchase", "savingsplans:Create",
+    "elasticache:Purchase", "memorydb:Purchase", "redshift:Purchase", "es:Purchase",
+    "ec2:AcceptReservedInstancesExchangeQuote", "redshift:AcceptReservedNodeExchange",
+    "redshift-serverless:CreateReservation", "bedrock:CreateProvisionedModelThroughput",
+    "sagemaker:CreateTrainingPlan", "sagemaker:ExtendTrainingPlan",
+    "medialive:PurchaseOffering", "mediaconnect:PurchaseOffering",
+    "devicefarm:PurchaseOffering", "outposts:CreateOrder",
+    "glacier:PurchaseProvisionedCapacity",
+]
+# One action per commitment prefix above, asked of the IAM simulator.
+_COMMITMENT_PURCHASE_PROBES = [
+    "rds:PurchaseReservedDBInstancesOffering",
+    "ec2:PurchaseReservedInstancesOffering",
+    "savingsplans:CreateSavingsPlan",
+    "elasticache:PurchaseReservedCacheNodesOffering",
+    "memorydb:PurchaseReservedNodesOffering",
+    "redshift:PurchaseReservedNodeOffering",
+    "es:PurchaseReservedElasticsearchInstanceOffering",
+    "ec2:AcceptReservedInstancesExchangeQuote",
+    "redshift:AcceptReservedNodeExchange",
+    "redshift-serverless:CreateReservation",
+    "bedrock:CreateProvisionedModelThroughput",
+    "sagemaker:CreateTrainingPlan",
+    "sagemaker:ExtendTrainingPlan",
+    "medialive:PurchaseOffering",
+    "mediaconnect:PurchaseOffering",
+    "devicefarm:PurchaseOffering",
+    "outposts:CreateOrder",
+    "glacier:PurchaseProvisionedCapacity",
 ]
 
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
@@ -596,8 +641,15 @@ def check_credential_scope() -> dict[str, Any]:
             "required_allowed": list[str],   # actions that work
             "required_denied": list[str],    # actions that don't work
             "dangerous_allowed": list[str],  # write actions that shouldn't work
-            "scoped_correctly": bool,
+            "not_read": list[str],           # actions nothing could check
+            "scoped_correctly": bool | None, # None: nothing wrong was seen, and
+                                             # not everything could be read
         }
+
+    A key that cannot call the simulator is checked by the probes that need
+    no simulator (_probe_permissions). What they cannot reach is listed in
+    not_read rather than counted as denied or as allowed, and while anything
+    is unread the key is not reported as correctly scoped.
     """
     try:
         import boto3
@@ -612,14 +664,15 @@ def check_credential_scope() -> dict[str, Any]:
     except Exception as e:
         return {"error": f"Could not get caller identity: {e}"}
 
+    all_actions = _REQUIRED_ACTIONS + [
+        "ec2:TerminateInstances",
+        "s3:PutObject",
+        "iam:CreateUser",
+        "lambda:InvokeFunction",
+        *_COMMITMENT_PURCHASE_PROBES,
+    ]
     try:
         iam = boto3.client("iam")
-        all_actions = _REQUIRED_ACTIONS + [
-            "ec2:TerminateInstances",
-            "s3:PutObject",
-            "iam:CreateUser",
-            "lambda:InvokeFunction",
-        ]
         resp = iam.simulate_principal_policy(
             PolicySourceArn=identity_arn,
             ActionNames=all_actions,
@@ -635,11 +688,13 @@ def check_credential_scope() -> dict[str, Any]:
         results = _probe_permissions()
 
     required_allowed = [a for a in _REQUIRED_ACTIONS if results.get(a) == "allowed"]
-    required_denied  = [a for a in _REQUIRED_ACTIONS if results.get(a) != "allowed"]
+    required_denied  = [a for a in _REQUIRED_ACTIONS
+                        if a in results and results[a] != "allowed"]
     dangerous_allowed = [
         a for a in results
         if a not in _REQUIRED_ACTIONS and results[a] == "allowed"
     ]
+    not_read = [a for a in dict.fromkeys(all_actions) if a not in results]
 
     return {
         "account_id":       account_id,
@@ -647,8 +702,10 @@ def check_credential_scope() -> dict[str, Any]:
         "required_allowed": required_allowed,
         "required_denied":  required_denied,
         "dangerous_allowed": dangerous_allowed,
+        "not_read":         not_read,
         "scoped_correctly": (
-            len(required_denied) == 0 and len(dangerous_allowed) == 0
+            False if required_denied or dangerous_allowed
+            else None if not_read else True
         ),
     }
 
@@ -695,6 +752,14 @@ def _probe_permissions() -> dict[str, str]:
     _try(
         lambda: ec2.terminate_instances(InstanceIds=["i-00000000000000000"], DryRun=True),
         "ec2:TerminateInstances",
+    )
+    # A dry run: EC2 answers DryRunOperation when the key could buy and
+    # UnauthorizedOperation when it could not, and buys nothing either way.
+    _try(
+        lambda: ec2.purchase_reserved_instances_offering(
+            InstanceCount=1, ReservedInstancesOfferingId="00000000-0000-0000-0000-000000000000",
+            DryRun=True),
+        "ec2:PurchaseReservedInstancesOffering",
     )
 
     s3 = boto3.client("s3")

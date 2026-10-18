@@ -197,10 +197,29 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     ("spot-fleet-terminate", "terminate_instance"),
     (r"\baws\s+ec2\s+release-address\b", "release_ip"),
     (r"\baws\s+ec2\s+delete-snapshot\b", "snapshot_delete"),
+    # The AWS CLI operations that buy a commitment: a term of capacity paid
+    # for whether it is used or not. Each verb is an operation in botocore's
+    # service model (tests/test_guard_commitment_purchase.py pins them).
+    # Bedrock Provisioned Throughput is a commitment only with a term, so it
+    # is its own rule below.
     (r"\baws\s+(?:savingsplans\s+create-savings-plan|"
      r"ec2\s+purchase-reserved-instances-offering|"
      r"ec2\s+purchase-host-reservation|"
-     r"rds\s+purchase-reserved-db-instances-offering)", "purchase_commitment"),
+     r"ec2\s+purchase-scheduled-instances|"
+     r"ec2\s+purchase-capacity-block|"
+     r"ec2\s+accept-reserved-instances-exchange-quote|"
+     r"rds\s+purchase-reserved-db-instances-offering|"
+     r"elasticache\s+purchase-reserved-cache-nodes-offering|"
+     r"memorydb\s+purchase-reserved-nodes-offering|"
+     r"redshift\s+(?:purchase-reserved-node-offering|accept-reserved-node-exchange)|"
+     r"redshift-serverless\s+create-reservation|"
+     r"opensearch\s+purchase-reserved-instance-offering|"
+     r"es\s+purchase-reserved-elasticsearch-instance-offering|"
+     r"sagemaker\s+(?:create|extend)-training-plan|"
+     r"(?:medialive|mediaconnect|devicefarm)\s+purchase-offering|"
+     r"outposts\s+create-order|"
+     r"glacier\s+purchase-provisioned-capacity)", "purchase_commitment"),
+    ("bedrock-commitment", "purchase_commitment"),
     # delete-*, and the batch forms (ecr batch-delete-image, dynamodb
     # batch-delete-item) that delete many at once.
     (r"\baws\s+\S+\s+(?:batch-)?delete-[a-z0-9-]+", "delete_resource"),
@@ -213,9 +232,13 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bgcloud\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baz\s+(?:\S+\s+)*delete\b", "delete_resource"),
     # Heuristics. These cannot see what will actually run, so they only ever
-    # ask: a Python one-liner that imports boto3 and calls a delete or a
-    # terminate, and a base64 payload decoded straight into a shell.
+    # ask: Python code handed to the interpreter that imports boto3 or
+    # botocore and buys a commitment, or calls a delete or a terminate; an
+    # aws command whose service or operation is a variable or a
+    # substitution; and a base64 payload decoded straight into a shell.
+    ("python-boto3-purchase", "purchase_commitment"),
     ("python-boto3-delete", "delete_resource"),
+    ("aws-unresolved-operation", "delete_resource"),
     ("base64-to-shell", "delete_resource"),
 ]
 
@@ -395,7 +418,27 @@ def _flatten(cmd: str) -> str:
     if "\\" in cmd:
         cmd = _ESCAPE_RE.sub(r"\1", cmd)
     cmd = cmd.replace('"', "").replace("'", "")
-    return _cli_images(_lower_programs(" ".join(cmd.split())))
+    return _py_awscli(_cli_images(_lower_programs(" ".join(cmd.split()))))
+
+
+# AWS CLI v1 runs as a Python module: `python3 -m awscli rds purchase-...` is
+# `aws rds purchase-...`, and read as anything else it was nothing at all.
+_PY_AWSCLI_RE = re.compile(r"python[\d.]*(?: -[A-Za-z]+)* -m awscli(?![\w.-])")
+
+
+def _py_awscli(cmd: str) -> str:
+    """Each `[path/]python -m awscli` as `aws`. Matched from the word
+    `python` and the path found by looking back from it, so a long word with
+    no `python` in it is never rescanned."""
+    if "awscli" not in cmd:
+        return cmd
+    out, last = [], 0
+    for m in _PY_AWSCLI_RE.finditer(cmd):
+        start = max(cmd.rfind(c, 0, m.start()) for c in " ;&|()") + 1
+        if start >= last and (start == m.start() or cmd[m.start() - 1] == "/"):
+            out += (cmd[last:start], "aws")
+            last = m.end()
+    return "".join(out) + cmd[last:] if out else cmd
 
 
 # The CLIs' own container images, whose entrypoint is the CLI itself: `docker
@@ -716,7 +759,7 @@ class _Lazy:
 # The operators between shell commands in a normalized command.
 _COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
 _SUBSTITUTION_RE = re.compile(r"\$\(|`|<\(|>\(")
-_CROSS_SEGMENT = frozenset({"python-boto3-delete", "base64-to-shell"})
+_CROSS_SEGMENT = frozenset({"python-boto3-delete", "python-boto3-purchase", "base64-to-shell"})
 _CLI_WORD_RE = re.compile(r"(?<![\w./-])(?:aws|kubectl|helm|terraform|tofu|terragrunt|pulumi|"
                           r"gcloud|az|cdk|sam|doctl|eksctl|gsutil)(?![\w.-])")
 _AWS_EC2_RE = re.compile(r"aws\s+ec2\s")
@@ -747,9 +790,10 @@ _INERT_SUBCOMMAND_RE = re.compile(
     rf"completion|help){_END}")
 
 
-def _inert(seg: str) -> bool:
+def _inert(seg: str, dry: bool = True) -> bool:
     """Does this one shell command run nothing: a dry run, a permission
-    check, or a helm subcommand that never touches a release?"""
+    check, or a helm subcommand that never touches a release? `dry` False
+    leaves the dry runs out: what is left is inert whatever the flags say."""
     clis = _CLI_WORD_RE.finditer(seg)
     prog = next(clis, None)
     if prog is None or next(clis, None) is not None:
@@ -758,7 +802,7 @@ def _inert(seg: str) -> bool:
         return True
     # After a bare `--` a flag is an argument: `kubectl delete ns x --
     # --dry-run` deletes the namespace.
-    if ("dry" not in seg or _REAL_RUN_RE.search(seg, prog.end())
+    if (not dry or "dry" not in seg or _REAL_RUN_RE.search(seg, prog.end())
             or _END_OF_OPTIONS_RE.search(seg, prog.end())):
         return False
     if prog.group() == "aws":
@@ -776,10 +820,11 @@ class _Segments:
     ends (a break belongs to the next one), and which run nothing (_inert),
     each looked up once."""
 
-    __slots__ = ("_inert", "cmd", "ends", "starts")
+    __slots__ = ("_dry", "_inert", "cmd", "ends", "starts")
 
-    def __init__(self, cmd: str) -> None:
+    def __init__(self, cmd: str, dry: bool = True) -> None:
         self.cmd = cmd
+        self._dry = dry
         starts, ends, pos = [], [], 0
         for m in _COMMAND_BREAK_RE.finditer(cmd):
             starts.append(pos)
@@ -802,7 +847,7 @@ class _Segments:
 
     def inert(self, i: int) -> bool:
         if i not in self._inert:
-            self._inert[i] = _inert(self.text(i))
+            self._inert[i] = _inert(self.text(i), self._dry)
         return self._inert[i]
 
 
@@ -970,18 +1015,75 @@ class _PythonBoto3Delete:
     later `python -c` is inside that rest already."""
 
     pattern = "python-boto3-delete"
-    _python = re.compile(r"(?<![\w.-])python(?:3(?:\.\d+)?)?(?: -\S+)*? -c ")
-    _boto3 = re.compile(r"\bboto3\b")
-    _delete = re.compile(r"\b(?:delete|terminate)_\w+|\.(?:delete|terminate)\(")
+    # Code handed to Python: `-c` (alone or as the last of combined flags,
+    # `-Ic`), `-` or a heredoc for stdin, or a pipe into Python with no
+    # script named. For a pipe the code comes before Python, so the whole
+    # command is searched; otherwise what follows it.
+    _python = re.compile(r"(?<![\w.-])python(?:3(?:\.\d+)?)?(?: -\S+)*? "
+                         r"(?:-[A-Za-z]*c |-(?: |$)|<<)")
+    # `(?:[^\s/|]*/)*`, not `(?:\S*/)?`: a run of `|||...` would rescan the
+    # rest of the run from every pipe in it.
+    _piped = re.compile(r"\| ?(?:[^\s/|]*/)*python(?:3(?:\.\d+)?)?(?: -[A-Za-z]+)*(?: -)?"
+                        r"(?= ?[;&|)]|$)")
+    _boto3 = re.compile(r"\b(?:boto3|botocore)\b")
+    _delete = re.compile(r"\b(?:delete|terminate)_\w+|\.(?:delete|terminate)\("
+                         r"|_make_api_call\( ?(?:Delete|Terminate)[A-Z]\w*")
 
     def search(self, cmd: str) -> re.Match[str] | None:
         py = self._python.search(cmd)
-        if py is None or self._boto3.search(cmd, py.end()) is None:
+        piped = self._piped.search(cmd) is not None
+        if py is None and not piped:
             return None
-        return self._delete.search(cmd, py.end())
+        start = 0 if piped or py is None else py.end()
+        if self._boto3.search(cmd, start) is None:
+            return None
+        return self._delete.search(cmd, start)
 
     def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
         return self.search(cmd)
+
+
+class _PythonBoto3Purchase(_PythonBoto3Delete):
+    """`python3 -c "import boto3; ...purchase_reserved_db_instances_offering(...)"`:
+    a commitment bought through the SDK. The same heuristic as the delete
+    one, so it only ever asks."""
+
+    pattern = "python-boto3-purchase"
+    _delete = re.compile(r"\b(?:purchase_(?:reserved_\w+|capacity_block\w*|host_reservation|"
+                         r"scheduled_instances|offering|provisioned_capacity)|"
+                         r"accept_reserved_(?:instances_exchange_quote|node_exchange)|"
+                         r"create_savings_plan|create_reservation|create_order|"
+                         r"(?:create|extend)_training_plan|"
+                         r"create_provisioned_model_throughput\b[^)]*\bcommitmentDuration)\b"
+                         # The same operations by their API names, through the
+                         # client's own dispatcher.
+                         r"|_make_api_call\( ?(?:Purchase(?:Reserved\w+|CapacityBlock\w*|"
+                         r"HostReservation|ScheduledInstances|Offering|ProvisionedCapacity)|"
+                         r"AcceptReserved\w+|CreateSavingsPlan|CreateReservation|CreateOrder|"
+                         r"(?:Create|Extend)TrainingPlan|"
+                         r"CreateProvisionedModelThroughput\b[^)]*\bcommitmentDuration)\b")
+
+
+class _AwsUnresolved:
+    """`aws rds $VERB ...`, `aws $SERVICE ...`, `aws rds $(...)`: an AWS
+    command whose service or operation the shell fills in, so the guard
+    cannot read which operation runs. A heuristic, so it only ever asks, and
+    a commitment floor holds for it (it may be a purchase)."""
+
+    pattern = "aws-unresolved-operation"
+    _re = re.compile(r"aws (?:[a-z0-9-]+ )?[$`]")
+
+    def _hits(self, cmd: str):
+        for m in self._re.finditer(cmd):
+            if m.start() == 0 or cmd[m.start() - 1] in " ;&|()/":
+                yield m
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        return next(self._hits(cmd), None)
+
+    def search_live(self, cmd: str, segs: _Segments) -> re.Match[str] | None:
+        return next((m for m in self._hits(cmd) if not segs.inert(segs.index(m.start()))),
+                    None)
 
 
 class _Base64ToShell:
@@ -1020,7 +1122,11 @@ _SPECIAL_RULES = {r.pattern: r for r in (
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
     _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
-    _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _Base64ToShell(),
+    _VerbWithFlag("bedrock-commitment",
+                  rf"\baws\s+bedrock\s+create-provisioned-model-throughput{_END}", r"",
+                  r"\s--commitment-duration(?![^\s=])"),
+    _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _PythonBoto3Purchase(),
+    _AwsUnresolved(), _Base64ToShell(),
 )}
 
 
@@ -1030,6 +1136,12 @@ def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
 
 _ONE_WAY_RULES = _compile(_ONE_WAY_CLASSIFIERS)
 _TWO_WAY_RULES = _compile(_TWO_WAY_CLASSIFIERS)
+_COMMITMENT = ("one_way", "purchase_commitment")
+# The rules the commitment floor holds for: every purchase, and an AWS
+# operation the guard cannot read, which may be one.
+_COMMITMENT_RULES = [rule for rule, action in _ONE_WAY_RULES
+                     if action == "purchase_commitment"
+                     or rule.pattern == "aws-unresolved-operation"]
 
 
 def classify_command(command: str) -> tuple[str, str] | None:
@@ -1043,6 +1155,20 @@ def classify_command(command: str) -> tuple[str, str] | None:
         found = _worst_reading(form, _classify_live)
         if _rank(found) > _rank(hit):
             hit = found
+    if _rank(hit) < 2 and "dry" in command:
+        # A dry run excused something. It stands only where the shell hands
+        # the CLI the flag as an argument of its own (_shell_view).
+        strict = None
+        for form in _quoting_splits(command):
+            found = _worst_reading(form, _classify_strict)
+            if _rank(found) > _rank(strict):
+                strict = found
+        if _rank(strict) > _rank(hit):
+            seen = _shell_view(command, _classify_live)
+            if seen is _UNREADABLE:
+                return strict
+            if _rank(seen) > _rank(hit):
+                hit = seen
     return hit
 
 
@@ -1066,10 +1192,10 @@ def _classify_normalized(cmd: str) -> tuple[str, str] | None:
     return None
 
 
-def _classify_live(cmd: str) -> tuple[str, str] | None:
+def _classify_live(cmd: str, dry: bool = True) -> tuple[str, str] | None:
     """_classify_normalized, where a rule's program and verb sit in one shell
     command that runs something (see _Segments). A command with a
-    substitution is judged whole."""
+    substitution is judged whole. `dry` False counts no dry run as inert."""
     if _SUBSTITUTION_RE.search(cmd):
         return _classify_normalized(cmd)
     segs: _Segments | None = None
@@ -1078,10 +1204,135 @@ def _classify_live(cmd: str) -> tuple[str, str] | None:
             if rule.search(cmd) is None:
                 continue
             if segs is None:
-                segs = _Segments(cmd)
+                segs = _Segments(cmd, dry)
             if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
                 return (door, action)
     return None
+
+
+def _classify_strict(cmd: str) -> tuple[str, str] | None:
+    return _classify_live(cmd, dry=False)
+
+
+def _commitment_live(cmd: str, dry: bool = True) -> tuple[str, str] | None:
+    """_classify_live with the commitment purchase rules alone."""
+    hits = [rule for rule in _COMMITMENT_RULES if rule.search(cmd) is not None]
+    if not hits:
+        return None
+    if _SUBSTITUTION_RE.search(cmd):
+        return _COMMITMENT
+    segs = _Segments(cmd, dry)
+    for rule in hits:
+        if rule.pattern in _CROSS_SEGMENT or rule.search_live(cmd, segs):
+            return _COMMITMENT
+    return None
+
+
+def _buys_commitment(command: str) -> bool:
+    """Does the command buy a commitment, read the way classify_command reads
+    it? Asked on its own because classification stops at the first one-way
+    rule: `aws ec2 terminate-instances ... && aws savingsplans
+    create-savings-plan ...` is a terminate there, and the purchase in it
+    must still never be let through (_commitment_floor)."""
+    if len(command) > MAX_JUDGED_CHARS:
+        return False
+    forms = _quoting_splits(command)
+    if any(_worst_reading(form, _commitment_live) is not None for form in forms):
+        return True
+    if "dry" not in command or not any(
+            _worst_reading(form, _commitment_strict) is not None for form in forms):
+        return False
+    seen = _shell_view(command, _commitment_live)
+    return seen is _UNREADABLE or seen is not None
+
+
+def _commitment_strict(cmd: str) -> tuple[str, str] | None:
+    return _commitment_live(cmd, dry=False)
+
+
+# ── A dry run, as the shell hands it to the CLI ───────────────────────────────
+# The forms the rules read have their quotes dropped (so a verb inside `bash
+# -c '...'` is seen) and keep a comment's text, which is the right side to err
+# on for finding a change and the wrong one for excusing it: `... --instance-
+# count 2 # --dry-run` and `--client-token 'x --dry-run'` read as dry runs,
+# and the purchase ran. So when a dry run excused something, each shell
+# command is judged again as the shell reads it (shlex: a comment dropped, a
+# quoted value one word), and its dry run counts only when the flag is an
+# argument of its own, before any `--`.
+_DRY_FLAGS = frozenset({"--dry-run", "--dryrun", "--dry-run=client", "--dry-run=server",
+                        "--dry-run=true"})
+_REAL_RUN_FLAGS = frozenset({"--no-dry-run", "--dry-run=none", "--dry-run=false"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+_SHLEX_BREAK_RE = re.compile(r"[;&|()]+")
+_UNREADABLE = object()
+# What the shell's reading is tried on: a dry run is a short command, and
+# shlex reads a character at a time. Longer, or more commands than this, and
+# the excused change stands.
+_SHELL_VIEW_MAX_CHARS = 16 * 1024
+_SHELL_VIEW_MAX_COMMANDS = 64
+
+
+def _shell_commands(command: str) -> list[list[str]] | None:
+    """Each shell command's words as the shell reads them, or None when shlex
+    cannot read the command. Comments and newlines are found by the shell's
+    own quoting first (_SHELL_LEX_RE): a `#` starts one only at a word's
+    start, and shlex would end it at the newline it swallows, joining the
+    next command onto this one."""
+    import shlex
+
+    def one(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        return " " if tok[0] == "#" else " ; " if tok == "\n" else tok
+
+    lex = shlex.shlex(_SHELL_LEX_RE.sub(one, _unfold(command)), posix=True,
+                      punctuation_chars="();&|<>")
+    lex.commenters = ""
+    lex.whitespace_split = True
+    out: list[list[str]] = [[]]
+    try:
+        for tok in lex:
+            if _SHLEX_BREAK_RE.fullmatch(tok):
+                out.append([])
+            else:
+                out[-1].append(tok)
+    except ValueError:
+        return None
+    return [words for words in out if words]
+
+
+def _shell_view(command: str, judge: Any, depth: int = 0) -> Any:
+    """judge(text, dry) over each shell command as the shell reads it, the
+    most severe result; `dry` is whether that command's dry-run flag is an
+    argument of its own. A `sh -c` string is read the same way. _UNREADABLE
+    when shlex cannot read the command."""
+    import shlex
+
+    if len(command) > _SHELL_VIEW_MAX_CHARS or depth > 2:
+        return _UNREADABLE
+    commands = _shell_commands(command)
+    if commands is None or len(commands) > _SHELL_VIEW_MAX_COMMANDS:
+        return _UNREADABLE
+    worst = None
+    for words in commands:
+        found: Any = None
+        if words[0].rsplit("/", 1)[-1].lower() in _SHELLS:
+            at = next((i for i, w in enumerate(words[1:], 1)
+                       if w.startswith("-") and not w.startswith("--") and w.endswith("c")),
+                      None)
+            if at is not None and at + 1 < len(words):
+                found = _shell_view(words[at + 1], judge, depth + 1)
+                if found is _UNREADABLE:
+                    return _UNREADABLE
+                if _rank(found) > _rank(worst):
+                    worst = found
+                continue
+        end = words.index("--") if "--" in words else len(words)
+        flags = set(words[:end])
+        dry = bool(flags & _DRY_FLAGS) and not flags & _REAL_RUN_FLAGS
+        found = judge(_readings(shlex.join(words)).masked, dry)
+        if _rank(found) > _rank(worst):
+            worst = found
+    return worst
 
 
 def _strict() -> bool:
@@ -1640,6 +1891,27 @@ def _price_reserved_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     }
 
 
+# A commitment purchase with no price in the command: the offering id fixes
+# the price, and reading an offering needs the network, so no figure is shown
+# and none is guessed. How many it buys is in the command, and is said.
+_COMMITMENT_COUNTS = (("db-instance-count", "DB instance"), ("cache-node-count", "cache node"),
+                      ("node-count", "node"), ("instance-count", "instance"))
+_NO_COMMITMENT_FIGURE = ("No figure: the offering id fixes the price, which the guard cannot "
+                         "look up offline")
+
+
+def _commitment_unpriced(command: str) -> str:
+    """The sentence an unpriced commitment purchase gets in place of a figure."""
+    norm = _normalize(command)
+    counts = []
+    for flag, noun in _COMMITMENT_COUNTS:
+        n = _num(_flag(norm, flag))
+        if n is not None and n.is_integer():
+            counts.append(f"{int(n):,} {noun}{'s' if n != 1 else ''}")
+    return (f"{_NO_COMMITMENT_FIGURE}"
+            + (f" (the order is for {' and '.join(counts)})" if counts else "") + ". ")
+
+
 def _leading_names(cmd: str, verb_end: int) -> int:
     """How many positional names follow the verb before the first flag.
 
@@ -1914,6 +2186,214 @@ def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
         return out
     except Exception:
         return []
+
+
+# ── Infrastructure as code that buys a commitment ─────────────────────────────
+# The commitment rules read the command, and `terraform apply -auto-approve`
+# says nothing of what it creates: a configuration with resource
+# "aws_rds_reserved_instance" buys a reservation for its whole term, and the
+# guard let it through. So an apply is read for what it would buy: a saved
+# plan's creates, or else the configuration in the directory it runs in
+# (Terraform, OpenTofu and Terragrunt files, and a Pulumi program's source),
+# and the commitment floor holds for it. A directory too large to read asks.
+IAC_COMMITMENT_TYPES = ("aws_rds_reserved_instance", "aws_elasticache_reserved_cache_node",
+                        "aws_ec2_capacity_block_reservation")
+_TF_COMMITMENT_RE = re.compile(r"\b(?:" + "|".join(IAC_COMMITMENT_TYPES) + r")\b")
+_PULUMI_COMMITMENT_RE = re.compile(
+    r"\b(?:rds\.(?:New)?ReservedInstance|elasticache\.(?:New)?ReservedCacheNode"
+    r"|ec2\.(?:New)?CapacityBlockReservation)\b"
+    r"|aws:(?:rds/reservedInstance:ReservedInstance|elasticache/reservedCacheNode:ReservedCacheNode"
+    r"|ec2/capacityBlockReservation:CapacityBlockReservation)")
+_TF_SUFFIXES = (".tf", ".tf.json")
+_PULUMI_SUFFIXES = (".ts", ".tsx", ".js", ".mjs", ".cjs", ".py", ".go", ".cs", ".fs", ".java",
+                    ".kt", ".yaml", ".yml")
+# Dependencies, not the program: the Pulumi SDK itself defines every class above.
+_IAC_SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", "site-packages", ".venv",
+                            "venv", "vendor", "bin", "obj", "target", "dist", "build"})
+_IAC_SCAN_MAX_FILES = 2000
+_IAC_SCAN_MAX_ENTRIES = 50_000          # every name walked, read or not
+_IAC_SCAN_MAX_FILE_BYTES = 4 * 1024 * 1024
+_IAC_TOOL_RE = re.compile(r"(?<![\w.-])(terraform|tofu|terragrunt|pulumi)(?![\w.-])")
+_IAC_DIR_FLAGS = ("--terragrunt-working-dir", "--working-dir", "--cwd", "-C")
+_IAC_APPLIES_MAX = 16                   # applies read per command
+# A local module: `source = "./modules/db"`, as HCL or JSON.
+_TF_LOCAL_SOURCE_RE = re.compile(r'"?source"?\s*[=:]\s*"(\.\.?/[^"]+)"')
+
+
+class _IacRead:
+    """What a scan found, and why it stopped short, across the files it read."""
+
+    def __init__(self, pattern: re.Pattern[str], suffixes: tuple[str, ...], top: Path) -> None:
+        self.pattern, self.suffixes, self.top = pattern, suffixes, top
+        self.found: list[str] = []
+        self.why: str | None = None
+        self.files = self.entries = 0
+
+    def _name(self, path: Path) -> str:
+        try:
+            return path.relative_to(self.top).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+    def read(self, path: Path) -> str | None:
+        """The file's text, after counting it against the bounds; None (and
+        `why` set) once they are passed."""
+        self.files += 1
+        if self.files > _IAC_SCAN_MAX_FILES:
+            self.why = f"more than {_IAC_SCAN_MAX_FILES:,} files to read"
+            return None
+        if path.stat().st_size > _IAC_SCAN_MAX_FILE_BYTES:
+            self.why = f"{self._name(path)} is too large to read"
+            return None
+        text = path.read_text(encoding="utf-8", errors="replace")
+        hit = self.pattern.search(text)
+        if hit is not None:
+            self.found.append(f"{hit.group(0)} ({self._name(path)})")
+        return text
+
+    def walk(self, base: Path) -> None:
+        """Every matching file under `base`, dependencies left out."""
+        for root, dirs, files in os.walk(base):
+            self.entries += len(dirs) + len(files)
+            if self.entries > _IAC_SCAN_MAX_ENTRIES:
+                self.why = f"more than {_IAC_SCAN_MAX_ENTRIES:,} entries to look through"
+                return
+            dirs[:] = sorted(d for d in dirs if d not in _IAC_SKIP_DIRS
+                             and not (Path(root, d) / "pyvenv.cfg").exists())
+            for name in sorted(files):
+                if name.endswith(self.suffixes) and self.read(Path(root, name)) is None:
+                    return
+
+
+def _tf_module(scan: _IacRead, base: Path, seen: set[Path]) -> None:
+    """A Terraform root module: its own files, the modules `init` downloaded
+    (.terraform/modules) and every local module it names, as Terraform reads
+    them. A sibling stack in another directory is not part of it."""
+    queue = [base]
+    while queue and scan.why is None:
+        d = queue.pop()
+        try:
+            key = d.resolve()
+        except (OSError, RuntimeError):
+            key = d
+        if key in seen or not d.is_dir():
+            continue
+        seen.add(key)
+        for path in sorted(d.iterdir()):
+            if path.is_file() and path.name.endswith(_TF_SUFFIXES):
+                text = scan.read(path)
+                if text is None:
+                    return
+                queue += [d / src for src in _TF_LOCAL_SOURCE_RE.findall(text)]
+        downloaded = d / ".terraform" / "modules"
+        if d == base and downloaded.is_dir():
+            scan.walk(downloaded)
+
+
+def _pulumi_project(base: Path) -> Path | None:
+    """The directory holding Pulumi.yaml, from `base` up, as pulumi finds it."""
+    for d in (base, *list(base.parents)[:8]):
+        if (d / "Pulumi.yaml").is_file() or (d / "Pulumi.yml").is_file():
+            return d
+    return None
+
+
+def _iac_scan(base: Path, tool: str) -> tuple[list[str], str | None]:
+    """(each commitment resource the configuration `tool` would apply in
+    `base` declares, with its file; why it could not all be read, or None)."""
+    pulumi = tool == "pulumi"
+    try:
+        if not base.is_dir():
+            return [], None
+        top = _pulumi_project(base) if pulumi else base
+        if top is None:
+            return [], None             # not a Pulumi project: pulumi up applies nothing
+        scan = _IacRead(_PULUMI_COMMITMENT_RE if pulumi else _TF_COMMITMENT_RE,
+                        _PULUMI_SUFFIXES if pulumi else _TF_SUFFIXES, top)
+        if tool in ("terraform", "tofu"):
+            _tf_module(scan, base, set())
+        else:
+            scan.walk(top)              # terragrunt applies every module below it
+    except (OSError, ValueError) as exc:
+        return [], f"{type(exc).__name__} while reading it"
+    return scan.found, scan.why
+
+
+def iac_commitments(command: str, *, cwd: str | None = None) -> tuple[list[str], list[str]]:
+    """(what the applies in `command` would buy, the directories that could
+    not be read and why), for terraform|tofu|terragrunt apply and pulumi
+    up|update in a shell command that runs. A saved plan is read for its
+    creates; without one, the configuration the apply would read is."""
+    buys: list[str] = []
+    unread: list[str] = []
+    try:
+        form = _segmented(command)
+    except Exception:  # noqa: BLE001 - unreadable as a command: the rules judge it as written
+        return [], []
+    applies, pos = 0, 0
+    while True:
+        # One shell command at a time, each looked at once.
+        m = _IAC_TOOL_RE.search(form, pos)
+        if m is None:
+            break
+        brk = _COMMAND_BREAK_RE.search(form, m.end())
+        stop = brk.start() if brk else len(form)
+        at = max([pos] + [form.rfind(c, pos, m.start()) + 1 for c in ";&|"])
+        pos = brk.end() if brk else len(form)
+        seg = form[at:stop]
+        tool = m.group(1)
+        rest = form[m.end():stop].split()
+        if tool == "pulumi":
+            if not {"up", "update"} & set(rest):
+                continue
+        elif "apply" not in rest or {"-destroy", "--destroy", "-refresh-only"} & set(rest):
+            continue
+        if _inert(seg):
+            continue
+        applies += 1
+        if applies > _IAC_APPLIES_MAX:
+            unread.append(f"more than {_IAC_APPLIES_MAX} applies in one command")
+            break
+        base, _ = _cd_target(form, at, cwd)
+        for i, w in enumerate(rest):
+            if w.startswith("-chdir="):
+                base = base / Path(w.split("=", 1)[1]).expanduser()
+            elif w in _IAC_DIR_FLAGS and i + 1 < len(rest):
+                base = base / Path(rest[i + 1]).expanduser()
+            elif "=" in w and w.split("=", 1)[0] in _IAC_DIR_FLAGS:
+                base = base / Path(w.split("=", 1)[1]).expanduser()
+        if tool in ("terraform", "tofu"):
+            read = _plan_read(form, cwd, at)
+            if read is not None:
+                if isinstance(read[2], dict):
+                    for rc in read[2].get("resource_changes") or []:
+                        acts = (rc.get("change") or {}).get("actions") or []
+                        if rc.get("type") in IAC_COMMITMENT_TYPES and "create" in acts:
+                            buys.append(f"{rc.get('address') or rc.get('type')} "
+                                        f"(in the saved plan {read[1]})")
+                continue               # an unreadable plan asks on its own
+        found, why = _iac_scan(base, tool)
+        buys += found
+        if why:
+            unread.append(f"{base.name or base}/ ({why})")
+    return list(dict.fromkeys(buys)), list(dict.fromkeys(unread))
+
+
+def _iac_floor(command: str, cwd: str | None) -> str:
+    """The sentence the commitment floor leads with for an apply that buys a
+    commitment, or that could not be read for one; "" for neither."""
+    buys, unread = iac_commitments(command, cwd=cwd)
+    shown = " ".join(command.split())
+    if len(shown) > _SHOWN_COMMAND_MAX:
+        shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
+    if buys:
+        listed = ", ".join(buys[:3]) + (f" and {len(buys) - 3} more" if len(buys) > 3 else "")
+        return (f"This would buy a commitment (`{shown}`): it creates {listed}, which buys a "
+                "reservation for its whole term")
+    if unread:
+        return (f"The guard could not read what `{shown}` creates, in {', '.join(unread)}, "
+                "so it cannot tell whether it buys a commitment")
+    return ""
 
 
 def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = None,
@@ -3112,6 +3592,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     lens = budget_lens(command, est, team=org.team()[0] if est is not None else None)
     over = lens is not None and lens["state"] == "over"
     cost = f"{_cost_line(est)}. " if est else ""
+    if est is None and action_type == "purchase_commitment":
+        cost = _commitment_unpriced(command)
     if destroys:
         shown = ", ".join(destroys[:3]) + (f" and {len(destroys) - 3} more" if len(destroys) > 3 else "")
         cost = (f"The saved plan destroys {len(destroys)} "
@@ -3155,6 +3637,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
 # first fragment found in that rule's pattern names it. Checked against the
 # normalised command in the classifier's own order.
 _ONE_WAY_PHRASES: list[tuple[str, str]] = [
+    ("aws-unresolved-operation", ("runs an AWS operation the guard cannot read, which may "
+                                  "delete something or buy a commitment")),
     ("base64-to-shell", "runs a decoded script the guard cannot read"),
     ("python-boto3-delete", "looks like a Python one-liner that deletes or terminates "
                             "AWS resources"),
@@ -3558,6 +4042,14 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         # Installed guard-rule packs may tighten any of that, never loosen it.
         v, pack_error, pack_problem = _with_packs(
             v, forms=forms, commands=() if forms else (command,), cwd=cwd)
+        # Nothing above lets a commitment purchase through without a person.
+        buys = not forms and _buys_commitment(command)
+        if buys:
+            v = _commitment_floor(v, command)
+        elif not forms:
+            via = _iac_floor(command, cwd)
+            if via:
+                v, buys = _commitment_floor(v, command, via=via), True
         if record:
             _record_pack_trouble(pack_error, pack_problem, judged=v is not None or stop is not None,
                                  harness=harness, tool=tool, command=command,
@@ -3572,7 +4064,7 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         if record:
             answer, recorded = _out_of_band(answer, recorded, kind="shell", text=command,
                                             cwd=cwd, harness=harness, session_id=session_id,
-                                            tool=tool)
+                                            tool=tool, commitment=buys)
         if record:
             if history_error is not None:
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
@@ -3844,20 +4336,66 @@ _MAYBE_DENY_ONLY = ("codex", "gemini", "cline", "copilot")
 _NO_OUT_OF_BAND = ("ai_budget", "oversize_command")
 _POLICY_DENY_NOTE = (" This is denied by policy, not waiting for a person, so a one-time "
                      "approval (`nable guard approve`) cannot let it through.")
+# A commitment purchase is not lifted by a one-time approval either: the
+# approval is an id an agent can wait on, and money committed for a term is
+# bought by a person, in their own terminal, or from an agent that can ask.
+_COMMITMENT_NOT_APPROVABLE = (" A commitment purchase is never approved out of band, so "
+                              "`nable guard approve` cannot let it through: a person runs it "
+                              "in their own terminal, or from an agent that can ask.")
+
+# ── The commitment floor ──────────────────────────────────────────────────────
+# A commitment purchase is never weaker than an ask, whatever a policy, a
+# pack, a learned threshold, a one-time approval or the allowed-actions list
+# says; a deny (a pack's, the allowlist's, a hard budget stop) stays a deny.
+# The policy gate holds the same floor (policy.evaluate_action_gate); this is
+# the guard's own, applied to the final verdict, so no layer added later can
+# open it.
+_COMMITMENT_FLOOR = ("A commitment purchase always asks a person, whatever the policy, a "
+                     "pack, a learned threshold or the allowed-actions list says.")
+
+
+def _unread_aws_only(command: str) -> bool:
+    """Is the floor holding only for an AWS operation the guard cannot read
+    (`aws rds $VERB`), with no purchase it can read?"""
+    norm = _normalize(command)
+    return (_SPECIAL_RULES["aws-unresolved-operation"].search(norm) is not None
+            and not any(rule.search(norm) for rule in _COMMITMENT_RULES
+                        if rule.pattern != "aws-unresolved-operation"))
+
+
+def _commitment_floor(v: dict[str, Any] | None, command: str, *, via: str = ""
+                      ) -> dict[str, Any] | None:
+    """`v` when it already asks or denies; otherwise an ask for the
+    commitment purchase in `command`."""
+    if v is not None and _SEVERITY.get(str(v.get("decision")), 0) >= _SEVERITY["ask"]:
+        return v
+    opening, closing = _one_way_sentence(command, "purchase_commitment", cwd=None)
+    if not via and _unread_aws_only(command):
+        opening = opening.replace("would buy a commitment", "runs an AWS operation the guard "
+                                  "cannot read, which may buy a commitment", 1)
+    est = (v or {}).get("estimate")
+    cost = f"{_cost_line(est)}. " if est else _commitment_unpriced(command)
+    lead = f"{via}. " if via else f"{opening}. "
+    return {**(v or {}), "decision": "ask", "action_type": "purchase_commitment",
+            "door": "one_way", "rule": "commitment_floor",
+            "reason": f"nable guard: {lead}{_sentence(cost)}{_COMMITMENT_FLOOR} {closing}"}
 
 
 def _out_of_band(answer: dict[str, Any], recorded: dict[str, Any] | None, *, kind: str,
                  text: Any, cwd: str | None, harness: str, session_id: Any,
-                 tool: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
+                 tool: Any, commitment: bool = False
+                 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """(answer, recorded) for a harness that cannot ask (guard_approvals).
 
     An ask the identical call already had a person approve, once, from their
     own terminal becomes an allow, recorded with approved_out_of_band and
     who approved. Any other ask gets a pending approval: its id and the
     command a person runs join the reason, and the ledger line carries the
-    id. A deny says a one-time approval cannot lift it. Elsewhere, and on
-    any error, the verdict is left as it was: in these harnesses an ask is
-    a deny either way."""
+    id. A deny says a one-time approval cannot lift it, and so does an ask
+    about a call that buys a commitment (`commitment`, or its action type),
+    which no approval is ever taken or offered for. Elsewhere, and on any
+    error, the verdict is left as it was: in these harnesses an ask is a deny
+    either way."""
     if harness not in _MAYBE_DENY_ONLY or recorded is None or not answer.get("reason"):
         return answer, recorded
     decision = answer.get("decision")
@@ -3869,6 +4407,9 @@ def _out_of_band(answer: dict[str, Any], recorded: dict[str, Any] | None, *, kin
             return answer, recorded
         if decision == "deny":
             reason = answer["reason"].rstrip() + _POLICY_DENY_NOTE
+            return {**answer, "reason": reason}, {**recorded, "reason": reason}
+        if commitment or answer.get("action_type") == "purchase_commitment":
+            reason = answer["reason"].rstrip() + _COMMITMENT_NOT_APPROVABLE
             return {**answer, "reason": reason}, {**recorded, "reason": reason}
         if answer.get("action_type") in (*_NO_OUT_OF_BAND, *_CHANGE_TYPES):
             return answer, recorded
@@ -4006,6 +4547,26 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         worst, pack_error, pack_problem = _with_packs(
             worst, commands=tuple(dict.fromkeys(commands)), tool=tool_name, args=arguments,
             cwd=cwd if isinstance(cwd, str) else None)
+        # Nothing above lets a commitment purchase through without a person.
+        buying = next((act for act in actions if not act.unchecked and (
+            act.hit == _COMMITMENT or (act.hit is None and _buys_commitment(act.command)))),
+            None)
+        if buying is not None:
+            via = (f"{tool_name} would {buying.summary}" if buying.summary
+                   else f"{tool_name} amounts to `{buying.command}`")
+            floored = _commitment_floor(worst, buying.command, via=via)
+            if floored is not worst:
+                worst, summary = floored, buying.command
+        else:
+            for act in actions:
+                via = "" if act.unchecked else _iac_floor(
+                    act.command, cwd if isinstance(cwd, str) else None)
+                if via:
+                    buying = act
+                    floored = _commitment_floor(worst, act.command, via=f"{tool_name}: {via}")
+                    if floored is not worst:
+                        worst, summary = floored, act.command
+                    break
         if record:
             _record_pack_trouble(pack_error, pack_problem,
                                  judged=worst is not None or stop is not None, harness=harness,
@@ -4018,7 +4579,7 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                                             text=(tool_name, arguments),
                                             cwd=cwd if isinstance(cwd, str) else None,
                                             harness=harness, session_id=session_id,
-                                            tool=tool_name)
+                                            tool=tool_name, commitment=buying is not None)
             if stop is not None:
                 _record({**stop, "harness": harness, "mcp_tool": tool_name}, tool=tool_name,
                         command=summary, session_id=session_id)

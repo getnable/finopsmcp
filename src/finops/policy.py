@@ -690,5 +690,15 @@ def evaluate_action_gate(
         out["reason"] = (f"'{action_type}' is reversible, in your allowlist, and within budget; "
                          "a human can apply it within your policy.")
 
+    # ---- The commitment floor ----
+    # Money committed for a term is never the policy's to wave through: with
+    # escalate_one_way_doors off, purchase_commitment on the allowlist and any
+    # threshold, buying one still needs a human. A block stays a block.
+    if action_type == "purchase_commitment" and out["gate"] == GATE_ALLOW:
+        out["gate"] = GATE_ESCALATE
+        out["rule"] = "commitment_floor"
+        out["reason"] = ("Buying a commitment cannot be cancelled, so a human must confirm it "
+                         "before it is applied, whatever the policy allows.")
+
     # ---- Learning layer (caution-only ratchet) ----
     return _apply_learning(out, action_type, signal)
