@@ -63,6 +63,9 @@ instance metadata.
 | `nable brief --deliver` | as above, plus "delivery failed: slack" when the push did not land | the brief, with `delivered` | 1 |
 | `nable brief --latest` | the last saved brief | `{"error": "no_brief"}` when there is none | 0 |
 | `nable why` | "no AWS credentials found"; the Cost Explorer cost estimate on stderr | `{"error": {...}}` | 1 |
+| `nable commitments status` | "no AWS credentials found", the fix, the `--dry-run` pointer | the report, with `{"error": {...}}` | 6 |
+| `nable commitments status --fail-within 30` | the same, then "nothing was read, so it cannot check" | the same, with `gate` | 2 |
+| `nable commitments status --dry-run` | every call and IAM action it makes, each a Describe or Get; reads no credentials | the calls and actions | 0 |
 | `nable ai-budget` | Claude Code and Codex CLI usage on this machine, zeros when none | the budget | 0 |
 | `nable ai-costs` | nothing connected; `not_connected` lists the providers | the split | 1 |
 | `nable budget` / `budget refresh` | budgets against month-to-date spend; refresh rewrites the guard's figure | `{"ok", "budgets", ...}` | 0 |
@@ -85,6 +88,11 @@ instance metadata.
 | `nable tools`, `nable agents` | what to ask; the agent team and its setup | | 0 |
 | `nable serve`, `nable credits` | "a hosted/enterprise feature" on stderr, nothing on stdout | | 1 |
 | `nable` with no arguments | the MCP server on stdio (stdin is not a terminal); exits when stdin closes | | 0 |
+
+The `commitments status` rows are from the next release (CHANGELOG,
+Unreleased), run the same way on its branch. With credentials it reads only
+free Describe calls; `--spend` adds Cost Explorer and prints what that can
+cost on stderr before the first request.
 
 `nable guard hook` is not for scripts: it is the agents' hook protocol, reads
 one payload on stdin, answers on stdout and always exits 0, so a hook that
@@ -119,6 +127,7 @@ code), and 0 means it did its job. The rest, per command:
 | `scan` | 1 unexpected error, a bad `--regions` value, or no network; 3 credentials expired; 4 permission denied everywhere; 5 partial with nothing usable; 6 no credentials, or AWS rejected them; 7 the local AWS config does not resolve (profile, region); 130 Ctrl-C. A partial scan that still found something is 0 |
 | `brief` | 1 an error, or `--deliver` and a channel did not take it (or none was named); 3 credentials expired; 6 nothing could be read. An empty brief is 0 |
 | `why`, `ai-costs` | 1 nothing could be read |
+| `commitments status` | 3 credentials expired; 4 every commitment read was denied (permission denied everywhere); 5 some reads failed, each listed as not read and never as zero; 6 no credentials, or AWS rejected them. With `--fail-within DAYS` the code is the gate's: 1 a commitment that was read ends within DAYS (this wins); 2 a commitment read failed, so it cannot check (no credentials included); otherwise 0. A `--regions` value that is not a region code is 2 |
 | `ai-budget` | 2 a negative cap |
 | `budget`, `budget refresh` | 1 the budgets could not be checked |
 | `budget ci-gate` | without `--fail-on-breach`: 0 always (it reports). With it: 1 a budget is breached (spend at or past its critical percentage); 2 cannot check (the budget file is missing or invalid, a budget has no cost data for its period, or one could not be read). A breach wins over cannot-check |

@@ -3832,7 +3832,8 @@ def main(args: list[str] | None = None) -> None:
         _GROUPS = [
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
-            ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs", "budget"]),
+            ("get answers", ["scan", "brief", "why", "commitments", "ai-budget", "ai-costs",
+                             "budget"]),
             ("start here", ["welcome", "connect", "org", "learn", "setup", "doctor", "tools",
                             "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
@@ -3950,6 +3951,8 @@ def main(args: list[str] | None = None) -> None:
     _add_ai_costs_parser(sub)
     from .cli_why import add_parser as _add_why_parser
     _add_why_parser(sub)
+    from .cli_commitments import add_parser as _add_commitments_parser
+    _add_commitments_parser(sub)
     from .budget.cli import add_parser as _add_budget_parser
     _add_budget_parser(sub)
     from .org.cli import add_parser as _add_org_parser
@@ -4479,6 +4482,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "why":
         from .cli_why import run as _why_run
         raise SystemExit(_why_run(parsed))
+    elif parsed.cmd == "commitments":
+        from .cli_commitments import main as _commitments_main
+        raise SystemExit(_commitments_main(parsed))
     elif parsed.cmd == "budget":
         from .budget.cli import run as _budget_run
         raise SystemExit(_budget_run(parsed))

@@ -2,6 +2,80 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+The free on-ramp to commitments: see what this account has committed to and
+when it ends, have the guard ask before an agent buys one, and price RDS in
+sixteen regions, Multi-AZ included, from cited Price List rows. No version
+bump.
+
+- **`nable commitments status`.** Every RDS, EC2 and ElastiCache reservation
+  in each region (found the way `nable scan` finds them, or `--regions`) and
+  every Savings Plan, every page, with class or type, count, engine or
+  product, offering type, term, start, end, days left, state, and the fixed
+  and recurring charges as AWS reports them. RDS and ElastiCache report no
+  end date; theirs is the start plus the term, and says so.
+  - Free reads only by default. A read that failed is listed as not read,
+    per service and region, with its reason (denied, throttled, expired and
+    so on), never as a zero or "none found".
+  - "Matched now" compares each active reservation with what is running this
+    minute (free describes of DB instances, EC2 instances and cache
+    clusters, only where an active reservation is). Reservations of one kind
+    share what runs, size flexibility is not counted, and it is never called
+    billed utilization. Savings Plans say billed utilization needs Cost
+    Explorer and that an account sees only its own plans.
+  - `--spend` reads billed utilization from Cost Explorer
+    (GetReservationUtilization by subscription,
+    GetSavingsPlansUtilizationDetails), at most five pages a query, and
+    prints what it can cost on stderr before the first request ($0.01 each).
+  - `--dry-run` lists every call and IAM action without reading credentials.
+    `--json` is one document on stdout, a failure included.
+  - Exit codes: 0 every read succeeded, 5 some failed, 4 every commitment
+    read was denied, 3 credentials expired, 6 no credentials. With
+    `--fail-within DAYS`: 1 a commitment that was read ends within DAYS
+    (this wins), 2 a commitment read failed (cannot check), else 0.
+  - The IAM templates gain an OptionalCommitments statement
+    (`IncludeCommitments`): rds:DescribeReservedDBInstances,
+    ec2:DescribeReservedInstances, elasticache:DescribeReservedCacheNodes and
+    savingsplans:DescribeSavingsPlans, Describe only.
+    cloudformation/readonly-key.json is regenerated; the published copy is
+    updated when it is next published.
+- **The guard asks before any commitment purchase.**
+  - New: ElastiCache, MemoryDB, Redshift, OpenSearch and Elasticsearch
+    reserved nodes and instances, EC2 Scheduled Instances, Capacity Blocks
+    and their extensions, and Reserved Instance exchanges, each pinned to an
+    operation in botocore's service model, through `nable guard check`, the
+    hook, and the MCP call_aws and use_aws paths. A boto3 one-liner that buys
+    one asks too (a heuristic, like the one for deletes).
+  - Never weaker than an ask: no policy (escalate_one_way_doors off, a high
+    max_auto_monthly_usd, purchase_commitment on the allowed-actions list),
+    pack, learned threshold or one-time approval turns a commitment purchase
+    into an allow, in the policy gate and in the guard's final verdict. A
+    pack's deny still denies. In Codex CLI, Gemini CLI and Cline the deny
+    says it is never approved out of band, and no approval id is offered.
+  - A figure only where the command carries one (a Savings Plan's
+    `--commitment`, an EC2 `--limit-price`). Otherwise the ask says the
+    offering id fixes the price, which the guard cannot look up offline,
+    shows no figure, and names the count the command buys where it gives one
+    (`--db-instance-count`, `--cache-node-count`, `--node-count`,
+    `--instance-count`).
+  - `rds:Purchase`, `ec2:Purchase` and `savingsplans:Create` are dangerous
+    prefixes for a read-only key, and `nable setup aws --check-scope` asks the
+    IAM simulator about one purchase action for each.
+- **Regional and Multi-AZ RDS rates, each a cited Price List row.**
+  `aws_prices.rds_rate(instance_class, engine, region, multi_az=False)`
+  returns an `RdsRate` (the listed USD string, region, engine, deployment,
+  SKU, source and date) or None. It reads
+  `src/finops/price_data/rds_on_demand.json`, which
+  `scripts/build_rds_price_tables.py` builds by hand from the public AmazonRDS
+  offers (version 20261006224050, read 2026-10-17): 16 regions, MySQL,
+  PostgreSQL and MariaDB, Single-AZ and Multi-AZ, No license required,
+  current generation, 17,970 rows. Multi-AZ is the offer's own row, never a
+  doubled Single-AZ hour (PostgreSQL db.r5d.xlarge in us-east-1 is $0.571
+  and $1.143). Aurora, Oracle, SQL Server and anything not listed get None.
+  Every us-east-1 Single-AZ row of `RDS_HOURLY` and `RDS_HOURLY_POSTGRES`
+  agrees with it; `rds_hourly` and those tables are unchanged.
+
 ## 0.12.0
 
 An audit of every dollar figure nable prints, every command run with no

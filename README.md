@@ -64,6 +64,8 @@ run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)
 
 Uses the AWS credentials already on your machine and reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan --demo` runs on sample data with no account at all. Add `--json` for CI, or `--spend` for a deeper breakdown.
 
+`uvx nable commitments status` lists every reservation and Savings Plan the account holds and when each ends, from free reads; `--fail-within 30` makes it a CI check (exit 1 when one ends within 30 days).
+
 From there nable:
 
 - **Shows what you spend** across AWS, Azure, GCP, Kubernetes, and 15 AI, data and SaaS providers, in one place.
