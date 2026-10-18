@@ -3390,6 +3390,29 @@ def _refresh_budget_summary(doc: dict[str, Any] | None, state: str) -> bool:
     return background_refresh.maybe_start(background_refresh.BUDGET) is not None
 
 
+def _lens_parts(est: dict[str, Any]) -> tuple[float, float, list[tuple[float, float]]]:
+    """(monthly run-rate, orders paid once, [(hourly, hours)] per commitment
+    term) in an estimate, part by part, so each is projected as what it is.
+    A term without its hourly rate and hours counts as its whole total, which
+    can only over-ask, never under-ask."""
+    parts = est.get("parts") or [est]
+    monthly = sum(float(p["monthly_usd"]) for p in parts
+                  if isinstance(p.get("monthly_usd"), (int, float)) and p["monthly_usd"] > 0)
+    one_off = 0.0
+    terms: list[tuple[float, float]] = []
+    for p in parts:
+        total = p.get("total_usd")
+        if p.get("monthly_usd") is not None or not isinstance(total, (int, float)) or total <= 0:
+            continue
+        hourly, count, held = p.get("hourly_usd"), p.get("count"), p.get("commitment_hours")
+        if (p.get("total_kind") == "term" and isinstance(hourly, (int, float))
+                and isinstance(count, int) and isinstance(held, (int, float)) and held > 0):
+            terms.append((float(hourly) * count, float(held)))
+        else:
+            one_off += float(total)
+    return monthly, one_off, terms
+
+
 def budget_lens(command: str, est: dict[str, Any] | None, *,
                 now: Any = None, team: str | None = None) -> dict[str, Any] | None:
     """The change against the budget figures on this machine, or None when the
@@ -3410,10 +3433,8 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
     """
     if not est:
         return None
-    monthly = est.get("monthly_usd")
-    one_off = est.get("total_usd") if monthly is None else None
-    if not ((isinstance(monthly, (int, float)) and monthly > 0)
-            or (isinstance(one_off, (int, float)) and one_off > 0)):
+    monthly, one_off, terms = _lens_parts(est)
+    if not (monthly or one_off or terms):
         return None
     from datetime import date, datetime
 
@@ -3441,12 +3462,13 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
         checked.append(str(b.get("name")))
         end = date.fromisoformat(str(b["period_end"]))
         days_left = (end - today).days + 1
-        if monthly is not None:
-            # The change's run-rate for what is left of the period, today
-            # included: it bills from the moment it exists.
-            rest = float(monthly) * days_left * 24 / _hours_per_month()
-        else:
-            rest = float(one_off)
+        # What lands in this period, today included: a run-rate for the
+        # hours left, a term's hourly billing for the hours it bills before
+        # the period ends (never its whole term), and an order paid once.
+        hours_left = days_left * 24
+        rest = (float(monthly or 0.0) * hours_left / _hours_per_month()
+                + sum(hourly * min(hours_left, held) for hourly, held in terms)
+                + float(one_off or 0.0))
         spent, limit = float(b["spent"]), float(b["limit"])
         projected = spent + rest
         if projected > limit:
@@ -3456,8 +3478,11 @@ def budget_lens(command: str, est: dict[str, Any] | None, *,
                 "period": b.get("period") or "monthly",
                 "spent_mtd": round(spent, 2),
                 "limit": round(limit, 2),
-                "change_monthly_usd": round(float(monthly), 2) if monthly is not None else None,
-                "change_one_off_usd": round(float(one_off), 2) if one_off is not None else None,
+                "change_monthly_usd": round(float(monthly), 2) if monthly else None,
+                "change_one_off_usd": round(float(one_off), 2) if one_off else None,
+                "change_term_hourly_usd": (round(sum(h for h, _ in terms), 4)
+                                           if terms else None),
+                "change_term_hours": [round(held, 2) for _, held in terms] or None,
                 "days_left": days_left,
                 "rest_of_period_usd": round(rest, 2),
                 "projected_usd": round(projected, 2),
@@ -3616,13 +3641,25 @@ def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str, undo: str = ""
     """The over-budget sentence: the budget, spend so far, the change's figure,
     the projected overage, and how fresh the spend is."""
     so_far = "this week" if lens.get("period") == "weekly" else "month to date"
-    if lens.get("change_monthly_usd") is not None:
-        days = lens["days_left"]
-        change = (f"this change at ~{_usd(lens['change_monthly_usd'])}/mo adds "
-                  f"~{_usd(lens['rest_of_period_usd'])} over the {days} "
-                  f"day{'s' if days != 1 else ''} left")
+    monthly, hourly = lens.get("change_monthly_usd"), lens.get("change_term_hourly_usd")
+    one_off = lens.get("change_one_off_usd")
+    if monthly is None and hourly is None:
+        change = f"this change adds a one-off ~{_usd(one_off)}"
     else:
-        change = f"this change adds a one-off ~{_usd(lens['change_one_off_usd'])}"
+        days = lens["days_left"]
+        held = lens.get("change_term_hours") or []
+        term = (f"~${hourly:,.2f}/hr over "
+                + (f"its {held[0]:,.0f}-hour commitment" if len(held) == 1
+                   else f"{len(held)} commitment terms")) if hourly is not None else ""
+        if monthly is None:
+            how = f"bills {term} and adds"
+        elif hourly is None:
+            how = f"at ~{_usd(monthly)}/mo adds"
+        else:
+            how = f"at ~{_usd(monthly)}/mo, plus {term}, adds"
+        change = (f"this change {how} ~{_usd(lens['rest_of_period_usd'])} over the {days} "
+                  f"day{'s' if days != 1 else ''} left"
+                  + (f", a one-off ~{_usd(one_off)} included" if one_off is not None else ""))
     others = lens.get("others_over") or []
     more = (f" It is over {len(others)} other budget{'s' if len(others) != 1 else ''} "
             f"too ({', '.join(others)})." if others else "")

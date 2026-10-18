@@ -179,6 +179,10 @@ regions, Multi-AZ included, from cited Price List rows.
     may be in the file: the floor holds, and the ask says the guard did not
     read it. Added up with other changes in one command, its total is said
     as billed hourly over its commitment term, never as a one-off order.
+    Against a budget it counts only the hours it bills before the period
+    ends (count x hourly x the hours left, capped at the term), and the
+    over-budget sentence says it bills by the hour over its commitment. A
+    command that mixes a launch with a term counts both.
   - Without one it is priced the way `run-instances` is: count x hourly x
     730 a month, judged on the launch threshold; with `--end-date-type
     limited` and an end under a month away, for the hours until then. The
