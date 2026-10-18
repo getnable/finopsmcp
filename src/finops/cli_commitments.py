@@ -34,6 +34,12 @@ region code.
 With --json, stdout is one document whatever happens, a failure included;
 progress goes to stderr. Nothing reads stdin, and there are no escape codes
 unless stdout is a terminal.
+
+Under the telemetry consent that already exists, and only then, a run that
+read or tried to sends one commitments_status_run count (finops.telemetry):
+its exit class, how many commitments were read, how many of those end within
+90 days, how many services were not read, and whether --json was on. A
+--dry-run or a usage error sends nothing. No id, ARN, charge or region leaves.
 """
 from __future__ import annotations
 
@@ -69,9 +75,43 @@ EXIT_CODES = {
     EXIT_NO_CREDS: "no credentials, or AWS rejected them",
 }
 
+# The commitment services each run reads: the reservations in each region,
+# and the Savings Plans once.
+SERVICES_READ = len(cs.COMMITMENT_READS) + 1
+# What the usage count calls ending soon.
+_ENDING_DAYS = 90
+
 _REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
 _GRANT = ("`nable iam-template` grants them in its OptionalCommitments statement "
           "(parameter IncludeCommitments), Describe only")
+
+
+def exit_class(code: int) -> int:
+    """The usage count's three classes: 0 every read succeeded (and, with
+    --fail-within, nothing ends inside), 1 a commitment read ends within
+    DAYS, 2 something could not be read or checked (exits 2 to 6)."""
+    return 0 if code == EXIT_OK else 1 if code == EXIT_ENDING else 2
+
+
+def _count_run(code: int, commitments: list[dict], missed: list[cs.NotRead] | None, *,
+               as_json: bool) -> None:
+    """The commitments_status_run usage count, sent only under the telemetry
+    consent that already exists (telemetry.send_usage decides, and drops
+    anything off its allow-list). Counts only: what was read never leaves.
+    `missed` None means nothing was read, so every service is not read."""
+    try:
+        from . import telemetry
+        ending = sum(1 for c in commitments if cs.is_live(c)
+                     and isinstance(c.get("days_left"), int)
+                     and 0 <= c["days_left"] <= _ENDING_DAYS)
+        not_read = (SERVICES_READ if missed is None else
+                    len({n.service for n in missed if n.what == "commitments"}))
+        telemetry.send_usage("commitments_status_run", {
+            "exit_class": exit_class(code), "commitments_read": len(commitments),
+            "ending_within_90_days": ending, "services_not_read": not_read,
+            "json": as_json})
+    except Exception:  # noqa: BLE001, S110 - a count is never worth a failed command
+        pass
 
 
 def _days(raw: str) -> int:
@@ -409,7 +449,9 @@ def run(args: argparse.Namespace, *, session: Any = None, now: datetime | None =
     report = _report(now, days)
 
     def fail(klass: str, code: int, lines: list[str]) -> int:
-        return _fail(report, klass, code, lines, out=out, err=err, as_json=as_json, days=days)
+        code = _fail(report, klass, code, lines, out=out, err=err, as_json=as_json, days=days)
+        _count_run(code, [], None, as_json=as_json)
+        return code
 
     no_creds = [
         "no AWS credentials found on this machine",
@@ -472,6 +514,7 @@ def run(args: argparse.Namespace, *, session: Any = None, now: datetime | None =
         print(json.dumps(report, indent=2, default=str), file=out)
     else:
         _render(report, out, code)
+    _count_run(code, commitments, missed, as_json=as_json)
     return code
 
 

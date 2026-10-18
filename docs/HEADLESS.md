@@ -88,6 +88,9 @@ instance metadata.
 | `nable upgrade [VERSION]` | see [Exit codes](#exit-codes) | | 0, 1 |
 | `nable uninstall --yes [--purge] [--dry-run]` | removes nable's editor entries and hooks; `--dry-run` changes nothing | | 0 |
 | `nable tools`, `nable agents` | what to ask; the agent team and its setup | | 0 |
+| `nable cloud connect --box https://HOST` | a dry run: the destination host, the org model files and guard ledger records it would send, their size and sha256; saves those exact bytes beside the ledger; opens no connection | the same, as one document | 0, 3 |
+| `nable cloud connect --box https://HOST --send --confirm SHA256` | with `NABLE_WORKSPACE_KEY` set, sends what the workspace does not hold yet; without a key, "no workspace key" | `{"sent": true, ...}` | 0, 1, 2 |
+| `nable cloud status --box https://HOST` | what the workspace holds from the free tool; without a key, "no workspace key" | the box's answer | 0, 1, 2 |
 | `nable serve`, `nable credits` | "a hosted/enterprise feature" on stderr, nothing on stdout | | 1 |
 | `nable` with no arguments | the MCP server on stdio (stdin is not a terminal); exits when stdin closes | | 0 |
 
@@ -98,6 +101,11 @@ Explorer and prints what that can cost on stderr before the first request. A
 service botocore lists no endpoint for in a region is not called there: it is
 listed under `not_offered` in the report, is not a failed read, and leaves the
 exit code as it was.
+
+The `cloud` rows are from 0.13.0. A send needs the sha256 its own dry run
+printed, and refuses once the bytes have changed (the guard appends a record
+with each call it judges, so confirm soon after the dry run). The key is never
+an argument: `--key` is refused without being echoed.
 
 `nable guard hook` is not for scripts: it is the agents' hook protocol, reads
 one payload on stdin, answers on stdout and always exits 0, so a hook that
@@ -150,6 +158,7 @@ code), and 0 means it did its job. The rest, per command:
 | `license-status` | 1 the key is invalid or expired |
 | `license`, `login` | 1 nothing was activated |
 | `serve`, `credits` | 1 the feature is not in this package (`EXIT_NOT_IN_THIS_PACKAGE`); the reason on stderr, stdout empty |
+| `cloud connect`, `cloud status` | 1 refused or not reached: the payload changed since the dry run, the box said no or could not be reached, or `FINOPS_AIRGAP` is set; 2 a box that is not `https://host`, `--send` without `--confirm`, no workspace key, a key file that is not 0600, or a key on the command line; 3 nothing to send |
 
 `nable upgrade` moves every pin nable wrote: the CLI in this environment, the
 `finops-mcp==X` argument in Claude Desktop's, Cursor's and Claude Code's MCP
@@ -326,6 +335,7 @@ name exported (`nable doctor` says when).
 | `FINOPS_ACCOUNT_BASE` | The account service `nable login` uses (default https://getnable.com). |
 | `FINOPS_LICENSE_PRIVATE_KEY` | Issuer side: signs license keys. Not needed to use nable. |
 | `FINOPS_LICENSE_SECRET` | The HMAC secret of the retired FINOPS-1- keys. Not needed for FINOPS-2- keys. |
+| `NABLE_WORKSPACE_KEY` | The paid workspace's analyst key `nable cloud connect --send` and `nable cloud status` use (made on its /workspace page). Read only by those two, sent only in the Authorization header over HTTPS, and never stored. |
 
 #### Demo, hosted and test hooks
 
@@ -362,6 +372,8 @@ It turns off (each one checked headless or by a test):
 - `nable upgrade` with no version: it does not ask PyPI and exits 1. `nable
   upgrade 0.12.0` works, through the package index pip and uv are configured
   for (`PIP_INDEX_URL`, `UV_INDEX_URL`);
+- `nable cloud connect --send` and `nable cloud status`: refused, exit 1. The
+  dry run still shows and saves what a send would carry;
 - with `FINOPS_GOVCLOUD`, it also requires FIPS-validated OpenSSL.
 
 It does not stop the calls you ask for to your providers. AWS Cost Explorer is

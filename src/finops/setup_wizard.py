@@ -3779,6 +3779,15 @@ def main(args: list[str] | None = None) -> None:
             arm_consent_prompt()
         except Exception:
             pass
+        # The daily count of the guard's commitment asks starts here (and at
+        # the MCP server's start), on a background thread and only under
+        # consent. Never on the hook's path: the hook loads no telemetry.
+        if args[:2] != ["guard", "hook"]:
+            try:
+                from .telemetry import start_usage_counts
+                start_usage_counts()
+            except Exception:  # noqa: BLE001, S110 - a count never stops a command
+                pass
 
     # `guard` output belongs to the guard: no first-run welcome, no PATH
     # warning. The hook variant is parsed as JSON by the agent harness, and
@@ -3825,7 +3834,10 @@ def main(args: list[str] | None = None) -> None:
 
         # Internal commands, registered and runnable but left out of --help:
         # `pricing` is the founder's margin table, not something a user needs.
-        _HIDDEN = frozenset({"pricing"})
+        # `cloud` (nable cloud connect, status) joins "account & billing" when
+        # CAPABILITIES.md's CLI section lists it too: the count test holds
+        # the two together. Until then README.md and HEADLESS.md name it.
+        _HIDDEN = frozenset({"pricing", "cloud"})
 
         # Ordered groups. A command registered but not listed here auto-renders
         # under "other", so new subcommands can never silently vanish from help.
@@ -3963,6 +3975,8 @@ def main(args: list[str] | None = None) -> None:
     _add_pricing_parser(sub)
     from .packs.cli import add_parser as _add_pack_parser
     _add_pack_parser(sub)
+    from .cli_cloud import add_parser as _add_cloud_parser
+    _add_cloud_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -4164,6 +4178,12 @@ def main(args: list[str] | None = None) -> None:
     profile_p.add_argument("profile_name", nargs="?", default="")
 
     parsed, _extras = parser.parse_known_args(args)
+    if _extras and parsed.cmd == "cloud":
+        # `nable cloud` is the one command handed a workspace key, and a key
+        # typed under a flag it does not have would be printed straight back
+        # below. It names none of them.
+        from .cli_cloud import refuse_extras
+        raise SystemExit(refuse_extras(_extras, as_json=bool(getattr(parsed, "json", False))))
     if _extras:
         # A bad flag on a subcommand (`nable scan --jsn`) used to print the
         # top-level usage, which lists commands, not the flag that was wrong.
@@ -4208,7 +4228,10 @@ def main(args: list[str] | None = None) -> None:
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard", "why", "budget", "org", "learn", "pricing", "pack"):
+    # `cloud` sends to a workspace when asked to, so it never opens with a
+    # line that says everything stays here.
+    if parsed.cmd not in ("scan", "guard", "why", "budget", "org", "learn", "pricing", "pack",
+                          "cloud"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -4507,6 +4530,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "pack":
         from .packs.cli import run as _pack_run
         raise SystemExit(_pack_run(parsed))
+    elif parsed.cmd == "cloud":
+        from .cli_cloud import main as _cloud_main
+        raise SystemExit(_cloud_main(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))

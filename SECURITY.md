@@ -31,10 +31,36 @@ only:
   are connected, how many distinct tools were used and a hash of their names;
 - runtime facts: nable version, Python major.minor, OS family, install method
   (uvx, pipx, venv, docker, system), environment kind, whether a terminal is
-  attached, whether it runs in a container, and the age of the install id.
+  attached, whether it runs in a container, and the age of the install id;
+- two usage counts, under the same consent and with no new prompt.
+  `commitments_status_run`, once per `nable commitments status` that read or
+  tried to: its exit class (0, 1 or 2), how many commitments were read, how
+  many of those end within 90 days, how many services were not read, and
+  whether `--json` was on. `guard_commitment_asks`: how many guard ledger
+  records asked before buying a commitment (decision ask, action type
+  purchase_commitment) since the last count sent, and how many days that
+  count covers. It is counted from the local ledger at most once a day, from
+  a CLI or MCP start, and never from inside the guard hook, which loads no
+  telemetry; without consent the ledger is not read for it. Each event is a
+  closed list of integers, yes/no flags and fixed values, so no account id,
+  ARN, dollar figure, command, path or resource name can travel in one.
 
 It never carries cost figures, account IDs, resource names, file paths,
 hostnames, usernames, credentials or your query text.
+
+**Cloud connect, only when you send it.** `nable cloud connect` carries the
+org model files in your org dir and the guard ledger's lines, exactly as
+stored, to a paid workspace you name with `--box https://HOST`. Without
+`--send` it is a dry run that opens no connection: it prints the destination
+host, the files, the record counts, the size and the sha256, and saves the
+exact bytes (0600) for you to read. `--send --confirm SHA256` sends those bytes
+and nothing else, and refuses when they changed since you looked. It POSTs to
+`https://HOST/api/free-tool/connect` and reads `/api/free-tool/status`, over
+HTTPS only, follows no redirect, and is refused under `FINOPS_AIRGAP=1`. The
+workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
+0600, or a hidden prompt; it is never an argument, and it is never stored,
+printed or logged. No host is built in, and nothing about the machine (its
+name, your user name, a path) is in the payload.
 
 **Version check.** To tell you when your build is out of date, nable makes one
 GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run

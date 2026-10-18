@@ -553,3 +553,43 @@ def test_a_harmless_read_is_still_not_gated():
                     "terraform -chdir=infra plan",
                     "kubectl --context prod get pods"):
         assert classify_command(command) is None, f"{command!r} should not be gated"
+
+
+# ── 5. what leaves for a paid workspace leaves only from the terminal ────────
+
+def test_no_mcp_tool_can_send_to_a_workspace():
+    """PASSES TODAY, and guards D58: `nable cloud connect` is the one way the
+    org model and the guard ledger leave the machine, and only a person at
+    the CLI with the sha256 they were shown can send. No MCP tool imports it,
+    so an agent cannot carry them out, with or without a key."""
+    def naming(word):
+        return sorted(p.relative_to(_SRC).as_posix() for p in _SRC.rglob("*.py")
+                      if p.name not in ("cloud_connect.py", "cli_cloud.py")
+                      and word in p.read_text(encoding="utf-8"))
+    assert naming("cloud_connect") == [], "something but the cloud CLI reaches the sender"
+    assert naming("cli_cloud") == ["setup_wizard.py"], "the cloud CLI is reached elsewhere"
+    tools = _registered_tools()
+    for name in tools:
+        assert "cloud_connect" not in name and "free_tool" not in name, name
+
+
+def test_the_cloud_cli_takes_no_secret_as_an_argument():
+    """PASSES TODAY. The workspace key comes from NABLE_WORKSPACE_KEY, a 0600
+    key file or a hidden prompt. The only options named like a key are traps
+    that refuse without echoing (tests/test_cli_cloud.py)."""
+    import argparse
+
+    from finops import cli_cloud
+    p = argparse.ArgumentParser()
+    cli_cloud.add_parser(p.add_subparsers(dest="cmd"))
+    sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
+    cloud = sub.choices["cloud"]
+    acts = next(a for a in cloud._actions if isinstance(a, argparse._SubParsersAction))
+    for action_name, parser in acts.choices.items():
+        for a in parser._actions:
+            secretish = [o for o in a.option_strings
+                         if o.lstrip("-").replace("-", "_") in _SECRET_PARAM_NAMES
+                         or o.lstrip("-").replace("-", "_").endswith(_SECRET_PARAM_SUFFIXES)]
+            if secretish:
+                assert a.dest == "argv_key" and a.help == argparse.SUPPRESS, (action_name,
+                                                                              secretish)

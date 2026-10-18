@@ -57,7 +57,7 @@ KNOWN: frozenset[str] = frozenset({
     'NABLE_K8S_IDLE_THRESHOLD', 'NABLE_K8S_TEAM_LABEL', 'NABLE_NO_CLOUDWATCH_BILLING',
     'NABLE_NO_COST_EXPLORER', 'NABLE_NO_TELEMETRY', 'NABLE_NO_UPDATE_CHECK',
     'NABLE_OPENCOST_URL', 'NABLE_PACK_KEY_PASSPHRASE', 'NABLE_PACK_REGISTRY',
-    'NABLE_POSTHOG_KEY', 'NABLE_TELEMETRY',
+    'NABLE_POSTHOG_KEY', 'NABLE_TELEMETRY', 'NABLE_WORKSPACE_KEY',
 })
 
 # Names in this repo's docker-compose files and deploy/Slack docs that this
@@ -311,6 +311,10 @@ DOC: dict[str, tuple[str, str]] = {
                                    "use nable.")),
     "FINOPS_LICENSE_SECRET": ("account", ("The HMAC secret of the retired FINOPS-1- keys. "
                               "Not needed for FINOPS-2- keys.")),
+    "NABLE_WORKSPACE_KEY": ("account", ("The paid workspace's analyst key `nable cloud "
+                            "connect --send` and `nable cloud status` use (made on its "
+                            "/workspace page). Read only by those two, sent only in the "
+                            "Authorization header over HTTPS, and never stored.")),
     # ── demo ──
     "FINOPS_DEMO": ("demo", ("1: answer from the StreamCo sample until a real provider is "
                     "connected.")),
