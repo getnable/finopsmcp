@@ -41,7 +41,7 @@ NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 BOX = "https://box.example.com"
 KEY = "nbl_test_workspace_key_0123456789abcdef"  # pragma: allowlist secret
 PROMPT = "PLEASE-REFACTOR-THE-SECRET-BILLING-MODULE"
-CONTENTS = "FILE-CONTENTS-MARKER-api_key=hunter2"
+CONTENTS = "FILE-CONTENTS-MARKER-api_key=hunter2"  # pragma: allowlist secret
 HOST = "alice-laptop.corp.example"
 RECORD_KEYS = ["agent", "basis", "day", "developer", "kind", "model", "price_source",
                "project", "source", "tokens", "unpriced_tokens", "usd", "v"]
