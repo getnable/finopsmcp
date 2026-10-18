@@ -101,6 +101,19 @@ _OPTIONAL_GROUPS: list[tuple[str, str, str, list[str]]] = [
       "read in place of Cost Explorer. Reading the report itself is a separate "
       "grant, scoped to its bucket."),
      ["cur:DescribeReportDefinitions"]),
+    # Reading the commitments an account holds. Describe only: buying one
+    # (rds:Purchase*, ec2:Purchase*, savingsplans:Create*) is in
+    # _DANGEROUS_ACTIONS_PREFIXES below, and nothing here can.
+    ("OptionalCommitments", "IncludeCommitments",
+     ("Free reads. Unlocks `nable commitments status`: the RDS, EC2 and ElastiCache "
+      "reservations and the Savings Plans this account holds, with their end dates. "
+      "Describe only; nothing here can buy a commitment."),
+     [
+         "rds:DescribeReservedDBInstances",
+         "ec2:DescribeReservedInstances",
+         "elasticache:DescribeReservedCacheNodes",
+         "savingsplans:DescribeSavingsPlans",
+     ]),
     ("OptionalOrganizations", "IncludeOrganizations",
      ("Free. Unlocks the org rollup: listing member accounts and organizational "
       "units from the management account."),
@@ -173,6 +186,15 @@ _DANGEROUS_ACTIONS_PREFIXES = [
     "lambda:Create", "lambda:Delete", "lambda:Update", "lambda:Invoke",
     "logs:Put", "logs:Create", "logs:Delete",  # logs writes (e.g. PutRetentionPolicy)
     "sts:Assume",  # AssumeRole et al — escalation primitive, not a read
+    # Buying a commitment: money for one or three years. A read-only key
+    # that can do this is not read-only.
+    "rds:Purchase", "ec2:Purchase", "savingsplans:Create",
+]
+# One action per commitment prefix above, asked of the IAM simulator.
+_COMMITMENT_PURCHASE_PROBES = [
+    "rds:PurchaseReservedDBInstancesOffering",
+    "ec2:PurchaseReservedInstancesOffering",
+    "savingsplans:CreateSavingsPlan",
 ]
 
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
@@ -619,6 +641,7 @@ def check_credential_scope() -> dict[str, Any]:
             "s3:PutObject",
             "iam:CreateUser",
             "lambda:InvokeFunction",
+            *_COMMITMENT_PURCHASE_PROBES,
         ]
         resp = iam.simulate_principal_policy(
             PolicySourceArn=identity_arn,

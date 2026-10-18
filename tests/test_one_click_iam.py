@@ -118,3 +118,72 @@ def test_connect_key_is_strictly_read_only_no_writes():
         verb = a.split(":", 1)[1]
         assert verb.startswith(("Get", "Describe", "List")) or a == "sts:GetCallerIdentity", \
             f"{a} is not a read-only action"
+
+
+# ── commitments: readable, never buyable ─────────────────────────────────────
+
+_PURCHASE_PREFIXES = ("rds:Purchase", "ec2:Purchase", "savingsplans:Create")
+_PURCHASE_ACTIONS = ("rds:PurchaseReservedDBInstancesOffering",
+                     "ec2:PurchaseReservedInstancesOffering", "savingsplans:CreateSavingsPlan")
+
+
+def test_buying_a_commitment_is_a_dangerous_prefix():
+    """The enterprise derives one read-only probe for each prefix from this
+    list, so it passes against this release and the one before."""
+    assert set(_PURCHASE_PREFIXES) <= set(I._DANGEROUS_ACTIONS_PREFIXES)
+    for action in _PURCHASE_ACTIONS:
+        assert any(action.startswith(p) for p in I._DANGEROUS_ACTIONS_PREFIXES), action
+    for a in I._REQUIRED_ACTIONS:
+        assert not any(a.startswith(p) for p in _PURCHASE_PREFIXES), a
+
+
+def test_the_commitments_statement_only_describes():
+    [group] = [g for g in I._OPTIONAL_GROUPS if g[0] == "OptionalCommitments"]
+    _sid, param, what, actions = group
+    assert sorted(actions) == ["ec2:DescribeReservedInstances",
+                               "elasticache:DescribeReservedCacheNodes",
+                               "rds:DescribeReservedDBInstances",
+                               "savingsplans:DescribeSavingsPlans"]
+    assert all(a.split(":", 1)[1].startswith("Describe") for a in actions)
+    assert param == "IncludeCommitments"
+    assert "Unlocks" in what and "nable commitments status" in what
+    assert set(actions) <= set(I._REQUIRED_ACTIONS)
+
+
+def _stubbed(service: str):
+    import boto3
+    return boto3.client(service, region_name="us-east-1", aws_access_key_id="testing",
+                        aws_secret_access_key="testing")  # pragma: allowlist secret
+
+
+def test_check_credential_scope_names_commitment_purchases_it_could_make(monkeypatch):
+    import boto3
+    from botocore.stub import ANY, Stubber
+
+    sts, iam = _stubbed("sts"), _stubbed("iam")
+    sent: dict = {}
+    iam.meta.events.register("provide-client-params.iam.SimulatePrincipalPolicy",
+                             lambda params, **_: sent.update(params))
+    arn = "arn:aws:iam::123456789012:user/ci"
+    allowed = set(I._REQUIRED_ACTIONS) | set(_PURCHASE_ACTIONS)
+
+    def answer(params):
+        return {"EvaluationResults": [
+            {"EvalActionName": a, "EvalDecision": "allowed" if a in allowed else "implicitDeny"}
+            for a in params]}
+
+    monkeypatch.setattr(boto3, "client", lambda name, *a, **k: {"sts": sts, "iam": iam}[name])
+    with Stubber(sts) as s_sts, Stubber(iam) as s_iam:
+        s_sts.add_response("get_caller_identity",
+                           {"Account": "123456789012", "Arn": arn, "UserId": "AIDA0"})
+        # The reply allows the scan's reads and the three purchases; the
+        # hook above records which actions were asked about.
+        names = list(I._REQUIRED_ACTIONS) + ["ec2:TerminateInstances", "s3:PutObject",
+                                             "iam:CreateUser", "lambda:InvokeFunction",
+                                             *_PURCHASE_ACTIONS]
+        s_iam.add_response("simulate_principal_policy", answer(names),
+                           {"PolicySourceArn": arn, "ActionNames": ANY, "ResourceArns": ["*"]})
+        out = I.check_credential_scope()
+    assert set(_PURCHASE_ACTIONS) <= set(sent["ActionNames"])
+    assert sorted(out["dangerous_allowed"]) == sorted(_PURCHASE_ACTIONS)
+    assert out["scoped_correctly"] is False
