@@ -320,3 +320,26 @@ def test_the_headless_dry_run_prints_no_local_only_banner(machine, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "credentials stay on your machine" not in r.stdout + r.stderr
     assert "Nothing was sent" in r.stdout
+
+
+# ── the suite itself ─────────────────────────────────────────────────────────
+
+def test_the_suite_never_reads_this_machines_transcripts_or_git_identity(tmp_path, monkeypatch):
+    """A dry run names a developer and reads Claude Code's transcripts. Under
+    the suite neither may be the developer's own (conftest): Claude Code's
+    config dir is an empty sandbox whatever HOME is, and git's email is
+    never read from PATH's git."""
+    from finops import ai_budget
+    home = tmp_path / "home"
+    (home / ".claude" / "projects" / "-x").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    projects = ai_budget._claude_projects_dir()
+    assert not str(projects).startswith(str(home))
+    assert not projects.exists() or not any(projects.iterdir())
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "git"
+    fake.write_text("#!/bin/sh\necho someone@this-machine.example\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    assert cli_cloud._git_email() is None

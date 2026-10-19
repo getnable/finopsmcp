@@ -31,9 +31,10 @@ The payload is one JSON object per line, keys sorted, no spaces:
 
   * coding-agent usage (D88): one line per (source, UTC day, developer,
     agent, model, project), for the closed UTC days of the last
-    AGENT_USAGE_DAYS, from what this machine's agents logged (ai_budget:
+    AGENT_USAGE_DAYS (fewer when Claude Code keeps its transcripts for less:
+    usage_window), from what this machine's agents logged (ai_budget:
     Claude Code's transcripts, Codex CLI's rollouts, Cursor's Admin API read
-    when it is scoped to one person):
+    when it is scoped to one person, for the days that read covers):
 
     {"agent": "claude_code"|"codex"|"cursor", "basis": "list_price",
      "day": "YYYY-MM-DD", "developer": "<the sender>", "kind": "agent_usage",
@@ -51,10 +52,13 @@ The payload is one JSON object per line, keys sorted, no spaces:
     that repo; anything else is "unmapped". The developer is the sender: the
     person --as names, else, at a terminal, git's user.email, then $USER;
     with neither there is no record. The source is a random 128-bit id made
-    once per install (SOURCE_NAME beside the ledger), so a resend replaces
-    the box's rows of the same (source, day, developer, agent, model,
-    project). No prompt, file content, path, host name or machine id is in
-    a record; a model logged as a path is sent as "unknown".
+    once per install (SOURCE_NAME beside the ledger). The box replaces, for
+    each (source, developer, day, agent) a batch carries, every record it
+    holds of it, so a resend whose project changed (a repo the org model
+    names now) replaces the old record instead of adding to it; a day's
+    records therefore always travel in one batch. No prompt, file content,
+    path, host name or machine id is in a record; a model logged as a path
+    is sent as "unknown".
 
 Nothing else is added: no hostname, user name or machine id of nable's own.
 What the ledger's records name, they carry, and the dry run counts the
@@ -74,10 +78,10 @@ person looked (the guard appends a record with every agent call it judges, so
 a dry run goes stale), or the dry run was for another box. It asks the box
 what the workspace already holds (GET status), then
 POSTs the rest as ordered batches of at most BATCH_MAX bytes, each a slice of
-the bytes shown, cut where a line ends. A resumed send skips the org model the
-box already holds and the ledger lines up to the head it reports, and nothing
-else: coding-agent usage goes whole every time, since the box replaces rows by
-their key. A box whose status does not list agent_usage among what it accepts
+the bytes shown, cut where a line ends and never inside one UTC day's
+coding-agent records. A resumed send skips the org model the box already holds
+and the ledger lines up to the head it reports, and nothing else: coding-agent
+usage goes whole every time, since the box replaces each day's records. A box whose status does not list agent_usage among what it accepts
 is told so before anything is sent (--no-agent-usage leaves the records out).
 
 HTTPS only. The box is https://host[:port] with no path, query or user info; a
@@ -128,8 +132,15 @@ STATUS_PATH = "/api/free-tool/status"
 PAYLOAD_NAME = "cloud-connect.payload.jsonl"
 # This install's id for its coding-agent usage records, beside the ledger.
 SOURCE_NAME = "agent-usage-source"
-# How many closed UTC days of coding-agent usage a payload carries.
-AGENT_USAGE_DAYS = 35
+# How many closed UTC days of coding-agent usage a payload carries. Claude
+# Code removes a session's transcript CLAUDE_CLEANUP_DEFAULT days after its
+# last write (its cleanupPeriodDays setting), so an older day can be read
+# short, and the box would take the short figure in place of the whole one.
+# Two days inside that, for a session written just before midnight and a
+# cleanup that ran before the send.
+AGENT_USAGE_DAYS = 28
+CLAUDE_CLEANUP_DEFAULT = 30
+_CLEANUP_MARGIN = 2
 AGENT_NAMES = {"claude-code": "claude_code", "codex": "codex", "cursor": "cursor"}
 _AGENT_SHOWN = {"claude_code": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
 UNMAPPED = "unmapped"
@@ -328,10 +339,16 @@ def build(*, org_dir: str | os.PathLike | None = None,
         records, usage = agent_usage_records(developer=developer.strip(),
                                              developer_from=developer_from,
                                              org_dir=org_dir, now=now)
+        day_bytes: dict[str, int] = {}
         for rec in records:
             line = _line(rec)
-            if len(line) + 1 > BATCH_MAX:      # bounded strings: never, but never sent whole
-                usage = _usage_left_out("a record is over one request's size")
+            day_bytes[rec["day"]] = day_bytes.get(rec["day"], 0) + len(line) + 1
+            if day_bytes[rec["day"]] > BATCH_MAX:
+                # The box replaces a day's records whole, so a day travels in
+                # one batch; one too large for a request is never cut in two.
+                usage = _usage_left_out(f"the records for {rec['day']} are over the "
+                                        f"{BATCH_MAX:,} bytes one request takes, and a day's "
+                                        "records are sent in one request or not at all")
                 parts = [x for x in parts if x[0] != "agent_usage"]
                 break
             parts.append(("agent_usage", line))
@@ -436,19 +453,48 @@ def _usd_text(x: Decimal) -> str:
     return text or "0"
 
 
+def _claude_cleanup_days() -> tuple[int, str]:
+    """(how many days Claude Code keeps a transcript after its last write,
+    where that came from): cleanupPeriodDays in Claude Code's user settings
+    (CLAUDE_CONFIG_DIR, else ~/.claude), else its default. Only that file
+    is read; a project's or a managed setting is not."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    path = (Path(base) if base else Path.home() / ".claude") / "settings.json"
+    try:
+        got = json.loads(path.read_text(encoding="utf-8")).get("cleanupPeriodDays")
+    except (OSError, ValueError, AttributeError):
+        got = None
+    if isinstance(got, int) and not isinstance(got, bool) and got >= 1:
+        return got, f"cleanupPeriodDays {got} in {path}"
+    return CLAUDE_CLEANUP_DEFAULT, f"cleanupPeriodDays, {CLAUDE_CLEANUP_DEFAULT} by default"
+
+
+def usage_window() -> tuple[int, str]:
+    """(how many closed UTC days a payload carries, why it stops there)."""
+    kept, where = _claude_cleanup_days()
+    days = max(1, min(AGENT_USAGE_DAYS, kept - _CLEANUP_MARGIN))
+    return days, (f"{days} closed UTC days: Claude Code removes a session's transcript {kept} "
+                  f"days after its last write ({where}), so an older day could be read short "
+                  "and is not sent. Send at least every "
+                  f"{days} days for every day to reach the workspace.")
+
+
 def agent_usage_records(*, developer: str, developer_from: str = "",
                         org_dir: str | os.PathLike | None = None,
                         now: datetime | None = None) -> tuple[list[dict[str, Any]],
                                                               dict[str, Any]]:
     """(records in key order, what they hold), from this machine's agents
-    for the closed UTC days of the last AGENT_USAGE_DAYS. A reader that
-    fails leaves the usage out, said as not read, never as zero."""
+    for the closed UTC days of usage_window. Cursor counts only for the days
+    its read covers (ai_budget.cursor_read_since), and the rest of the
+    window is said as not read. A reader that fails leaves the usage out,
+    said as not read, never as zero."""
     from . import ai_budget, llm_prices
     from .org.store import git_root, repo_identity
 
     now = (now or datetime.now(UTC)).astimezone(UTC)
     today = now.date()
-    first = today - timedelta(days=AGENT_USAGE_DAYS)
+    window_days, limit = usage_window()
+    first = today - timedelta(days=window_days)
     since = datetime(first.year, first.month, first.day, tzinfo=UTC).timestamp()
     until = datetime(today.year, today.month, today.day, tzinfo=UTC).timestamp()
     who = developer.strip()[:_DEVELOPER_MAX]
@@ -460,8 +506,26 @@ def agent_usage_records(*, developer: str, developer_from: str = "",
     try:
         responses, notes = ai_budget.agent_responses(since, allow_network=False)
         mapped = _mapped_repos(org_dir)
+        cursor_since = ai_budget.cursor_read_since()
     except Exception as exc:  # noqa: BLE001 - not read is said, never a zero
         return [], _usage_left_out(f"not read ({type(exc).__name__}: {str(exc)[:120]})")
+    notes = list(notes)
+    agent_windows: dict[str, dict[str, str]] = {}
+    last = (today - timedelta(days=1)).isoformat()
+    if cursor_since is not None and cursor_since > since:
+        # The Cursor read the guard keeps starts a day before the month: an
+        # earlier day of the window is not read, so it is not sent at all.
+        c_first = datetime.fromtimestamp(cursor_since, UTC).date()
+        c_first = max(c_first, first)
+        agent_windows["cursor"] = {"first": c_first.isoformat(), "last": last}
+        responses = [r for r in responses
+                     if AGENT_NAMES.get(str(r.get("harness") or "")) != "cursor"
+                     or (isinstance(r.get("ts"), (int, float)) and r["ts"] >= cursor_since)]
+        notes.append(f"Cursor is read from {c_first.isoformat()} (the Admin API read the "
+                     "guard keeps starts the day before this month), so Cursor usage on "
+                     f"{first.isoformat()} to {(c_first - timedelta(days=1)).isoformat()} "
+                     "is not read and not in these records, never zero; the workspace keeps "
+                     "what an earlier send held for those days.")
     projects: dict[str, str] = {}
 
     def project_of(cwd: Any) -> str:
@@ -530,8 +594,8 @@ def agent_usage_records(*, developer: str, developer_from: str = "",
         "records": len(records), "left_out": None, "basis": "list_price",
         "developer": who, "developer_from": developer_from, "source": source,
         "days": ({"first": days[0], "last": days[-1], "count": len(days)} if days else None),
-        "window": {"first": first.isoformat(),
-                   "last": (today - timedelta(days=1)).isoformat()},
+        "window": {"first": first.isoformat(), "last": last, "limit": limit},
+        "agent_windows": agent_windows,
         "agents": sorted({x["agent"] for x in records}),
         "models": sorted({x["model"] for x in records}),
         "projects": sorted({x["project"] for x in records if x["project"] != UNMAPPED}),
@@ -611,16 +675,34 @@ def save(payload: Payload, path: Path | None = None) -> Path:
     return path
 
 
+def _units(payload: Payload, a: int, b: int) -> list[tuple[int, int]]:
+    """The lines in [a, b) as the pieces a batch is never cut inside: one
+    line, or the run of one UTC day's coding-agent records (the box
+    replaces a day's records whole)."""
+    units: list[tuple[int, int]] = []
+    last_day = None
+    for kind, s, e in payload.lines:
+        if s < a or e > b:
+            continue
+        day = json.loads(payload.data[s:e])["day"] if kind == "agent_usage" else None
+        if day is not None and day == last_day and units and units[-1][1] == s:
+            units[-1] = (units[-1][0], e)
+        else:
+            units.append((s, e))
+        last_day = day
+    return units
+
+
 def _batches(payload: Payload, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Each range cut into slices of at most BATCH_MAX bytes, at line ends."""
+    """Each range cut into slices of at most BATCH_MAX bytes, at line ends,
+    never inside one day's coding-agent records (build keeps each day
+    under BATCH_MAX)."""
     out: list[tuple[int, int]] = []
     for a, b in ranges:
         start = a
         last = a
-        for _kind, s, e in payload.lines:
-            if s < a or e > b:
-                continue
-            if e - start > BATCH_MAX:
+        for _s, e in _units(payload, a, b):
+            if e - start > BATCH_MAX and last > start:
                 out.append((start, last))
                 start = last
             last = e
@@ -962,6 +1044,8 @@ def _describe_usage(u: Mapping[str, Any]) -> list[str]:
                    "(llm_prices has no cited rate)")
     for note in u.get("notes") or []:
         out.append(f"  note       {note}")
+    if w.get("limit"):
+        out.append(f"  window     {w.get('first')} to {w.get('last')}, {w['limit']}")
     out.append("  each record is one UTC day, developer, agent, model and project: no prompt, "
                "file content, path, host name or machine id")
     return out

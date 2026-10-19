@@ -25,7 +25,9 @@ coding-agent spend a person can carry into a paid workspace.
   commands in Cursor and Codex), the guard compares this machine's
   month-to-date (UTC) coding-agent spend at list price with the person's
   budget, else their confirmed team's `per_person_usd`, and with the team's
-  and the org's `monthly_usd`. Over one: ask, with `action_type: ai_budget`
+  and the org's `monthly_usd`. Only a confirmed personal budget displaces the
+  team's `per_person_usd`: beside a proposal both apply, and the stricter
+  answers. Over one: ask, with `action_type: ai_budget`
   and a reason naming the budget's file and fact key, the figure, its price
   source (`llm_prices`, by provider and date) and that it is this machine
   only (a team's or the org's figure can only be under-counted, and it says
@@ -41,11 +43,22 @@ coding-agent spend a person can carry into a paid workspace.
   `guard-person.json` beside the ledger until git's config files change. The
   guard asks before an agent runs `git config` to change `user.email` (set,
   `--add`, `--replace-all`, `--unset`, `unset`, `--remove-section user`,
-  `--edit`); reading it stays silent. `nable guard doctor` says whose budgets
-  apply and this month's figure (`ai_budgets` in `--json`).
+  `--edit`), or to write `include.path` or an `includeIf.<condition>.path`
+  (or remove or rename those sections), since an include can set it; reading
+  any of it stays silent. The files git reads it from (the repo's
+  `.git/config` and a worktree's, `~/.gitconfig`, the XDG `git/config`,
+  `GIT_CONFIG_GLOBAL`, the system file) are among the guard's own files, so a
+  shell command or a file tool that writes one asks. As a backstop, when git's
+  email for a repo changes since the guard last read it, the next call asks
+  once (`action_type: ai_budget_change`), naming both, and the earlier email's
+  budgets still apply for the rest of that UTC month. `nable guard doctor`
+  says whose budgets apply and this month's figure (`ai_budgets` in `--json`,
+  with `earlier_this_month`).
 - **Coding-agent usage in `nable cloud connect`.** A new payload record kind,
   `agent_usage`: one line per (install id, UTC day, developer, agent, model,
-  project) for the closed UTC days of the last 35, keys sorted, no spaces:
+  project) for the closed UTC days of the last 28 (fewer when Claude Code's
+  `cleanupPeriodDays` is lower than 30: an older day could be read short, and
+  the dry run says where the window stops and why), keys sorted, no spaces:
   `agent` (`claude_code`, `codex`, `cursor`), `basis` (`list_price`), `day`,
   `developer`, `kind`, `model` (as the agent logged it), `price_source` (the
   `llm_prices` row), `project` (the repo's identity only when the org model
@@ -61,9 +74,14 @@ coding-agent spend a person can carry into a paid workspace.
   is in a record: a model logged as a path is sent as `unknown`, and a repo
   whose identity is not a plain name (a directory name with a tab in it) as
   `unmapped`. Cursor counts only when its Admin API read is scoped to one
-  person (`CURSOR_ADMIN_USER_EMAIL`). A send goes whole each time (the box
-  replaces records by key) and is refused before anything leaves when the
-  box's status does not list `agent_usage` among what it accepts.
+  person (`CURSOR_ADMIN_USER_EMAIL`), and only for the days that read covers
+  (from the day before this month); the dry run names the days it leaves out
+  as not read. A send goes whole each time, a day's records always in one
+  batch (the box replaces, for each install, developer, day and agent sent,
+  the records it holds, so a project the org model maps now replaces the old
+  record), and is refused before anything leaves when the box's status does
+  not list `agent_usage` among what it accepts. A day too large for one
+  request leaves the usage out, said.
 - `llm_prices.ModelPrice.cost_exact` (exact decimal) and `citation()`.
 
 ## 0.13.0 (2026-10-18)

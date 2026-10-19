@@ -77,7 +77,8 @@ the dry run counts the records that do and points at the saved file.
 
 It also carries this machine's coding-agent usage, as `agent_usage` records:
 one per install id, UTC day, developer, agent, model and project, for the
-closed days of the last 35, with the tokens by direction, the
+closed days of the last 28 (fewer when Claude Code's `cleanupPeriodDays` keeps
+transcripts for less, so no day is sent short), with the tokens by direction, the
 list-price-equivalent dollars for tokens of a model `llm_prices` has a cited
 row for (`price_source` names the row), and the count of tokens it does not
 price. The install id is 128 random bits made once and kept beside the ledger;
@@ -96,8 +97,15 @@ repo's `nable.org/`, in nable's data directory and at `FINOPS_ORG_DIR`. The
 person a budget is matched by is `FINOPS_GUARD_PERSON`, else git's
 `user.email`, which the guard reads by running `git config --get user.email`
 once and keeps in `guard-person.json` beside the ledger (another of its own
-files) until git's config files change; the guard asks before an agent runs
-`git config` to change `user.email`. Nothing about a budget leaves the machine
+files) until git's config files change. The guard asks before an agent runs
+`git config` to change `user.email`, or to write `include.path` or an
+`includeIf.<condition>.path` (either can bring in another file's `[user]`),
+and before an agent writes, moves or deletes a file git reads it from: the
+repo's `.git/config` (and a worktree's), `~/.gitconfig`, the XDG
+`git/config`, `GIT_CONFIG_GLOBAL` and the system file are among its own files.
+As a backstop, when git's email for a repo changes since the guard last read
+it, the next call asks once, naming both, and the earlier email's budgets still
+apply for the rest of that UTC month. Nothing about a budget leaves the machine
 unless you send the org model.
 
 **Version check.** To tell you when your build is out of date, nable makes one

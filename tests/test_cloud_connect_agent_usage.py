@@ -2,8 +2,8 @@
 """`nable cloud connect` carries coding-agent usage, one record a day (D88).
 
 One record per (source, UTC day, developer, agent, model, project), for closed
-UTC days in the last 35, each a payload line of exactly these keys, sorted, no
-spaces:
+UTC days in the last 28 (inside Claude Code's 30 days of transcripts), each a
+payload line of exactly these keys, sorted, no spaces:
 
     {"agent", "basis": "list_price", "day", "developer", "kind": "agent_usage",
      "model", "price_source", "project", "source", "tokens": {"cache_read",
@@ -134,8 +134,8 @@ def laptop(tmp_path, monkeypatch):
     _claude(claude, "s-3", NOW - timedelta(days=3), model="claude-haiku-5-5", inp=9_000_000,
             out=0, cwd=str(pay))                                                     # unpriced
     _claude(claude, "s-4", NOW - timedelta(hours=1), cwd=str(pay))                   # today
-    _claude(claude, "s-5", datetime(2026, 9, 13, 8, 0, tzinfo=UTC), cwd=str(pay))   # 35 days back
-    _claude(claude, "s-6", datetime(2026, 9, 12, 23, 0, tzinfo=UTC), cwd=str(pay))  # 36: out
+    _claude(claude, "s-5", datetime(2026, 9, 20, 8, 0, tzinfo=UTC), cwd=str(pay))   # 28 days back
+    _claude(claude, "s-6", datetime(2026, 9, 19, 23, 0, tzinfo=UTC), cwd=str(pay))  # 29: out
     _claude(claude, "s-7", NOW - timedelta(days=2), cwd=str(tmp_path / "gone"))     # no repo
     _codex(codex, NOW - timedelta(days=2), cwd=str(pay))
     return {"home": home, "pay": pay, "scratch": scratch, "claude": claude, "tmp": tmp_path}
@@ -181,7 +181,7 @@ def test_one_record_per_day_developer_agent_model_and_project(laptop):
         ("2026-10-15", "claude_code", "claude-haiku-5-5", "github.com/acme/payments"),
         ("2026-10-16", "claude_code", "claude-sonnet-4-6", "unmapped"),
         ("2026-10-16", "codex", "gpt-5-codex", "github.com/acme/payments"),
-        ("2026-09-13", "claude_code", "claude-sonnet-4-6", "github.com/acme/payments"),
+        ("2026-09-20", "claude_code", "claude-sonnet-4-6", "github.com/acme/payments"),
     }
     two = got[("2026-10-17", "claude_code", "claude-sonnet-4-6", "github.com/acme/payments")]
     assert two["tokens"] == {"cache_read": 0, "cache_write": 0, "input": 2_000_000,
@@ -189,11 +189,35 @@ def test_one_record_per_day_developer_agent_model_and_project(laptop):
     assert two["usd"] == "9"                       # 2 x ($3.00 + $1.50) at $3/$15 a million
 
 
-def test_closed_utc_days_in_the_last_35_only(laptop):
+def test_closed_utc_days_in_the_last_28_only(laptop):
     days = {r["day"] for r in _records(_build())}
     assert "2026-10-18" not in days, "today is not closed"
-    assert "2026-09-12" not in days, "36 days back is outside the window"
-    assert "2026-09-13" in days
+    assert "2026-09-19" not in days, "29 days back is outside the window"
+    assert "2026-09-20" in days
+
+
+def test_the_window_stays_inside_claude_codes_transcript_retention(laptop):
+    """Claude Code removes a session's transcript 30 days after its last
+    write (cleanupPeriodDays). A day older than that could be read short, and
+    sent short it would lower what the workspace holds, so it is not sent;
+    the dry run says where the window stops and why."""
+    u = _build().usage
+    assert u["window"]["first"] == "2026-09-20" and u["window"]["last"] == "2026-10-17"
+    assert "cleanupPeriodDays" in u["window"]["limit"] and "28" in u["window"]["limit"]
+    (laptop["claude"] / "settings.json").write_text(json.dumps({"cleanupPeriodDays": 10}))
+    p = _build()
+    assert p.usage["window"]["first"] == "2026-10-10"
+    assert "10" in p.usage["window"]["limit"]
+    assert min(r["day"] for r in _records(p)) >= "2026-10-10"
+
+
+def test_a_day_whose_transcript_was_cleaned_up_is_never_resent_short(laptop):
+    """The review's case: a session last active 32 days ago is removed by
+    Claude Code's cleanup. Its day is outside the window either way, so the
+    box never gets a smaller figure for it."""
+    old = NOW - timedelta(days=32)
+    _claude(laptop["claude"], "s-old", old, cwd=str(laptop["pay"]))
+    assert old.date().isoformat() not in {r["day"] for r in _records(_build())}
 
 
 def test_dollars_only_at_a_cited_rate_and_unpriced_tokens_carry_none(laptop):
@@ -201,7 +225,7 @@ def test_dollars_only_at_a_cited_rate_and_unpriced_tokens_carry_none(laptop):
     haiku = recs[("claude-haiku-5-5", "2026-10-15")]
     assert (haiku["usd"], haiku["unpriced_tokens"]) == ("0", 9_000_000)
     assert "no llm_prices row" in haiku["price_source"]
-    sonnet = recs[("claude-sonnet-4-6", "2026-09-13")]
+    sonnet = recs[("claude-sonnet-4-6", "2026-09-20")]
     assert sonnet["unpriced_tokens"] == 0
     assert "claude-sonnet-4-6" in sonnet["price_source"]
     assert llm_prices.ANTHROPIC_SOURCE in sonnet["price_source"]
@@ -336,7 +360,8 @@ def test_the_dry_run_shows_counts_days_developer_agents_models_projects_tokens_a
     assert cli_cloud.run(_args("--as", "alice@acme.example"), stdout=out, stderr=err,
                          prompt=None, terminal=False, now=NOW) == 0
     text = out.getvalue()
-    for said in ("Coding agents", "6 records", "2026-09-13 to 2026-10-17",
+    for said in ("Coding agents", "6 records", "2026-09-20 to 2026-10-17",
+                 "cleanupPeriodDays",
                  "alice@acme.example", "Claude Code", "Codex", "claude-sonnet-4-6",
                  "gpt-5-codex", "claude-haiku-5-5", "github.com/acme/payments", "unmapped",
                  "input", "output", "cache read", "list-price equivalent",
@@ -344,7 +369,7 @@ def test_the_dry_run_shows_counts_days_developer_agents_models_projects_tokens_a
         assert said in text, said
     _code, doc, _ = _dry("--as", "alice@acme.example")
     u = doc["agent_usage"]
-    assert u["records"] == 6 and u["days"] == {"first": "2026-09-13", "last": "2026-10-17",
+    assert u["records"] == 6 and u["days"] == {"first": "2026-09-20", "last": "2026-10-17",
                                                "count": 4}
     assert u["agents"] == ["claude_code", "codex"] and u["basis"] == "list_price"
     assert u["projects"] == ["github.com/acme/payments"] and u["unmapped_records"] == 2
@@ -469,3 +494,80 @@ def test_a_repo_whose_identity_is_not_a_slug_is_sent_unmapped(laptop, monkeypatc
 def test_a_developer_name_with_a_control_character_builds_no_record(laptop):
     p = _build(developer="alice\nbob")
     assert p.usage["records"] == 0 and "control character" in p.usage["left_out"]
+
+
+# ── Cursor: only the days its read covers ────────────────────────────────────
+
+def _cursor(monkeypatch, *whens):
+    """Cursor's Admin API read for one person, stubbed: it starts a day
+    before the month (harness_usage.cursor_responses), so a response before
+    that is never there."""
+    from finops import harness_usage
+    month_start = datetime(2026, 10, 1, tzinfo=UTC).timestamp()
+    monkeypatch.setattr(ai_budget, "_month_start_epoch", lambda: month_start)
+    monkeypatch.setattr(harness_usage, "cursor_enabled", lambda: True)
+    monkeypatch.setattr(harness_usage, "cursor_email", lambda: "alice@acme.example")
+    monkeypatch.setattr(harness_usage, "cursor_status", dict)
+
+    def read(since, session_id=None, month_start=None, *, allow_network=True):
+        start = (month_start if month_start is not None else since) - 86400
+        return [{"ts": w.timestamp(), "model": "claude-sonnet-4-6", "input": 1000,
+                 "output": 100, "cache_write": 0, "cache_write_1h": 0, "cache_read": 0,
+                 "fast": False, "us_only": False, "session": "c", "cwd": None,
+                 "harness": harness_usage.HARNESS_CURSOR}
+                for w in whens if w.timestamp() >= start]
+    monkeypatch.setattr(harness_usage, "cursor_responses", read)
+
+
+def test_cursor_is_sent_only_for_the_days_its_read_covers_and_the_rest_is_said(
+        laptop, monkeypatch):
+    _cursor(monkeypatch, datetime(2026, 9, 25, 9, tzinfo=UTC),
+            datetime(2026, 9, 30, 9, tzinfo=UTC), datetime(2026, 10, 5, 9, tzinfo=UTC))
+    p = _build()
+    days = sorted(r["day"] for r in _records(p) if r["agent"] == "cursor")
+    assert days == ["2026-09-30", "2026-10-05"]
+    u = p.usage
+    assert u["agent_windows"]["cursor"] == {"first": "2026-09-30", "last": "2026-10-17"}
+    said = " ".join(u["notes"])
+    assert "Cursor" in said and "2026-09-20 to 2026-09-29" in said and "not read" in said
+
+
+def test_without_cursor_no_agent_window_is_narrowed(laptop):
+    assert _build().usage["agent_windows"] == {}
+
+
+# ── a day's records travel in one batch ──────────────────────────────────────
+
+def test_a_days_records_are_never_split_between_two_batches(laptop, monkeypatch):
+    """The box replaces, for each (source, developer, day, agent) a batch
+    carries, every record of it, so a day cut in two would drop the half
+    sent first."""
+    for d in range(1, 9):
+        for k in range(3):
+            _claude(laptop["claude"], f"s-x{d}-{k}", NOW - timedelta(days=d),
+                    model=f"claude-sonnet-4-{k + 4}", cwd=str(laptop["pay"]))
+    p = _build()
+    lines = [(a, b) for kind, a, b in p.lines if kind == "agent_usage"]
+    longest_day = max(sum(b - a for a, b in lines if json.loads(p.data[a:b])["day"] == d)
+                      for d in {json.loads(p.data[a:b])["day"] for a, b in lines})
+    monkeypatch.setattr(cc, "BATCH_MAX", longest_day + 200)
+    batches = cc.plan(p, None)
+    assert len(batches) > 2
+    seen: dict[str, int] = {}
+    for i, (a, b) in enumerate(batches):
+        assert b - a <= cc.BATCH_MAX
+        for line in p.data[a:b].splitlines():
+            doc = json.loads(line)
+            if doc["kind"] == "agent_usage":
+                assert seen.setdefault(doc["day"], i) == i, doc["day"]
+    assert b"".join(p.data[a:b] for a, b in batches) == p.data
+
+
+def test_a_day_too_large_for_one_batch_leaves_the_usage_out_and_says_so(laptop, monkeypatch):
+    """Every record fits a request, but no day of two records does: the
+    first such day (2026-10-16, Claude Code and Codex) is named."""
+    longest = max(b - a for kind, a, b in _build().lines if kind == "agent_usage")
+    monkeypatch.setattr(cc, "BATCH_MAX", longest + 1)
+    p = _build()
+    assert not any(kind == "agent_usage" for kind, *_ in p.lines)
+    assert "2026-10-16" in p.usage["left_out"] and "one request" in p.usage["left_out"]
