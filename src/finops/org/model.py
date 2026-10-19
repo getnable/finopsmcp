@@ -1397,7 +1397,9 @@ class OrgModel:
         a proposal included, as {scope, subject, usd, sure, key, file,
         status}: sure only when a person confirmed it, and its team
         membership, where it was read (under `strict`, a trusted dir). An
-        answer that is not sure may only ask."""
+        answer that is not sure may only ask, so only a sure budget of their
+        own displaces a team's per_person_usd: beside a proposal both apply,
+        and the stricter answers."""
         out: list[dict[str, Any]] = []
 
         def hit(scope: str, f: Fact, usd: float, sure: bool) -> None:
@@ -1409,6 +1411,7 @@ class OrgModel:
         own = self.resolve("ai_budget", Subject("person", who)) if who else None
         if own is not None:
             hit("person", own, own.value["monthly_usd"], True)
+        own_sure = self._sure(own, strict)
         teams = dict(self.teams_of(who, strict=strict)) if who else {}
         by_team: dict[str, list[Fact]] = {}
         for f in self.by_kind("ai_budget"):
@@ -1419,7 +1422,7 @@ class OrgModel:
             f = pick(by_team.get(tid.lower(), ()))
             if f is None:
                 continue
-            if own is None and f.value.get("per_person_usd") is not None:
+            if not own_sure and f.value.get("per_person_usd") is not None:
                 hit("per_person", f, f.value["per_person_usd"], member_sure)
             hit("team", f, f.value["monthly_usd"], member_sure)
         whole = self.resolve("ai_budget", Subject("org", "org"))

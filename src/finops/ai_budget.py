@@ -1086,36 +1086,10 @@ def _stamp(p: Path) -> list[Any]:
 
 
 def _git_config_files(root: Path | None) -> list[Path]:
-    """The files `git config` reads user.email from, as far as nable can
-    tell without running it: the system file, the global ones, and the
-    repo's own config (its common dir's, and a worktree's). include.path is
-    not followed: a change behind an include is seen when one of these
-    changes, or when the cache is removed."""
-    home = Path.home()
-    out: list[Path] = []
-    if not os.environ.get("GIT_CONFIG_NOSYSTEM"):
-        out.append(Path(os.environ.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig"))
-    if os.environ.get("GIT_CONFIG_GLOBAL"):
-        out.append(Path(os.environ["GIT_CONFIG_GLOBAL"]))
-    else:
-        xdg = os.environ.get("XDG_CONFIG_HOME") or str(home / ".config")
-        out += [Path(xdg) / "git" / "config", home / ".gitconfig"]
-    if root is not None:
-        git = root / ".git"
-        out.append(git / "config")
-        try:
-            if git.is_file():
-                text = git.read_text(encoding="utf-8")
-                gd = next((line[7:].strip() for line in text.splitlines()
-                           if line.startswith("gitdir:")), "")
-                if gd:
-                    gdir = Path(gd) if Path(gd).is_absolute() else (root / gd)
-                    out += [gdir / "config.worktree", gdir / "commondir"]
-                    common = (gdir / (gdir / "commondir").read_text().strip())
-                    out.append(common / "config")
-        except OSError:
-            pass
-    return out
+    """guard_paths.git_config_files: the files git reads user.email from,
+    each one of the guard's own files."""
+    from . import guard_paths
+    return guard_paths.git_config_files(root)
 
 
 def _person_cache_path() -> Path:
@@ -1123,31 +1097,77 @@ def _person_cache_path() -> Path:
     return guard_ledger.ledger_path().with_name(PERSON_CACHE)
 
 
-def _cached_git_email(cwd: str | None) -> str | None:
-    """git's user.email for `cwd`, from guard-person.json while the config
-    files it came from are as they were, else read again (and kept)."""
-    from . import guard_paths
-    root = guard_paths.git_root(cwd)
-    where = str(root) if root is not None else ""
-    stamp = [_stamp(p) for p in _git_config_files(root)]
+def _month_key() -> str:
+    """This UTC month, as guard-person.json keeps it ("2026-10")."""
+    return time.strftime("%Y-%m", time.gmtime(_month_start_epoch()))
+
+
+def _read_person_cache() -> tuple[Path, dict[str, Any]]:
     path = _person_cache_path()
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
         entries = doc.get("entries") if isinstance(doc, dict) and doc.get("v") == 1 else None
     except (OSError, ValueError):
         entries = None
-    entries = entries if isinstance(entries, dict) else {}
-    hit = entries.get(where)
-    if isinstance(hit, dict) and hit.get("stamp") == stamp:
-        email = hit.get("email")
-        return email if isinstance(email, str) and email else None
-    email = _read_git_email(str(root) if root is not None else cwd)
-    entries.pop(where, None)
-    entries[where] = {"stamp": stamp, "email": email}
+    return path, entries if isinstance(entries, dict) else {}
+
+
+def _write_person_cache(path: Path, entries: dict[str, Any]) -> None:
     kept = dict(list(entries.items())[-_PERSON_KEPT:])
     with contextlib.suppress(OSError, TypeError, ValueError):
         path.parent.mkdir(parents=True, exist_ok=True)
         harness_usage.write_json_atomic(path, {"v": 1, "entries": kept})
+
+
+def _root_key(cwd: str | None) -> tuple[Path | None, str]:
+    from . import guard_paths
+    root = guard_paths.git_root(cwd)
+    return root, str(root) if root is not None else ""
+
+
+def _lower(x: Any) -> str:
+    return x.strip().lower() if isinstance(x, str) else ""
+
+
+def _cached_git_email(cwd: str | None) -> str | None:
+    """git's user.email for `cwd`, from guard-person.json while the config
+    files it came from are as they were, else read again (and kept).
+
+    When a read again finds another email than the one kept, the one kept is
+    remembered as `earlier` for the rest of the UTC month (this machine's
+    month holds what was spent under it, so its budgets still apply), and
+    `moved` is set until the guard has asked about it once (identity_moved).
+    That is the backstop for a change no check saw coming: a file an include
+    names, a script."""
+    root, where = _root_key(cwd)
+    stamp = [_stamp(p) for p in _git_config_files(root)]
+    path, entries = _read_person_cache()
+    hit = entries.get(where)
+    hit = hit if isinstance(hit, dict) else None
+    if hit is not None and hit.get("stamp") == stamp:
+        email = hit.get("email")
+        return email if isinstance(email, str) and email else None
+    email = _read_git_email(str(root) if root is not None else cwd)
+    month = _month_key()
+    entry: dict[str, Any] = {"stamp": stamp, "email": email, "month": month}
+    if hit is not None:
+        same_month = hit.get("month", month) == month
+        earlier = [e for e in (hit.get("earlier") or []) if isinstance(e, str)] \
+            if same_month else []
+        before, now = _lower(hit.get("email")), _lower(email)
+        moved = hit.get("moved") if same_month and isinstance(hit.get("moved"), dict) else None
+        if before and before != now:
+            if before not in earlier:
+                earlier.append(before)
+            moved = {"from": before, "to": now or None}
+        earlier = [e for e in earlier if e != now]
+        if earlier:
+            entry["earlier"] = earlier
+        if moved is not None and _lower(moved.get("from")) != now:
+            entry["moved"] = moved
+    entries.pop(where, None)
+    entries[where] = entry
+    _write_person_cache(path, entries)
     return email
 
 
@@ -1161,6 +1181,53 @@ def developer(cwd: str | None = None) -> tuple[str | None, str]:
         return env.lower(), PERSON_ENV
     email = _cached_git_email(cwd)
     return (email.strip().lower(), "git user.email") if email else (None, "")
+
+
+def earlier_developers(cwd: str | None = None) -> list[str]:
+    """The other emails git's user.email gave for `cwd`'s repo earlier this
+    UTC month (guard-person.json), lowercased; [] under FINOPS_GUARD_PERSON,
+    which names the person whatever git says. Their budgets still apply this
+    month: this machine's month holds what was spent under them."""
+    if os.environ.get(PERSON_ENV, "").strip():
+        return []
+    _root, where = _root_key(cwd)
+    _path, entries = _read_person_cache()
+    hit = entries.get(where)
+    if not isinstance(hit, dict) or hit.get("month", _month_key()) != _month_key():
+        return []
+    return [e for e in (hit.get("earlier") or []) if isinstance(e, str) and e]
+
+
+def identity_moved(cwd: str | None = None) -> dict[str, Any] | None:
+    """{"from", "to"} once after git's user.email for `cwd`'s repo changed
+    (to None when it was removed), then None: the guard asks about it once.
+    None under FINOPS_GUARD_PERSON."""
+    if os.environ.get(PERSON_ENV, "").strip():
+        return None
+    _root, where = _root_key(cwd)
+    path, entries = _read_person_cache()
+    hit = entries.get(where)
+    if not isinstance(hit, dict) or not isinstance(hit.get("moved"), dict):
+        return None
+    moved = hit.pop("moved")
+    _write_person_cache(path, entries)
+    return {"from": _lower(moved.get("from")) or None, "to": _lower(moved.get("to")) or None}
+
+
+def budgets_for(model: Any, cwd: str | None = None) -> tuple[str | None, str, list[dict]]:
+    """(person, where that came from, the org model's AI budgets that apply):
+    the person's, and those of each identity git gave for the repo earlier
+    this month (each hit's "person" says whose), each budget once."""
+    person, source = developer(cwd)
+    seen: set[tuple[str, str]] = set()
+    hits: list[dict[str, Any]] = []
+    for who in [person, *[e for e in earlier_developers(cwd) if e != person]]:
+        for h in model.ai_budgets_for(who, strict=True):
+            if (h["scope"], h["subject"]) in seen:
+                continue
+            seen.add((h["scope"], h["subject"]))
+            hits.append({**h, "person": who})
+    return person, source, hits
 
 
 def list_price_usd(r: dict[str, Any]) -> Decimal | None:
@@ -1179,6 +1246,14 @@ def list_price_usd(r: dict[str, Any]) -> Decimal | None:
 
 def _tokens(r: dict[str, Any]) -> int:
     return int(r["input"]) + int(r["output"]) + int(r["cache_write"]) + int(r["cache_read"])
+
+
+def cursor_read_since() -> float | None:
+    """Where agent_responses' Cursor read starts (a day before this UTC
+    month), or None when it reads no Cursor usage."""
+    if not (harness_usage.cursor_enabled() and harness_usage.cursor_email()):
+        return None
+    return _month_start_epoch() - harness_usage.CURSOR_READ_BEFORE_S
 
 
 def agent_responses(since_epoch: float, *, allow_network: bool = False
@@ -1280,8 +1355,7 @@ def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
         return None
     from . import guard_org
     model = guard_org.load_model(cwd)
-    person, source = developer(cwd)
-    hits = model.ai_budgets_for(person, strict=True)
+    person, source, hits = budgets_for(model, cwd)
     if not hits:
         return None
     usage = month_agent_usage(allow_network=False)
@@ -1290,6 +1364,9 @@ def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
         pct = usage["usd"] / h["usd"] if h["usd"] > 0 else 0.0
         rows.append({**h, "pct": pct, "verdict": _verdict(pct)})
     worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
+    if worst["scope"] in ("person", "per_person") and worst["person"] != person:
+        person, source = worst["person"], (f"git user.email earlier this month; it is "
+                                           f"{person or 'not set'} now")
     return {"verdict": worst["verdict"], "hit": worst, "usd": usage["usd"], "pct": worst["pct"],
             "person": person, "person_source": source, "usage": usage, "hits": rows}
 

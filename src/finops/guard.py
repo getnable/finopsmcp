@@ -3317,11 +3317,39 @@ def _org_budget_gate(session_id: str | None, cwd: str | None) -> dict[str, Any] 
     stop is on (_org_budget_hard_stop). A proposed budget, or one from a repo
     nobody trusted, only asks. Close (80%): a note, as ai-budget.json's.
     None when no budgets.yaml is there, none applies, or anything could not
-    be read: an unreadable org model or transcript takes no position."""
+    be read: an unreadable org model or transcript takes no position.
+
+    Short of a deny, a change to git's user.email for the repo since the
+    guard last read it asks once (ai_budget.identity_moved), whatever made
+    it: whose budget it is moved."""
     try:
         from . import ai_budget
         if not ai_budget.has_org_budgets(cwd):
             return None
+        v = _org_budget_verdict(session_id, cwd)
+        if v is not None and v["decision"] == "deny":
+            return v
+        moved = ai_budget.identity_moved(cwd)
+        if moved is None:
+            return v
+        was, now = moved["from"], moved["to"] or "nothing"
+        ask = {"decision": "ask", "action_type": "ai_budget_change", "door": None,
+               "reason": (f"nable guard: git's user.email for this repo changed from {was} "
+                          f"to {now} since the guard last read it, and it says whose AI "
+                          f"budget this machine's agents are held to. {was}'s budgets still "
+                          "apply for the rest of this month (UTC), since this machine's "
+                          f"month holds what was spent as {was}; a human should confirm the "
+                          "change. Set FINOPS_GUARD_PERSON in the agent's environment to "
+                          "name the person whatever git says.")}
+        return _with_reason_of(ask, v) if v is not None else ask
+    except Exception:  # noqa: BLE001 - an unreadable org model or transcript stops nobody
+        return None
+
+
+def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, Any] | None:
+    """_org_budget_gate's verdict on the budgets themselves."""
+    try:
+        from . import ai_budget
         st = ai_budget.org_budget_status(cwd)
         if st is None or st["verdict"] not in (ai_budget.BUDGET_OVER, ai_budget.BUDGET_WARN):
             return None
@@ -5443,9 +5471,13 @@ def _self_change_normalized(cmd: str) -> tuple[str, str] | None:
 # git's user.email is whose AI budget this machine's agents are held to
 # (ai_budget.developer, when FINOPS_GUARD_PERSON is unset): an agent that sets
 # it moves its own spend onto somebody else's budget, or onto none. Writing it
-# asks; reading it does not. git's global options before `config` are skipped
-# (-C DIR, -c NAME=VALUE, --git-dir=..., ...), and so are config's own options
-# and their values; the key is matched without regard to case, as git does.
+# asks; reading it does not. So does writing include.path or an
+# includeIf.<condition>.path, which brings in another file's [user] section,
+# and removing or renaming the include sections. git's global options before
+# `config` are skipped (-C DIR, -c NAME=VALUE, --git-dir=..., ...), and so are
+# config's own options and their values; the key is matched without regard to
+# case, as git does. Writing a config file git reads it from, by any other
+# means, is a write to one of the guard's own files (guard_paths.protected).
 _GIT_GLOBAL_WITH_VALUE = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace",
                                     "--exec-path", "--config-env", "--super-prefix",
                                     "--list-cmds", "--attr-source"))
@@ -5457,17 +5489,28 @@ _CONFIG_WRITES = frozenset(("--add", "--replace-all", "--unset", "--unset-all", 
 _CONFIG_SECTION = frozenset(("--remove-section", "--rename-section", "remove-section",
                              "rename-section"))
 _GIT_IDENTITY = ("git-identity", "ai_budget_change",
-                 ("changing git's user.email, which says whose AI budget this machine's "
-                  "agents are held to"))
+                 ("changing git's user.email, or an include that can set it, which says "
+                  "whose AI budget this machine's agents are held to"))
 
 
 def _word(token: str) -> str:
     return token.strip("\"'`()")
 
 
+def _identity_key(key: str) -> bool:
+    """user.email, include.path or includeIf.<condition>.path, lower-cased."""
+    return key in ("user.email", "include.path") or (
+        key.startswith("includeif.") and key.endswith(".path"))
+
+
+def _identity_section(name: str) -> bool:
+    return name in ("user", "include") or name.startswith("includeif.")
+
+
 def _config_writes_email(rest: list[str]) -> bool:
-    """Whether the arguments after `git config` write user.email (or the
-    whole user section, or open an editor on a config file)."""
+    """Whether the arguments after `git config` write user.email, or an
+    include that can bring one in (or remove the user or include section,
+    or open an editor on a config file)."""
     words: list[str] = []
     flags: set[str] = set()
     i = 0
@@ -5488,10 +5531,10 @@ def _config_writes_email(rest: list[str]) -> bool:
                                              "remove-section", "rename-section") else None
     args = words[1:] if sub else words
     if (flags & _CONFIG_SECTION) or sub in _CONFIG_SECTION:
-        return bool(args) and args[0] == "user"
+        return bool(args) and _identity_section(args[0])
     if (flags & _CONFIG_READS) or sub in ("get", "list"):
         return False
-    if not args or args[0] != "user.email":
+    if not args or not _identity_key(args[0]):
         return False
     if (flags & _CONFIG_WRITES) or sub in _CONFIG_WRITES:
         return True
@@ -7502,8 +7545,7 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
     try:
         from . import guard_org
         model = guard_org.load_model(cwd)
-        person, source = ai_budget.developer(cwd)
-        applies = model.ai_budgets_for(person, strict=True)
+        person, source, applies = ai_budget.budgets_for(model, cwd)
         usage = ai_budget.month_agent_usage(allow_network=False)
     except Exception as exc:  # noqa: BLE001 - said, never raised
         gaps.append(f"the org model's AI budgets: they could not be read "
@@ -7521,8 +7563,10 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
                        + ", compared at every shell and MCP call with this machine's "
                          "coding-agent spend at list price")
     return {"present": True, "person": person, "person_source": source or None,
-            "applies": [{k: h[k] for k in ("scope", "subject", "usd", "sure", "key", "file")}
+            "applies": [{k: h[k] for k in ("scope", "subject", "usd", "sure", "key", "file",
+                                           "person")}
                         for h in applies],
+            "earlier_this_month": ai_budget.earlier_developers(cwd),
             "month_usd": usage["usd_cents"], "basis": "list_price",
             "unpriced_tokens": usage["unpriced_tokens"],
             "price_source": ai_budget.price_source(usage["providers"]),

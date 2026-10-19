@@ -225,6 +225,24 @@ def test_a_teams_per_person_usd_applies_when_the_person_has_none(box, monkeypatc
     assert "team:payments" in v["reason"]
 
 
+def test_a_proposed_personal_budget_does_not_silence_the_teams_confirmed_per_person(
+        box, monkeypatch):
+    """A proposal only asks. Beside a confirmed per_person_usd it must not
+    take that budget's hard stop away: the stricter answers."""
+    team = BUDGET.format(kind="team", ident="payments",
+                         value="{monthly_usd: 100, per_person_usd: 4}", status="confirmed")
+    (box["org"] / "teams.yaml").write_text(TEAMS)
+    (box["org"] / "budgets.yaml").write_text(team)
+    _person(monkeypatch)
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    assert guard.gate_command("ls -la")["decision"] == "deny"
+    proposal = BUDGET.format(kind="person", ident="alice@acme.example",
+                             value="{monthly_usd: 1000}", status="proposed")
+    (box["org"] / "budgets.yaml").write_text(team + proposal.split("\n", 1)[1])
+    v = guard.gate_command("ls -la")
+    assert v is not None and v["decision"] == "deny" and "per person" in v["reason"]
+
+
 def test_a_teams_monthly_usd_is_compared_with_this_machines_spend(box, monkeypatch):
     _budget(box, "team", "payments", "{monthly_usd: 4}")
     _person(monkeypatch, "bob@acme.example")
@@ -387,6 +405,15 @@ def test_no_identity_at_all_still_meets_the_orgs_budget_and_nobody_elses(box, mo
     "git config --remove-section user",
     "git config --edit --global",
     "/usr/bin/git config user.email x@y.z",
+    # An include brings in another file's [user] section: the same change.
+    "git config include.path /tmp/other.cfg",
+    "git config --global include.path ~/elsewhere.cfg",
+    "git config --local includeIf.gitdir:~/work/.path ~/work.cfg",
+    "git config --add include.path ../x.cfg",
+    "git config set include.path ../x.cfg",
+    "git config --unset include.path",
+    "git config --remove-section include",
+    "git config --rename-section includeIf.gitdir:~/work/ foo",
 ])
 def test_an_agent_changing_gits_user_email_is_asked(box, cmd):
     v = guard.gate_command(cmd)
@@ -403,9 +430,116 @@ def test_an_agent_changing_gits_user_email_is_asked(box, cmd):
     "git -c user.email=x@y.z commit -m wip",
     "git commit -m 'git config user.email x@y.z'",
     "git log --format=%ae",
+    "git config --get include.path",
+    "git config --get-regexp '^includeif'",
+    "git config remote.origin.url git@example.com:acme/x.git",
 ])
 def test_reading_it_or_anything_else_stays_silent(box, cmd):
     assert guard.gate_command(cmd) is None, cmd
+
+
+def _repo(box) -> Path:
+    repo = box["tmp"] / "repo"
+    (repo / ".git").mkdir(parents=True, exist_ok=True)
+    (repo / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    return repo
+
+
+@pytest.mark.parametrize("cmd", [
+    "printf '[user]\\n\\temail = nobody@nowhere.example\\n' >> .git/config",
+    "echo '[user] email = x@y.z' | tee -a .git/config",
+    "sed -i 's/email = .*/email = x@y.z/' .git/config",
+    "cp /tmp/other.cfg .git/config",
+    "printf '[user]\\n\\temail = x@y.z\\n' >> ~/.gitconfig",
+    "sed -i 's/email = .*/email = x@y.z/' ~/.gitconfig",
+    "mkdir -p ~/.config/git && printf '[user]\\n\\temail = x@y.z\\n' > ~/.config/git/config",
+    "rm .git/config",
+])
+def test_writing_a_git_config_file_directly_is_asked_too(box, cmd):
+    """The same identity change, made by writing the file git reads it from
+    instead of running git config: the repo's, the global and the XDG one."""
+    repo = _repo(box)
+    v = guard.gate_command(cmd, cwd=str(repo))
+    assert v is not None and v["decision"] == "ask", cmd
+    assert "user.email" in v["reason"], cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat .git/config",
+    "grep email ~/.gitconfig",
+    "git status",
+    "git commit -m 'edit .git/config later'",
+])
+def test_reading_a_git_config_file_stays_silent(box, cmd):
+    repo = _repo(box)
+    assert guard.gate_command(cmd, cwd=str(repo)) is None, cmd
+
+
+@pytest.mark.parametrize("tool,where", [("Edit", ".git/config"), ("Write", ".git/config"),
+                                        ("Write", "~/.gitconfig")])
+def test_an_editor_tool_writing_a_git_config_file_is_asked(box, tool, where):
+    repo = _repo(box)
+    path = str(Path(os.path.expanduser(where)) if where.startswith("~") else repo / where)
+    inp = {"file_path": path, "old_string": "bare = false",
+           "new_string": "bare = false\n[user]\n\temail = x@y.z"} if tool == "Edit" else {
+        "file_path": path, "content": "[user]\n\temail = x@y.z\n"}
+    v = guard.gate_editor(tool, inp, cwd=str(repo), record=False)
+    assert v is not None and v["decision"] == "ask"
+    assert "user.email" in v["reason"]
+
+
+def test_an_identity_moved_some_other_way_still_answers_to_the_earlier_budget(box, monkeypatch):
+    """A backstop for what no check above sees (a file an include names, a
+    script): when git's user.email for a repo changes, the next call asks once,
+    naming both, and this month the earlier identity's budgets still apply,
+    since this machine's month holds what was spent under it."""
+    repo = _repo(box)
+    who = ["alice@acme.example"]
+    monkeypatch.setattr(ab, "_read_git_email", lambda cwd: who[0])
+    _budget(box, "person", "alice@acme.example", "{monthly_usd: 4}")
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    v = guard.gate_command("ls -la", cwd=str(repo))
+    assert v["decision"] == "deny" and v["action_type"] == "ai_budget"
+    who[0] = "nobody@nowhere.example"
+    (repo / ".git" / "config").write_text("[include]\n\tpath = /tmp/elsewhere.cfg\n")
+    assert ab.developer(str(repo)) == ("nobody@nowhere.example", "git user.email")
+    v = guard.gate_command("ls -la", cwd=str(repo))
+    assert v is not None and v["decision"] == "deny"
+    assert "alice@acme.example" in v["reason"]
+    monkeypatch.delenv("FINOPS_GUARD_STOP_ON_BUDGET")
+    _budget(box, "person", "alice@acme.example", "{monthly_usd: 400}")
+    v = guard.gate_command("ls -la", cwd=str(repo))
+    assert v is not None and v["decision"] == "ask"
+    assert v["action_type"] == "ai_budget_change"
+    assert "alice@acme.example" in v["reason"] and "nobody@nowhere.example" in v["reason"]
+    assert guard.gate_command("ls -la", cwd=str(repo)) is None      # asked once
+
+
+def test_the_identity_ask_keeps_the_budgets_own_reason_beside_it(box, monkeypatch):
+    repo = _repo(box)
+    who = ["alice@acme.example"]
+    monkeypatch.setattr(ab, "_read_git_email", lambda cwd: who[0])
+    _budget(box, "person", "alice@acme.example", "{monthly_usd: 4}")
+    assert guard.gate_command("ls -la", cwd=str(repo))["action_type"] == "ai_budget"
+    who[0] = "nobody@nowhere.example"
+    (repo / ".git" / "config").write_text("[user]\n\temail = nobody@nowhere.example\n")
+    v = guard.gate_command("ls -la", cwd=str(repo))
+    assert v["decision"] == "ask" and v["action_type"] == "ai_budget_change"
+    assert "changed from alice@acme.example" in v["reason"]
+    assert "over an AI budget" in v["reason"] and "$4.00" in v["reason"]
+
+
+def test_the_earlier_identity_is_held_only_for_the_month_it_was_seen(box, monkeypatch):
+    repo = _repo(box)
+    who = ["alice@acme.example"]
+    monkeypatch.setattr(ab, "_read_git_email", lambda cwd: who[0])
+    assert ab.developer(str(repo))[0] == "alice@acme.example"
+    who[0] = "nobody@nowhere.example"
+    (repo / ".git" / "config").write_text("[user]\n\temail = nobody@nowhere.example\n")
+    assert ab.developer(str(repo))[0] == "nobody@nowhere.example"
+    assert ab.earlier_developers(str(repo)) == ["alice@acme.example"]
+    monkeypatch.setattr(ab, "_month_key", lambda: "2099-01")
+    assert ab.earlier_developers(str(repo)) == []
 
 
 def test_an_mcp_shell_tool_changing_it_is_asked(box):

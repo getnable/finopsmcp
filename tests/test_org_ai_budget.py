@@ -288,6 +288,28 @@ def test_without_a_person_budget_the_teams_per_person_usd_applies():
         ("team", "team:payments"): (5000.0, True)}
 
 
+def test_a_proposed_personal_budget_leaves_the_teams_confirmed_per_person_in_force():
+    """A proposal only asks: it never displaces a budget a person confirmed,
+    so the team's per_person_usd still applies, and the stricter answers."""
+    m = _model(_budget("person:alice@acme.example", {"monthly_usd": 1000}, status="proposed"),
+               _budget("team:payments", {"monthly_usd": 100, "per_person_usd": 4}),
+               _team("payments", ["alice@acme.example"]))
+    assert _scopes(m.ai_budgets_for("alice@acme.example")) == {
+        ("person", "person:alice@acme.example"): (1000.0, False),
+        ("per_person", "team:payments"): (4.0, True),
+        ("team", "team:payments"): (100.0, True)}
+
+
+def test_an_untrusted_personal_budget_leaves_the_teams_per_person_in_force_too():
+    own = _budget("person:alice@acme.example", {"monthly_usd": 1000})
+    m = _model(_budget("team:payments", {"monthly_usd": 100, "per_person_usd": 4}),
+               _team("payments", ["alice@acme.example"]))
+    m = OrgModel([*m.facts, _model(own, trusted=False).facts[0]])
+    hits = _scopes(m.ai_budgets_for("alice@acme.example"))
+    assert hits[("person", "person:alice@acme.example")] == (1000.0, False)
+    assert hits[("per_person", "team:payments")] == (4.0, True)
+
+
 def test_a_proposed_budget_or_membership_is_never_sure_and_a_proposed_team_names_nobody():
     m = _model(_budget("team:search", {"monthly_usd": 100, "per_person_usd": 10}),
                _team("search", ["carol@acme.example"], status="proposed"),
