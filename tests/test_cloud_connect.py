@@ -549,5 +549,6 @@ def test_the_network_manifest_lists_the_box_a_person_names():
     doc = json.loads((root / "docs" / "network-manifest.json").read_text(encoding="utf-8"))
     (box,) = [e for e in doc["endpoints"] if e["category"] == "user_named_workspace"]
     assert "--box" in box["host"] and "FINOPS_AIRGAP=1" in box["disabled_by"]
-    for said in (cc.CONNECT_PATH, cc.STATUS_PATH, "--confirm", "HTTPS"):
+    for said in (cc.CONNECT_PATH, cc.STATUS_PATH, cc.STANDING_PATH, '{"person": P}',
+                 cc.DELETE_KIND, "--confirm", "HTTPS", "never this host"):
         assert said in box["purpose"], said

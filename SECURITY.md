@@ -65,7 +65,15 @@ and the guard asks before an agent runs `--send`, `--out` or `nable cloud
 status`. `--out` never writes one of the guard's own files, nable's data
 directory, or anything but a regular file of yours. It POSTs to
 `https://HOST/api/free-tool/connect` and reads `/api/free-tool/status`, over
-HTTPS only, follows no redirect, and is refused under `FINOPS_AIRGAP=1`. The
+HTTPS only, follows no redirect, and is refused under `FINOPS_AIRGAP=1`.
+`--delete-org-file NAME` adds one `org_file_delete` line per file, carrying
+the file name alone, shown in the dry run and covered by its confirm code.
+`nable cloud status` also POSTs exactly `{"person": P}` to
+`/api/free-tool/standing` when the box's status lists `standing` in `reads`:
+P is `--as WHO`, else `FINOPS_GUARD_PERSON`, else git's `user.email`, the
+person the guard holds this machine's agents to. Nothing else is in that
+request. The answer is kept in `cloud-standing.json` beside the ledger
+(0600), without the key; the guard reads that file and never the network. The
 workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
 0600, or a hidden prompt; it is never an argument, and it is never stored,
 printed or logged. No host is built in, and nable adds nothing about the

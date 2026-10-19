@@ -83,6 +83,65 @@ coding-agent spend a person can carry into a paid workspace.
   not list `agent_usage` among what it accepts. A day too large for one
   request leaves the usage out, said.
 - `llm_prices.ModelPrice.cost_exact` (exact decimal) and `citation()`.
+- **A team budget holds on the team's whole figure.** `nable cloud status`
+  also reads the box's month to date for one person when the box's status
+  lists `standing` in a new `reads` field (otherwise it says the box does not
+  offer it yet, and asks nothing): `POST /api/free-tool/standing` with exactly
+  `{"person": P}` and the bound analyst key. P is `--as WHO` (new on
+  `status`), else `FINOPS_GUARD_PERSON`, else git's `user.email`, as the guard
+  resolves whose budget it is. The answer is kept beside the ledger as
+  `cloud-standing.json` (0600): the box, when it was fetched, the UTC month,
+  the person, the figures as decimal strings and each team's coverage. The key
+  is never in it. `status` prints the person's, each of their teams' and the
+  org's month to date, the box's budget standing, and per team how many of its
+  people sent, the latest day and the oldest last day; `--json` adds
+  `standing`. A refused or unreadable answer exits 1 and keeps the last file.
+- **The guard takes the larger figure, never the sum.** For each org model
+  budget that applies on this machine (the person's, a team's
+  `per_person_usd` and `monthly_usd`, the org's), the figure compared is the
+  larger of this machine's UTC month to date and the box's. A sum would count
+  this machine twice once it has sent its usage. The box's figure counts at
+  any age for this UTC month, this person and the box this machine last sent
+  to (`cloud-box.json`, written by `nable cloud connect --send`), or any box
+  while it has sent to none. The reason names both figures, the box's as-of
+  time and age, and which, the larger, was compared; the ledger line adds
+  `budget_figure` (`decision` and `action_type` are unchanged).
+  `FINOPS_GUARD_STOP_ON_BUDGET=1` and `on_budget_breach: deny` deny on the
+  box's figure too. Only the local `budgets.yaml` sets a threshold: the box's
+  budgets are shown, never compared. No file, last month's, another person's
+  or box's, a malformed one or one over 64 KiB: this machine's figure alone,
+  and `nable guard doctor` says why (`ai_budgets.box_standing`). The gate
+  reads the file and never opens a connection. `cloud-standing.json` and
+  `cloud-box.json` are among the guard's own files.
+- **The month to date, priced once.** With an org model budget, the guard
+  priced every response of the month on every shell and MCP call: about
+  370 ms a call over 40,000 responses. A month cache in the data dir (0600,
+  `ai-budget-month.json`, `ai-budget-month.total.json` and one file per
+  transcript under `ai-budget-month/`) keeps each transcript's responses
+  priced, keyed by its path, size, mtime and inode, the UTC month and the
+  `llm_prices` table. Over unchanged transcripts a call prices nothing; a
+  transcript that only grew has its new lines priced and nothing else; any
+  other change, a new month or another price table makes it again. Measured
+  on a synthetic month of 40,000 responses in 400 transcripts: about 4 ms a
+  call unchanged, about 25 ms after one transcript grew. The figure is the one pricing every
+  response gives; a response two transcripts hold counts once, the copy in
+  the path that sorts last. The cache files and `ai-budget-tally/` are among
+  the guard's own files. Codex and Cursor responses are read each call and
+  priced once each. `ai-budget.json`'s own spend cap still prices per call.
+- **`nable cloud connect --delete-org-file NAME`** (repeatable; NAME one of
+  the org model's file names, anything else exit 2 without the name echoed)
+  adds `{"file": NAME, "kind": "org_file_delete", "v": 1}` lines ahead of the
+  org model, so the dry run shows them and the confirm code covers them. A
+  delete and the org model after it always travel in one request: a file this
+  machine also carries applies after its delete, even when the workspace held
+  that text before and replaced it. A box whose status does not list
+  `org_file_delete` among what it accepts is refused before anything is sent.
+  The box's per-file answer (applied, unchanged, stale with when it was
+  replaced, deleted) is printed, and `status` lists each file's sha256, bytes,
+  upload time and key when the box gives them.
+- Tests: the guard's glob test no longer reads the machine's own `/tmp`; it
+  passes with a temp dir of 5,000 entries and with an empty one, and a glob
+  past the guard's listing limit asking is asserted on its own.
 
 ## 0.13.0 (2026-10-18)
 
