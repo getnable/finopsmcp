@@ -3187,8 +3187,11 @@ def _stop_on_budget() -> bool:
         return False
 
 
-def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
-    """Stop the agent when its own token spend is over the budget the user set.
+def check_budget_gate(session_id: str | None = None,
+                      cwd: str | None = None) -> dict[str, Any] | None:
+    """Stop the agent when its own token spend is over the budget the user set,
+    or over an AI budget in the org model (_org_budget_gate); the stricter of
+    the two answers.
 
     This applies to every tool call the hook sees, not just infrastructure
     ones. "Stop the agent because it is spending too much" means stop it, not
@@ -3209,8 +3212,22 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     account, no API key and no network. Returns None when no budget is set, when
     usage is under it, or on ANY error: a guard that cannot read its own budget
     must not take a position. session_id is the hook payload's, so a per-session
-    cap is measured against the session making the call.
+    cap is measured against the session making the call. `cwd` is the agent's
+    directory: the org model is the one it sees (a repo's nable.org/).
     """
+    own = _ai_budget_json_gate(session_id)
+    org = _org_budget_gate(session_id, cwd)
+    if own is None or org is None:
+        return own or org
+    if _SEVERITY[org["decision"]] > _SEVERITY[own["decision"]]:
+        return _with_reason_of(org, own)
+    return _with_reason_of(own, org)
+
+
+def _ai_budget_json_gate(session_id: str | None) -> dict[str, Any] | None:
+    """ai-budget.json's verdict (`nable ai-budget`): the month's spend or
+    tokens and the per-session cap. None when nothing is over or close, or
+    on any error."""
     try:
         from .ai_budget import BUDGET_OVER, BUDGET_WARN, status
         st = status(session_id=session_id) if session_id else status()
@@ -3271,6 +3288,104 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
         }
     except Exception:
         return None  # unreadable budget is not a reason to block anyone
+
+
+def _org_budget_hard_stop() -> tuple[bool, str]:
+    """(deny?, why) for an org model budget a person confirmed, when over:
+    FINOPS_GUARD_STOP_ON_BUDGET decides when set, either way; otherwise the
+    policy's on_budget_breach: deny, or ai-budget.json's on_breach stop.
+    Default: ask."""
+    env = os.getenv("FINOPS_GUARD_STOP_ON_BUDGET", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True, "FINOPS_GUARD_STOP_ON_BUDGET is on"
+    if env in ("0", "false", "no"):
+        return False, ""
+    try:
+        if load_policy().get("on_budget_breach") == "deny":
+            return True, "your policy sets on_budget_breach: deny"
+    except Exception:  # noqa: BLE001, S110 - an unreadable policy stops nothing
+        pass
+    if _stop_on_budget():
+        return True, "you chose to stop on a breach (`nable ai-budget`, on_breach stop)"
+    return False, ""
+
+
+def _org_budget_gate(session_id: str | None, cwd: str | None) -> dict[str, Any] | None:
+    """The org model's AI budgets (nable.org/budgets.yaml) against this
+    machine's month at list price (ai_budget.org_budget_status). Over one:
+    ask, or deny when a person confirmed it where it was read and the hard
+    stop is on (_org_budget_hard_stop). A proposed budget, or one from a repo
+    nobody trusted, only asks. Close (80%): a note, as ai-budget.json's.
+    None when no budgets.yaml is there, none applies, or anything could not
+    be read: an unreadable org model or transcript takes no position.
+
+    Short of a deny, a change to git's user.email for the repo since the
+    guard last read it asks once (ai_budget.identity_moved), whatever made
+    it: whose budget it is moved."""
+    try:
+        from . import ai_budget
+        if not ai_budget.has_org_budgets(cwd):
+            return None
+        v = _org_budget_verdict(session_id, cwd)
+        if v is not None and v["decision"] == "deny":
+            return v
+        moved = ai_budget.identity_moved(cwd)
+        if moved is None:
+            return v
+        was, now = moved["from"], moved["to"] or "nothing"
+        ask = {"decision": "ask", "action_type": "ai_budget_change", "door": None,
+               "reason": (f"nable guard: git's user.email for this repo changed from {was} "
+                          f"to {now} since the guard last read it, and it says whose AI "
+                          f"budget this machine's agents are held to. {was}'s budgets still "
+                          "apply for the rest of this month (UTC), since this machine's "
+                          f"month holds what was spent as {was}; a human should confirm the "
+                          "change. Set FINOPS_GUARD_PERSON in the agent's environment to "
+                          "name the person whatever git says.")}
+        return _with_reason_of(ask, v) if v is not None else ask
+    except Exception:  # noqa: BLE001 - an unreadable org model or transcript stops nobody
+        return None
+
+
+def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, Any] | None:
+    """_org_budget_gate's verdict on the budgets themselves."""
+    try:
+        from . import ai_budget
+        st = ai_budget.org_budget_status(cwd)
+        if st is None or st["verdict"] not in (ai_budget.BUDGET_OVER, ai_budget.BUDGET_WARN):
+            return None
+        hit = st["hit"]
+        words = ai_budget.org_budget_words(st)
+        who = (f" It is {st['person']}'s, from {st['person_source']}." if st.get("person")
+               else "")
+        raise_it = (f"`nable org set ai_budget --subject {hit['subject']} --monthly-usd USD"
+                    + (" --per-person-usd USD" if hit["scope"] == "per_person" else "") + "`")
+        if st["verdict"] == ai_budget.BUDGET_WARN:
+            if not _budget_note_due(f"org:{session_id or '*'}"):
+                return None
+            return {"decision": "warn", "action_type": "ai_budget",
+                    "reason": (f"nable guard: your agent is close to an AI budget in the org "
+                               f"model. {words}.{who} Nothing is stopped; this note shows at "
+                               f"most every {_BUDGET_NOTE_EVERY_MIN} minutes.")}
+        if not hit["sure"]:
+            why = ("it is a proposal nobody has confirmed" if hit["status"] != "confirmed"
+                   else "it comes from a repo's nable.org/ nobody on this machine trusted "
+                        "(`nable org trust --here`)")
+            return {"decision": "ask", "action_type": "ai_budget",
+                    "reason": (f"nable guard: your agent is over an AI budget in the org model. "
+                               f"{words}.{who} This only asks, never stops: {why}. Confirm to "
+                               "continue.")}
+        hard, because = _org_budget_hard_stop()
+        return {"decision": "deny" if hard else "ask", "action_type": "ai_budget",
+                "reason": (f"nable guard: your agent is over an AI budget in the org model. "
+                           f"{words}.{who} "
+                           + (f"Stopped because {because}. Whoever owns the budget can raise "
+                              f"it in their own terminal with {raise_it}."
+                              if hard else
+                              "Confirm to continue, or have whoever owns the budget raise it in "
+                              f"their own terminal with {raise_it}. Set "
+                              "FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop."))}
+    except Exception:  # noqa: BLE001 - an unreadable org model or transcript stops nobody
+        return None
 
 
 # How often the "close to your AI budget" note may show in one session. Every
@@ -4595,7 +4710,7 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         # The command is still judged, so that a policy deny or a cloud budget
         # hard stop is not softened to the budget's ask, and so the ledger
         # holds what the command was.
-        budget_hit = check_budget_gate(session_id)
+        budget_hit = check_budget_gate(session_id, cwd)
         note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
         stop = budget_hit if note is None else None
         v: dict[str, Any] | None
@@ -5062,7 +5177,7 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     try:
         from .guard_mcp import argument_text, translate
 
-        budget_hit = check_budget_gate(session_id)
+        budget_hit = check_budget_gate(session_id, cwd if isinstance(cwd, str) else None)
         note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
         stop = budget_hit if note is None else None
         change = _budget_change(tool_name, arguments) or _protected_mcp(tool_name, arguments)
@@ -5353,6 +5468,98 @@ def _self_change_normalized(cmd: str) -> tuple[str, str] | None:
     return None
 
 
+# git's user.email is whose AI budget this machine's agents are held to
+# (ai_budget.developer, when FINOPS_GUARD_PERSON is unset): an agent that sets
+# it moves its own spend onto somebody else's budget, or onto none. Writing it
+# asks; reading it does not. So does writing include.path or an
+# includeIf.<condition>.path, which brings in another file's [user] section,
+# and removing or renaming the include sections. git's global options before
+# `config` are skipped (-C DIR, -c NAME=VALUE, --git-dir=..., ...), and so are
+# config's own options and their values; the key is matched without regard to
+# case, as git does. Writing a config file git reads it from, by any other
+# means, is a write to one of the guard's own files (guard_paths.protected).
+_GIT_GLOBAL_WITH_VALUE = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                                    "--exec-path", "--config-env", "--super-prefix",
+                                    "--list-cmds", "--attr-source"))
+_CONFIG_WITH_VALUE = frozenset(("-f", "--file", "--blob", "--type", "--default", "--comment",
+                                "--value", "--worktree-file", "--fixed-value-of"))
+_CONFIG_READS = frozenset(("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list",
+                           "-l", "--get-color", "--get-colorbool", "get", "list"))
+_CONFIG_WRITES = frozenset(("--add", "--replace-all", "--unset", "--unset-all", "set", "unset"))
+_CONFIG_SECTION = frozenset(("--remove-section", "--rename-section", "remove-section",
+                             "rename-section"))
+_GIT_IDENTITY = ("git-identity", "ai_budget_change",
+                 ("changing git's user.email, or an include that can set it, which says "
+                  "whose AI budget this machine's agents are held to"))
+
+
+def _word(token: str) -> str:
+    return token.strip("\"'`()")
+
+
+def _identity_key(key: str) -> bool:
+    """user.email, include.path or includeIf.<condition>.path, lower-cased."""
+    return key in ("user.email", "include.path") or (
+        key.startswith("includeif.") and key.endswith(".path"))
+
+
+def _identity_section(name: str) -> bool:
+    return name in ("user", "include") or name.startswith("includeif.")
+
+
+def _config_writes_email(rest: list[str]) -> bool:
+    """Whether the arguments after `git config` write user.email, or an
+    include that can bring one in (or remove the user or include section,
+    or open an editor on a config file)."""
+    words: list[str] = []
+    flags: set[str] = set()
+    i = 0
+    while i < len(rest):
+        t = _word(rest[i])
+        low = t.lower()
+        if low.startswith("-"):
+            name = low.split("=", 1)[0]
+            flags.add(name)
+            if name in _CONFIG_WITH_VALUE and "=" not in low:
+                i += 1
+        else:
+            words.append(low)
+        i += 1
+    if flags & {"-e", "--edit"} or (words[:1] == ["edit"]):
+        return True
+    sub = words[0] if words and words[0] in ("get", "list", "set", "unset", "edit",
+                                             "remove-section", "rename-section") else None
+    args = words[1:] if sub else words
+    if (flags & _CONFIG_SECTION) or sub in _CONFIG_SECTION:
+        return bool(args) and _identity_section(args[0])
+    if (flags & _CONFIG_READS) or sub in ("get", "list"):
+        return False
+    if not args or not _identity_key(args[0]):
+        return False
+    if (flags & _CONFIG_WRITES) or sub in _CONFIG_WRITES:
+        return True
+    return len(args) >= 2       # `git config user.email VALUE` sets; with no value it reads
+
+
+def _git_identity_normalized(cmd: str) -> tuple[str, str] | None:
+    """("self", "git-identity") for a command that writes git's user.email."""
+    if "config" not in cmd or "git" not in cmd:
+        return None
+    for seg in re.split(r"[|;&\n]", cmd):
+        toks = seg.split()
+        for i, tok in enumerate(toks):
+            if _word(tok).rsplit("/", 1)[-1] != "git":
+                continue
+            j = i + 1
+            while j < len(toks) and _word(toks[j]).startswith("-"):
+                opt = _word(toks[j])
+                j += 2 if opt in _GIT_GLOBAL_WITH_VALUE and "=" not in opt else 1
+            if j < len(toks) and _word(toks[j]) == "config" and \
+                    _config_writes_email(toks[j + 1:]):
+                return ("self", _GIT_IDENTITY[0])
+    return None
+
+
 def _self_change(command: str) -> dict[str, Any] | None:
     """An ask for a shell command that changes a budget or removes the guard,
     or None. Every reading of the command counts (_worst_reading), so a
@@ -5360,7 +5567,17 @@ def _self_change(command: str) -> dict[str, Any] | None:
     hide one."""
     hit = _worst_reading(command, _self_change_normalized)
     if hit is None:
-        return None
+        hit = _worst_reading(command, _git_identity_normalized)
+        if hit is None:
+            return None
+        _name, action_type, what = _GIT_IDENTITY
+        shown = " ".join(command.split())
+        if len(shown) > _SHOWN_COMMAND_MAX:
+            shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
+        return {"decision": "ask", "action_type": action_type, "door": None,
+                "reason": (f"nable guard: the agent is {what} (`{shown}`); a human should "
+                           "confirm. Set FINOPS_GUARD_PERSON in the agent's environment to "
+                           "name the person whatever git says.")}
     _rule, action_type, what = _SELF_RULES[hit[1]]
     shown = " ".join(command.split())
     if len(shown) > _SHOWN_COMMAND_MAX:
@@ -6453,7 +6670,7 @@ def _run_hook(stdin: Any, stdout: Any) -> int:
                                    cwd=payload.get("cwd"), tool="Bash")
         elif isinstance(tool, str) and tool.startswith("mcp__"):
             verdict = gate_mcp_call(tool, tool_input, harness="claude-code",
-                                    session_id=session_id)
+                                    session_id=session_id, cwd=payload.get("cwd"))
         elif tool in _EDITOR_TOOLS:
             verdict = gate_editor(tool, tool_input, cwd=payload.get("cwd"),
                                   harness="claude-code", session_id=session_id)
@@ -7248,6 +7465,7 @@ def doctor() -> dict[str, Any]:
     for problem in problems:
         fix("correct the policy setting", problem)
     packs = _doctor_packs(covered, gaps, fix)
+    ai_budgets = _doctor_ai_budgets(covered, gaps, fix)
     try:
         from . import guard_paths
         protected = [e.as_dict() for e in guard_paths.protected()]
@@ -7273,6 +7491,7 @@ def doctor() -> dict[str, Any]:
         "protected_paths": protected,
         "editor_tools": editor_tools,
         "packs": packs,
+        "ai_budgets": ai_budgets,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
@@ -7313,6 +7532,45 @@ def _editor_coverage(rows: list[dict[str, Any]]) -> dict[str, str]:
     for name in _ADAPTER_SURFACES:
         out[name] = "not covered: " + _EDITOR_GAPS[name]
     return out
+
+
+def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
+                       cwd: str | None = None) -> dict[str, Any]:
+    """The doctor's word on the org model's AI budgets (budgets.yaml): whose
+    budgets this machine is held to, which apply, and this month's figure at
+    list price. {"present": False} when there is no budgets.yaml."""
+    from . import ai_budget
+    if not ai_budget.has_org_budgets(cwd):
+        return {"present": False}
+    try:
+        from . import guard_org
+        model = guard_org.load_model(cwd)
+        person, source, applies = ai_budget.budgets_for(model, cwd)
+        usage = ai_budget.month_agent_usage(allow_network=False)
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        gaps.append(f"the org model's AI budgets: they could not be read "
+                    f"({type(exc).__name__}), so the guard holds no agent to them")
+        fix("nable org status", "shows which org file is at fault")
+        return {"present": True, "error": type(exc).__name__}
+    if person is None:
+        gaps.append("the org model's AI budgets for a person or a team: nobody is named on "
+                    "this machine, so only the org's budget applies; set FINOPS_GUARD_PERSON "
+                    "in the agent's environment, or git's user.email")
+    if applies:
+        n = len(applies)
+        covered.append(f"{n} AI budget{'s' if n != 1 else ''} from the org model"
+                       + (f" for {person} ({source})" if person else "")
+                       + ", compared at every shell and MCP call with this machine's "
+                         "coding-agent spend at list price")
+    return {"present": True, "person": person, "person_source": source or None,
+            "applies": [{k: h[k] for k in ("scope", "subject", "usd", "sure", "key", "file",
+                                           "person")}
+                        for h in applies],
+            "earlier_this_month": ai_budget.earlier_developers(cwd),
+            "month_usd": usage["usd_cents"], "basis": "list_price",
+            "unpriced_tokens": usage["unpriced_tokens"],
+            "price_source": ai_budget.price_source(usage["providers"]),
+            "notes": usage["notes"]}
 
 
 def _doctor_packs(covered: list[str], gaps: list[str], fix: Any) -> dict[str, Any]:

@@ -385,6 +385,9 @@ def codex_compressed_skipped(since_epoch: float) -> int:
 CURSOR_API = "https://api.cursor.com/teams/filtered-usage-events"
 _LOOPBACK = ("127.0.0.1", "localhost", "::1")
 _CURSOR_TTL = 3600
+# How far before the month (or the window) a Cursor read starts: one read
+# serves a window that crosses into the month (cursor_responses).
+CURSOR_READ_BEFORE_S = 86400
 _CURSOR_RETRY_AFTER = 600
 _CURSOR_PAGE = 1000
 _CURSOR_MAX_PAGES = 20
@@ -587,7 +590,7 @@ def cursor_responses(since_epoch: float, session_id: str | None = None,
     # the month's start, so a window that crosses into the month is covered too.
     # Never further back: every 30 days is another request, and a session's
     # usage before this month is not what a budget measures.
-    start = (month_start if month_start is not None else since_epoch) - 86400
+    start = (month_start if month_start is not None else since_epoch) - CURSOR_READ_BEFORE_S
     start_ms = int(start * 1000)
     _cursor_status.update({"enabled": True, "scope": email or "team"})
     cache = _cursor_read_cache()

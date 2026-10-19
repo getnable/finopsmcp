@@ -151,13 +151,19 @@ def _no_ambient_service_creds(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_ambient_agent_usage(monkeypatch, _sandbox):
     """The AI budget reads every agent harness on the machine: Claude Code's
-    transcripts (tests point CLAUDE_CONFIG_DIR at a sandbox), Codex CLI's
-    rollouts under CODEX_HOME, and Cursor's Admin API when a key is set. A dev
-    box with a real ~/.codex, a Codex session id in its environment, or a
-    Cursor key must not leak its usage (or a network call) into a unit test.
-    Tests that exercise those readers set their own values on top. The guard's
+    transcripts (CLAUDE_CONFIG_DIR, here an empty sandbox whatever HOME is),
+    Codex CLI's rollouts under CODEX_HOME, and Cursor's Admin API when a key
+    is set. A dev box with a real ~/.claude or ~/.codex, a Codex session id in
+    its environment, or a Cursor key must not leak its usage (or a network
+    call) into a unit test. `nable cloud connect` at a terminal names the
+    sender by git's user.email from PATH's git: that is stubbed to nobody, so
+    the developer's own identity never reaches a test either. Tests that
+    exercise those readers set their own values on top. The guard's
     background refresh (background_refresh) is off under pytest unless a test
     turns it on, so a developer's own setting is cleared too."""
+    from finops import cli_cloud
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(_sandbox("claude-config")))
+    monkeypatch.setattr(cli_cloud, "_git_email", lambda: None)
     monkeypatch.setenv("CODEX_HOME", str(_sandbox("codex-home")))
     for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL",
                 "FINOPS_CURSOR_API_URL", "FINOPS_GUARD_BACKGROUND_REFRESH",

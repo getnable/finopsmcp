@@ -31,6 +31,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -1038,3 +1039,356 @@ def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict
         "session": st["session"],
         "headroom": st["headroom"],
     }
+
+
+# ── Org model budgets (nable.org/budgets.yaml) ───────────────────────────────
+#
+# A team's, a person's or the org's ai_budget fact (finops.org.model) is
+# compared with what this machine's coding agents spent this month (UTC), at
+# list price: only tokens of a model llm_prices has a cited row for are
+# dollars; the rest are counted and said, never priced at a guess. It is this
+# machine alone, so a team's or the org's figure can only be under-counted.
+# Whose budget: FINOPS_GUARD_PERSON, else git's user.email for the agent's
+# directory, read once and kept beside the ledger until git's config changes.
+
+PERSON_ENV = "FINOPS_GUARD_PERSON"
+PERSON_CACHE = "guard-person.json"
+_PERSON_KEPT = 50
+_AGENT_NAMES = {harness_usage.HARNESS_CLAUDE: "Claude Code",
+                harness_usage.HARNESS_CODEX: "Codex",
+                harness_usage.HARNESS_CURSOR: "Cursor"}
+
+
+def _read_git_email(cwd: str | None) -> str | None:
+    """`git config --get user.email` run in `cwd`, or None. The one place a
+    process is started for the identity; the cache keeps it off every call."""
+    import shutil
+    import subprocess
+    git = shutil.which("git")
+    if not git:
+        return None
+    try:
+        r = subprocess.run([git, "config", "--get", "user.email"],  # nosec B603
+                           cwd=cwd if cwd and os.path.isdir(cwd) else None,
+                           capture_output=True, text=True, timeout=2, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    email = (r.stdout or "").strip()
+    return email or None
+
+
+def _stamp(p: Path) -> list[Any]:
+    try:
+        st = p.stat()
+    except OSError:
+        return [str(p), None]
+    return [str(p), st.st_mtime_ns, st.st_size, st.st_ino]
+
+
+def _git_config_files(root: Path | None) -> list[Path]:
+    """guard_paths.git_config_files: the files git reads user.email from,
+    each one of the guard's own files."""
+    from . import guard_paths
+    return guard_paths.git_config_files(root)
+
+
+def _person_cache_path() -> Path:
+    from . import guard_ledger
+    return guard_ledger.ledger_path().with_name(PERSON_CACHE)
+
+
+def _month_key() -> str:
+    """This UTC month, as guard-person.json keeps it ("2026-10")."""
+    return time.strftime("%Y-%m", time.gmtime(_month_start_epoch()))
+
+
+def _read_person_cache() -> tuple[Path, dict[str, Any]]:
+    path = _person_cache_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        entries = doc.get("entries") if isinstance(doc, dict) and doc.get("v") == 1 else None
+    except (OSError, ValueError):
+        entries = None
+    return path, entries if isinstance(entries, dict) else {}
+
+
+def _write_person_cache(path: Path, entries: dict[str, Any]) -> None:
+    kept = dict(list(entries.items())[-_PERSON_KEPT:])
+    with contextlib.suppress(OSError, TypeError, ValueError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        harness_usage.write_json_atomic(path, {"v": 1, "entries": kept})
+
+
+def _root_key(cwd: str | None) -> tuple[Path | None, str]:
+    from . import guard_paths
+    root = guard_paths.git_root(cwd)
+    return root, str(root) if root is not None else ""
+
+
+def _lower(x: Any) -> str:
+    return x.strip().lower() if isinstance(x, str) else ""
+
+
+def _cached_git_email(cwd: str | None) -> str | None:
+    """git's user.email for `cwd`, from guard-person.json while the config
+    files it came from are as they were, else read again (and kept).
+
+    When a read again finds another email than the one kept, the one kept is
+    remembered as `earlier` for the rest of the UTC month (this machine's
+    month holds what was spent under it, so its budgets still apply), and
+    `moved` is set until the guard has asked about it once (identity_moved).
+    That is the backstop for a change no check saw coming: a file an include
+    names, a script."""
+    root, where = _root_key(cwd)
+    stamp = [_stamp(p) for p in _git_config_files(root)]
+    path, entries = _read_person_cache()
+    hit = entries.get(where)
+    hit = hit if isinstance(hit, dict) else None
+    if hit is not None and hit.get("stamp") == stamp:
+        email = hit.get("email")
+        return email if isinstance(email, str) and email else None
+    email = _read_git_email(str(root) if root is not None else cwd)
+    month = _month_key()
+    entry: dict[str, Any] = {"stamp": stamp, "email": email, "month": month}
+    if hit is not None:
+        same_month = hit.get("month", month) == month
+        earlier = [e for e in (hit.get("earlier") or []) if isinstance(e, str)] \
+            if same_month else []
+        before, now = _lower(hit.get("email")), _lower(email)
+        moved = hit.get("moved") if same_month and isinstance(hit.get("moved"), dict) else None
+        if before and before != now:
+            if before not in earlier:
+                earlier.append(before)
+            moved = {"from": before, "to": now or None}
+        earlier = [e for e in earlier if e != now]
+        if earlier:
+            entry["earlier"] = earlier
+        if moved is not None and _lower(moved.get("from")) != now:
+            entry["moved"] = moved
+    entries.pop(where, None)
+    entries[where] = entry
+    _write_person_cache(path, entries)
+    return email
+
+
+def developer(cwd: str | None = None) -> tuple[str | None, str]:
+    """(who this machine's agents spend for, where that came from):
+    FINOPS_GUARD_PERSON, else git's user.email for the agent's directory,
+    lowercased (a budget's person is matched without regard to case).
+    (None, "") when neither says."""
+    env = os.environ.get(PERSON_ENV, "").strip()
+    if env:
+        return env.lower(), PERSON_ENV
+    email = _cached_git_email(cwd)
+    return (email.strip().lower(), "git user.email") if email else (None, "")
+
+
+def earlier_developers(cwd: str | None = None) -> list[str]:
+    """The other emails git's user.email gave for `cwd`'s repo earlier this
+    UTC month (guard-person.json), lowercased; [] under FINOPS_GUARD_PERSON,
+    which names the person whatever git says. Their budgets still apply this
+    month: this machine's month holds what was spent under them."""
+    if os.environ.get(PERSON_ENV, "").strip():
+        return []
+    _root, where = _root_key(cwd)
+    _path, entries = _read_person_cache()
+    hit = entries.get(where)
+    if not isinstance(hit, dict) or hit.get("month", _month_key()) != _month_key():
+        return []
+    return [e for e in (hit.get("earlier") or []) if isinstance(e, str) and e]
+
+
+def identity_moved(cwd: str | None = None) -> dict[str, Any] | None:
+    """{"from", "to"} once after git's user.email for `cwd`'s repo changed
+    (to None when it was removed), then None: the guard asks about it once.
+    None under FINOPS_GUARD_PERSON."""
+    if os.environ.get(PERSON_ENV, "").strip():
+        return None
+    _root, where = _root_key(cwd)
+    path, entries = _read_person_cache()
+    hit = entries.get(where)
+    if not isinstance(hit, dict) or not isinstance(hit.get("moved"), dict):
+        return None
+    moved = hit.pop("moved")
+    _write_person_cache(path, entries)
+    return {"from": _lower(moved.get("from")) or None, "to": _lower(moved.get("to")) or None}
+
+
+def budgets_for(model: Any, cwd: str | None = None) -> tuple[str | None, str, list[dict]]:
+    """(person, where that came from, the org model's AI budgets that apply):
+    the person's, and those of each identity git gave for the repo earlier
+    this month (each hit's "person" says whose), each budget once."""
+    person, source = developer(cwd)
+    seen: set[tuple[str, str]] = set()
+    hits: list[dict[str, Any]] = []
+    for who in [person, *[e for e in earlier_developers(cwd) if e != person]]:
+        for h in model.ai_budgets_for(who, strict=True):
+            if (h["scope"], h["subject"]) in seen:
+                continue
+            seen.add((h["scope"], h["subject"]))
+            hits.append({**h, "person": who})
+    return person, source, hits
+
+
+def list_price_usd(r: dict[str, Any]) -> Decimal | None:
+    """One response at its model's cited list price (llm_prices), exact, or
+    None when llm_prices has no row for the model. A figure the harness
+    reported itself (Cursor's) is not used: every dollar here has one source."""
+    price = llm_prices.price_for(r["model"])
+    if price is None:
+        return None
+    return price.cost_exact(input_tokens=int(r["input"]), output_tokens=int(r["output"]),
+                            cache_write_5m_tokens=int(r["cache_write"]) - int(r["cache_write_1h"]),
+                            cache_write_1h_tokens=int(r["cache_write_1h"]),
+                            cache_read_tokens=int(r["cache_read"]), fast=bool(r.get("fast")),
+                            us_only=bool(r.get("us_only")))
+
+
+def _tokens(r: dict[str, Any]) -> int:
+    return int(r["input"]) + int(r["output"]) + int(r["cache_write"]) + int(r["cache_read"])
+
+
+def cursor_read_since() -> float | None:
+    """Where agent_responses' Cursor read starts (a day before this UTC
+    month), or None when it reads no Cursor usage."""
+    if not (harness_usage.cursor_enabled() and harness_usage.cursor_email()):
+        return None
+    return _month_start_epoch() - harness_usage.CURSOR_READ_BEFORE_S
+
+
+def agent_responses(since_epoch: float, *, allow_network: bool = False
+                    ) -> tuple[list[dict[str, Any]], list[str]]:
+    """(this machine's coding-agent responses since `since_epoch`, notes on
+    what is left out): Claude Code's transcripts, Codex CLI's rollouts and,
+    when its Admin API read is scoped to one person (CURSOR_ADMIN_USER_EMAIL),
+    Cursor's. A team-wide Cursor read is somebody else's usage too, so it is
+    left out and said. Raises when a reader fails: a figure missing a source
+    it should have read is not this machine's spend."""
+    notes: list[str] = []
+    proj = _claude_projects_dir()
+    out = _responses(proj, since_epoch) if proj.is_dir() else []
+    out += harness_usage.codex_responses(since_epoch)
+    if harness_usage.cursor_enabled():
+        if harness_usage.cursor_email():
+            out += harness_usage.cursor_responses(since_epoch, month_start=_month_start_epoch(),
+                                                  allow_network=allow_network)
+            notes += _source_notes(_sources(True))
+        else:
+            notes.append("Cursor's Admin API key reads the whole team's usage, so Cursor is "
+                         "left out; set CURSOR_ADMIN_USER_EMAIL to count one person's")
+    return out, notes
+
+
+def month_agent_usage(*, allow_network: bool = False) -> dict[str, Any]:
+    """This machine's coding-agent spend this month (UTC), at list price:
+    {usd, usd_cents, unpriced_tokens, unpriced_models, agents, providers,
+    notes, month_start}. usd covers priced tokens only; usd_cents is it
+    rounded up to the cent, as text."""
+    since = _month_start_epoch()
+    responses, notes = agent_responses(since, allow_network=allow_network)
+    usd = Decimal(0)
+    unpriced = 0
+    unpriced_models: set[str] = set()
+    agents: set[str] = set()
+    providers: set[str] = set()
+    for r in responses:
+        agents.add(r.get("harness") or harness_usage.HARNESS_CLAUDE)
+        got = list_price_usd(r)
+        if got is None:
+            unpriced += _tokens(r)
+            unpriced_models.add(str(r["model"]))
+            continue
+        usd += got
+        price = llm_prices.price_for(r["model"])
+        if price is not None:
+            providers.add(price.provider)
+    cents = usd.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    return {"usd": float(usd), "usd_cents": format(cents, "f"), "unpriced_tokens": unpriced,
+            "unpriced_models": sorted(unpriced_models),
+            "agents": sorted(agents), "providers": sorted(providers), "notes": notes,
+            "month_start": since}
+
+
+def price_source(providers: list[str] | tuple[str, ...]) -> str:
+    """Where the dollars' rates come from, for a reason a person reads."""
+    names = {"anthropic": "Anthropic", "openai": "OpenAI"}
+    parts = [f"{names.get(p, p)}'s as of {llm_prices.AS_OF_BY_PROVIDER.get(p, llm_prices.AS_OF)}"
+             f" ({llm_prices.SOURCES.get(p, '')})" for p in providers] or [
+        f"as of {llm_prices.AS_OF}"]
+    return "list prices from llm_prices, " + ", ".join(parts)
+
+
+def _org_dirs(cwd: str | None) -> list[Path]:
+    """The org model dirs the guard reads from `cwd`, found without
+    importing the org package (finops.org.store.resolve_dir's rule)."""
+    from . import guard_paths
+    env = os.environ.get("FINOPS_ORG_DIR", "").strip()
+    if env:
+        return [Path(env).expanduser()]
+    out: list[Path] = []
+    root = guard_paths.git_root(cwd)
+    if root is not None:
+        out.append(Path(root) / "nable.org")
+    out.append(guard_paths.data_dir() / "org")
+    return out
+
+
+def has_org_budgets(cwd: str | None = None) -> bool:
+    """Whether any org model dir the guard reads from `cwd` holds a
+    budgets.yaml: a stat or three, so a call with none costs nothing more."""
+    return any((d / "budgets.yaml").is_file() for d in _org_dirs(cwd))
+
+
+_SCOPE_WORDS = {"person": "the monthly budget for {subject}",
+                "per_person": "the per person budget of {subject}",
+                "team": "the monthly budget of {subject}",
+                "org": "the org's monthly budget ({subject})"}
+
+
+def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
+    """The org model's AI budgets against this machine's month: None when
+    no budgets.yaml is there or none applies, else {verdict, hit, usd, pct,
+    person, person_source, usage, hits}, `hit` the budget furthest past its
+    line. Raises when the org model or the usage cannot be read: the caller
+    decides what that means (the guard: no opinion)."""
+    if not has_org_budgets(cwd):
+        return None
+    from . import guard_org
+    model = guard_org.load_model(cwd)
+    person, source, hits = budgets_for(model, cwd)
+    if not hits:
+        return None
+    usage = month_agent_usage(allow_network=False)
+    rows = []
+    for h in hits:
+        pct = usage["usd"] / h["usd"] if h["usd"] > 0 else 0.0
+        rows.append({**h, "pct": pct, "verdict": _verdict(pct)})
+    worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
+    if worst["scope"] in ("person", "per_person") and worst["person"] != person:
+        person, source = worst["person"], (f"git user.email earlier this month; it is "
+                                           f"{person or 'not set'} now")
+    return {"verdict": worst["verdict"], "hit": worst, "usd": usage["usd"], "pct": worst["pct"],
+            "person": person, "person_source": source, "usage": usage, "hits": rows}
+
+
+def org_budget_words(st: dict[str, Any]) -> str:
+    """The figure and the budget, as a reason says them: the file and fact
+    key, the dollars and where their rates come from, and that they are
+    this machine's alone."""
+    h, u = st["hit"], st["usage"]
+    what = _SCOPE_WORDS[h["scope"]].format(subject=h["subject"])
+    agents = ", ".join(_AGENT_NAMES.get(a, a) for a in u["agents"]) or "no agent"
+    text = (f"This machine's coding agents ({agents}) have spent "
+            f"${Decimal(u['usd_cents']):,.2f} in "
+            f"list-price-equivalent dollars this month, {h['pct'] * 100:.0f}% of "
+            f"{what}, ${h['usd']:,.2f} ({h['file'] or 'budgets.yaml'}, fact {h['key']}). "
+            f"Priced at {price_source(u['providers'])}: usage, not an invoice, and "
+            "this machine only: the person's other machines are not counted")
+    if h["scope"] in ("team", "org"):
+        text += ", nor anyone else's, so the figure can only under-count"
+    if u["unpriced_tokens"]:
+        text += (f". {u['unpriced_tokens']:,} tokens from {', '.join(u['unpriced_models'])} "
+                 "are not priced (llm_prices has no cited rate) and are not in the figure")
+    for note in u["notes"]:
+        text += f". {note.rstrip('.')}"
+    return text

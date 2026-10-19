@@ -50,12 +50,18 @@ _LEDGER_FILES = (
     ("packs-guard-cache.json", "the guard's cache of pack rules and price books"),
     # guard_approvals.STORE_NAME: an approval written here lets a call through.
     ("guard-approvals.json", "the one-time approvals for calls the guard stopped"),
+    # ai_budget.PERSON_CACHE: whose org model AI budget this machine is held to.
+    ("guard-person.json", "the git identity the org model's AI budgets are matched by"),
+    # The connect payload's install id (SOURCE_NAME): changed, a resend counts usage twice.
+    ("agent-usage-source", "the install id coding-agent usage is sent under"),
 )
 # Directories beside the ledger: facts derived from the org model's files,
 # keyed on their content (written into, they would be read as facts).
 _LEDGER_DIRS = (
     ("org-parse-cache", "the guard's cache of facts parsed from the org model"),
 )
+_GIT_CONFIG_WHAT = ("a git config file, which holds the user.email whose AI budgets this "
+                    "machine's agents are held to")
 POLICY_FILE_NAME = "nable.policy.yaml"
 ORG_DIR_NAME = "nable.org"
 # Any file with one of these names: `nable budget ci-gate --budget-file` and
@@ -151,6 +157,43 @@ def git_root(start: str | os.PathLike | None = None) -> Path | None:
         if (d / ".git").exists():
             return d
     return None
+
+
+def git_config_files(root: Path | None) -> list[Path]:
+    """The files `git config` reads user.email from, as far as nable can
+    tell without running it: the system file, the global ones, and the
+    repo's own config (its common dir's, and a worktree's). git's user.email
+    says whose AI budget this machine's agents are held to (ai_budget.
+    developer), so each is one of the guard's own files. include.path is not
+    followed: writing one asks (guard._config_writes_email), and a change
+    behind an existing include is caught by ai_budget's identity backstop."""
+    home = _home()
+    out: list[Path] = []
+    if not os.environ.get("GIT_CONFIG_NOSYSTEM"):
+        out.append(Path(os.environ.get("GIT_CONFIG_SYSTEM") or "/etc/gitconfig"))
+    if os.environ.get("GIT_CONFIG_GLOBAL"):
+        out.append(Path(os.environ["GIT_CONFIG_GLOBAL"]).expanduser())
+    else:
+        xdg = os.environ.get("XDG_CONFIG_HOME") or str(home / ".config")
+        out += [Path(xdg) / "git" / "config", home / ".gitconfig"]
+    if root is not None:
+        git = Path(root) / ".git"
+        out.append(git / "config")
+        try:
+            if git.is_file():
+                text = git.read_text(encoding="utf-8")
+                gd = next((line[7:].strip() for line in text.splitlines()
+                           if line.startswith("gitdir:")), "")
+                if gd:
+                    gdir = Path(gd) if Path(gd).is_absolute() else (Path(root) / gd)
+                    out += [gdir / "config.worktree", gdir / "commondir"]
+                    common = (gdir / (gdir / "commondir").read_text().strip())
+                    out.append(common / "config")
+            else:
+                out.append(git / "config.worktree")
+        except OSError:
+            pass
+    return out
 
 
 # ── What git would put back ───────────────────────────────────────────────────
@@ -350,6 +393,7 @@ def protected(cwd: str | None = None) -> list[Protected]:
     ai = Path(os.environ["FINOPS_DATA_DIR"]).expanduser() if os.environ.get(
         "FINOPS_DATA_DIR") else _home() / ".nable"
     entries.append((ai / "ai-budget.json", "the agent's AI budget", False))
+    entries += [(p, _GIT_CONFIG_WHAT, False) for p in git_config_files(root)]
     tag_rules = _env("FINOPS_TAG_RULES")
     accounts = _env("FINOPS_ACCOUNTS_FILE")
     entries.append((Path(tag_rules).expanduser() if tag_rules

@@ -32,6 +32,18 @@ the root of that repo the path may be bare ("infra/payments"); anywhere else
 name). A bare repo_path fact outside a repo belongs to no repo: it is still
 shown, and never counts as confirmed where a confirmation picks a team.
 
+An AI budget (ai_budget, in budgets.yaml) is a ceiling on what coding agents
+spend in a month, in list-price-equivalent US dollars: the dollars the agent's
+tokens would cost at the provider's published rate (finops.llm_prices), not
+anyone's invoice. It is about a team (monthly_usd, and optionally
+per_person_usd, what each of its people may spend), a person (an email or a
+github:login, matched without regard to case) or the org. Only an ai_budget
+fact may be about a person, and ai_budget facts are budgets.yaml's alone, so a
+nable that predates them (0.13.0 reads its own eight files and warns about any
+other) never meets either. The guard compares a budget with this machine's
+spend (finops.ai_budget); a proposal, or a budget from a repo nobody trusted,
+only ever asks.
+
 Nothing here imports more than the standard library. The guard hook will read
 this model on every agent tool call, and its budget is about 100 ms.
 """
@@ -51,11 +63,12 @@ from typing import Any
 log = logging.getLogger("finops.org")
 
 FACT_KINDS = ("owner", "team", "environment", "tag_key", "tag_alias", "account", "threshold",
-              "freeze", "approval")
+              "freeze", "approval", "ai_budget")
 # "environment" is a subject too, so a threshold can be scoped to one (policy.yaml).
+# "person" is an ai_budget's alone (an email or github:login).
 SUBJECT_KINDS = ("aws_account", "gcp_project", "azure_subscription", "k8s_namespace",
                  "repo_path", "service", "tag_value", "resource", "team", "org",
-                 "environment")
+                 "environment", "person")
 ACCOUNT_KINDS = ("aws_account", "gcp_project", "azure_subscription")
 STATUSES = ("proposed", "confirmed", "rejected", "expired")
 LIVE = ("confirmed", "proposed")
@@ -70,6 +83,11 @@ APPROVAL_SUBJECTS = ("team", "environment")
 # in the repo's organisation ("team:platform"), a Jira account id, a Linear
 # user id, or an email address (shown, never sent to).
 APPROVER_KINDS = ("github", "team", "jira", "linear", "email")
+# What an AI budget is about.
+AI_BUDGET_SUBJECTS = ("team", "person", "org")
+_EMAIL_RE = re.compile(r"^[^@\s:]+@[^@\s]+\.[^@\s]+$")
+# GitHub's own rule: 1 to 39 letters, digits or single hyphens.
+_GITHUB_RE = re.compile(r"^github:[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$")
 
 # One file per fact kind, so a diff reads as "ownership changed" or "a tag
 # alias was added" and never both at once.
@@ -83,6 +101,7 @@ FILE_FOR_KIND = {
     "threshold": "policy.yaml",
     "freeze": "freezes.yaml",
     "approval": "approvals.yaml",
+    "ai_budget": "budgets.yaml",
 }
 KNOWN_FILES = tuple(sorted(set(FILE_FOR_KIND.values())))
 HEADER = "# nable org model v1"
@@ -184,6 +203,13 @@ def subject_of(x: Subject | dict | str) -> Subject:
                         "ids in YAML (id: \"012345678901\")")
     if kind == "repo_path":
         ident = _norm_repo_path(ident)
+    if kind == "person":
+        # One person whatever the case: an email's domain and a GitHub login
+        # ignore it, and the local part of an address in practice does too.
+        ident = ident.lower()
+        if not (_EMAIL_RE.match(ident) or _GITHUB_RE.match(ident)):
+            raise FactError(f"subject.id {ident[:80]!r} for a person is an email address or "
+                            "github:LOGIN")
     return Subject(kind, ident)
 
 
@@ -229,6 +255,8 @@ def core_value(fact: str, value: dict[str, Any]) -> tuple:
     if fact == "approval":
         return (many("action_classes"), many("approvers"), v.get("min", 1),
                 bool(v.get("change_ticket")))
+    if fact == "ai_budget":
+        return tuple(v.get(n) for n in ("monthly_usd", "per_person_usd"))
     return (json.dumps(v, sort_keys=True, default=str),)
 
 
@@ -299,6 +327,16 @@ def _number(v: Any, name: str, *, lo: float = 0.0, hi: float | None = None) -> f
     return v
 
 
+def _usd_above_zero(v: Any, name: str) -> float:
+    """A dollar figure a budget can be: a finite number above zero."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise FactError(f"{name} must be a number of US dollars above 0")
+    v = float(v)
+    if not math.isfinite(v) or v <= 0:
+        raise FactError(f"{name} {v:g} must be a number of US dollars above 0")
+    return v
+
+
 def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
     """A cleaned copy of `value` for this fact kind. Raises FactError.
 
@@ -307,6 +345,9 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FactError("value must be a mapping")
     v = dict(value)
+    if subject.kind == "person" and kind != "ai_budget":
+        raise FactError(f"a person subject is for an ai_budget fact (budgets.yaml), not "
+                        f"{kind!r}")
     if kind == "owner":
         _req_str(v, "team")
         _opt_str(v, "channel")
@@ -403,6 +444,19 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
         v["min"] = least
         if v.get("change_ticket") is not None and not isinstance(v["change_ticket"], bool):
             raise FactError("value.change_ticket must be true or false")
+    elif kind == "ai_budget":
+        if subject.kind not in AI_BUDGET_SUBJECTS:
+            raise FactError(f"an ai_budget fact's subject.kind must be one of "
+                            f"{', '.join(AI_BUDGET_SUBJECTS)}")
+        if v.get("monthly_usd") is None:
+            raise FactError("value.monthly_usd is required: the budget a month, in "
+                            "list-price-equivalent US dollars")
+        v["monthly_usd"] = _usd_above_zero(v["monthly_usd"], "value.monthly_usd")
+        if v.get("per_person_usd") is not None:
+            if subject.kind != "team":
+                raise FactError("value.per_person_usd is a team's alone (subject.kind team): "
+                                "what each of its people may spend a month")
+            v["per_person_usd"] = _usd_above_zero(v["per_person_usd"], "value.per_person_usd")
     else:
         raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
     return v
@@ -1317,3 +1371,61 @@ class OrgModel:
                 slots.setdefault(f.slot, []).append(f)
         out = [w for w in (pick(fs) for fs in slots.values()) if w is not None]
         return sorted(out, key=lambda f: (f.subject.kind != "team", str(f.subject), f.key))
+
+    # ── AI budgets ────────────────────────────────────────────────────────────
+
+    def teams_of(self, person: str, *, strict: bool = True) -> list[tuple[str, bool]]:
+        """(team id, sure) for each team whose confirmed team fact lists
+        `person` in its people, without regard to case. A proposed fact names
+        nobody; one a person confirmed in a repo nobody trusted (under
+        `strict`) counts, but not as sure."""
+        who = (person or "").strip().lower()
+        if not who:
+            return []
+        out: list[tuple[str, bool]] = []
+        ids, _names = self._team_table(True, False)
+        for f in ids.values():
+            if who in {str(p).strip().lower() for p in f.value.get("people") or []}:
+                out.append((f.subject.id, self._sure(f, strict)))
+        return sorted(out)
+
+    def ai_budgets_for(self, person: str | None, *, strict: bool = True) -> list[dict[str, Any]]:
+        """The AI budgets that apply to `person` (an email or github:login,
+        or None when nobody is known): their own (scope "person"), else each
+        of their teams' per_person_usd ("per_person"); each of their teams'
+        monthly_usd ("team"); the org's ("org"). The winner of each slot,
+        a proposal included, as {scope, subject, usd, sure, key, file,
+        status}: sure only when a person confirmed it, and its team
+        membership, where it was read (under `strict`, a trusted dir). An
+        answer that is not sure may only ask, so only a sure budget of their
+        own displaces a team's per_person_usd: beside a proposal both apply,
+        and the stricter answers."""
+        out: list[dict[str, Any]] = []
+
+        def hit(scope: str, f: Fact, usd: float, sure: bool) -> None:
+            out.append({"scope": scope, "subject": str(f.subject), "usd": float(usd),
+                        "sure": sure and self._sure(f, strict), "key": f.key,
+                        "file": f.file or "", "status": f.status})
+
+        who = (person or "").strip().lower()
+        own = self.resolve("ai_budget", Subject("person", who)) if who else None
+        if own is not None:
+            hit("person", own, own.value["monthly_usd"], True)
+        own_sure = self._sure(own, strict)
+        teams = dict(self.teams_of(who, strict=strict)) if who else {}
+        by_team: dict[str, list[Fact]] = {}
+        for f in self.by_kind("ai_budget"):
+            if f.live and f.subject.kind == "team":
+                tid = self.canonical_team(f.subject.id, confirmed_only=True)[0].lower()
+                by_team.setdefault(tid, []).append(f)
+        for tid, member_sure in sorted(teams.items()):
+            f = pick(by_team.get(tid.lower(), ()))
+            if f is None:
+                continue
+            if not own_sure and f.value.get("per_person_usd") is not None:
+                hit("per_person", f, f.value["per_person_usd"], member_sure)
+            hit("team", f, f.value["monthly_usd"], member_sure)
+        whole = self.resolve("ai_budget", Subject("org", "org"))
+        if whole is not None:
+            hit("org", whole, whole.value["monthly_usd"], True)
+        return out

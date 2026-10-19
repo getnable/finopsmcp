@@ -29,6 +29,37 @@ The payload is one JSON object per line, keys sorted, no spaces:
     sha256 of the ledger's first line. The chain is checked on these very
     bytes; a chain that breaks is shown, with where, and left out whole.
 
+  * coding-agent usage (D88): one line per (source, UTC day, developer,
+    agent, model, project), for the closed UTC days of the last
+    AGENT_USAGE_DAYS (fewer when Claude Code keeps its transcripts for less:
+    usage_window), from what this machine's agents logged (ai_budget:
+    Claude Code's transcripts, Codex CLI's rollouts, Cursor's Admin API read
+    when it is scoped to one person, for the days that read covers):
+
+    {"agent": "claude_code"|"codex"|"cursor", "basis": "list_price",
+     "day": "YYYY-MM-DD", "developer": "<the sender>", "kind": "agent_usage",
+     "model": "<as the agent logged it>", "price_source": "<the llm_prices
+     row>", "project": "<repo identity>"|"unmapped", "source": "<32 hex>",
+     "tokens": {"cache_read", "cache_write", "input", "output"},
+     "unpriced_tokens": N, "usd": "<at most 6 places>", "v": 1}
+
+    usd covers tokens of a model llm_prices has a cited row for, at that list
+    price, rounded up to the millionth: list-price-equivalent dollars, usage
+    and not an invoice. A model with no row is unpriced: its tokens are
+    counted in unpriced_tokens and carry no dollars. The project is the repo
+    the agent worked in, by its identity (the remote's slug, else the root
+    directory's name), only when the org model holds a repo_path fact for
+    that repo; anything else is "unmapped". The developer is the sender: the
+    person --as names, else, at a terminal, git's user.email, then $USER;
+    with neither there is no record. The source is a random 128-bit id made
+    once per install (SOURCE_NAME beside the ledger). The box replaces, for
+    each (source, developer, day, agent) a batch carries, every record it
+    holds of it, so a resend whose project changed (a repo the org model
+    names now) replaces the old record instead of adding to it; a day's
+    records therefore always travel in one batch. No prompt, file content,
+    path, host name or machine id is in a record; a model logged as a path
+    is sent as "unknown".
+
 Nothing else is added: no hostname, user name or machine id of nable's own.
 What the ledger's records name, they carry, and the dry run counts the
 records that name a path, a host or a user and points at the saved file.
@@ -47,9 +78,11 @@ person looked (the guard appends a record with every agent call it judges, so
 a dry run goes stale), or the dry run was for another box. It asks the box
 what the workspace already holds (GET status), then
 POSTs the rest as ordered batches of at most BATCH_MAX bytes, each a slice of
-the bytes shown, cut where a line ends. A resumed send skips the org model the
-box already holds and the ledger lines up to the head it reports, and nothing
-else.
+the bytes shown, cut where a line ends and never inside one UTC day's
+coding-agent records. A resumed send skips the org model the box already holds
+and the ledger lines up to the head it reports, and nothing else: coding-agent
+usage goes whole every time, since the box replaces each day's records. A box whose status does not list agent_usage among what it accepts
+is told so before anything is sent (--no-agent-usage leaves the records out).
 
 HTTPS only. The box is https://host[:port] with no path, query or user info; a
 redirect is refused, not followed (it would carry the key to wherever it
@@ -63,11 +96,13 @@ stored, printed or logged, and no error message carries it.
 """
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import tempfile
 import urllib.error
@@ -75,6 +110,8 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +130,25 @@ FORMAT = 1
 CONNECT_PATH = "/api/free-tool/connect"
 STATUS_PATH = "/api/free-tool/status"
 PAYLOAD_NAME = "cloud-connect.payload.jsonl"
+# This install's id for its coding-agent usage records, beside the ledger.
+SOURCE_NAME = "agent-usage-source"
+# How many closed UTC days of coding-agent usage a payload carries. Claude
+# Code removes a session's transcript CLAUDE_CLEANUP_DEFAULT days after its
+# last write (its cleanupPeriodDays setting), so an older day can be read
+# short, and the box would take the short figure in place of the whole one.
+# Two days inside that, for a session written just before midnight and a
+# cleanup that ran before the send.
+AGENT_USAGE_DAYS = 28
+CLAUDE_CLEANUP_DEFAULT = 30
+_CLEANUP_MARGIN = 2
+AGENT_NAMES = {"claude-code": "claude_code", "codex": "codex", "cursor": "cursor"}
+_AGENT_SHOWN = {"claude_code": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
+UNMAPPED = "unmapped"
+_MODEL_MAX = 128
+_DEVELOPER_MAX = 254
+# A project the box takes: a repo's identity, never a path. One that does not
+# fit (a directory name with characters a slug never has) is sent "unmapped".
+_PROJECT_RE = re.compile(r"^(?![./~])(?!.*//)[A-Za-z0-9._~@+:/ -]{1,256}$")
 TIMEOUT_S = 30.0
 _KEY_MAX = 512
 
@@ -117,6 +173,8 @@ class Payload:
     org_sha256: str | None = None
     # sha256 of each ledger line as stored, in order: what a box's head names.
     ledger_hashes: list[str] = field(default_factory=list)
+    # What the coding-agent usage records hold, for the dry run.
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 def _sha(b: bytes) -> str:
@@ -249,8 +307,14 @@ def _ledger(path: Path | None) -> dict[str, Any]:
 # ── the payload ──────────────────────────────────────────────────────────────
 
 def build(*, org_dir: str | os.PathLike | None = None,
-          ledger_path: Path | None = None) -> Payload:
-    """The payload, from what is on this machine now. Reads files only."""
+          ledger_path: Path | None = None, developer: str | None = None,
+          developer_from: str = "", agent_usage: bool = True,
+          now: datetime | None = None, left_out: str | None = None) -> Payload:
+    """The payload, from what is on this machine now. Reads files only (and
+    makes this install's source id, the first time agent usage is built).
+
+    `developer` is the sender the agent usage is sent as; None leaves it
+    out, said with `left_out` (or a default reason). `now` fixes "today"."""
     org = _org(org_dir)
     led = _ledger(ledger_path)
     parts: list[tuple[str, bytes]] = []
@@ -263,6 +327,31 @@ def build(*, org_dir: str | os.PathLike | None = None,
         else:
             parts.append(("org_model", line))
             org_sha = _sha(line)
+    if not agent_usage:
+        usage = _usage_left_out(left_out or "--no-agent-usage was given")
+    elif not (developer or "").strip():
+        usage = _usage_left_out(left_out or "no developer is named: run this at your own "
+                                             "terminal, or pass --as WHO")
+    elif any(ord(c) < 0x20 or ord(c) == 0x7f for c in developer):
+        usage = _usage_left_out("the developer's name holds a control character; pass --as "
+                                "WHO with a plain name or email")
+    else:
+        records, usage = agent_usage_records(developer=developer.strip(),
+                                             developer_from=developer_from,
+                                             org_dir=org_dir, now=now)
+        day_bytes: dict[str, int] = {}
+        for rec in records:
+            line = _line(rec)
+            day_bytes[rec["day"]] = day_bytes.get(rec["day"], 0) + len(line) + 1
+            if day_bytes[rec["day"]] > BATCH_MAX:
+                # The box replaces a day's records whole, so a day travels in
+                # one batch; one too large for a request is never cut in two.
+                usage = _usage_left_out(f"the records for {rec['day']} are over the "
+                                        f"{BATCH_MAX:,} bytes one request takes, and a day's "
+                                        "records are sent in one request or not at all")
+                parts = [x for x in parts if x[0] != "agent_usage"]
+                break
+            parts.append(("agent_usage", line))
     hashes: list[str] = []
     if led["lines"] and not led["left_out"]:
         wrapped = []
@@ -294,7 +383,231 @@ def build(*, org_dir: str | os.PathLike | None = None,
     org.pop("texts", None)
     led.pop("lines", None)
     return Payload(data=data_b, sha256=_sha(data_b), lines=spans, org=org, ledger=led,
-                   org_sha256=org_sha, ledger_hashes=hashes)
+                   org_sha256=org_sha, ledger_hashes=hashes, usage=usage)
+
+
+# ── coding-agent usage ───────────────────────────────────────────────────────
+
+def _usage_left_out(why: str) -> dict[str, Any]:
+    return {"records": 0, "left_out": why, "basis": "list_price"}
+
+
+def source_id() -> str:
+    """This install's id for its agent usage: 32 random hex digits, made
+    once and kept (0600) beside the ledger. OSError when it cannot be kept:
+    an id made anew each time would turn every resend into new rows."""
+    path = guard_ledger.ledger_path().parent / SOURCE_NAME
+    try:
+        got = path.read_text(encoding="utf-8").strip()
+        if re.fullmatch(r"[0-9a-f]{32}", got):
+            return got
+    except FileNotFoundError:
+        pass
+    new = secrets.token_hex(16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(new + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    return new
+
+
+def _mapped_repos(org_dir: str | os.PathLike | None) -> set[str]:
+    """The repos the org model names in a repo_path fact (a live one, from a
+    directory this machine trusts): the only projects a record names."""
+    from .org.model import split_repo_path
+    from .org.store import load
+    out: set[str] = set()
+    for f in load(org_dir).facts:
+        if f.subject.kind != "repo_path" or not f.live or not f.trusted:
+            continue
+        repo = split_repo_path(f.subject.id)[0] or f.anchor
+        if repo:
+            out.add(repo.lower())
+    return out
+
+
+def _model_shown(raw: Any) -> str:
+    """The model as the agent logged it, unless that could carry a path or
+    is not one printable line: then "unknown"."""
+    m = str(raw or "unknown").strip()
+    if (not m or len(m) > _MODEL_MAX or m.startswith(("/", "~", "."))
+            or "\\" in m or "/home/" in m or "/Users/" in m
+            or any(ord(c) < 0x21 or ord(c) > 0x7e for c in m)):
+        return "unknown"
+    return m
+
+
+def _usd_text(x: Decimal) -> str:
+    """At most 6 places, rounded up (a cost is never shown smaller)."""
+    q = x.quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+    text = format(q, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _claude_cleanup_days() -> tuple[int, str]:
+    """(how many days Claude Code keeps a transcript after its last write,
+    where that came from): cleanupPeriodDays in Claude Code's user settings
+    (CLAUDE_CONFIG_DIR, else ~/.claude), else its default. Only that file
+    is read; a project's or a managed setting is not."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    path = (Path(base) if base else Path.home() / ".claude") / "settings.json"
+    try:
+        got = json.loads(path.read_text(encoding="utf-8")).get("cleanupPeriodDays")
+    except (OSError, ValueError, AttributeError):
+        got = None
+    if isinstance(got, int) and not isinstance(got, bool) and got >= 1:
+        return got, f"cleanupPeriodDays {got} in {path}"
+    return CLAUDE_CLEANUP_DEFAULT, f"cleanupPeriodDays, {CLAUDE_CLEANUP_DEFAULT} by default"
+
+
+def usage_window() -> tuple[int, str]:
+    """(how many closed UTC days a payload carries, why it stops there)."""
+    kept, where = _claude_cleanup_days()
+    days = max(1, min(AGENT_USAGE_DAYS, kept - _CLEANUP_MARGIN))
+    return days, (f"{days} closed UTC days: Claude Code removes a session's transcript {kept} "
+                  f"days after its last write ({where}), so an older day could be read short "
+                  "and is not sent. Send at least every "
+                  f"{days} days for every day to reach the workspace.")
+
+
+def agent_usage_records(*, developer: str, developer_from: str = "",
+                        org_dir: str | os.PathLike | None = None,
+                        now: datetime | None = None) -> tuple[list[dict[str, Any]],
+                                                              dict[str, Any]]:
+    """(records in key order, what they hold), from this machine's agents
+    for the closed UTC days of usage_window. Cursor counts only for the days
+    its read covers (ai_budget.cursor_read_since), and the rest of the
+    window is said as not read. A reader that fails leaves the usage out,
+    said as not read, never as zero."""
+    from . import ai_budget, llm_prices
+    from .org.store import git_root, repo_identity
+
+    now = (now or datetime.now(UTC)).astimezone(UTC)
+    today = now.date()
+    window_days, limit = usage_window()
+    first = today - timedelta(days=window_days)
+    since = datetime(first.year, first.month, first.day, tzinfo=UTC).timestamp()
+    until = datetime(today.year, today.month, today.day, tzinfo=UTC).timestamp()
+    who = developer.strip()[:_DEVELOPER_MAX]
+    try:
+        source = source_id()
+    except OSError as exc:
+        return [], _usage_left_out(f"this install's id could not be kept beside the ledger "
+                                   f"({exc.strerror or type(exc).__name__})")
+    try:
+        responses, notes = ai_budget.agent_responses(since, allow_network=False)
+        mapped = _mapped_repos(org_dir)
+        cursor_since = ai_budget.cursor_read_since()
+    except Exception as exc:  # noqa: BLE001 - not read is said, never a zero
+        return [], _usage_left_out(f"not read ({type(exc).__name__}: {str(exc)[:120]})")
+    notes = list(notes)
+    agent_windows: dict[str, dict[str, str]] = {}
+    last = (today - timedelta(days=1)).isoformat()
+    if cursor_since is not None and cursor_since > since:
+        # The Cursor read the guard keeps starts a day before the month: an
+        # earlier day of the window is not read, so it is not sent at all.
+        c_first = datetime.fromtimestamp(cursor_since, UTC).date()
+        c_first = max(c_first, first)
+        agent_windows["cursor"] = {"first": c_first.isoformat(), "last": last}
+        responses = [r for r in responses
+                     if AGENT_NAMES.get(str(r.get("harness") or "")) != "cursor"
+                     or (isinstance(r.get("ts"), (int, float)) and r["ts"] >= cursor_since)]
+        notes.append(f"Cursor is read from {c_first.isoformat()} (the Admin API read the "
+                     "guard keeps starts the day before this month), so Cursor usage on "
+                     f"{first.isoformat()} to {(c_first - timedelta(days=1)).isoformat()} "
+                     "is not read and not in these records, never zero; the workspace keeps "
+                     "what an earlier send held for those days.")
+    projects: dict[str, str] = {}
+
+    def project_of(cwd: Any) -> str:
+        if not isinstance(cwd, str) or not cwd:
+            return UNMAPPED
+        if cwd not in projects:
+            name = UNMAPPED
+            try:
+                root = git_root(cwd) if os.path.isdir(cwd) else None
+                if root is not None:
+                    ident = repo_identity(root)
+                    name = (ident if ident and ident.lower() in mapped
+                            and _PROJECT_RE.match(ident) else UNMAPPED)
+            except OSError:
+                name = UNMAPPED
+            projects[cwd] = name
+        return projects[cwd]
+
+    groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for r in responses:
+        ts = r.get("ts")
+        if not isinstance(ts, (int, float)) or not since <= ts < until:
+            continue
+        day = datetime.fromtimestamp(ts, UTC).date().isoformat()
+        agent = AGENT_NAMES.get(str(r.get("harness") or "claude-code"))
+        if agent is None:
+            continue
+        model = _model_shown(r.get("model"))
+        key = (day, agent, model, project_of(r.get("cwd")))
+        g = groups.setdefault(key, {"tokens": {"cache_read": 0, "cache_write": 0, "input": 0,
+                                               "output": 0},
+                                    "usd": Decimal(0), "unpriced": 0, "price": None})
+        t = g["tokens"]
+        t["input"] += int(r["input"])
+        t["output"] += int(r["output"])
+        t["cache_write"] += int(r["cache_write"])
+        t["cache_read"] += int(r["cache_read"])
+        price = llm_prices.price_for(str(r.get("model") or ""))
+        if price is None or model == "unknown":
+            g["unpriced"] += (int(r["input"]) + int(r["output"]) + int(r["cache_write"])
+                              + int(r["cache_read"]))
+            continue
+        g["price"] = price
+        g["usd"] += price.cost_exact(
+            input_tokens=int(r["input"]), output_tokens=int(r["output"]),
+            cache_write_5m_tokens=int(r["cache_write"]) - int(r["cache_write_1h"]),
+            cache_write_1h_tokens=int(r["cache_write_1h"]),
+            cache_read_tokens=int(r["cache_read"]), fast=bool(r.get("fast")),
+            us_only=bool(r.get("us_only")))
+    records: list[dict[str, Any]] = []
+    for (day, agent, model, project), g in sorted(groups.items()):
+        price = g["price"]
+        records.append({
+            "agent": agent, "basis": "list_price", "day": day, "developer": who,
+            "kind": "agent_usage", "model": model,
+            "price_source": (price.citation() if price is not None
+                             else "none: no llm_prices row for this model, so its tokens "
+                                  "are counted and not priced"),
+            "project": project, "source": source, "tokens": dict(g["tokens"]),
+            "unpriced_tokens": int(g["unpriced"]), "usd": _usd_text(g["usd"]), "v": FORMAT})
+    total = sum((Decimal(x["usd"]) for x in records), Decimal(0))
+    tokens = {k: sum(x["tokens"][k] for x in records)
+              for k in ("input", "output", "cache_write", "cache_read")}
+    days = sorted({x["day"] for x in records})
+    summary = {
+        "records": len(records), "left_out": None, "basis": "list_price",
+        "developer": who, "developer_from": developer_from, "source": source,
+        "days": ({"first": days[0], "last": days[-1], "count": len(days)} if days else None),
+        "window": {"first": first.isoformat(), "last": last, "limit": limit},
+        "agent_windows": agent_windows,
+        "agents": sorted({x["agent"] for x in records}),
+        "models": sorted({x["model"] for x in records}),
+        "projects": sorted({x["project"] for x in records if x["project"] != UNMAPPED}),
+        "unmapped_records": sum(1 for x in records if x["project"] == UNMAPPED),
+        "tokens": tokens, "unpriced_tokens": sum(x["unpriced_tokens"] for x in records),
+        "unpriced_models": sorted({x["model"] for x in records if x["unpriced_tokens"]}),
+        "usd": _usd_text(total),
+        "price_sources": sorted({x["price_source"] for x in records
+                                 if not x["price_source"].startswith("none:")}),
+        "notes": list(notes),
+    }
+    return records, summary
 
 
 def default_out() -> Path:
@@ -362,16 +675,34 @@ def save(payload: Payload, path: Path | None = None) -> Path:
     return path
 
 
+def _units(payload: Payload, a: int, b: int) -> list[tuple[int, int]]:
+    """The lines in [a, b) as the pieces a batch is never cut inside: one
+    line, or the run of one UTC day's coding-agent records (the box
+    replaces a day's records whole)."""
+    units: list[tuple[int, int]] = []
+    last_day = None
+    for kind, s, e in payload.lines:
+        if s < a or e > b:
+            continue
+        day = json.loads(payload.data[s:e])["day"] if kind == "agent_usage" else None
+        if day is not None and day == last_day and units and units[-1][1] == s:
+            units[-1] = (units[-1][0], e)
+        else:
+            units.append((s, e))
+        last_day = day
+    return units
+
+
 def _batches(payload: Payload, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Each range cut into slices of at most BATCH_MAX bytes, at line ends."""
+    """Each range cut into slices of at most BATCH_MAX bytes, at line ends,
+    never inside one day's coding-agent records (build keeps each day
+    under BATCH_MAX)."""
     out: list[tuple[int, int]] = []
     for a, b in ranges:
         start = a
         last = a
-        for _kind, s, e in payload.lines:
-            if s < a or e > b:
-                continue
-            if e - start > BATCH_MAX:
+        for _s, e in _units(payload, a, b):
+            if e - start > BATCH_MAX and last > start:
                 out.append((start, last))
                 start = last
             last = e
@@ -391,6 +722,10 @@ def plan(payload: Payload, held: Mapping[str, Any] | None) -> list[tuple[int, in
     org = [x for x in payload.lines if x[0] == "org_model"]
     if org and held_org != payload.org_sha256:
         ranges.append((org[0][1], org[0][2]))
+    usage = [x for x in payload.lines if x[0] == "agent_usage"]
+    if usage:
+        # Replaced by key on the box, so sent whole every time.
+        ranges.append((usage[0][1], usage[-1][2]))
     ledger = [x for x in payload.lines if x[0] == "ledger_line"]
     if ledger:
         start = 0
@@ -534,6 +869,12 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
     if not box.startswith("https://"):
         raise ConnectError("only HTTPS: the key and the payload never travel over plain HTTP")
     held = status(box, key, opener=opener)
+    accepts = held.get("accepts")
+    if any(kind == "agent_usage" for kind, _a, _b in payload.lines) and not (
+            isinstance(accepts, list) and "agent_usage" in accepts):
+        raise ConnectError("the box does not say it takes coding-agent usage records, so "
+                           "nothing was sent. Run the dry run again with --no-agent-usage "
+                           "to send the org model and the ledger without them.")
     batches = plan(payload, held)
     sent = 0
     for n, (a, b) in enumerate(batches, start=1):
@@ -603,6 +944,7 @@ def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
     return {"dry_run": True, "sent": False, "destination": {"box": box,
                                                             "host": host_of(box)},
             "org_model": payload.org, "ledger": payload.ledger,
+            "agent_usage": payload.usage,
             "payload": {"bytes": len(payload.data), "lines": len(payload.lines),
                         "sha256": payload.sha256,
                         "batches": len(plan(payload, None)),
@@ -648,9 +990,10 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
                              "the saved file before you send")
     if led.get("partial"):
         lines.append("  the last record was still being written; it waits for the next connect")
-    lines.append("")
+    lines += ["", *_describe_usage(payload.usage), ""]
     if not payload.data:
-        lines += ["Nothing to send: no org model and no ledger records here."]
+        lines += [("Nothing to send: no org model, no ledger records and no coding-agent "
+                   "usage here.")]
         return "\n".join(lines)
     count = len(plan(payload, None))
     n_lines = len(payload.lines)
@@ -667,3 +1010,42 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
                "--key-file with mode 0600, or a hidden prompt, never from the command line. "
                "A resend skips what the workspace already holds.")]
     return "\n".join(lines)
+
+
+def _describe_usage(u: Mapping[str, Any]) -> list[str]:
+    """The coding-agent usage part of the dry run."""
+    n = u.get("records") or 0
+    if u.get("left_out"):
+        return ["Coding agents", f"  left out: {u['left_out']}"]
+    w = u.get("window") or {}
+    if not n:
+        return ["Coding agents", (f"  no usage on closed UTC days {w.get('first')} to "
+                                  f"{w.get('last')}")]
+    d = u.get("days") or {}
+    t = u.get("tokens") or {}
+    who = u.get("developer")
+    out = [f"Coding agents {n:,} record{'s' if n != 1 else ''}, {d.get('first')} to "
+           f"{d.get('last')} ({d.get('count')} UTC day{'s' if d.get('count') != 1 else ''}), "
+           f"sent as developer {who}" + (f" ({u['developer_from']})"
+                                         if u.get("developer_from") else ""),
+           "  agents     " + ", ".join(_AGENT_SHOWN.get(a, a) for a in u.get("agents") or []),
+           "  models     " + ", ".join(u.get("models") or []),
+           "  projects   " + (", ".join(u.get("projects") or []) or "none named")
+           + (f"; {u['unmapped_records']:,} record(s) unmapped (no repo_path fact in the org "
+              "model names their repo)" if u.get("unmapped_records") else ""),
+           (f"  tokens     input {t.get('input', 0):,}, output {t.get('output', 0):,}, "
+            f"cache write {t.get('cache_write', 0):,}, cache read {t.get('cache_read', 0):,}"),
+           (f"  USD        ${u.get('usd')} list-price equivalent: what the tokens cost at the "
+            "published rate, usage and not an invoice, never added to billed dollars"),
+           "  priced     " + ("; ".join(u.get("price_sources") or []) or "nothing priced")]
+    if u.get("unpriced_tokens"):
+        out.append(f"  unpriced   {u['unpriced_tokens']:,} tokens from "
+                   f"{', '.join(u.get('unpriced_models') or [])}: counted, not priced "
+                   "(llm_prices has no cited rate)")
+    for note in u.get("notes") or []:
+        out.append(f"  note       {note}")
+    if w.get("limit"):
+        out.append(f"  window     {w.get('first')} to {w.get('last')}, {w['limit']}")
+    out.append("  each record is one UTC day, developer, agent, model and project: no prompt, "
+               "file content, path, host name or machine id")
+    return out

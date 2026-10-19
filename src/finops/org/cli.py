@@ -23,6 +23,12 @@
                          --approver github:alice --approver team:platform [--min 1]
                                  who reviews that class of change: nable's pull
                                  requests request them, its tickets add them
+  nable org set ai_budget --subject team:payments --monthly-usd 5000 [--per-person-usd 400]
+  nable org set ai_budget --subject person:alice@acme.com --monthly-usd 300
+  nable org set ai_budget --subject org:org --monthly-usd 20000
+                                 a coding-agent budget a month, in list-price-equivalent
+                                 US dollars (budgets.yaml); the guard compares it with
+                                 this machine's agent spend at the next shell or MCP call
   nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
                                  (init and questions first read the guard's
@@ -107,9 +113,9 @@ def add_parser(sub) -> None:
 
     x = osub.add_parser("set", parents=[common], help="State a fact directly (confirmed)")
     x.add_argument("org_set_kind", choices=["owner", "environment", "team", "threshold",
-                                             "freeze", "approval"],
+                                             "freeze", "approval", "ai_budget"],
                    metavar="KIND", help="owner | environment | team | threshold | freeze | "
-                                        "approval")
+                                        "approval | ai_budget")
     x.add_argument("--subject", "--scope", dest="org_subject", default=None, metavar="KIND:ID",
                    help="e.g. aws_account:123456789012, repo_path:infra/payments "
                         "(owner, environment); team:payments, environment:prod or org:org "
@@ -144,6 +150,13 @@ def add_parser(sub) -> None:
                                        "and run without asking")
     x.add_argument("--velocity-cap-usd", dest="org_velocity_cap", type=float, default=None,
                    metavar="USD", help="threshold: the velocity cap, $/mo per window")
+    x.add_argument("--monthly-usd", dest="org_monthly_usd", type=float, default=None,
+                   metavar="USD", help="ai_budget: the budget a month, in list-price-equivalent "
+                                       "US dollars (what the agents' tokens cost at the "
+                                       "provider's published rate, not an invoice)")
+    x.add_argument("--per-person-usd", dest="org_per_person_usd", type=float, default=None,
+                   metavar="USD", help="ai_budget on a team: what each of its people may "
+                                       "spend a month, the same way")
     x.add_argument("--team", dest="org_team", default=None,
                    help="owner: the owning team; team: the team's id")
     x.add_argument("--channel", dest="org_channel", default=None,
@@ -465,6 +478,19 @@ def _set(parsed, org) -> int:
         if isinstance(built, int):
             return built
         subject, value = parsed.org_subject, built
+    elif kind == "ai_budget":
+        if not parsed.org_subject:
+            print("set ai_budget needs --subject team:TEAM, person:EMAIL (or "
+                  "person:github:LOGIN) or org:org", file=sys.stderr)
+            return 2
+        if getattr(parsed, "org_monthly_usd", None) is None:
+            print("set ai_budget needs --monthly-usd USD, the budget a month in "
+                  "list-price-equivalent US dollars", file=sys.stderr)
+            return 2
+        subject = parsed.org_subject
+        value = {"monthly_usd": parsed.org_monthly_usd}
+        if getattr(parsed, "org_per_person_usd", None) is not None:
+            value["per_person_usd"] = parsed.org_per_person_usd
     elif kind == "threshold":
         if not parsed.org_subject:
             print("set threshold needs --subject team:TEAM, environment:ENV or org:org",
@@ -509,6 +535,10 @@ def _set(parsed, org) -> int:
         print(f"Not set: {e}", file=sys.stderr)
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
+    if f.fact == "ai_budget":
+        print("  In list-price-equivalent US dollars a month: what the agents' tokens cost at "
+              "the provider's published rate, not an invoice. The guard compares it with this "
+              "machine's coding-agent spend at the agent's next shell or MCP call.")
     return 0
 
 
