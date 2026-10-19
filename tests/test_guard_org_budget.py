@@ -83,7 +83,11 @@ def box(tmp_path, monkeypatch):
     for var in ("FINOPS_GUARD_PERSON", "FINOPS_GUARD_STOP_ON_BUDGET", "CLAUDE_CODE_SESSION_ID",
                 "FINOPS_TAG_RULES", "FINOPS_ACCOUNTS_FILE", "FINOPS_REQUIRED_TAGS",
                 "FINOPS_PROTECTED_TAGS", "FINOPS_POLICY_FILE",
-                "FINOPS_POLICY_ON_BUDGET_BREACH"):
+                "FINOPS_POLICY_ON_BUDGET_BREACH",
+                # Where git looks for its config: a CI runner sets XDG_CONFIG_HOME,
+                # which moves the XDG file out of the sandboxed HOME.
+                "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+                "GIT_CONFIG_NOSYSTEM"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("PATH", "")          # nothing here may depend on what is on PATH
     monkeypatch.setattr(ab, "_month_start_epoch", lambda: MONTH_START)
