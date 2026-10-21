@@ -150,7 +150,7 @@ def test_status_posts_exactly_the_person_the_guard_holds_and_keeps_the_answer(la
     assert doc["figures"]["teams"][0]["usd"] == "5420"
     for shown in ("team payments", "$5,420.00", "3 of 4 people sent", "latest day 2026-10-04",
                   "oldest last day 2026-10-01", "$120.50", "budget $5,000.00 a month: over",
-                  "never their sum", str(path)):
+                  "$120.50 across 4 day(s), last day 2026-10-04", "never their sum", str(path)):
         assert shown in out, shown
 
 

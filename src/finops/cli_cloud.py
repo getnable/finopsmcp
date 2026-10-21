@@ -494,7 +494,8 @@ def _standing_text(got: Mapping[str, Any]) -> str:
     head = (f"Standing for {d['person']} ({got.get('person_from')}), {d['month']} UTC, as of "
             f"{d['as_of'] or 'no records received'}, {d['basis']} dollars from what people "
             "sent:")
-    days = (f" over {p['days']} day(s), last day {p['last_day']}" if p["usd"] is not None
+    # "across", not "over": the budget's state on the same line may be "over".
+    days = (f" across {p['days']} day(s), last day {p['last_day']}" if p["usd"] is not None
             else "")
     lines = [head, f"  {d['person']:<24} {_money(p['usd'])}{days}; {_budget_text(p['budget'])}"]
     for t in f["teams"]:
