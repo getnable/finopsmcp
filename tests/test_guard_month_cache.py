@@ -250,3 +250,21 @@ def test_an_unchanged_month_reads_the_small_total_alone(heavy, monkeypatch):
                         lambda self, p, st, entry: opened.append(p))
     ab.month_agent_usage()
     assert read == [ab.MONTH_TOTAL] and opened == []
+
+
+def test_a_grown_transcript_is_the_only_one_read_again(heavy, monkeypatch):
+    """The call after an agent's turn: one transcript grew. The others are
+    taken from the index by their stats, so neither their shards nor their
+    files are read; only the grown one is, from where its last read stopped."""
+    ab.month_agent_usage()
+    _append(heavy["claude"], "s-a", 2)
+    opened: list[str] = []
+    real = ab._MonthTally._read_file
+
+    def spy(self, p, st, entry):
+        opened.append(os.path.basename(p))
+        return real(self, p, st, entry)
+    monkeypatch.setattr(ab._MonthTally, "_read_file", spy)
+    u = ab.month_agent_usage()
+    assert opened == ["s-a.jsonl"]
+    assert u["usd_cents"] == _uncached()

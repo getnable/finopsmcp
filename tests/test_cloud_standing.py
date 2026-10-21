@@ -321,6 +321,36 @@ def test_the_boxs_person_and_org_figures_count_for_their_budgets(team):
     assert "alice@acme.example" in v["reason"]
 
 
+def test_the_boxs_figure_never_meets_an_earlier_identitys_budget(_box, monkeypatch):  # noqa: F811
+    """git's user.email changed this month. The earlier identity's budgets
+    still apply to this machine's month, but the box's standing is about the
+    person named now, so it is compared with that person's budgets alone."""
+    from decimal import Decimal
+
+    from tests.test_guard_org_budget import _repo
+    repo = _repo(_box)
+    who = ["alice@acme.example"]
+    monkeypatch.setattr(ab, "_read_git_email", lambda cwd: who[0])
+    monkeypatch.setattr(cloud_standing, "now_epoch", lambda: AT.timestamp())
+    (_box["org"] / "budgets.yaml").write_text(
+        BUDGET.format(kind="person", ident="alice@acme.example", value="{monthly_usd: 100}",
+                      status="confirmed")
+        + BUDGET.format(kind="person", ident="carol@acme.example",
+                        value="{monthly_usd: 10000}", status="confirmed").split("\n", 1)[1])
+    assert guard.gate_command("ls -la", cwd=str(repo)) is None     # $4.50 of alice's $100
+    who[0] = "carol@acme.example"
+    (repo / ".git" / "config").write_text("[user]\n\temail = carol@acme.example\n")
+    guard.gate_command("ls -la", cwd=str(repo))                    # the identity ask, once
+    _keep(answer(person="carol@acme.example", person_usd="5000", teams=[]))
+    st = ab.org_budget_status(str(repo))
+    hits = {h["person"]: h for h in st["hits"]}
+    assert set(hits) == {"alice@acme.example", "carol@acme.example"}
+    assert hits["carol@acme.example"]["box_usd"] == Decimal(5000)
+    assert hits["alice@acme.example"]["box_usd"] is None
+    assert hits["alice@acme.example"]["compared"] == "machine"
+    assert guard.gate_command("ls -la", cwd=str(repo)) is None     # 50% of carol's budget
+
+
 def test_a_team_the_box_does_not_list_is_this_machines_figure(team):
     _machine(team, 5420)
     _keep(answer(teams=[]))
