@@ -230,7 +230,7 @@ def _team_budget(box_fixture, monthly="5000"):
 
 
 def _machine(box_fixture, usd: int):
-    """This machine's month: claude-opus-4-6 at $5 a million input tokens."""
+    """This machine's month: one response at $5 a million input tokens."""
     for f in (box_fixture["claude"] / "projects").rglob("*.jsonl"):
         f.unlink()
     _transcript(box_fixture["claude"], "s-opus", model="claude-opus-4-6",
@@ -525,3 +525,46 @@ def test_the_file_lives_beside_the_ledger_and_is_a_guard_file(laptop):
     names = {os.path.basename(e.path) for e in guard_paths.protected()}
     assert {"cloud-standing.json", "cloud-box.json"} <= names
     assert datetime.fromisoformat(YESTERDAY).tzinfo == UTC
+
+
+# The enterprise route's answer for its own fixture (nable-enterprise
+# tests/agent_usage/test_standing.py, two workspaces, the person in both),
+# as its assertions pin it, "status" on each part included: this version
+# reads past keys it does not keep.
+RECORDED = {
+    "month": "2026-10", "as_of": "2026-10-17T12:00:00+00:00",
+    "person": {"id": "alice@acme.example", "usd": "5.75", "days": 2, "last_day": "2026-10-16",
+               "budget": {"monthly_usd": None, "per_person_usd": "4", "state": "over"},
+               "status": "ok"},
+    "teams": [{"team": "payments", "usd": "8.75", "people": 3, "people_sent": 2,
+               "latest_day": "2026-10-16", "oldest_last_day": "2026-10-15",
+               "budget": {"monthly_usd": "9", "per_person_usd": "4", "state": "close"},
+               "status": "ok"}],
+    "org": {"usd": "11.5", "people_sent": 3, "latest_day": "2026-10-16",
+            "budget": {"monthly_usd": "100", "per_person_usd": None, "state": "under"},
+            "status": "ok"},
+    "budgets_from": {"version": 1, "uploaded_at": "2026-10-17T12:00:00+00:00"},
+    "basis": "list-price equivalent"}
+RECORDED_NONE = {
+    "month": "2026-10", "as_of": None,
+    "person": {"id": "dana@acme.example", "usd": None, "days": 0, "last_day": None,
+               "budget": None, "status": "no records received"},
+    "teams": [], "org": {"usd": None, "people_sent": 0, "latest_day": None, "budget": None,
+                         "status": "no records received"},
+    "budgets_from": None, "basis": "list-price equivalent"}
+
+
+def test_the_enterprise_answer_reads_on_the_laptop():
+    from decimal import Decimal
+    doc = cloud_standing.normalize(RECORDED, box=BOX, person="alice@acme.example",
+                                   fetched_at=AT)
+    assert cloud_standing.figure(doc, "team", "team:payments") == Decimal("8.75")
+    assert cloud_standing.figure(doc, "per_person", "team:payments") == Decimal("5.75")
+    assert cloud_standing.figure(doc, "org", "org:org") == Decimal("11.5")
+    assert cloud_standing.figure(doc, "team", "team:search") is None
+    none = cloud_standing.normalize(RECORDED_NONE, box=BOX, person="dana@acme.example",
+                                    fetched_at=AT)
+    assert cloud_standing.figure(none, "person", "person:dana@acme.example") is None
+    assert cloud_standing.figure(none, "org", "org:org") is None
+    assert "no records received" in cli_cloud._standing_text(
+        {"read": True, "standing": none, "file": "f", "person_from": "--as"})

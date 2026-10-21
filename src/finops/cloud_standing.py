@@ -3,8 +3,8 @@
 the guard (D107, D108).
 
 `nable cloud status` asks the box for one person's standing (POST
-/api/free-tool/standing, finops.cloud_connect.standing) and keeps the answer
-here, beside the guard ledger, as cloud-standing.json (0600):
+/api/free-tool/standing, from the cloud CLI's own client) and keeps the
+answer here, beside the guard ledger, as cloud-standing.json (0600):
 
     {"v": 1, "box": "https://HOST", "host": "HOST", "fetched_at": ISO 8601,
      "month": "YYYY-MM", "person": "<the person asked about>",
