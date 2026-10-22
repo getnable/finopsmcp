@@ -54,6 +54,21 @@ _LEDGER_FILES = (
     ("guard-person.json", "the git identity the org model's AI budgets are matched by"),
     # The connect payload's install id (SOURCE_NAME): changed, a resend counts usage twice.
     ("agent-usage-source", "the install id coding-agent usage is sent under"),
+    # cloud_standing.FILE_NAME and BOX_FILE_NAME: the box's month to date the
+    # AI budget gate compares, and the box it must come from. Removed or
+    # rewritten, the gate falls back to this machine's figure alone.
+    ("cloud-standing.json", "the box's month to date the AI budget gate compares"),
+    ("cloud-box.json", "the box this machine sends its coding-agent usage to"),
+)
+# Beside ai-budget.json (ai_budget._data_dir): the month's priced responses
+# the AI budget gate totals (ai_budget.MONTH_CACHE, MONTH_TOTAL, MONTH_SHARDS)
+# and the parsed transcripts they come from. Written into, they would lower
+# the month to date the gate compares.
+_AI_BUDGET_FILES = (
+    ("ai-budget-month.json", "the AI budget gate's priced month of agent responses", False),
+    ("ai-budget-month.total.json", "the AI budget gate's month to date", False),
+    ("ai-budget-month", "the AI budget gate's priced agent responses, per transcript", True),
+    ("ai-budget-tally", "the AI budget gate's parsed agent transcripts", True),
 )
 # Directories beside the ledger: facts derived from the org model's files,
 # keyed on their content (written into, they would be read as facts).
@@ -393,6 +408,7 @@ def protected(cwd: str | None = None) -> list[Protected]:
     ai = Path(os.environ["FINOPS_DATA_DIR"]).expanduser() if os.environ.get(
         "FINOPS_DATA_DIR") else _home() / ".nable"
     entries.append((ai / "ai-budget.json", "the agent's AI budget", False))
+    entries += [(ai / name, what, tree) for name, what, tree in _AI_BUDGET_FILES]
     entries += [(p, _GIT_CONFIG_WHAT, False) for p in git_config_files(root)]
     tag_rules = _env("FINOPS_TAG_RULES")
     accounts = _env("FINOPS_ACCOUNTS_FILE")

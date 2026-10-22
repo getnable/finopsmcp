@@ -416,7 +416,9 @@ def write_json_atomic(path: Path, data: Any) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as fh:
-            json.dump(data, fh)
+            # dumps, not dump: json.dump encodes in pure Python, about ten
+            # times slower on a month of responses (ai_budget's caches).
+            fh.write(json.dumps(data))
         os.replace(tmp, path)
     except BaseException:
         try:
