@@ -118,7 +118,7 @@ def test_an_approved_create_db_instance_records_its_arn():
     _pre(RDS)
     body = {"DBInstance": {"DBInstanceIdentifier": "orders", "DBInstanceClass": "db.r5.4xlarge",
                            "Engine": "postgres", "DBInstanceStatus": "creating",
-                           "DbiResourceId": "db-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                           "DbiResourceId": "db-" + "A" * 26,
                            "DBInstanceArn": RDS_ARN}}
     _post(RDS, {"stdout": json.dumps(body, indent=4), "stderr": ""})
     assert _outcomes()[0]["created"] == [{"kind": "rds_instance", "id": RDS_ARN}]

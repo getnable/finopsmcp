@@ -4175,8 +4175,12 @@ def _with_effective(v: dict[str, Any]) -> dict[str, Any]:
     if got.get("effective"):
         out["effective"] = got["effective"]
     if got["note"] and v.get("decision") in ("ask", "deny", "warn") and v.get("reason"):
-        out["reason"] = f"{v['reason']} {got['note']}"
-        out["price_note"] = got["note"]
+        note = got["note"]
+        if v.get("decision") != "ask":
+            note = note.replace(cloud_rates.JUDGED_AT_LIST, cloud_rates.JUDGED_AT_LIST.replace(
+                "this ask", "this call"))
+        out["reason"] = f"{v['reason']} {note}"
+        out["price_note"] = note
     return out
 
 
@@ -6154,7 +6158,7 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
         return None
     values = _CHECKOUT_VALUES if sub == "checkout" else _SWITCH_VALUES
     words, paths, j = [], None, 0
-    creates = detach = orphan = False
+    creates = detach = orphan = force = False
     while j < len(rest):
         w = rest[j]
         if w == "--":
@@ -6168,6 +6172,8 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
             continue
         if w == "--detach" or (sub == "switch" and w == "-d"):
             detach = True
+        elif w in ("-f", "--force", "--discard-changes"):
+            force = True
         elif not w.startswith("-") or w == "-":
             words.append(w)
         j += 1
@@ -6177,6 +6183,9 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
         return None                     # `git checkout REF PATHS`
     if orphan and sub == "switch":
         return (None, True, True)       # an orphan branch: an empty tree
+    if not words and force:
+        # A forced checkout at HEAD throws away what changed since it moved.
+        return ("HEAD", True, False)
     if not words:
         return False if (creates or detach or orphan or sub == "checkout"
                          or paths is not None) else None

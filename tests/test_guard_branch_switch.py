@@ -419,7 +419,7 @@ def test_an_unresolvable_ref_asks_when_the_repo_holds_org_files(repo, machine):
 
 
 def test_a_missing_object_asks(repo):
-    repo.ref("refs/heads/gone", "0123456789abcdef0123456789abcdef01234567")
+    repo.ref("refs/heads/gone", "0123456789abcdef" * 2 + "01234567")
     v = _ask("git checkout gone", repo.root)
     assert v is not None and v["decision"] == "ask" and "could not tell" in v["reason"]
 
@@ -486,3 +486,20 @@ def test_a_git_directory_git_would_not_recognise_changes_nothing(machine):
     (root / "nable.org" / "authority.yaml").write_text(OFF)
     assert _ask("git checkout main", root) is None
     assert _ask("git switch main", root) is None
+
+
+@pytest.mark.parametrize("cmd", ["git checkout -f", "git checkout --force",
+                                 "git checkout -f -b feature", "git switch -f docs",
+                                 "git switch --discard-changes docs"])
+def test_a_forced_checkout_over_local_org_changes_asks(repo, cmd):
+    """A forced checkout throws away what changed since HEAD moved, the org
+    model's files among them, even where the trees are the same."""
+    (repo.root / "nable.org" / "teams.yaml").write_text(TEAMS + "# edited\n")
+    v = _ask(cmd, repo.root)
+    assert v is not None and v["decision"] == "ask", cmd
+    assert "changed since HEAD last moved" in v["reason"]
+
+
+def test_a_forced_checkout_with_nothing_changed_stays_silent(repo):
+    assert _ask("git checkout -f", repo.root) is None
+    assert _ask("git switch -f docs", repo.root) is None

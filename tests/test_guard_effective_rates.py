@@ -394,3 +394,13 @@ def test_a_silent_command_and_the_editor_path_open_no_rates_file(opened, offline
     assert gp.run_hook(None, "plugin", io.StringIO(json.dumps(payload)), out,
                        io.StringIO()) == 0
     assert opened == []
+
+
+def test_a_deny_says_the_call_is_judged_at_list(monkeypatch):
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    _budget(monkeypatch)
+    keep_rates()
+    v = g.gate_command(SMALL)
+    assert v["decision"] == "deny"
+    assert "The guard judges this call at list price" in v["reason"]
+    assert "judges this ask" not in v["reason"]
