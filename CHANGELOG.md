@@ -232,7 +232,10 @@ coding-agent spend a person can carry into a paid workspace.
   not named, a higher rung, and at approve_each a larger bound or none, an
   approver not named here, or a later expiry), it is left out of the payload,
   in the dry run and so in what leaves, with the reason naming the stricter
-  file and `--org-dir`. The workspace keeps what it holds.
+  file and `--org-dir`. The workspace keeps what it holds. A send says when
+  the workspace held an `authority.yaml` (or its delete) instead of applying
+  it, because it would widen purchase authority there: a workspace admin with
+  the purchase grant confirms it on `/rds-ri`.
 - **`nable cloud connect` sends `authority.yaml` only to a box that says it
   takes it.** A box whose status does not list `org_file:authority.yaml` in
   `accepts` would refuse the batch whole, so the send is refused before a

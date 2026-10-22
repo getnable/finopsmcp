@@ -1077,13 +1077,15 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
     return out
 
 
-_ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held")
+_ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held", "held")
 
 
 def _gather_org_files(into: dict[str, list[Any]], doc: Mapping[str, Any]) -> None:
     """The box's per-file answer on the org model (accepted.org_files),
     where it gives one: applied, unchanged, stale ({file, replaced_at}),
-    deleted and not_held. An older box gives none."""
+    deleted, not_held and held ({file, message}: an authority.yaml, or its
+    delete, that would widen purchase authority, held for a person on the
+    workspace to confirm). An older box gives none."""
     acc = doc.get("accepted") if isinstance(doc, Mapping) else None
     got = acc.get("org_files") if isinstance(acc, Mapping) else None
     if not isinstance(got, Mapping):

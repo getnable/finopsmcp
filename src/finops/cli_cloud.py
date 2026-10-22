@@ -438,6 +438,12 @@ def _org_files_text(got: Mapping[str, Any]) -> list[str]:
             out.append(f"  {x.get('file')!s:<20} stale, not applied: the workspace held this "
                        f"text and replaced it at {x.get('replaced_at')}. To go back to it, "
                        f"send again with --delete-org-file {x.get('file')}")
+    for x in got.get("held") or []:
+        if isinstance(x, Mapping):
+            what = "its delete" if x.get("delete") else "this text"
+            out.append(f"  {x.get('file')!s:<20} held, not applied: {what} would widen "
+                       "purchase authority, so the workspace keeps what it holds until a "
+                       "workspace admin who holds the purchase grant confirms it on /rds-ri")
     return out
 
 

@@ -624,3 +624,21 @@ def test_the_network_manifest_says_both():
                       "network-manifest.json").read_text())
     text = json.dumps(doc)
     assert "org_file:authority.yaml" in text and "--without-org-file" in text
+
+
+def test_a_held_authority_yaml_is_said_as_held_never_as_applied():
+    """A box that holds an authority.yaml that would widen purchase authority
+    answers it under org_files.held: the send says so."""
+    from finops import cli_cloud
+
+    lines = cli_cloud._org_files_text({"held": [{"file": "authority.yaml", "delete": False,
+                                                 "sha256": "x", "message": "held"}],
+                                       "applied": ["teams.yaml"]})
+    text = "\n".join(lines)
+    assert "authority.yaml" in text and "held, not applied" in text and "/rds-ri" in text
+    assert "teams.yaml" in text and "applied" in text
+    into: dict = {}
+    cc._gather_org_files(into, {"accepted": {"org_files": {
+        "held": [{"file": "authority.yaml", "delete": True}]}}})
+    assert into == {"held": [{"file": "authority.yaml", "delete": True}]}
+    assert "its delete would widen" in "\n".join(cli_cloud._org_files_text(into))
