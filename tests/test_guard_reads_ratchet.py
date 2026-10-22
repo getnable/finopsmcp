@@ -49,6 +49,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 ROOTS = ("finops.guard", "finops.guard_outcome")
+# The seams the guard and cloud connect import by name at run time
+# (importlib), which a static walk cannot see: walked too when installed, so
+# workstream B's modules are held to the same reads the moment they land.
+SEAMS = ("finops.guard_authority", "finops.authority_standing")
 # How long a hook may take with a FIFO in a file's place before the test
 # calls it a wait (the harness's own hook timeout is 60 s; an unhung hook
 # answers in well under one).
@@ -183,6 +187,12 @@ WRITES: dict[tuple[str, str], str] = {
     ("finops.security.vault", "Vault.store"): "`nable vault set`",
     ("finops.security.vault", "_data_dir"): "the data dir, 0700",
     ("finops.security.vault", "_vault_dir"): "the vault's dir, 0700",
+    # Workstream B's seam module (S2), walked when installed: it keeps the box's
+    # authority block for `nable cloud status` and `connect --send`, never the hook.
+    ("finops.authority_standing", "_keep"):
+        "keeps the box's authority block, run by nable cloud status and connect --send",
+    ("finops.authority_standing", "_write"):
+        "writes the kept authority block beside the ledger, from keep only",
 }
 
 
@@ -229,11 +239,12 @@ def _imports(name: str, path: Path) -> Iterator[tuple[str, str]]:
 
 
 def closure() -> dict[str, Path]:
-    """{module: its file} for the hook path: ROOTS and every finops module
-    they import, at any depth, function-level imports included, but not
-    those inside NOT_ON_HOOK_PATH. A module not installed is skipped."""
+    """{module: its file} for the hook path: ROOTS, the SEAMS installed, and
+    every finops module they import, at any depth, function-level imports
+    included, but not those inside NOT_ON_HOOK_PATH. A module not installed
+    is skipped."""
     seen: dict[str, Path] = {}
-    todo = list(ROOTS)
+    todo = [*ROOTS, *SEAMS]
     while todo:
         name = todo.pop()
         if name in seen:
@@ -435,6 +446,8 @@ def test_the_reads_not_yet_converted_only_shrink():
     reads, _ = every_site()
     still = {(s.module, s.function) for s in reads if not s.ok}
     for key, why in NOT_YET.items():
+        if _module_path(key[0]) is None:
+            continue                    # a seam module not installed on this branch
         assert key in still, f"{key} reads without waiting now: drop it from NOT_YET"
         assert why and "proposed" in why, key
     owned = ("finops.guard", "finops.ai_budget", "finops.cloud_", "finops.policy",
@@ -454,7 +467,8 @@ def test_every_write_in_the_closure_is_on_the_allow_list():
 def test_the_write_allow_list_only_shrinks():
     _, writes = every_site()
     have = {(s.module, s.function) for s in writes}
-    stale = sorted(set(WRITES) - have)
+    # A seam module not installed on this branch has no write to find.
+    stale = sorted(k for k in set(WRITES) - have if _module_path(k[0]) is not None)
     assert not stale, f"entries on WRITES with no write left: {stale}"
     for key, why in WRITES.items():
         assert why and len(why) > 10, key
