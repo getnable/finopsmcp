@@ -572,11 +572,54 @@ def test_an_unreadable_authority_yaml_holds_the_class_at_approve_each(org):
 
 
 def test_a_fifo_in_place_of_authority_yaml_is_unreadable_never_waited_on(org):
+    """In a thread with a timeout: a read that waited fails here, never hangs."""
+    import threading
     path = org()
     path.unlink()
     os.mkfifo(path)
-    v = lv(TAG)
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.update(v=lv(TAG)), daemon=True)
+    t.start()
+    t.join(timeout=10)
+    if t.is_alive():
+        # Hand the waiting reader a writer and its end of file, so it returns.
+        os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        t.join(timeout=10)
+        pytest.fail("the guard waited on a FIFO in place of authority.yaml")
+    v = got["v"]
     assert (v["decision"], v["rung"]) == ("ask", "approve_each")
+
+
+# Rule 15: every file the guard reads for a class goes through
+# guard_paths.read_regular (O_NONBLOCK, and read only when regular). A new
+# read anywhere else in these modules fails here until it does, or is named.
+_HOOK_PATH_MODULES = ("guard_authority.py", "authority_standing.py")
+_READ_CALLS = frozenset({"open", "read_bytes", "read_text", "fdopen", "loads_file"})
+_WRITES_ALLOWED = {("authority_standing.py", "_write")}
+
+
+def test_every_read_on_the_hook_path_goes_through_read_regular():
+    import ast
+    src = Path(guard_authority.__file__).parent
+    found = []
+    for name in _HOOK_PATH_MODULES:
+        tree = ast.parse((src / name).read_text())
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                f = node.func
+                called = f.id if isinstance(f, ast.Name) else (
+                    f.attr if isinstance(f, ast.Attribute) else None)
+                if called in _READ_CALLS and (name, fn.name) not in _WRITES_ALLOWED:
+                    found.append(f"{name}:{node.lineno} {fn.name} calls {called}()")
+    assert not found, found
+    reads = sum(1 for name in _HOOK_PATH_MODULES
+                for node in ast.walk(ast.parse((src / name).read_text()))
+                if isinstance(node, ast.Attribute) and node.attr == "read_regular")
+    assert reads >= 3, "the class reads are expected through guard_paths.read_regular"
 
 
 def test_an_expired_bounded_entry_asks(org):
