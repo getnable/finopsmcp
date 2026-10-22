@@ -24,6 +24,7 @@ import argparse
 import io
 import json
 import os
+import re
 import socket
 import stat
 import urllib.request
@@ -44,6 +45,13 @@ YESTERDAY = (AT - timedelta(days=1)).isoformat()
 WS_A = "ws_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 WS_B = "ws_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 KEY_B = "nbl_other_workspace_key_B_0123456789ab"  # pragma: allowlist secret
+# The box's host named as a whole word in a sentence (not as part of another
+# name such as other-box.example.com).
+_BOX_HOST_NAMED = re.compile(r"(?<![\w.-])box\.example\.com(?![\w-])")
+
+
+def _names_box_host(text: str) -> bool:
+    return _BOX_HOST_NAMED.search(text) is not None
 
 
 def answer(*, person="alice@acme.example", team_usd="5420", person_usd="120.5",
@@ -266,7 +274,7 @@ def test_the_boxs_larger_team_figure_asks_and_names_both(team, monkeypatch):
     v = guard.gate_command("ls -la")
     assert v["decision"] == "ask" and v["action_type"] == "ai_budget"
     r = v["reason"]
-    assert "$5,420.00" in r and "box.example.com" in r and YESTERDAY in r
+    assert "$5,420.00" in r and _names_box_host(r) and YESTERDAY in r
     assert "24 hours old" in r and "$300.00" in r
     assert "The larger, the box's $5,420.00, is the one compared" in r
     assert "$5,720" not in r and "5720" not in r
@@ -563,7 +571,7 @@ def test_the_ledger_and_the_payload_never_carry_the_boxs_figure(team, monkeypatc
     _machine(team, 300)
     _keep(answer(team_usd="5420"))
     v = guard.gate_command("ls -la", record=True)
-    assert "$5,420.00" in v["reason"] and "box.example.com" in v["reason"]
+    assert "$5,420.00" in v["reason"] and _names_box_host(v["reason"])
     raw = guard_ledger.ledger_path().read_text()
     line = json.loads(raw.splitlines()[-1])
     assert (line["decision"], line["action_type"]) == ("ask", "ai_budget")
