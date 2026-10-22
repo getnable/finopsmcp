@@ -495,3 +495,132 @@ def test_a_delete_and_the_org_model_are_never_cut_apart(machine, monkeypatch):
     first = payload.data[slice(*cc.plan(payload, None)[0])]
     kinds = [json.loads(x)["kind"] for x in first.split(b"\n") if x]
     assert kinds == [cc.DELETE_KIND, cc.DELETE_KIND, "org_model"]
+
+
+# ── authority.yaml goes only to a box that takes it (D138) ───────────────────
+
+AUTHORITY = ("# nable org model v1\n- fact: authority\n  subject: action_class:rds_ri\n"
+             "  value: {rung: 'off'}\n  source: human\n  status: confirmed\n"
+             "  confirmed_at: 2026-10-01\n")
+
+
+@pytest.fixture
+def with_authority(machine):
+    (machine / "org" / "authority.yaml").write_text(AUTHORITY)
+    return machine
+
+
+def _connect_sha(machine, *argv) -> str:
+    code, out, err = _run("connect", "--box", BOX, "--json", "--out",
+                          str(machine / "p.jsonl"), *argv)
+    assert code == 0, err
+    return json.loads(out)["confirm_sha256"]
+
+
+def test_authority_yaml_is_in_the_dry_run_and_the_confirm_code(with_authority):
+    code, out, _err = _run("connect", "--box", BOX, "--out", str(with_authority / "p.jsonl"))
+    assert code == 0
+    assert "authority.yaml" in out and "org_file:authority.yaml" in out
+    assert "--without-org-file authority.yaml" in out
+    payload = cc.build()
+    org_line = next(json.loads(payload.data[s:e]) for k, s, e in payload.lines
+                    if k == "org_model")
+    assert org_line["files"]["authority.yaml"] == AUTHORITY
+    assert payload.org_files == sorted([*ORG, "authority.yaml"])
+    (with_authority / "org" / "authority.yaml").write_text(AUTHORITY.replace("'off'",
+                                                                           "recommend"))
+    assert cc.confirm_code(cc.build(), BOX) != cc.confirm_code(payload, BOX)
+
+
+def test_a_box_that_does_not_take_authority_yaml_receives_nothing(with_authority):
+    sha = _connect_sha(with_authority)
+    box = _DeleteBox(accepts=("org_model", "ledger_line", "agent_usage", cc.DELETE_KIND))
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha, opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED
+    assert "--without-org-file authority.yaml" in err and "org_file:authority.yaml" in err
+    assert [r["method"] for r in box.requests] == ["GET"], "something was sent"
+
+
+def test_a_box_whose_status_names_no_accepts_at_all_receives_nothing(with_authority):
+    sha = _connect_sha(with_authority)
+    box = Box()
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha, opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED and "--without-org-file authority.yaml" in err
+    assert box.posted == []
+
+
+def test_a_box_that_takes_it_receives_it(with_authority):
+    sha = _connect_sha(with_authority)
+    box = _DeleteBox(accepts=("org_model", "ledger_line", "agent_usage", cc.DELETE_KIND,
+                              "org_file:authority.yaml"))
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha, opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == 0, err
+    sent = b"".join(r["body"] for r in box.requests if r["method"] == "POST")
+    org_line = next(json.loads(x) for x in sent.split(b"\n")
+                    if x and json.loads(x)["kind"] == "org_model")
+    assert org_line["files"]["authority.yaml"] == AUTHORITY
+
+
+def test_without_org_file_leaves_it_out_is_shown_and_changes_the_confirm_code(with_authority):
+    with_it = _connect_sha(with_authority)
+    code, out, _err = _run("connect", "--box", BOX, "--out", str(with_authority / "p.jsonl"),
+                           "--without-org-file", "authority.yaml")
+    assert code == 0 and "authority.yaml" in out
+    assert "left out: --without-org-file authority.yaml" in out
+    without = _connect_sha(with_authority, "--without-org-file", "authority.yaml")
+    assert without != with_it
+    payload = cc.build(without_files=["authority.yaml"])
+    assert "authority.yaml" not in payload.org_files and payload.without == ["authority.yaml"]
+    assert payload.org_files == sorted(ORG)
+    assert (with_authority / "p.jsonl").read_bytes() == payload.data
+    _code, out, _err = _run("connect", "--box", BOX, "--json", "--out",
+                            str(with_authority / "p.jsonl"), "--without-org-file",
+                            "authority.yaml")
+    assert json.loads(out)["org_files_left_out"] == ["authority.yaml"]
+    # The send made with the flag goes to a box that does not take the file;
+    # the code shown with the flag does not send without it, nor the reverse.
+    box = _DeleteBox(accepts=("org_model", "ledger_line", "agent_usage", cc.DELETE_KIND))
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", without,
+                           "--without-org-file", "authority.yaml", opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == 0, err
+    assert all(b"authority.yaml" not in r["body"] for r in box.requests)
+    box = _DeleteBox()
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", without,
+                           opener=box, environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED and box.requests == []
+
+
+def test_without_org_file_leaves_out_any_named_file(machine):
+    payload = cc.build(without_files=["teams.yaml"])
+    assert payload.org_files == sorted(set(ORG) - {"teams.yaml"})
+    assert cc.confirm_code(payload, BOX) != cc.confirm_code(cc.build(), BOX)
+
+
+@pytest.mark.parametrize("name", ["notes.yaml", "../authority.yaml", KEY])
+def test_an_unknown_without_name_is_a_usage_error_that_echoes_nothing(machine, name):
+    code, out, err = _run("connect", "--box", BOX, "--without-org-file", name)
+    assert code == cli_cloud.EXIT_USAGE and name not in out + err
+    assert "authority.yaml" in err
+    with pytest.raises(ValueError):
+        cc.build(without_files=[name])
+
+
+def test_deleting_authority_yaml_on_a_box_that_does_not_take_it_is_refused(machine):
+    sha = _delete_sha(machine, "authority.yaml")
+    box = _DeleteBox()
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha,
+                           "--delete-org-file", "authority.yaml", opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED and "--delete-org-file authority.yaml" in err
+    assert [r["method"] for r in box.requests] == ["GET"]
+
+
+def test_the_network_manifest_says_both():
+    doc = json.loads((Path(__file__).resolve().parents[1] / "docs" /
+                      "network-manifest.json").read_text())
+    text = json.dumps(doc)
+    assert "org_file:authority.yaml" in text and "--without-org-file" in text

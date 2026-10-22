@@ -77,8 +77,8 @@ def data_root() -> Path:
     on profiles)."""
     if _data_root_override is not None:
         return _data_root_override
-    raw = os.environ.get("FINOPS_DATA_DIR", "")
-    return Path(raw).expanduser() if raw else Path.home() / ".finops"
+    from ._datadir import env_data_dir
+    return env_data_dir(Path.home() / ".finops")[0]
 
 
 def off_flag_path() -> Path:

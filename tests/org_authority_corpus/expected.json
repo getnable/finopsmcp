@@ -1,0 +1,1010 @@
+{
+ "files": {
+  "01_one_class.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:19dbad58af"
+     ],
+     "max_commitment_usd_per_plan": 50000.0,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:aea5e6645dd5f1c6fb2ff185458f25db151f29536468c385d8b5874bea01ff33"
+  },
+  "02_strictest_of_two.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:bo@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-03-01",
+     "keys": [
+      "key:47c50895bd",
+      "key:5ea2c97476"
+     ],
+     "max_commitment_usd_per_plan": 20000.5,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:e29e88048a38aabf288df4ab2168cd8db55d7a30390b28f503c98a8c5225a948"
+  },
+  "03_rejected_and_off.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:f522aa3887"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "off"
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-01-31",
+     "keys": [
+      "key:1b147c2cb1"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:531066b4642e5875188a882a2ed4efe4ba1cff46d340761100390852881559d9"
+  },
+  "04_expired.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": "2026-11-01",
+     "expires": "2026-11-01",
+     "keys": [
+      "key:9d0ba52152"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": "2026-10-31",
+     "expires": "2026-10-31",
+     "keys": [
+      "key:a3af9591c3"
+     ],
+     "max_commitment_usd_per_plan": 1000.0,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:7766fc5a72adaea19339b7a68e8c38b7019cab49a8800f1ac1c0d99a4309306d"
+  },
+  "05_nobody_in_common.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": [],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:884c6537e6",
+      "key:f2249ca55c"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": true,
+     "rung": "approve_each"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:e9ced4bfba5b030107d03a5f1f8489ec23cd8b28d22487dd30da1522651f03cd"
+  },
+  "06_typo_class.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:884c6537e6"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "subject.id",
+     "holds": "every class"
+    }
+   ],
+   "sha256": "sha256:9f66ef8a3bd7d8b37a708d9a1e3f45ea7fbd3bd38d3224e65f7d3595c5e9484c"
+  },
+  "07_bad_rung_readable_class.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:884c6537e6"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.rung",
+     "holds": "rds_ri"
+    }
+   ],
+   "sha256": "sha256:9ef9b066f3ab3858a8ae4474351761b3ca97db0de7958eddd44716fb13e87e40"
+  },
+  "08_bad_bounds.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:8d8cbbf834"
+     ],
+     "max_commitment_usd_per_plan": 0.0,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 1,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 2,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 3,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 4,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "rds_ri"
+    }
+   ],
+   "sha256": "sha256:22969c80220be958d2aab62c1d33b72bcf9f3c56df70d6108e21e37a1837c5f0"
+  },
+  "09_bad_approvers.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.approvers",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 1,
+     "field": "value.approvers",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 2,
+     "field": "value.expires",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 3,
+     "field": "value.approvers",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 4,
+     "field": "value.approvers",
+     "holds": "rds_ri"
+    }
+   ],
+   "sha256": "sha256:0cb0e7bb93a3a7bbbba064d18b8cc9ab55ca87d6335991106f9d5eb0738ed25b"
+  },
+  "10_bad_expires.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-10-02",
+     "keys": [
+      "key:2e499affec"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.expires",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 1,
+     "field": "value.expires",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 3,
+     "field": "value.expires",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 4,
+     "field": "value.expires",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 5,
+     "field": "value.expires",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 6,
+     "field": "value.expires",
+     "holds": "database_savings_plan"
+    }
+   ],
+   "sha256": "sha256:178baf1f66a7f9cb69fc126d690b5c2d01e2f9aa7c573cd1b28be17d08f216aa"
+  },
+  "11_not_yaml.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": null,
+     "field": "file",
+     "holds": "every class"
+    }
+   ],
+   "sha256": "sha256:4e4760e1f6b8354f5ebbcb80d7b1ebbf297fa053d28f68458ba4bd5fc9b10238"
+  },
+  "12_not_a_list.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": null,
+     "field": "file",
+     "holds": "every class"
+    }
+   ],
+   "sha256": "sha256:d5d07643b1f8d798efd5c2bfb1dac038c3c68e02db971403577d132de55c2b73"
+  },
+  "13_another_kind.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:ceeeb1ed95"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "fact",
+     "holds": "every class"
+    }
+   ],
+   "sha256": "sha256:dfe634e1b44641260b3a40e4b356b2257741d24583d85379ee583f48a68a3325"
+  },
+  "14_bad_envelope.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "status",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 1,
+     "field": "source",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 2,
+     "field": "confidence",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 3,
+     "field": "confirmed_at",
+     "holds": "database_savings_plan"
+    },
+    {
+     "entry": 4,
+     "field": "value",
+     "holds": "database_savings_plan"
+    }
+   ],
+   "sha256": "sha256:9da9f7345264fc795693b74ce075f650ccc2f01bb22ae5389d52dcc076a7a433"
+  },
+  "15_empty.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:e6aed5feb728bcdf6897018a86e40807298ce0def67b0a322dc867b254bd2da8"
+  },
+  "16_proposed_counts.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:6d0367f328"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "off"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:c8c21398ca",
+      "key:ceeeb1ed95"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:a33732b4c773ecb83dd5b8dc1463a2bf909c607987c79bfb51e2004c4eea813a"
+  },
+  "17_spellings.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:010853ddf8"
+     ],
+     "max_commitment_usd_per_plan": 7.0,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:47818ca977"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:942556eda45e4e3d5bd81f9825c6ce97ae96022ecdfb21a1d5c52dfecec0aeeb"
+  },
+  "18_wrong_subject_kind.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "subject.kind",
+     "holds": "every class"
+    },
+    {
+     "entry": 1,
+     "field": "subject.id",
+     "holds": "every class"
+    },
+    {
+     "entry": 2,
+     "field": "subject",
+     "holds": "every class"
+    }
+   ],
+   "sha256": "sha256:0bbaf1d076f0a7248a36d3e1c87e4c4be3299661052c9bfdf084d67410d89e20"
+  },
+  "19_superseded_counts_for_nothing.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:74f109bb0a"
+     ],
+     "max_commitment_usd_per_plan": 100000.0,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:2b18e7fa4505ccd9ccc212369711e3db217268ee0630eae6c1a49cbcd28ff78c"
+  },
+  "21_number_spellings.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:5cec0433f5"
+     ],
+     "max_commitment_usd_per_plan": 15000.0,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 2,
+     "field": "value.rung",
+     "holds": "database_savings_plan"
+    }
+   ],
+   "sha256": "sha256:236683fba547363a97ac4cdbd4255823ea8a0f4ec37edd84954db07a1907388d"
+  },
+  "22_odd_entries.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-01-01",
+     "keys": [
+      "key:c9bc49a74c"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "entry",
+     "holds": "every class"
+    },
+    {
+     "entry": 1,
+     "field": "fact",
+     "holds": "every class"
+    },
+    {
+     "entry": 2,
+     "field": "subject.kind",
+     "holds": "every class"
+    },
+    {
+     "entry": 3,
+     "field": "subject.id",
+     "holds": "every class"
+    },
+    {
+     "entry": 4,
+     "field": "value",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 5,
+     "field": "confirmed_by",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 6,
+     "field": "dollars_monthly",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 7,
+     "field": "review_after",
+     "holds": "elasticache_ri"
+    }
+   ],
+   "sha256": "sha256:3612fbb91d8fd658919df16ea371c5ce1e5fcfe0920eba04aea93ec57a8ba8ae"
+  },
+  "23_rejected_never_refused_for_dates.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-01-01",
+     "keys": [
+      "key:aefdc41b04"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:a2f0985ba80c0e5217439e5c0c7fa2d86f01232575ca8ee474d80b8fcad424d2"
+  }
+ },
+ "note": "Made by the open core's loader and read by hand; keys and sha256 values carry a prefix so no line is a bare hex string.",
+ "today": "2026-11-01"
+}

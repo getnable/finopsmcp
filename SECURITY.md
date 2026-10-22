@@ -68,6 +68,11 @@ directory, or anything but a regular file of yours. It POSTs to
 HTTPS only, follows no redirect, and is refused under `FINOPS_AIRGAP=1`.
 `--delete-org-file NAME` adds one `org_file_delete` line per file, carrying
 the file name alone, shown in the dry run and covered by its confirm code.
+`authority.yaml` goes only to a box whose status lists
+`org_file:authority.yaml` in `accepts`; to any other box the send is refused
+before a byte leaves, and `--without-org-file NAME` (repeatable) leaves a
+named file out, shown in the dry run and covered by the confirm code, since
+what leaves is exactly what was shown.
 `nable cloud status` also POSTs exactly `{"person": P}` to
 `/api/free-tool/standing` when the box's status lists `standing` in `reads`:
 P is `--as WHO`, else `FINOPS_GUARD_PERSON`, else git's `user.email`, the
@@ -128,7 +133,31 @@ directory, Codex's rollouts), which are not among the guard's own files: an
 agent that rewrites or removes them outside the guard's view lowers this
 machine's figure, and the guard does not ask before it does. A response two
 transcripts hold counts once, the larger copy, and usage already sent to a box
-stays there. `nable guard doctor` says so.
+stays there. `nable guard doctor` says so. Asking before an agent writes those
+transcripts (D118) is not built in this release: the guard's purchase path
+changed in it, and the cost of asking on every transcript write is measured
+first.
+
+**Purchase authority in the org model.** `authority.yaml` says, per purchase
+kind a paid workspace's reservation agent buys (`rds_ri`, `elasticache_ri`,
+`database_savings_plan`), its rung (`off`, `recommend` or `approve_each`), the
+most a plan may commit to it, who may approve it (`email:` entries) and when
+the entry expires (within 366 days). A person writes it (`nable org set
+authority`, at a terminal or with `--as`); no adapter, pack, MCP tool or
+agent proposal may. It is one of the guard's own files in every org dir
+(a repo's `nable.org/`, the data dir's model, `FINOPS_ORG_DIR`): a write,
+move, truncation or deletion by an agent asks, by tool and by shell, and the
+reason names it. A workspace applies the stricter of the file and its own
+opt-in, so the file can only narrow, and an entry nable cannot read holds its
+kind (or every kind) at recommend rather than being skipped. Nothing on this
+machine acts on it.
+
+**Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
+expands, and a relative path is refused, so every part of nable (the vault,
+the ledger, the guard's own files) uses the default directory instead, and
+the guard protects the directory nable writes. A command says so once on
+stderr; the guard hook never fails over it; `nable guard doctor` names the
+value and the directory used.
 
 **Version check.** To tell you when your build is out of date, nable makes one
 GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run

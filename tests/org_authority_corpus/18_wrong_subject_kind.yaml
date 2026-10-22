@@ -1,0 +1,18 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: team, id: payments}
+  value: {rung: off}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class}
+  value: {rung: off}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: not-a-subject
+  value: {rung: off}
+  source: human
+  status: confirmed

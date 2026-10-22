@@ -20,11 +20,33 @@ import pytest
 import yaml
 
 from finops import guard_org, org
-from finops.org import cli, store
+from finops.org import cli, model, store
 from finops.org.cli import _who as human
-from finops.org.model import local_today
 
-TODAY = local_today()
+# The day every date the org model reads is, whatever the clock says: nothing
+# here reads the date at import, so a run whose clock crosses midnight passes.
+TODAY = date(2026, 6, 15)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_today(monkeypatch):
+    monkeypatch.setattr(model, "local_today", lambda: TODAY)
+    monkeypatch.setattr(store, "local_today", lambda: TODAY)
+    monkeypatch.setattr(model, "utc_today", lambda: TODAY)
+
+
+def test_this_module_reads_no_date_at_import():
+    import ast
+
+    from tests.test_org_model import _date_reads
+    assert _date_reads(ast.parse(Path(__file__).read_text(encoding="utf-8"))) == []
+
+
+def test_the_frozen_day_is_the_one_every_write_records(home, monkeypatch):
+    """A fact confirmed while the clock crosses midnight is confirmed on the
+    frozen day: the store reads the date through local_today alone."""
+    assert store._today() == TODAY.isoformat()
+    assert model.OrgModel([]).authority()["today"] == TODAY.isoformat()
 
 
 @pytest.fixture

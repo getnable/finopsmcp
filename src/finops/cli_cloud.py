@@ -5,6 +5,7 @@ workspace holds.
 
     nable cloud connect --box https://HOST [--org-dir DIR] [--out PATH] [--json]
                         [--as WHO] [--no-agent-usage] [--delete-org-file NAME ...]
+                        [--without-org-file NAME ...]
                         [--send --confirm CODE [--key-file PATH]]
     nable cloud status  --box https://HOST [--key-file PATH] [--as WHO] [--json]
 
@@ -21,6 +22,14 @@ so the dry run shows it and the confirm code covers it. A file this machine
 also carries is applied after its delete, even when the workspace held that
 text before and replaced it: how a team deliberately goes back (D97). A box
 that does not list org_file_delete among what it accepts is told nothing.
+
+`--without-org-file NAME` (repeatable, NAME one of the org model's file names)
+leaves that file out of the org model the payload carries (D138): the dry run
+names it, and the confirm code covers the bytes without it, so a send needs
+the flag again. authority.yaml goes only to a box whose status lists
+org_file:authority.yaml among what it accepts; to any other box the send is
+refused before anything leaves, and the refusal names --without-org-file
+authority.yaml.
 
 `status` also reads the box's month to date for one person, when the box
 lists "standing" among what it reads (POST /api/free-tool/standing with
@@ -169,6 +178,10 @@ def add_parser(sub) -> None:
                    metavar="NAME", default=None,
                    help="remove this org model file from the workspace (repeatable; one of "
                         + ", ".join(cc.org_file_names()) + ")")
+    c.add_argument("--without-org-file", dest="without_org_files", action="append",
+                   metavar="NAME", default=None,
+                   help="leave this org model file out of what is sent (repeatable; shown in "
+                        "the dry run and covered by the confirm code)")
 
 
 def refuse_extras(extras: list[str], *, as_json: bool, stdout: Any = None,
@@ -339,14 +352,16 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
     no_usage = bool(getattr(args, "no_agent_usage", False))
     deletes = list(getattr(args, "delete_org_files", None) or [])
     known = cc.org_file_names()
-    if any(n not in known for n in deletes):
-        # The name is not repeated: anything on a `nable cloud` command line
-        # could be a key typed in the wrong place.
-        return _fail("usage", EXIT_USAGE, "--delete-org-file takes an org model file name: "
-                     + ", ".join(known), as_json=as_json, out=out, err=err)
+    without = list(getattr(args, "without_org_files", None) or [])
+    for flag, names in (("--delete-org-file", deletes), ("--without-org-file", without)):
+        if any(n not in known for n in names):
+            # The name is not repeated: anything on a `nable cloud` command
+            # line could be a key typed in the wrong place.
+            return _fail("usage", EXIT_USAGE, f"{flag} takes an org model file name: "
+                         + ", ".join(known), as_json=as_json, out=out, err=err)
     payload = cc.build(org_dir=getattr(args, "org_dir", None), developer=developer,
                        developer_from=developer_from, agent_usage=not no_usage, now=now,
-                       delete_files=deletes)
+                       delete_files=deletes, without_files=without)
     if not sending:
         if not payload.data:
             if as_json:

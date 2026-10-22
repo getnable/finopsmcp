@@ -1,0 +1,42 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2026-09-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-10-03}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-10-02}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2026-10-01}
+  source: human
+  status: proposed
+  proposed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: recommend, expires: 2027-01-01}
+  source: human
+  status: confirmed
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: "2027-02-30"}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-01-01T00:00:00Z}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
