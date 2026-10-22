@@ -39,10 +39,15 @@ def machine(tmp_path, monkeypatch):
     (repo / ".git").mkdir()
     (repo / "nable.org").mkdir()
     monkeypatch.setenv("HOME", str(home))
-    for var in ("FINOPS_DATA_DIR", "FINOPS_PROFILE", "FINOPS_ORG_DIR", "XDG_CONFIG_HOME",
-                "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
+    for var in ("FINOPS_PROFILE", "FINOPS_ORG_DIR", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL",
+                "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
         monkeypatch.delenv(var, raising=False)
-    data_org = home / ".finops" / "org"
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(tmp_path / "data"))
+    import sys
+    db = sys.modules.get("finops.storage.db")
+    if db is not None:
+        monkeypatch.setattr(db, "_DATA_DIR", None)    # a path an earlier test cached
+    data_org = tmp_path / "data" / "org"
     data_org.mkdir(parents=True)
     (data_org / "trusted-repos.json").write_text(json.dumps(
         {"repos": [{"root": str(repo.resolve()), "remote": "", "by": "t",
