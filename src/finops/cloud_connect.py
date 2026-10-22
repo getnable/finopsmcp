@@ -134,7 +134,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
@@ -289,7 +289,8 @@ def _read_org_file(path: Path) -> tuple[str | None, str | None]:
         return None, "not UTF-8 text"
 
 
-def _org(org_dir: str | os.PathLike | None, without: list[str] | None = None) -> dict[str, Any]:
+def _org(org_dir: str | os.PathLike | None, without: list[str] | None = None, *,
+         today: date | None = None) -> dict[str, Any]:
     from .org.model import KNOWN_FILES
     from .org.store import git_root, is_trusted, resolve_dir
 
@@ -312,7 +313,68 @@ def _org(org_dir: str | os.PathLike | None, without: list[str] | None = None) ->
         elif text is not None:
             out["texts"][name] = text
             out["files"][name] = len(text.encode("utf-8"))
+    if AUTHORITY in out["texts"]:
+        why = _authority_wider(org_dir, d, today=today)
+        if why:
+            # What leaves is never wider than what this machine shows: the box
+            # keeps the authority it has, and the dry run says why.
+            del out["texts"][AUTHORITY]
+            del out["files"][AUTHORITY]
+            out["not_read"][AUTHORITY] = why
     return out
+
+
+AUTHORITY = "authority.yaml"
+_RUNG_RANK = {"off": 0, "recommend": 1, "approve_each": 2}
+
+
+def _authority_wider(org_dir: str | os.PathLike | None, d: Path, *,
+                     today: date | None) -> str | None:
+    """Why the authority.yaml in `d` would answer wider on the box than this
+    machine shows (`nable org authority`: the strictest across every layer
+    the org model reads, the data dir's model under a repo's), or None when
+    it is as narrow or narrower. Wider, per purchase kind: not named where
+    another layer names it, a higher rung, and where a plan could be approved,
+    a larger bound or none, an approver another layer does not name, or a
+    later expiry."""
+    from .org import store
+    from .org.model import AUTHORITY_CLASSES, OrgModel
+
+    try:
+        shown = store.load(org_dir).authority(today=today)
+        fl = store._File(d / AUTHORITY).load([])
+        own = OrgModel(fl.facts, refused=fl.refusals).authority(today=today)
+    except Exception as exc:  # noqa: BLE001 - not compared is not sent
+        return (f"{AUTHORITY} could not be compared with this machine's org model "
+                f"({type(exc).__name__}), so it is not sent")
+    wider: list[str] = []
+    for cls in AUTHORITY_CLASSES:
+        o, n = shown["classes"][cls], own["classes"][cls]
+        if not o["named"]:
+            continue
+        if not n["named"]:
+            wider.append(f"{cls} is not named in it")
+            continue
+        if _RUNG_RANK[n["rung"]] > _RUNG_RANK[o["rung"]]:
+            wider.append(f"{cls} is {n['rung']} in it and {o['rung']} here")
+            continue
+        if n["rung"] != "approve_each":
+            continue
+        ob, nb = o["max_commitment_usd_per_plan"], n["max_commitment_usd_per_plan"]
+        if ob is not None and (nb is None or nb > ob):
+            wider.append(f"{cls} has a larger bound a plan in it, or none")
+        oa, na = o["approvers"], n["approvers"]
+        if oa is not None and (na is None or not set(na) <= set(oa)):
+            wider.append(f"{cls} names an approver in it that this machine does not")
+        if o["expires"] and (n["expires"] is None or n["expires"] > o["expires"]):
+            wider.append(f"{cls} expires later in it than {o['expires']}")
+    if not wider:
+        return None
+    others = [f for f in shown.get("files") or [] if Path(f) != d / AUTHORITY]
+    return (f"it answers wider on the workspace than this machine's org model shows "
+            f"({'; '.join(wider)}), as {', '.join(others) or 'another layer'} narrows it "
+            f"here. Put that entry in {d / AUTHORITY}, or send that file's directory with "
+            "--org-dir, so the workspace holds what you were shown")
 
 
 # ── the ledger ───────────────────────────────────────────────────────────────
@@ -391,7 +453,8 @@ def build(*, org_dir: str | os.PathLike | None = None,
     without = sorted(set(without_files))
     if any(n not in names for n in without):
         raise ValueError("a file to leave out is not an org model file")
-    org = _org(org_dir, without)
+    org = _org(org_dir, without,
+               today=(now or datetime.now(UTC)).astimezone(UTC).date())
     led = _ledger(ledger_path)
     parts: list[tuple[str, bytes]] = [
         (DELETE_KIND, _line({"file": n, "kind": DELETE_KIND, "v": FORMAT})) for n in deletes]

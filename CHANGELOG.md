@@ -215,6 +215,24 @@ coding-agent spend a person can carry into a paid workspace.
   Code's file tools and by shell (through a glob and a redirect too), and the
   reason names it. `nable guard doctor` says so (`authority` in `--json`,
   with how many entries were refused).
+- **A git command that rewrites the org model's files asks.** `git merge`,
+  `pull`, `rebase`, `cherry-pick`, `revert`, `am`, `apply` (not `--check`,
+  `--stat`, `--numstat` or `--summary`) and `reset --hard` (or `--merge`,
+  `--keep`), and the `patch` program, change files named in a commit or a
+  patch the guard does not read: each now asks whenever the repo holds one of
+  the guard's own org files (`nable.org/`, or `nable.org/authority.yaml`'s
+  directory). In a repo with no org model they never ask. A branch switch
+  (`git checkout BRANCH`, `git switch`) is not asked, and `nable guard
+  doctor` lists it among the writes the guard cannot see coming.
+- **`nable cloud connect` never sends an `authority.yaml` wider than this
+  machine shows.** `nable org authority` answers with the strictest entry
+  across every layer the org model reads (a repo's `nable.org/` and the data
+  dir's model under it); cloud connect sends one directory. When the
+  `authority.yaml` it would send answers wider for any purchase kind (a kind
+  not named, a higher rung, and at approve_each a larger bound or none, an
+  approver not named here, or a later expiry), it is left out of the payload,
+  in the dry run and so in what leaves, with the reason naming the stricter
+  file and `--org-dir`. The workspace keeps what it holds.
 - **`nable cloud connect` sends `authority.yaml` only to a box that says it
   takes it.** A box whose status does not list `org_file:authority.yaml` in
   `accepts` would refuse the batch whole, so the send is refused before a
@@ -226,10 +244,13 @@ coding-agent spend a person can carry into a paid workspace.
 - **`FINOPS_DATA_DIR`, read in one place.** `finops._datadir.env_data_dir`
   is the one reader, and every module that kept a file in the data dir asks
   it with its own default: a leading `~` expands, and a relative value is
-  refused, so the default is used everywhere, the guard protects the
-  directory nable actually writes, a command says so once on stderr, the
-  guard hook never fails over it, and `nable guard doctor` names the value
-  and the directory used (`data_dir` in `--json`).
+  refused, as is a value with whitespace before or after it (a shell splits
+  `$FINOPS_DATA_DIR/guard-off` on it, so stripping it would protect the
+  directory a command then writes unasked), so the default is used
+  everywhere, the guard protects the directory nable actually writes, a
+  command says so once on stderr, the guard hook never fails over it, and
+  `nable guard doctor` names the value and the directory used (`data_dir` in
+  `--json`).
 - An org model file holding a date YAML cannot construct (`2027-02-30`) is
   now "not readable as YAML", named with its fix, instead of an error out of
   every command that reads the model.

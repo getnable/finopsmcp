@@ -13,7 +13,12 @@ the others write:
   * a relative path is refused: it would name a different directory from
     every working directory an agent's hook or a CLI runs in, so what nable
     wrote in one place the guard would protect in another. The default is
-    used instead, and the reason comes back with it.
+    used instead, and the reason comes back with it;
+  * so is a value with whitespace before or after it: the shell splits
+    `$FINOPS_DATA_DIR/guard-off` on it, so a command would reach the
+    directory without the space while the guard reads the value as written.
+    Stripping it here would protect one directory and let the shell write
+    the same one unasked.
 
 Nothing here prints or raises. A CLI says the reason once on stderr
 (say_once, called by the wizard's main and never on the guard hook's path),
@@ -39,9 +44,12 @@ def env_data_dir(default: Path, *, environ: Mapping[str, str] | None = None
     unset or blank too (with None)."""
     env = os.environ if environ is None else environ
     raw = env.get(ENV, "")
-    value = raw.strip() if isinstance(raw, str) else ""
-    if not value:
+    value = raw if isinstance(raw, str) else ""
+    if not value.strip():
         return default, None
+    if value != value.strip():
+        return default, (f"{ENV}={value!r} has whitespace before or after it, which a shell "
+                         f"splits off, so nable uses {default}. Set {ENV} to the path alone.")
     try:
         path = Path(value).expanduser()
     except (RuntimeError, ValueError):     # ~user with no such user, or no home

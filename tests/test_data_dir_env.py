@@ -86,6 +86,54 @@ def test_a_relative_value_is_refused_and_the_default_used(tmp_path, value):
     assert "not an absolute path" in why and str(d) in why and value in why
 
 
+@pytest.mark.parametrize("value", [" {d}", "{d} ", "\t{d}", "{d}\n", " {d} "])
+def test_a_value_with_whitespace_around_it_is_refused_never_stripped(tmp_path, value):
+    """The shell splits `$FINOPS_DATA_DIR/guard-off` on that whitespace, so
+    a stripped value would be the directory a command writes unasked while
+    the guard reads the value as written: refused, the default used."""
+    d = tmp_path / "default"
+    v = value.format(d=tmp_path / "nd")
+    got, why = _datadir.env_data_dir(d, environ={"FINOPS_DATA_DIR": v})
+    assert got == d and why is not None and "whitespace" in why and str(d) in why
+
+
+@pytest.mark.parametrize("value", [" {d}", "{d} ", "\t{d}"])
+@pytest.mark.parametrize("cmd", ["touch $FINOPS_DATA_DIR/guard-off",
+                                 "touch ${FINOPS_DATA_DIR}/guard-off",
+                                 "rm $FINOPS_DATA_DIR/guard-ledger.jsonl"])
+def test_a_shell_reading_a_spaced_value_never_reaches_the_guards_own_files(
+        tmp_path, monkeypatch, value, cmd):
+    """With FINOPS_DATA_DIR=' /abs/nd' the shell writes /abs/nd/guard-off.
+    That is not where nable keeps its switch (the default is used), so the
+    guard is not turned off; the real switch, under the default, still asks."""
+    import finops.guard as g
+    import finops.guard_plugin as gp
+    from finops import ai_budget
+
+    home = tmp_path / "home"
+    home.mkdir()
+    nd = tmp_path / "nd"
+    nd.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    for var in ("FINOPS_PROFILE", "FINOPS_ORG_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_PROJECT_DIR",
+                "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+                "GIT_CONFIG_NOSYSTEM"):
+        monkeypatch.delenv(var, raising=False)
+    from finops.storage import db
+    monkeypatch.setattr(gp, "_data_root_override", None)
+    monkeypatch.setattr(db, "_DATA_DIR", None)
+    monkeypatch.setattr(ai_budget, "status", lambda **_: {"verdict": ai_budget.BUDGET_OK})
+    monkeypatch.setenv("FINOPS_DATA_DIR", value.format(d=nd))
+    assert gp.off_flag_path() == home / ".finops" / "guard-off"
+    (nd / "guard-off").touch()                 # what the shell's command would write
+    assert gp.is_off() is False
+    real = cmd.replace("$FINOPS_DATA_DIR", str(home / ".finops")).replace(
+        "${FINOPS_DATA_DIR}", str(home / ".finops"))
+    verdict = g.gate_command(real, "s1", cwd=str(tmp_path), record=False)
+    assert verdict is not None and verdict["decision"] in ("ask", "deny"), (real, verdict)
+
+
 # ── every reader ─────────────────────────────────────────────────────────────
 
 @pytest.fixture
