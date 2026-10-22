@@ -349,6 +349,7 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
+    (r"\baws\s+elasticache\s+create-cache-cluster\b", "infra_apply"),
     # Changes that resize what is already running, or launch capacity by other
     # verbs than run-instances. Reversible, but a class change to
     # db.r6g.16xlarge or a desired capacity of 100 is a bill like any launch.
@@ -1568,6 +1569,7 @@ _STRUCT_TYPE_RE = re.compile(r"\bInstanceType\s*[=:]\s*([a-z0-9]+\.[a-z0-9]+)")
 # guard's job is the ceiling a human is about to authorise, not the floor.
 _COUNT_RE = re.compile(r"--count[=\s]+(\d+)(?::(\d+))?")
 _RDS_CREATE_RE = re.compile(r"\baws\s+rds\s+create-db-instance\b")
+_CACHE_CREATE_RE = re.compile(r"\baws\s+elasticache\s+create-cache-cluster\b")
 _RDS_MODIFY_RE = re.compile(r"\baws\s+rds\s+modify-db-instance\b")
 _EC2_MODIFY_RE = re.compile(r"\baws\s+ec2\s+modify-instance-attribute\b")
 _SPOT_RE = re.compile(r"\baws\s+ec2\s+request-spot-instances\b")
@@ -1688,6 +1690,23 @@ def _book_field(book: dict[str, Any], judged: bool = True,
         # Below list: shown, not used for the verdict.
         out.update(below_list=True, monthly_usd=round(book_monthly or 0.0, 2))
     return out
+
+
+# What an estimate priced, for the workspace's effective rate (cloud_rates,
+# D146) and for the ledger (contract 2's `priced`): the product code, the
+# region the command or the environment names, the usage type as the bill
+# names it without its region prefix, the quantity, and the hourly rate one
+# unit was priced at. Only on-demand launches of the families the box derives
+# rates for (EC2 run-instances, RDS create-db-instance, ElastiCache
+# create-cache-cluster, and the same resources in a saved Terraform plan).
+# Nothing here changes a figure the guard judges.
+def _sku(product: str, usage_type: str, quantity: float, hourly: float, monthly: float,
+         book: dict[str, Any] | None) -> dict[str, Any]:
+    from .cloud_rates import env_region
+    return {"product_code": product, "region": _PRICING_REGION.get() or env_region(),
+            "usage_type": usage_type, "quantity": quantity, "unit": "Hrs",
+            "hours": _hours_per_month(), "usd_hour": round(hourly, 6),
+            "monthly_usd": round(monthly, 2), "price_book": book is not None}
 
 
 # A size the tables do not list, in a family they do: `c6i.32xlarge`,
@@ -1906,6 +1925,10 @@ def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     basis = _ON_DEMAND_BASIS + "; the AMI's root volume is not counted" + (
         f", nor {unsized} volume{'s' if unsized != 1 else ''} from a snapshot" if unsized else "")
     est = _price_ec2(m.group(1), count or 1, basis=basis)
+    if est is not None:
+        book = est.get("price_book")
+        est["sku"] = _sku("AmazonEC2", f"BoxUsage:{est['instance_type']}", est["count"],
+                          est["hourly_usd"], est["monthly_usd"], book)
     if est is None or not per_instance:
         return est
     n = est["count"]
@@ -2022,16 +2045,71 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     elif family:
         basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
+    # The bill names a Multi-AZ instance's hours as one Multi-AZUsage line,
+    # its rate the standby's included.
+    sku = _sku("AmazonRDS", f"{'Multi-AZUsage' if multi_az else 'InstanceUsage'}:{cls}", 1,
+               hourly * (2 if multi_az else 1), monthly, book)
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": cls,
         "count": 2 if multi_az else 1,
         "basis": basis,
+        "sku": sku,
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         "line": (f"{cls} {engine or 'RDS'}{' Multi-AZ' if multi_az else ''} {at}"
                  f"{_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
+                 f"is ~${monthly:,.0f}/mo"
+                 + (_below_list(book, hours) if book and not judged else "")),
+    }
+
+
+_CACHE_BASIS = (f"{_ON_DEMAND_BASIS}, node hours only; a replication group's other nodes "
+                "and backup storage not included")
+
+
+def _price_cache_cluster(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-cache-cluster: its nodes at the ElastiCache table's node-hour
+    rate for the engine (the Terraform estimator's, which names its offer and
+    SKUs), scaled from the family's listed sizes when the size is not listed,
+    or the org's price book rate. No --cache-node-type, no figure."""
+    from .connectors.terraform_estimate import (
+        _ELASTICACHE_HOURLY,
+        _ELASTICACHE_VALKEY_HOURLY,
+        elasticache_hourly,
+    )
+    node = _flag(cmd, "cache-node-type")
+    if not node:
+        return None
+    engine = (_flag(cmd, "engine") or "redis").lower()
+    if engine not in ("redis", "memcached", "valkey"):
+        return None
+    nodes = _int_flag(cmd, "num-cache-nodes") or 1
+    listed, family = elasticache_hourly(node, engine), ""
+    if listed is None:
+        listed, family = _scaled(_ELASTICACHE_VALKEY_HOURLY if engine == "valkey"
+                                 else _ELASTICACHE_HOURLY, node)
+    hourly, book, judged = _gated("aws", node, listed)
+    if hourly is None:
+        return None
+    hours = nodes * _hours_per_month()
+    monthly = hourly * hours
+    basis = _CACHE_BASIS
+    if book and judged:
+        basis = _book_basis(basis, book)
+    elif family:
+        basis = _scaled_basis(basis, family)
+    at = "at your price book rate of " if judged else "at "
+    return {
+        "monthly_usd": round(monthly, 2),
+        "hourly_usd": hourly,
+        "instance_type": node,
+        "count": nodes,
+        "basis": basis,
+        "sku": _sku("AmazonElastiCache", f"NodeUsage:{node}", nodes, hourly, monthly, book),
+        **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
+        "line": (f"{nodes}x {node} {engine} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
     }
@@ -2864,9 +2942,13 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
     basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}{booked}"
              + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
                 if unpriced else ""))
+    from .cloud_rates import env_region
+    from .connectors.terraform_estimate import priced_skus
+    skus = priced_skus(doc, default_region=env_region())
     return {
         "monthly_usd": round(monthly, 2),
         "plan": plan,
+        **({"skus": skus} if skus else {}),
         "priced_resources": len(result["lines"]),
         "unpriced_resources": unpriced,
         "basis": basis,
@@ -2880,6 +2962,7 @@ _PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_CAPACITY_RESERVATION_RE, _price_capacity_reservation),
     (_RDS_CREATE_RE, _price_rds),
+    (_CACHE_CREATE_RE, _price_cache_cluster),
     (_RDS_MODIFY_RE, _price_rds_class_change),
     (_EC2_MODIFY_RE, _price_instance_type_change),
     (_SPOT_RE, _price_spot),
@@ -3048,12 +3131,22 @@ def _added_up(parts: list[dict[str, Any]], unpriced: int) -> dict[str, Any] | No
                                        if p.get("price_book")))
             if books:
                 est["price_book"] = {"pack": ", ".join(books)}
+            skus = [x for p in parts for x in _skus_of(p)]
+            if skus:
+                est["skus"] = skus
     if unpriced:
         est = {**est, "unpriced_changes": unpriced,
                "line": (f"{est['line']} ({unpriced} more change"
                         f"{'s' if unpriced != 1 else ''} in this command "
                         f"{'have' if unpriced != 1 else 'has'} no figure)")}
     return est
+
+
+def _skus_of(est: dict[str, Any]) -> list[dict[str, Any]]:
+    """The SKUs an estimate priced for the effective rate (_sku), in order."""
+    if est.get("skus"):
+        return [x for x in est["skus"] if isinstance(x, dict)]
+    return [est["sku"]] if isinstance(est.get("sku"), dict) else []
 
 
 def _size(est: dict[str, Any]) -> float:
@@ -4043,7 +4136,8 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         err = org.error
         v = _judged(command, hit, context=context, via=via, cwd=cwd,
                     org=_OrgLens(command, cwd, on=False))
-        return {**v, "_org_error": err}
+        return {**_with_effective(v), "_org_error": err}
+    v = _with_effective(v)
     v = _with_owner(v, org)
     v = _with_scope(v, org)
     if org.error is not None:
@@ -4053,6 +4147,41 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         # ledger keeps which figures, from which scope and which file.
         v = {**v, "org_thresholds": org._memo["thresholds"]}
     return v
+
+
+def _with_effective(v: dict[str, Any]) -> dict[str, Any]:
+    """A priced verdict, after it is judged: what it priced (contract 2's
+    `priced`), on which basis it is shown, and, where this machine keeps the
+    workspace's effective rates (cloud_rates), the figure at that rate,
+    appended to the reason of an ask, a deny or a warning as its own sentence
+    (price_note). Rule 13: the decision, the rule, the thresholds and the
+    figures every check judged are the list figures, untouched; a price is
+    shown, never trusted to skip a check. A failure here costs the note,
+    never the verdict."""
+    est = v.get("estimate")
+    skus = _skus_of(est) if isinstance(est, dict) else []
+    if not skus:
+        return v
+    try:
+        from . import cloud_rates
+        judged = est.get("monthly_usd") if isinstance(est.get("monthly_usd"), int | float) \
+            else None
+        got = cloud_rates.effective(skus, judged_monthly=judged)
+    except Exception:  # noqa: BLE001 - the note, never the verdict
+        return v
+    if got is None:
+        return v
+    out = {**v, "priced": got["priced"], "price_basis": got["price_basis"]}
+    if got.get("effective"):
+        out["effective"] = got["effective"]
+    if got["note"] and v.get("decision") in ("ask", "deny", "warn") and v.get("reason"):
+        note = got["note"]
+        if v.get("decision") != "ask":
+            note = note.replace(cloud_rates.JUDGED_AT_LIST, cloud_rates.JUDGED_AT_LIST.replace(
+                "this ask", "this call"))
+        out["reason"] = f"{v['reason']} {note}"
+        out["price_note"] = note
+    return out
 
 
 def _with_scope(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
@@ -4506,6 +4635,7 @@ _LOOP_ARGS: list[tuple[Any, tuple[str, ...]]] = [
     (re.compile(r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b"),
      ("template-file", "template-url", "template-body")),
     (_RDS_CREATE_RE, ("db-instance-class", "engine")),
+    (_CACHE_CREATE_RE, ("cache-node-type", "engine", "num-cache-nodes")),
     (_GCE_CREATE_RE, ("machine-type",)),
     (_AZ_VM_CREATE_RE, ("size", "count")),
 ]
@@ -5946,6 +6076,13 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
     if i >= len(args):
         return [], base
     sub, rest = args[i], args[i + 1:]
+    switch = _branch_switch(sub, rest, base)
+    if switch is not None:
+        if switch is False:
+            return [], base
+        from . import guard_paths
+        root = guard_paths.git_root(base)
+        return [(str(root) if root else ".", ("switch", switch))], base
     if sub in ("checkout", "restore"):
         source = any(w in ("-s", "--source") or w.startswith("--source=") for w in rest)
         if sub == "restore" and (_has_short(rest, "S") or "--staged" in rest) and not (
@@ -6003,6 +6140,68 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         # It deletes what is untracked, so only a protected file that is there.
         return [(p, "exists") for p in (_plain_args(rest) or ["."])], base
     return [], base
+
+
+# git checkout's and git switch's options that take the next word as their
+# value, and those that create a branch (its name is that value).
+_CHECKOUT_VALUES = ("-b", "-B", "--orphan", "--conflict", "--pathspec-from-file")
+_SWITCH_VALUES = ("-c", "-C", "--create", "--force-create", "--orphan", "--conflict")
+_CREATES = ("-b", "-B", "-c", "-C", "--create", "--force-create", "--orphan")
+
+
+def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
+    """For `git checkout` and `git switch` of a branch or commit (D157): the
+    switch to judge, (target, branch first, orphan); False for one that
+    changes no file (a branch made at HEAD, a bare checkout); None when the
+    words are not a switch (a checkout of paths, judged as before)."""
+    if sub not in ("checkout", "switch") or "-h" in rest or "--help" in rest:
+        return None
+    values = _CHECKOUT_VALUES if sub == "checkout" else _SWITCH_VALUES
+    words, paths, j = [], None, 0
+    creates = detach = orphan = force = False
+    while j < len(rest):
+        w = rest[j]
+        if w == "--":
+            paths = rest[j + 1:]
+            break
+        name = w.split("=", 1)[0]
+        if name in values:
+            creates = creates or name in _CREATES
+            orphan = orphan or name == "--orphan"
+            j += 1 if "=" in w else 2
+            continue
+        if w == "--detach" or (sub == "switch" and w == "-d"):
+            detach = True
+        elif w in ("-f", "--force", "--discard-changes"):
+            force = True
+        elif not w.startswith("-") or w == "-":
+            words.append(w)
+        j += 1
+    if paths:
+        return None                     # `git checkout REF -- PATHS`
+    if sub == "checkout" and len(words) > 1:
+        return None                     # `git checkout REF PATHS`
+    if orphan and sub == "switch":
+        return (None, True, True)       # an orphan branch: an empty tree
+    if not words and force:
+        # A forced checkout at HEAD throws away what changed since it moved.
+        return ("HEAD", True, False)
+    if not words:
+        return False if (creates or detach or orphan or sub == "checkout"
+                         or paths is not None) else None
+    target = words[0]
+    if sub == "checkout" and not (creates or detach) and paths is None:
+        # `git checkout X`: a branch or a commit when X names one, else a path.
+        from . import guard_git, guard_paths
+        root = guard_paths.git_root(base)
+        if root is None:
+            return None
+        try:
+            guard_git.Repo(root).resolve(target)
+        except (guard_git.Unknown, guard_paths.TooMuch, OSError):
+            if os.path.lexists(os.path.join(base, os.path.expanduser(target))):
+                return None
+    return (target, not detach, False)
 
 
 def _write_targets(prog: str, args: list[str], base: str,
@@ -6209,6 +6408,88 @@ def _git_would_change(path: str, mode: str, where: str, env: dict[str, str],
     return None
 
 
+# What a branch switch may spend reading the repo's objects, of the meter.
+_GIT_UNITS = 2048
+_SWITCH_FILES_SHOWN = 8
+
+
+def _org_entries_under(real: str, entries: list[Any]) -> list[Any]:
+    """The org model directories under a repo's root: its own nable.org and
+    any other the guard protects there."""
+    from . import guard_paths
+    return [e for e in entries
+            if e.tree and guard_paths.is_under(e.path, real)
+            and (guard_paths.ORG_DIR_NAME in Path(e.path).parts
+                 or e.what.startswith("the org model"))]
+
+
+def _switch_hit(path: str, spec: tuple[Any, bool, bool], where: str, env: dict[str, str],
+                entries: list[Any]) -> Any:
+    """The protected entry a branch switch would rewrite (D157), with the
+    files that differ named in its words; None when the org model's tree is
+    the same at HEAD and the target and nothing under it changed since HEAD
+    last moved. When that cannot be told, the org directory when the repo
+    holds one, as a merge is judged."""
+    from . import guard_git, guard_paths
+    target, branch_first, orphan = spec
+    real = guard_paths.resolve(path, where, env=env)
+    if real is None:
+        return None
+    org = _org_entries_under(real, entries)
+    own = os.path.join(real, guard_paths.ORG_DIR_NAME)
+    rels = sorted({os.path.relpath(e.path, real).replace(os.sep, "/") for e in org}
+                  | {guard_paths.ORG_DIR_NAME})
+    shown_to = "an orphan branch" if orphan else (target or "HEAD")
+    outer = guard_paths._METER.get()
+    token = guard_paths.meter(_GIT_UNITS)
+    why = None
+    try:
+        got = guard_git.compare(real, target, rels, branch_first=branch_first, empty=orphan)
+    except guard_git.NotARepo:
+        got, why = {"same": True, "files": []}, None    # git refuses: nothing changes
+        target = None
+    except guard_git.Unknown as exc:
+        got, why = None, str(exc)
+    except guard_paths.TooMuch:
+        got, why = None, "the repo is larger than the guard reads before its hook times out"
+    except (OSError, ValueError, MemoryError) as exc:
+        got, why = None, f"the repo could not be read ({type(exc).__name__})"
+    finally:
+        spent = _GIT_UNITS - max(guard_paths._METER.get()[0], 0)
+        guard_paths.unmeter(token)
+    if outer is not None:
+        guard_paths.charge(spent)
+
+    def entry(at: str, what: str) -> Any:
+        return guard_paths.Protected(path=at, shown=guard_paths._shown(Path(at)), what=what,
+                                     tree=True)
+    if got is None:
+        # As a merge: an org directory there, or the one that would be made.
+        here = [e.path for e in org if os.path.lexists(e.path)]
+        if not here and not os.path.isdir(own):
+            return None
+        return entry(here[0] if here else own,
+                     f"this repo's org model, which a switch to {shown_to} may rewrite (the "
+                     f"guard could not tell: {why})")
+    if got["same"]:
+        if target is None and not orphan:
+            return None                 # a branch made at HEAD changes no file
+        for rel in rels:
+            p = os.path.join(real, *rel.split("/"))
+            if os.path.lexists(p) and guard_paths.git_changed(p, real, tree=True) is not False:
+                return entry(p, f"this repo's org model, whose files changed since HEAD last "
+                                f"moved; a switch to {shown_to} carries those changes over, or "
+                                "forced, throws them away")
+        return None
+    files = got["files"]
+    named = ", ".join(files[:_SWITCH_FILES_SHOWN]) + (
+        f" and {len(files) - _SWITCH_FILES_SHOWN} more" if len(files) > _SWITCH_FILES_SHOWN
+        else "")
+    at = next((os.path.join(real, *r.split("/")) for r in rels
+               if any(f == r or f.startswith(r + "/") for f in files)), own)
+    return entry(at, f"this repo's org model: a switch to {shown_to} rewrites {named}")
+
+
 # What starts a command substitution (`$(...)`, a backtick) or a process
 # substitution (`<(...)`, `>(...)`), and the parentheses that close one.
 _SUBST_TOKEN_RE = _Lazy(r"\$\(|[<>]\(|[()`]")
@@ -6291,6 +6572,8 @@ def _protected_commands(form: str, code: str, base: str, entries: list[Any],
         return checks.once(key, lambda: look(path, ancestors, where))
 
     def look(path: str, ancestors: Any, where: str | None) -> Any:
+        if isinstance(ancestors, tuple) and ancestors and ancestors[0] == "switch":
+            return _switch_hit(path, ancestors[1], where or base, env, entries)
         if ancestors in ("changed", "tracked"):
             return _git_would_change(path, ancestors, where or base, env, entries)
         if ancestors == "repo":
@@ -6648,6 +6931,13 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # the change; the guard's own file a write would have changed.
             **({"pack_rules": v["pack_rules"]} if v.get("pack_rules") else {}),
             **({"price_book": est["price_book"]} if est.get("price_book") else {}),
+            # Contract 2: what was priced, on which basis it was shown, and,
+            # at an effective rate, that figure with its factor, window, as_of
+            # and the workspace it came from. monthly_usd and total_usd above
+            # stay the figures the guard judged.
+            **({"priced": v["priced"], "price_basis": v["price_basis"]}
+               if v.get("priced") else {}),
+            **({"effective": v["effective"]} if v.get("effective") else {}),
             **({"protected_path": guard_ledger.redact(v["protected_path"], limit=300)}
                if v.get("protected_path") else {}),
             # Who owns what the call touched, when the org model said (cited
@@ -7481,8 +7771,7 @@ def doctor() -> dict[str, Any]:
                 "and nothing else")
     gaps.append("writes to the guard's own files that the guard cannot see coming: a path "
                 "built at run time ($(...), a loop variable), a script the agent runs, "
-                "a git branch switch (checkout or switch of a branch, which can change the "
-                "org model's files), an archive unpacked over them")
+                "an archive unpacked over them")
     for name, (label, _what) in _ADAPTER_SURFACES.items():
         if any(r["harness"] == name and r.get("runs") for r in adapter_rows):
             gaps.append(f"{label}: {_EDITOR_GAPS[name]}")
@@ -7654,11 +7943,24 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
     box, why = ai_budget.box_standing(person)
     standing = ai_budget._box_said(box, why)
     if applies and box is not None:
+        from . import cloud_standing
         from .budget.summary import age_words
-        covered.append(f"the box's month to date for {box['person']} from {box['host']} (as "
-                       f"of {box['as_of'] or box['fetched_at']}, "
-                       f"{age_words(standing['age_hours'])} old), beside this machine's: the "
-                       "larger is compared, never their sum")
+        # Each budget's figure dated by its own as_of, the answer's only for
+        # a box that sends none.
+        dated = []
+        for h in applies:
+            if cloud_standing.figure(box, h["scope"], h["subject"]) is None:
+                continue
+            at, _own = cloud_standing.figure_as_of(box, h["scope"], h["subject"])
+            age = cloud_standing.figure_age_hours(box, h["scope"], h["subject"])
+            dated.append(f"{ai_budget._whose(h)} as of {at or box['fetched_at']}, "
+                         f"{age_words(age)} old")
+        when = "; ".join(dict.fromkeys(dated)) or (
+            f"as of {box['as_of'] or box['fetched_at']}, "
+            f"{age_words(standing['age_hours'])} old")
+        covered.append(f"the box's month to date for {box['person']} from {box['host']} "
+                       f"({when}), beside this machine's: the larger is compared, never "
+                       "their sum")
     elif applies:
         gaps.append(f"the box's month to date for these budgets: the guard uses this "
                     f"machine's figure alone, since {why}")

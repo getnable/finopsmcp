@@ -99,6 +99,13 @@ and the ledger lines up to the head it reports, and nothing else: coding-agent
 usage goes whole every time, since the box replaces each day's records. A box whose status does not list agent_usage among what it accepts
 is told so before anything is sent (--no-agent-usage leaves the records out).
 
+The status answer may carry the workspace's effective rates (a `rates`
+block, contract 1, D147: no endpoint and no request of its own). A send keeps
+them as cloud-rates.json for the guard (cloud_rates.keep), once it has bound
+the box and the workspace; `nable cloud status` keeps them only from the box
+and the workspace this machine last sent to, and otherwise shows them and says
+why they were not kept. A block that is not contract 1 is refused whole.
+
 `nable cloud status` reads the box's standing for one person (standing():
 POST STANDING_PATH with exactly {"person": P}) when the box's status lists
 "standing" in `reads`; cloud_standing keeps the answer for the guard, which
@@ -400,10 +407,13 @@ def _ledger(path: Path | None) -> dict[str, Any]:
         out.update(ok=None, left_out=f"the ledger was not read ({exc.strerror or exc})")
         return out
     lines, chain = got["lines"], got["chain"]
+    created = [_created_count(x) for x in lines]
     out.update(records=len(lines), ok=chain["ok"], head=chain["head"],
                partial=got["partial"], lines=lines,
                records_naming=sum(1 for x in lines
-                                  if _NAMING.search(x.decode("utf-8", "replace"))))
+                                  if _NAMING.search(x.decode("utf-8", "replace"))),
+               records_creating=sum(1 for n in created if n),
+               created_ids=sum(created))
     if lines:
         out["chain_id"] = _sha(lines[0])
     if not chain["ok"]:
@@ -1067,13 +1077,22 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
     # counts a standing from them alone (cloud_standing.usable). On a pooled
     # box the URL is every workspace's, so the workspace is the status's
     # reference, from the same key; a box that names none binds no workspace.
-    from . import cloud_standing
+    from . import cloud_rates, cloud_standing
     last = out["status"] if isinstance(out["status"], Mapping) else {}
     try:
         cloud_standing.bind(box, workspace=last.get("workspace_ref"))
     except (OSError, ValueError) as exc:
         out["box_record"] = (f"not kept ({type(exc).__name__}): the guard cannot tell which "
                              "box a standing must come from")
+    # The workspace's effective rates (D147), from the same status answer:
+    # kept for the guard only as this box's and this workspace's.
+    try:
+        out["rates"] = cloud_rates.keep(last.get("rates"), box=box,
+                                        workspace_ref=last.get("workspace_ref"),
+                                        fetched_at=datetime.now(UTC))
+    except OSError as exc:
+        out["rates"] = {"kept": False, "file": None, "rows": 0,
+                        "why": f"not kept ({type(exc).__name__})"}
     return out
 
 
@@ -1178,6 +1197,19 @@ def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
                         if code else None)}
 
 
+def _created_count(line: bytes) -> int:
+    """How many created resource ids an outcome line names (contract 2's
+    `created`, D149); 0 for any other line."""
+    if b'"created"' not in line:
+        return 0
+    try:
+        doc = json.loads(line)
+    except ValueError:
+        return 0
+    got = doc.get("created") if isinstance(doc, dict) else None
+    return len(got) if isinstance(got, list) else 0
+
+
 def describe(payload: Payload, box: str, out: Path | None) -> str:
     """The dry run as a person reads it."""
     o, led = payload.org, payload.ledger
@@ -1225,6 +1257,13 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
             if naming:
                 lines.append(f"  {naming:,} of them name a path, a host or a user; read them in "
                              "the saved file before you send")
+            creating = led.get("records_creating") or 0
+            if creating:
+                ids = led.get("created_ids") or 0
+                lines.append(f"  {creating:,} of them name{'s' if creating == 1 else ''} "
+                             f"{ids:,} resource id{'s' if ids != 1 else ''} an approved ask "
+                             "created, as the tool printed them, so the workspace can find "
+                             "them on its bill at day 30")
     if led.get("partial"):
         lines.append("  the last record was still being written; it waits for the next connect")
     lines += ["", *_describe_usage(payload.usage), ""]

@@ -222,8 +222,7 @@ coding-agent spend a person can carry into a paid workspace.
   patch the guard does not read: each now asks whenever the repo holds one of
   the guard's own org files (`nable.org/`, or `nable.org/authority.yaml`'s
   directory). In a repo with no org model they never ask. A branch switch
-  (`git checkout BRANCH`, `git switch`) is not asked, and `nable guard
-  doctor` lists it among the writes the guard cannot see coming.
+  is judged by what it would change (below).
 - **`nable cloud connect` never sends an `authority.yaml` wider than this
   machine shows.** `nable org authority` answers with the strictest entry
   across every layer the org model reads (a repo's `nable.org/` and the data
@@ -264,6 +263,67 @@ coding-agent spend a person can carry into a paid workspace.
   so a run whose clock crosses midnight passes), and the onboarding tests
   make their files under pytest's `tmp_path`, leaving nothing in the system
   temp dir.
+- **Your workspace's effective rate beside list price (D146 to D148).** A
+  paid workspace's status answer may carry a `rates` block: per EC2, RDS and
+  ElastiCache usage type and region, the workspace's own on-demand factor
+  (what its bill paid, net of private pricing, against the public on-demand
+  price of the same line items), a blended factor, the share of that usage
+  that ran on commitments, the window and its as_of. `nable cloud status` and
+  `nable cloud connect --send` keep it as `cloud-rates.json` beside the
+  ledger (0600) only when it comes from the box and the workspace this
+  machine last sent to, and otherwise show it and say why; a block that is
+  not the shape this version reads is refused whole (`finops.cloud_rates`;
+  `rates_kept` in `cloud status --json`). An ask, deny or warning on an EC2
+  `run-instances`, an RDS `create-db-instance`, an ElastiCache
+  `create-cache-cluster` or a saved Terraform plan holding those resources
+  then says what it is "at your effective rate", with the factor, its window
+  and as_of, and that the ask is judged at list price. Nothing is judged at
+  it: the decision, the rule, thresholds, the velocity cap and budgets read
+  the list figure exactly as before, and where a price book prices the SKU
+  the book's figure stands and no effective rate is applied. A rate that is
+  missing, more than 45 days past its as_of, another workspace's or box's, or
+  not held for that usage type and region says "Priced at list price" and
+  why. The region is the command's, else `AWS_REGION`, `AWS_DEFAULT_REGION`
+  or the AWS CLI config's for the active profile. `cloud-rates.json` is one
+  of the guard's own files. The guard reads it with no connection, and only
+  on a priced call.
+- **The ledger says what it priced (contract 2).** A verdict line on a priced
+  launch carries `priced` (product code, region, usage type, quantity, unit,
+  the hours a month priced over, and the hourly rate one unit was priced at;
+  a list for a plan of several), `price_basis` (`effective` or `list`) and,
+  at an effective rate, `effective` (that monthly figure, the factor, the
+  blended factor, as_of, window and the workspace reference). `monthly_usd`
+  and `total_usd` stay the figures the guard judged. Every field is new and
+  optional, and `nable guard verify-log` and every reader read the lines as
+  before.
+- **The post hook names what an approved priced create made (D149).** Its
+  `ran` line records `created`: the EC2 instance ids, RDS and ElastiCache
+  ARNs, and terraform `[id=...]` values in those forms that the tool printed
+  (Claude Code's tool_response, Cursor's output, Copilot's toolResult), at
+  most 20, raw, of the kinds the ask priced, so a paid workspace can find
+  them on its bill at day 30. Nothing is recorded for a deny, a decline or an
+  unpriced call. The post hook still never imports the guard. `nable cloud
+  connect`'s dry run counts the lines that name such ids, and the ids.
+- **An ElastiCache `create-cache-cluster` is priced and can ask.** Its nodes
+  at the ElastiCache table's node-hour rate for the engine (or the org's
+  price book rate), so a large cluster now asks at the threshold like any
+  other launch, where before it passed unpriced.
+- **A git branch switch that rewrites the org model's files asks (D157).**
+  `git checkout BRANCH` or `COMMIT` and `git switch [--detach] REF` compare
+  the org directory's tree at HEAD and at the target, read from the repo's
+  own objects (loose, and packed with OFS and REF deltas), refs and
+  packed-refs, in a worktree too, in process and under the guard's meter: no
+  subprocess and no network (`finops.guard_git`). A different tree asks,
+  naming the files; the same tree with no local changes under it stays
+  silent; a branch made at HEAD (`checkout -b`, `switch -c`, `--detach`)
+  stays silent. When it cannot tell (an unresolvable ref, a missing object, a
+  spent meter) it asks whenever the repo holds org files, as the rewrites
+  above do. `nable guard doctor` no longer lists the branch switch as a gap.
+- **Each box figure dated by its own as_of.** The box's standing sends an
+  as_of on each figure (the person's, each team's and the org's: the latest
+  receipt among the records in it). The guard's reason, the figure's age and
+  `nable guard doctor` now use the compared figure's own as_of, and the
+  answer's top-level as_of only for a box that sends none.
 
 ## 0.13.0 (2026-10-18)
 
