@@ -3355,6 +3355,7 @@ def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, An
             return None
         hit = st["hit"]
         words = ai_budget.org_budget_words(st)
+        figure = _org_budget_figure(st)
         who = (f" It is {st['person']}'s, from {st['person_source']}." if st.get("person")
                else "")
         raise_it = (f"`nable org set ai_budget --subject {hit['subject']} --monthly-usd USD"
@@ -3362,7 +3363,7 @@ def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, An
         if st["verdict"] == ai_budget.BUDGET_WARN:
             if not _budget_note_due(f"org:{session_id or '*'}"):
                 return None
-            return {"decision": "warn", "action_type": "ai_budget",
+            return {"decision": "warn", "action_type": "ai_budget", "budget_figure": figure,
                     "reason": (f"nable guard: your agent is close to an AI budget in the org "
                                f"model. {words}.{who} Nothing is stopped; this note shows at "
                                f"most every {_BUDGET_NOTE_EVERY_MIN} minutes.")}
@@ -3370,12 +3371,13 @@ def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, An
             why = ("it is a proposal nobody has confirmed" if hit["status"] != "confirmed"
                    else "it comes from a repo's nable.org/ nobody on this machine trusted "
                         "(`nable org trust --here`)")
-            return {"decision": "ask", "action_type": "ai_budget",
+            return {"decision": "ask", "action_type": "ai_budget", "budget_figure": figure,
                     "reason": (f"nable guard: your agent is over an AI budget in the org model. "
                                f"{words}.{who} This only asks, never stops: {why}. Confirm to "
                                "continue.")}
         hard, because = _org_budget_hard_stop()
         return {"decision": "deny" if hard else "ask", "action_type": "ai_budget",
+                "budget_figure": figure,
                 "reason": (f"nable guard: your agent is over an AI budget in the org model. "
                            f"{words}.{who} "
                            + (f"Stopped because {because}. Whoever owns the budget can raise "
@@ -3386,6 +3388,19 @@ def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, An
                               "FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop."))}
     except Exception:  # noqa: BLE001 - an unreadable org model or transcript stops nobody
         return None
+
+
+def _org_budget_figure(st: dict[str, Any]) -> dict[str, Any]:
+    """What an org model budget verdict was judged on, for the ledger: which
+    figure was compared (the larger of this machine's and the box's, never
+    their sum), this machine's figure, and whether the box's was beside it.
+    Not the box's figure, host or time: the ledger goes to whichever
+    workspace this machine sends it to, and those are the box's workspace's
+    (the reason is recorded without them too, ai_budget.ledger_safe)."""
+    hit = st["hit"]
+    return {"compared": hit.get("compared") or "machine",
+            "machine_usd": st["usage"]["usd_cents"],
+            "box_figure_read": hit.get("box_usd") is not None}
 
 
 # How often the "close to your AI budget" note may show in one session. Every
@@ -6536,6 +6551,13 @@ def _session_field(session_id: Any) -> dict[str, Any]:
     return {"session": guard_ledger.redact(session_id, limit=128)}
 
 
+def _ledger_safe(text: str) -> str:
+    """`text` without the box's figures (ai_budget.ledger_safe), when the AI
+    budget gate made a reason from them in this process."""
+    ab = sys.modules.get("finops.ai_budget")
+    return ab.ledger_safe(text) if ab is not None and isinstance(text, str) else text
+
+
 def _record(v: dict[str, Any], *, tool: str, command: str,
             session_id: str | None = None) -> None:
     """Append one verdict to the ledger. Cheap, and never raises: a ledger
@@ -6554,7 +6576,8 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             "monthly_usd": est.get("monthly_usd"),
             "total_usd": est.get("total_usd"),
             "basis": est.get("basis"),
-            "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
+            "reason": (guard_ledger.redact(_ledger_safe(v["reason"]), limit=600)
+                       if v.get("reason") else None),
             # Which history check turned this into an ask, when one did.
             **({"history": v["history"]} if v.get("history") else {}),
             # What loop detection matches on: a hash of the creation and its
@@ -6565,6 +6588,9 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # What the budget lens found for a priced change: the figures
             # behind an over-budget stop, or why the budget went unchecked.
             **({"budget_check": v["budget_check"]} if v.get("budget_check") else {}),
+            # An org model AI budget's figure: this machine's, and which, the
+            # larger of it and the box's, was compared (D108).
+            **({"budget_figure": v["budget_figure"]} if v.get("budget_figure") else {}),
             # The installed pack rules that matched (pack:rule), whether or
             # not they tightened the verdict; the pack whose price book priced
             # the change; the guard's own file a write would have changed.
@@ -7562,7 +7588,27 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
                        + (f" for {person} ({source})" if person else "")
                        + ", compared at every shell and MCP call with this machine's "
                          "coding-agent spend at list price")
+        gaps.append("the coding agents' transcripts this machine's month to date is read "
+                    "from (Claude Code's projects directory, Codex's rollouts) are not among "
+                    "the guard's own files: an agent that rewrites or removes them lowers "
+                    "this machine's figure, and the guard does not ask first. A response two "
+                    "transcripts hold counts once, the larger copy; what was sent to a box "
+                    "stays there")
+    box, why = ai_budget.box_standing(person)
+    standing = ai_budget._box_said(box, why)
+    if applies and box is not None:
+        from .budget.summary import age_words
+        covered.append(f"the box's month to date for {box['person']} from {box['host']} (as "
+                       f"of {box['as_of'] or box['fetched_at']}, "
+                       f"{age_words(standing['age_hours'])} old), beside this machine's: the "
+                       "larger is compared, never their sum")
+    elif applies:
+        gaps.append(f"the box's month to date for these budgets: the guard uses this "
+                    f"machine's figure alone, since {why}")
+        fix("nable cloud status --box https://HOST",
+            "reads the box's month to date for the guard (a paid workspace's)")
     return {"present": True, "person": person, "person_source": source or None,
+            "box_standing": standing,
             "applies": [{k: h[k] for k in ("scope", "subject", "usd", "sure", "key", "file",
                                            "person")}
                         for h in applies],

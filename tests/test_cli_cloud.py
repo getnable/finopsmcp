@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -343,3 +344,154 @@ def test_the_suite_never_reads_this_machines_transcripts_or_git_identity(tmp_pat
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     assert cli_cloud._git_email() is None
+    assert ai_budget._read_git_email(str(tmp_path)) is None
+    monkeypatch.delenv("FINOPS_GUARD_PERSON", raising=False)
+    assert cli_cloud._person("") == (None, "")
+
+
+# ── --delete-org-file (D97) ──────────────────────────────────────────────────
+
+class _DeleteBox:
+    """A box that takes org_file_delete lines and answers per file."""
+
+    def __init__(self, *, accepts=("org_model", "ledger_line", "agent_usage",
+                                   cc.DELETE_KIND)):
+        from tests.test_cloud_connect import Box
+        self.box = Box()
+        self.accepts = list(accepts)
+
+    @property
+    def requests(self):
+        return self.box.requests
+
+    def __call__(self, req, timeout):
+        path = req.full_url.split("://", 1)[1].split("/", 1)[1]
+        if req.get_method() == "GET" and path == "api/free-tool/status":
+            self.box.requests.append({"method": "GET", "url": req.full_url,
+                                      "headers": dict(req.header_items()), "body": b""})
+            return 200, json.dumps({**self.box.status(), "accepts": self.accepts}).encode()
+        if req.get_method() == "POST" and path == "api/free-tool/connect":
+            docs = [json.loads(x) for x in (req.data or b"").split(b"\n") if x]
+            deleted = [d["file"] for d in docs if d["kind"] == cc.DELETE_KIND]
+            files = next((d["files"] for d in docs if d["kind"] == "org_model"), {})
+            rest = b"".join(x + b"\n" for x in (req.data or b"").split(b"\n")
+                            if x and json.loads(x)["kind"] != cc.DELETE_KIND)
+            self.box.requests.append({"method": "POST", "url": req.full_url,
+                                      "headers": dict(req.header_items()), "body": req.data})
+            if rest:
+                inner = urllib.request.Request(req.full_url, data=rest, method="POST")
+                self.box(inner, timeout)
+                self.box.requests.pop()
+            if not (deleted or files):
+                return 200, json.dumps({"accepted": {"org_model": None}}).encode()
+            return 200, json.dumps({"accepted": {"org_model": "stored", "org_files": {
+                "applied": [n for n in files if n in deleted],
+                "unchanged": [],
+                "stale": [{"file": n, "replaced_at": "2026-10-03T08:00:00+00:00"}
+                          for n in files if n not in deleted],
+                "deleted": [n for n in deleted if n not in files]}}}).encode()
+        return self.box(req, timeout)
+
+
+def test_a_delete_is_in_the_dry_run_and_the_confirm_code_covers_it(machine):
+    code, out, _err = _run("connect", "--box", BOX, "--out", str(machine / "p.jsonl"),
+                           "--delete-org-file", "teams.yaml", "--delete-org-file",
+                           "budgets.yaml")
+    assert code == 0
+    assert "teams.yaml" in out and "delete on the workspace, then this machine's copy" in out
+    assert "budgets.yaml" in out and "this machine sends no copy" in out
+    with_delete = cc.build(delete_files=["teams.yaml", "budgets.yaml"])
+    without = cc.build()
+    docs = [json.loads(x) for x in with_delete.data.split(b"\n") if x]
+    assert docs[:3] == [{"file": "teams.yaml", "kind": "org_file_delete", "v": 1},
+                        {"file": "budgets.yaml", "kind": "org_file_delete", "v": 1},
+                        {"files": ORG, "kind": "org_model", "v": 1}]
+    assert cc.confirm_code(with_delete, BOX) != cc.confirm_code(without, BOX)
+    assert (machine / "p.jsonl").read_bytes() == with_delete.data
+    _code, out, _err = _run("connect", "--box", BOX, "--json", "--out",
+                            str(machine / "p.jsonl"), "--delete-org-file", "teams.yaml")
+    doc = json.loads(out)
+    assert doc["org_file_deletes"] == ["teams.yaml"]
+    assert doc["confirm_sha256"] == cc.confirm_code(cc.build(delete_files=["teams.yaml"]), BOX)
+
+
+def _delete_sha(machine, *names: str) -> str:
+    argv = [w for n in names for w in ("--delete-org-file", n)]
+    code, out, _err = _run("connect", "--box", BOX, "--json", "--out",
+                           str(machine / "p.jsonl"), *argv)
+    assert code == 0
+    return json.loads(out)["confirm_sha256"]
+
+
+def test_a_delete_is_refused_before_anything_is_sent_by_a_box_that_does_not_take_it(machine):
+    sha = _delete_sha(machine, "teams.yaml")
+    box = _DeleteBox(accepts=("org_model", "ledger_line", "agent_usage"))
+    code, _out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha,
+                           "--delete-org-file", "teams.yaml", opener=box,
+                           environ={cc.KEY_ENV: KEY})
+    assert code == cli_cloud.EXIT_REFUSED and "org_file_delete" in err
+    assert [r["method"] for r in box.requests] == ["GET"], "something was sent"
+
+
+def test_a_delete_and_the_file_go_in_one_batch_and_the_answer_is_printed(machine):
+    sha = _delete_sha(machine, "teams.yaml")
+    box = _DeleteBox()
+    code, out, err = _run("connect", "--box", BOX, "--send", "--confirm", sha,
+                          "--delete-org-file", "teams.yaml", opener=box,
+                          environ={cc.KEY_ENV: KEY})
+    assert code == 0, err
+    first = next(r["body"] for r in box.requests if r["method"] == "POST")
+    kinds = [json.loads(x)["kind"] for x in first.split(b"\n") if x]
+    assert kinds[:2] == [cc.DELETE_KIND, "org_model"], "the delete and the file were split"
+    assert "teams.yaml" in out and "applied" in out
+    assert "owners.yaml" in out and "stale, not applied" in out
+    assert "replaced it at 2026-10-03T08:00:00+00:00" in out
+    assert "--delete-org-file owners.yaml" in out
+
+
+def test_a_delete_resends_the_org_model_the_box_already_holds(machine):
+    """The box holds this org model, so a plain resend skips it; with a delete
+    the file goes again, after the delete, which is what makes it apply."""
+    payload = cc.build()
+    box = _DeleteBox()
+    cc.send(payload, BOX, KEY, opener=box)
+    assert cc.plan(payload, box.box.status()) == []
+    with_delete = cc.build(delete_files=["teams.yaml"])
+    batches = cc.plan(with_delete, box.box.status())
+    sent = b"".join(with_delete.data[a:b] for a, b in batches)
+    assert b'"kind":"org_model"' in sent and b'"kind":"org_file_delete"' in sent
+
+
+@pytest.mark.parametrize("name", ["notes.yaml", "../teams.yaml", KEY, "teams.yml"])
+def test_an_unknown_file_name_is_a_usage_error_that_echoes_nothing(machine, name):
+    box = _DeleteBox()
+    code, out, err = _run("connect", "--box", BOX, "--delete-org-file", name, opener=box)
+    assert code == cli_cloud.EXIT_USAGE
+    assert name not in out + err
+    assert "teams.yaml" in err and box.requests == []
+    with pytest.raises(ValueError):
+        cc.build(delete_files=[name])
+
+
+def test_status_shows_each_files_sha256_bytes_time_and_key(machine):
+    st = {"org_model": {"versions": 2, "latest": {"files": {"teams.yaml": 10}, "sha256": "a",
+                                                  "uploaded_at": "2026-10-04T00:00:00+00:00"},
+                        "files": {"teams.yaml": {"sha256": "b" * 64, "bytes": 10,
+                                                 "uploaded_at": "2026-10-03T00:00:00+00:00",
+                                                 "by": "key:7"}}},
+          "chains": []}
+    text = cli_cloud._status_text(BOX, st)
+    assert "teams.yaml" in text and "b" * 16 in text and "key:7" in text
+    assert "2026-10-03T00:00:00+00:00" in text and "10 bytes" in text
+
+
+def test_a_delete_and_the_org_model_are_never_cut_apart(machine, monkeypatch):
+    """Batches are cut at line ends to stay under BATCH_MAX, but never between
+    a delete and the org model after it: the box applies a file sent after
+    its delete only when both are in one request."""
+    payload = cc.build(delete_files=["teams.yaml", "owners.yaml"])
+    org = next(e - s for k, s, e in payload.lines if k == "org_model")
+    monkeypatch.setattr(cc, "BATCH_MAX", org)
+    first = payload.data[slice(*cc.plan(payload, None)[0])]
+    kinds = [json.loads(x)["kind"] for x in first.split(b"\n") if x]
+    assert kinds == [cc.DELETE_KIND, cc.DELETE_KIND, "org_model"]

@@ -35,7 +35,7 @@ from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
 
-from . import harness_usage, llm_prices, token_budget
+from . import cloud_standing, harness_usage, llm_prices, token_budget
 
 # ── Verdicts (mirror policy.py's vocabulary) ─────────────────────────────────
 BUDGET_OK = "ok"        # comfortably under budget
@@ -85,7 +85,10 @@ def _fallback() -> llm_prices.ModelPrice:
 
 
 def _data_dir() -> Path:
-    d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
+    # expanduser, as guard_paths reads it: a settings.json env entry gives
+    # "~/x" unexpanded, and the guard protects the home directory's ~/x.
+    raw = os.getenv("FINOPS_DATA_DIR")
+    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -394,6 +397,20 @@ def _file_responses(path: Path, st: os.stat_result,
     return out
 
 
+def _tail_in_place(path: Path, offset: int, tail: bytes) -> bool:
+    """The last line a cached parse read still sits where it ended. A cheap
+    guard against a file rewritten in place to the same size within the
+    filesystem's timestamp resolution."""
+    if not tail:
+        return True
+    try:
+        with path.open("rb") as fh:
+            fh.seek(offset - len(tail))
+            return fh.read(len(tail)) == tail
+    except (OSError, ValueError):
+        return False
+
+
 class _TallyEntry:
     __slots__ = ("ino", "lines", "mtime_ns", "offset", "responses", "size", "tail")
 
@@ -407,17 +424,7 @@ class _TallyEntry:
         self.responses = {_TallyCache.key_in(k): r for k, r in data["responses"]}
 
     def _tail_in_place(self, path: Path) -> bool:
-        """The last line the cached parse read still sits where it ended. A
-        cheap guard against a file rewritten in place to the same size within
-        the filesystem's timestamp resolution."""
-        if not self.tail:
-            return True
-        try:
-            with path.open("rb") as fh:
-                fh.seek(self.offset - len(self.tail))
-                return fh.read(len(self.tail)) == self.tail
-        except OSError:
-            return False
+        return _tail_in_place(path, self.offset, self.tail)
 
     def unchanged(self, path: Path, st: os.stat_result) -> bool:
         return ((st.st_size, st.st_mtime_ns, st.st_ino) == (self.size, self.mtime_ns, self.ino)
@@ -1264,10 +1271,18 @@ def agent_responses(since_epoch: float, *, allow_network: bool = False
     Cursor's. A team-wide Cursor read is somebody else's usage too, so it is
     left out and said. Raises when a reader fails: a figure missing a source
     it should have read is not this machine's spend."""
-    notes: list[str] = []
     proj = _claude_projects_dir()
     out = _responses(proj, since_epoch) if proj.is_dir() else []
-    out += harness_usage.codex_responses(since_epoch)
+    others, notes = _other_responses(since_epoch, allow_network=allow_network)
+    return out + others, notes
+
+
+def _other_responses(since_epoch: float, *, allow_network: bool = False
+                     ) -> tuple[list[dict[str, Any]], list[str]]:
+    """agent_responses without Claude Code's transcripts: Codex CLI's
+    rollouts, and Cursor's when its read is scoped to one person."""
+    notes: list[str] = []
+    out = list(harness_usage.codex_responses(since_epoch))
     if harness_usage.cursor_enabled():
         if harness_usage.cursor_email():
             out += harness_usage.cursor_responses(since_epoch, month_start=_month_start_epoch(),
@@ -1279,32 +1294,323 @@ def agent_responses(since_epoch: float, *, allow_network: bool = False
     return out, notes
 
 
+# ── The month, priced once (D109) ────────────────────────────────────────────
+#
+# The org model's budgets are checked at every shell and MCP call against the
+# month to date. Pricing every response of the month on every call was most of
+# what a heavy month cost the guard (40,000 responses: about 370 ms a call).
+# The month cache prices each transcript's responses once. In the data dir,
+# each 0600:
+#
+#   ai-budget-month/<hash>.json  one transcript's priced responses this UTC
+#                                month, with its size, mtime and inode and
+#                                where its last read stopped
+#   ai-budget-month.json         per transcript: those stats, its total, and
+#                                its responses' keys (hashed), to count a
+#                                response two transcripts hold once
+#   ai-budget-month.total.json   the month's total, the stats of every
+#                                transcript it was made from, and the prices
+#                                of Codex and Cursor responses by what they
+#                                were priced on
+#
+# all made for one UTC month, its start and one llm_prices table
+# (prices_version), and made again for any other. A call whose transcripts
+# all have the size, mtime and inode the total was made from reads the last
+# file alone and prices nothing. A transcript that only grew (Claude Code
+# appends) has its new lines read and priced, and nothing else; any other
+# change to it makes its entry again from the transcript. A response logged
+# in more than one transcript (a resumed session copies the one it resumes)
+# counts once: the larger copy, so a copy rewritten lower in either file does
+# not lower the month. A transcript that cannot be read is left out of that
+# call's figure and said (a note), and nothing about it is kept: no shard, no
+# index entry and no total, so the next call reads it again. A failed read is
+# never kept as $0.
+
+MONTH_CACHE = "ai-budget-month.json"
+MONTH_TOTAL = "ai-budget-month.total.json"
+MONTH_SHARDS = "ai-budget-month"
+_MONTH_CACHE_VERSION = 2
+
+
+def prices_version() -> str:
+    """A fingerprint of the llm_prices table every list price here comes
+    from: a change to any rate, alias, fast-mode rate, multiplier or date
+    makes another."""
+    import hashlib
+    blob = repr((sorted((k, dataclasses.astuple(v)) for k, v in llm_prices.MODEL_PRICES.items()),
+                 sorted(llm_prices.ALIASES.items()), sorted(llm_prices.FAST_MODE.items()),
+                 llm_prices.US_ONLY_MULTIPLIER, sorted(llm_prices.AS_OF_BY_PROVIDER.items())))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _priced(r: dict[str, Any]) -> list[Any]:
+    """One response as the month cache keeps it: [ts, exact list-price USD as
+    text or None when unpriced, its tokens, its model, its provider or None]."""
+    got = list_price_usd(r)
+    price = llm_prices.price_for(r["model"]) if got is not None else None
+    return [r["ts"], None if got is None else str(got), _tokens(r), str(r["model"]),
+            price.provider if price is not None else None]
+
+
+def _copy_size(row: list[Any]) -> tuple[Decimal, int]:
+    """How large one priced copy of a response is: its list price (an
+    unpriced one below any priced one), then its tokens."""
+    return (Decimal(row[1]) if row[1] is not None else Decimal(-1), int(row[2]))
+
+
+def _key_hash(key: str) -> str:
+    import hashlib
+    return hashlib.sha1(key.encode("utf-8", "surrogateescape"),
+                        usedforsecurity=False).hexdigest()[:16]
+
+
+def _sums(rows: Any) -> dict[str, Any]:
+    """{usd, unpriced, models, providers} over priced responses."""
+    usd = Decimal(0)
+    unpriced = 0
+    models: set[str] = set()
+    providers: set[str] = set()
+    for _ts, got, tokens, model, provider in rows:
+        if got is None:
+            unpriced += int(tokens)
+            models.add(str(model))
+            continue
+        usd += Decimal(got)
+        if provider:
+            providers.add(str(provider))
+    return {"usd": str(usd), "unpriced": unpriced, "models": sorted(models),
+            "providers": sorted(providers)}
+
+
+class _MonthTally:
+    """The month cache (see above), for one UTC month, its start and one
+    price table."""
+
+    def __init__(self, since: float, month: str, prices: str):
+        self.since = since
+        self.header = {"v": _MONTH_CACHE_VERSION, "month": month, "since": since,
+                       "prices": prices}
+        self.root = _data_dir()
+
+    def _load(self, path: Path) -> dict[str, Any]:
+        """The file's document when it is this month's cache, else {}."""
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(doc, dict) or any(doc.get(k) != v for k, v in self.header.items()):
+            return {}
+        return doc
+
+    def _write(self, path: Path, doc: dict[str, Any]) -> None:
+        with contextlib.suppress(OSError, TypeError, ValueError):
+            path.parent.mkdir(mode=0o700, exist_ok=True)
+            harness_usage.write_json_atomic(path, {**self.header, **doc})
+
+    def _shard(self, path: str) -> Path:
+        import hashlib
+        name = hashlib.sha256(path.encode("utf-8", "surrogateescape")).hexdigest()[:40]
+        return self.root / MONTH_SHARDS / f"{name}.json"
+
+    def _stats(self, proj: Path) -> list[tuple[str, os.stat_result]]:
+        out = []
+        for p in sorted(str(x) for x in _transcripts(proj, None)):
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if st.st_mtime >= self.since - 1:   # an older file holds nothing of the month
+                out.append((p, st))
+        return out
+
+    def _read_file(self, path: str, st: os.stat_result,
+                   entry: dict[str, Any] | None) -> dict[str, Any]:
+        """The transcript's shard: extended by its new lines, each priced,
+        when it only grew since `entry`; else made again from the file.
+        OSError when the file could not be read whole: the caller keeps
+        nothing of it."""
+        try:
+            tail = bytes.fromhex(str(entry.get("tail") or "")) if entry else b""
+            was = int(entry.get("offset") or 0) if entry else 0
+        except (TypeError, ValueError):
+            entry, tail, was = None, b"", 0
+        responses: dict[str, Any] = {}
+        offset = lines = 0
+        if (entry and entry.get("path") == path and st.st_ino == entry.get("ino")
+                and st.st_size >= was and isinstance(entry.get("r"), dict)
+                and _tail_in_place(Path(path), was, tail)):
+            responses = dict(entry["r"])
+            offset, lines = was, int(entry.get("lines") or 0)
+        last = b""
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            for line in fh:
+                if not line.endswith(b"\n"):
+                    break          # a line still being written: read it next time
+                hit = _parse_usage_line(line, Path(path), lines)
+                if hit is not None and hit[1]["ts"] >= self.header["since"]:
+                    responses[json.dumps(list(hit[0]))] = _priced(hit[1])
+                lines += 1
+                offset += len(line)
+                last = line
+        if not last and offset == was:
+            last = tail                # nothing new was read: keep the line it ended on
+        return {"path": path, "size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                "ino": st.st_ino, "offset": offset, "lines": lines, "tail": last[-256:].hex(),
+                "r": responses}
+
+    def total(self, proj: Path) -> dict[str, Any]:
+        """{usd (exact, as text), unpriced_tokens, unpriced_models, providers,
+        responses} for Claude Code's transcripts this month."""
+        stats = self._stats(proj)
+        stamp = [[p, st.st_size, st.st_mtime_ns, st.st_ino] for p, st in stats]
+        kept = self._load(self.root / MONTH_TOTAL)
+        if kept.get("stamp") == stamp and isinstance(kept.get("claude"), dict):
+            return kept["claude"]
+        index = self._load(self.root / MONTH_CACHE).get("files")
+        index = index if isinstance(index, dict) else {}
+        files: dict[str, Any] = {}
+        not_read = 0
+        for p, st in stats:
+            f = index.get(p)
+            if isinstance(f, dict) and f.get("stat") == [st.st_size, st.st_mtime_ns, st.st_ino]:
+                files[p] = f
+                continue
+            shard = self._load(self._shard(p))
+            try:
+                entry = self._read_file(p, st, shard or None)
+            except OSError:
+                not_read += 1      # nothing of it is kept, so the next call reads it again
+                continue
+            self._write(self._shard(p), entry)
+            rows = entry["r"]
+            files[p] = {"stat": [st.st_size, st.st_mtime_ns, st.st_ino], **_sums(rows.values()),
+                        "keys": [_key_hash(k) for k in rows], "shared": {}}
+        claude = self._combine(files, [p for p, _st in stats if p in files])
+        self._write(self.root / MONTH_CACHE, {"files": files})
+        if set(index) - set(files):
+            self._prune({self._shard(p).name for p, _st in stats})
+        if not_read:
+            # No total for stats a transcript was left out of: a later call
+            # with the same stats would take it as the whole month.
+            claude["not_read"] = not_read
+            self._write(self.root / MONTH_TOTAL, {"stamp": None, "claude": None,
+                                                   "other": kept.get("other") or {}})
+            return claude
+        self._write(self.root / MONTH_TOTAL, {"stamp": stamp, "claude": claude,
+                                               "other": kept.get("other") or {}})
+        return claude
+
+    def _combine(self, files: dict[str, Any], order: list[str]) -> dict[str, Any]:
+        """The month's total over `files`, a response two transcripts hold
+        counted once: the larger copy (by list price, then tokens), whatever
+        the paths, so a copy rewritten lower does not lower the month. Each
+        copy's figures are read from its shard once and kept in the index
+        (shared)."""
+        holders: dict[str, list[str]] = {}
+        for p in order:
+            for h in files[p]["keys"]:
+                holders.setdefault(h, []).append(p)
+        usd = sum((Decimal(files[p]["usd"]) for p in order), Decimal(0))
+        unpriced = sum(int(files[p]["unpriced"]) for p in order)
+        models = {m for p in order for m in files[p]["models"]}
+        providers = {x for p in order for x in files[p]["providers"]}
+        dup = {h: ps for h, ps in holders.items() if len(ps) > 1}
+        for p in dict.fromkeys(p for ps in dup.values() for p in ps):
+            mine = [h for h in files[p]["keys"] if h in dup]
+            shared = files[p].setdefault("shared", {})
+            if any(h not in shared for h in mine):
+                rows = self._load(self._shard(p)).get("r") or {}
+                by_hash = {_key_hash(k): v for k, v in rows.items()}
+                shared.update({h: by_hash[h] for h in mine if h in by_hash})
+        for h, ps in dup.items():
+            copies = [row for p in ps if (row := files[p]["shared"].get(h))]
+            if not copies:
+                continue
+            kept = max(copies, key=_copy_size)
+            for row in copies:
+                if row is kept:
+                    continue
+                if row[1] is None:
+                    unpriced -= int(row[2])
+                else:
+                    usd -= Decimal(row[1])
+        return {"usd": str(usd), "unpriced_tokens": unpriced, "unpriced_models": sorted(models),
+                "providers": sorted(providers), "responses": len(holders)}
+
+    def _prune(self, keep: set[str]) -> None:
+        """Drop the shards of transcripts that are gone."""
+        with contextlib.suppress(OSError):
+            for f in (self.root / MONTH_SHARDS).iterdir():
+                if f.suffix == ".json" and f.name not in keep:
+                    with contextlib.suppress(OSError):
+                        f.unlink()
+
+    def other_prices(self) -> dict[str, Any]:
+        memo = self._load(self.root / MONTH_TOTAL).get("other")
+        return memo if isinstance(memo, dict) else {}
+
+    def keep_other_prices(self, memo: dict[str, Any]) -> None:
+        kept = self._load(self.root / MONTH_TOTAL)
+        self._write(self.root / MONTH_TOTAL,
+                    {**{k: v for k, v in kept.items() if k not in self.header}, "other": memo})
+
+
+def _other_key(r: dict[str, Any]) -> str:
+    """What a Codex or Cursor response's list price depends on, as text."""
+    return json.dumps([str(r["model"]), int(r["input"]), int(r["output"]),
+                       int(r["cache_write"]), int(r["cache_write_1h"]), int(r["cache_read"]),
+                       bool(r.get("fast")), bool(r.get("us_only"))])
+
+
 def month_agent_usage(*, allow_network: bool = False) -> dict[str, Any]:
     """This machine's coding-agent spend this month (UTC), at list price:
     {usd, usd_cents, unpriced_tokens, unpriced_models, agents, providers,
     notes, month_start}. usd covers priced tokens only; usd_cents is it
-    rounded up to the cent, as text."""
+    rounded up to the cent, as text. Claude Code's transcripts come from the
+    month cache (_MonthTally); Codex's and Cursor's responses are read each
+    time and priced once each, by what their price depends on."""
     since = _month_start_epoch()
-    responses, notes = agent_responses(since, allow_network=allow_network)
-    usd = Decimal(0)
-    unpriced = 0
-    unpriced_models: set[str] = set()
-    agents: set[str] = set()
-    providers: set[str] = set()
-    for r in responses:
+    tally = _MonthTally(since, _month_key(), prices_version())
+    proj = _claude_projects_dir()
+    claude = tally.total(proj) if proj.is_dir() else {
+        "usd": "0", "unpriced_tokens": 0, "unpriced_models": [], "providers": [],
+        "responses": 0}
+    others, notes = _other_responses(since, allow_network=allow_network)
+    if claude.get("not_read"):
+        n = claude["not_read"]
+        what = "1 Claude Code transcript was" if n == 1 else f"{n} Claude Code transcripts were"
+        notes.append(f"{what} not read on this call and {'is' if n == 1 else 'are'} not in the "
+                     "figure, which can only under-count; the next call reads "
+                     f"{'it' if n == 1 else 'them'} again")
+    usd = Decimal(claude["usd"])
+    unpriced = int(claude["unpriced_tokens"])
+    unpriced_models: set[str] = set(claude["unpriced_models"])
+    agents: set[str] = {harness_usage.HARNESS_CLAUDE} if claude["responses"] else set()
+    providers: set[str] = set(claude["providers"])
+    memo = tally.other_prices() if others else {}
+    used: dict[str, Any] = {}
+    for r in others:
         agents.add(r.get("harness") or harness_usage.HARNESS_CLAUDE)
-        got = list_price_usd(r)
-        if got is None:
+        key = _other_key(r)
+        hit = memo.get(key)
+        if not (isinstance(hit, list) and len(hit) == 2):
+            got = list_price_usd(r)
+            price = llm_prices.price_for(r["model"]) if got is not None else None
+            hit = [None if got is None else str(got), price.provider if price else None]
+        used[key] = hit
+        if hit[0] is None:
             unpriced += _tokens(r)
             unpriced_models.add(str(r["model"]))
             continue
-        usd += got
-        price = llm_prices.price_for(r["model"])
-        if price is not None:
-            providers.add(price.provider)
+        usd += Decimal(hit[0])
+        if hit[1]:
+            providers.add(str(hit[1]))
+    if used != memo and (used or memo):
+        tally.keep_other_prices(used)
     cents = usd.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
-    return {"usd": float(usd), "usd_cents": format(cents, "f"), "unpriced_tokens": unpriced,
-            "unpriced_models": sorted(unpriced_models),
+    return {"usd": float(usd), "usd_exact": str(usd), "usd_cents": format(cents, "f"),
+            "unpriced_tokens": unpriced, "unpriced_models": sorted(unpriced_models),
             "agents": sorted(agents), "providers": sorted(providers), "notes": notes,
             "month_start": since}
 
@@ -1359,16 +1665,55 @@ def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
     if not hits:
         return None
     usage = month_agent_usage(allow_network=False)
+    machine = Decimal(str(usage.get("usd_exact") or repr(float(usage["usd"]))))
+    box, box_why = box_standing(person)
     rows = []
     for h in hits:
-        pct = usage["usd"] / h["usd"] if h["usd"] > 0 else 0.0
-        rows.append({**h, "pct": pct, "verdict": _verdict(pct)})
+        # The box's figure for this budget, when it is about this person
+        # (cloud_standing): the larger of the two is compared, never the sum.
+        theirs = (cloud_standing.figure(box, h["scope"], h["subject"])
+                  if box is not None and h["person"] == box["person"] else None)
+        compared = "box" if theirs is not None and theirs > machine else "machine"
+        larger = theirs if compared == "box" else machine
+        pct = float(larger) / h["usd"] if h["usd"] > 0 else 0.0
+        cover = (cloud_standing.coverage(box, h["scope"], h["subject"])
+                 if theirs is not None else None)
+        rows.append({**h, "pct": pct, "verdict": _verdict(pct), "machine_usd": machine,
+                     "box_usd": theirs, "compared": compared, "box_cover": cover})
     worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
     if worst["scope"] in ("person", "per_person") and worst["person"] != person:
         person, source = worst["person"], (f"git user.email earlier this month; it is "
                                            f"{person or 'not set'} now")
     return {"verdict": worst["verdict"], "hit": worst, "usd": usage["usd"], "pct": worst["pct"],
-            "person": person, "person_source": source, "usage": usage, "hits": rows}
+            "person": person, "person_source": source, "usage": usage, "hits": rows,
+            "box": _box_said(box, box_why)}
+
+
+def box_standing(person: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    """(the box's standing the gate may use, None), or (None, why not): read
+    from cloud-standing.json alone, never the network (cloud_standing)."""
+    try:
+        return cloud_standing.for_gate(person, _month_key())
+    except Exception as exc:  # noqa: BLE001 - a file not read is said, and stops nothing
+        return None, f"{cloud_standing.FILE_NAME} was not read ({type(exc).__name__})"
+
+
+def _box_said(box: dict[str, Any] | None, why: str | None) -> dict[str, Any]:
+    """What a status says of the box's standing: used or not, and why not."""
+    if box is None:
+        return {"used": False, "why": why}
+    return {"used": True, "why": None, "box": box["box"], "host": box["host"],
+            "person": box["person"], "month": box["month"], "as_of": box["as_of"],
+            "fetched_at": box["fetched_at"], "age_hours": cloud_standing.age_hours(box)}
+
+
+def _cents(x: Decimal) -> str:
+    return f"${x.quantize(Decimal('0.01'), rounding=ROUND_CEILING):,.2f}"
+
+
+def _whose(h: dict[str, Any]) -> str:
+    sid = str(h["subject"]).split(":", 1)[-1]
+    return {"team": f"the team {sid}", "org": "the org"}.get(h["scope"], str(h["person"]))
 
 
 def org_budget_words(st: dict[str, Any]) -> str:
@@ -1378,14 +1723,94 @@ def org_budget_words(st: dict[str, Any]) -> str:
     h, u = st["hit"], st["usage"]
     what = _SCOPE_WORDS[h["scope"]].format(subject=h["subject"])
     agents = ", ".join(_AGENT_NAMES.get(a, a) for a in u["agents"]) or "no agent"
-    text = (f"This machine's coding agents ({agents}) have spent "
-            f"${Decimal(u['usd_cents']):,.2f} in "
-            f"list-price-equivalent dollars this month, {h['pct'] * 100:.0f}% of "
-            f"{what}, ${h['usd']:,.2f} ({h['file'] or 'budgets.yaml'}, fact {h['key']}). "
+    budget = f"{what}, ${h['usd']:,.2f} ({h['file'] or 'budgets.yaml'}, fact {h['key']})"
+    mine = f"${Decimal(u['usd_cents']):,.2f}"
+    theirs = h.get("box_usd")
+    if theirs is not None:
+        return _box_words(st, h, u, budget=budget, agents=agents, mine=mine)
+    text = (f"This machine's coding agents ({agents}) have spent {mine} in "
+            f"list-price-equivalent dollars this month, {h['pct'] * 100:.0f}% of {budget}. "
             f"Priced at {price_source(u['providers'])}: usage, not an invoice, and "
             "this machine only: the person's other machines are not counted")
     if h["scope"] in ("team", "org"):
         text += ", nor anyone else's, so the figure can only under-count"
+    return _unpriced_and_notes(text, u)
+
+
+def _cover_words(h: dict[str, Any]) -> str:
+    """How current the box's figure for this budget is, from its own records:
+    the box's as_of is the newest receipt from anyone in the workspace."""
+    c = h.get("box_cover") or {}
+    if h["scope"] == "team":
+        return (f"; {c.get('people_sent', 0)} of the team's {c.get('people', 0)} people sent, "
+                f"their records running to {c.get('latest_day') or 'no day'}, the oldest of "
+                f"their last days {c.get('oldest_last_day') or 'none'}")
+    if h["scope"] == "org":
+        return (f"; {c.get('people_sent', 0)} people sent, their records running to "
+                f"{c.get('latest_day') or 'no day'}")
+    return (f"; {h['person']}'s records cover {c.get('days', 0)} day(s), the last "
+            f"{c.get('last_day') or 'none'}")
+
+
+# What the box said, as a reason shows it -> the same reason without the box's
+# figures, for the ledger (ledger_safe). Bounded: one entry per reason made.
+_LEDGER_SAFE: dict[str, str] = {}
+_LEDGER_SAFE_MAX = 32
+
+
+def ledger_safe(text: str) -> str:
+    """`text` with every reason _box_words made in this process replaced by
+    its version without the box's figures, coverage, host and times. The
+    guard ledger is sent to whichever workspace this machine sends it to,
+    and the box's figures are its own workspace's."""
+    for shown, safe in _LEDGER_SAFE.items():
+        if shown in text:
+            text = text.replace(shown, safe)
+    return text
+
+
+def _box_words(st: dict[str, Any], h: dict[str, Any], u: dict[str, Any], *, budget: str,
+               agents: str, mine: str) -> str:
+    """The reason when the box's standing counts: both figures, how current
+    the box's is, and which, the larger, was compared (never their sum).
+    Its version for the ledger says the box's figure was read, not what it
+    was (ledger_safe)."""
+    from .budget.summary import age_words
+    box = st.get("box") or {}
+    theirs = _cents(h["box_usd"])
+    at = box.get("as_of") or box.get("fetched_at")
+    when = (f"the box's records are as of {at}, the newest it received from anyone in the "
+            f"workspace ({age_words(box.get('age_hours'))} old, read by `nable cloud status` "
+            f"at {box.get('fetched_at')})")
+    on_box = (f"on the box ({box.get('host')}), {_whose(h)} stands at {theirs} in "
+              f"list-price-equivalent dollars this month, from what people sent with "
+              f"`nable cloud connect`{_cover_words(h)}; {when}")
+    on_box_safe = (f"on the box, the month to date of {_whose(h)} was read by `nable cloud "
+                   "status` (its figure is not kept in this ledger)")
+    here = f"this machine's coding agents ({agents}) have spent {mine}"
+    pct = f"{h['pct'] * 100:.0f}%"
+    if h["compared"] == "box":
+        text = (f"{on_box[0].upper()}{on_box[1:]}; {here}. The larger, the box's {theirs}, is "
+                f"the one compared: {pct} of {budget}")
+        safe = (f"{on_box_safe[0].upper()}{on_box_safe[1:]}; {here}. The larger, the box's, "
+                f"is the one compared, against {budget}")
+    else:
+        text = (f"{here[0].upper()}{here[1:]}; {on_box}. The larger, this machine's {mine}, "
+                f"is the one compared: {pct} of {budget}")
+        safe = (f"{here[0].upper()}{here[1:]}; {on_box_safe}. The larger, this machine's "
+                f"{mine}, is the one compared: {pct} of {budget}")
+    rest = (f". The two are never added: the box's figure already holds whatever this "
+            f"machine sent. Priced at {price_source(u['providers'])} on each machine that "
+            "sent: usage, not an invoice. A machine that has not sent is not in the box's "
+            "figure, so it can still under-count")
+    text, safe = _unpriced_and_notes(text + rest, u), _unpriced_and_notes(safe + rest, u)
+    if len(_LEDGER_SAFE) >= _LEDGER_SAFE_MAX:
+        _LEDGER_SAFE.clear()
+    _LEDGER_SAFE[text] = safe
+    return text
+
+
+def _unpriced_and_notes(text: str, u: dict[str, Any]) -> str:
     if u["unpriced_tokens"]:
         text += (f". {u['unpriced_tokens']:,} tokens from {', '.join(u['unpriced_models'])} "
                  "are not priced (llm_prices has no cited rate) and are not in the figure")

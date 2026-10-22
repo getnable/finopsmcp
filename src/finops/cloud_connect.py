@@ -10,9 +10,17 @@ is built so that what leaves is exactly what the person was shown.
 
 The payload is one JSON object per line, keys sorted, no spaces:
 
+    {"file": "teams.yaml", "kind": "org_file_delete", "v": 1}     (--delete-org-file)
     {"files": {"owners.yaml": "...", ...}, "kind": "org_model", "v": 1}
     {"chain": "<chain id>", "kind": "ledger_line", "line": "<as stored>", "v": 1}
     ...
+
+  * org file deletes (D97): one line per file named with --delete-org-file,
+    an org model file name and nothing else, ahead of the org model and in
+    the same request as it. The box removes that file; a copy this machine
+    sends after it applies, even when the box held that text before and
+    replaced it. A box whose status does not list org_file_delete among what
+    it accepts is told nothing.
 
   * the org model: the org model files (finops.org.model.KNOWN_FILES) found
     in the resolved org dir (finops.org.store.resolve_dir), each as its text.
@@ -84,6 +92,15 @@ and the ledger lines up to the head it reports, and nothing else: coding-agent
 usage goes whole every time, since the box replaces each day's records. A box whose status does not list agent_usage among what it accepts
 is told so before anything is sent (--no-agent-usage leaves the records out).
 
+`nable cloud status` reads the box's standing for one person (standing():
+POST STANDING_PATH with exactly {"person": P}) when the box's status lists
+"standing" in `reads`; cloud_standing keeps the answer for the guard, which
+reads it and never this module. A successful send records the box it went
+to and the workspace reference its status gave (cloud_standing.bind): the
+guard counts a standing from that box and that workspace alone. A standing
+refused for the workspace's plan (403 not_on_plan or plan_required) is
+NotOnPlan: said, and not a failure of the key.
+
 HTTPS only. The box is https://host[:port] with no path, query or user info; a
 redirect is refused, not followed (it would carry the key to wherever it
 pointed). Air-gap mode (FINOPS_AIRGAP) refuses every request.
@@ -129,6 +146,11 @@ KEY_ENV = "NABLE_WORKSPACE_KEY"
 FORMAT = 1
 CONNECT_PATH = "/api/free-tool/connect"
 STATUS_PATH = "/api/free-tool/status"
+STANDING_PATH = "/api/free-tool/standing"
+# What a box's status lists in `reads` when it answers STANDING_PATH.
+READS_STANDING = "standing"
+# What a box's status lists in `accepts` when it takes an org_file_delete line.
+DELETE_KIND = "org_file_delete"
 PAYLOAD_NAME = "cloud-connect.payload.jsonl"
 # This install's id for its coding-agent usage records, beside the ledger.
 SOURCE_NAME = "agent-usage-source"
@@ -161,6 +183,15 @@ class ConnectError(Exception):
     never carries the key."""
 
 
+class NotOnPlan(ConnectError):
+    """The box answered, and the workspace's plan does not include what was
+    asked (403 not_on_plan or plan_required): the key is fine."""
+
+
+# The refusals that are about the workspace's plan, not the key.
+PLAN_ERRORS = ("not_on_plan", "plan_required")
+
+
 @dataclass
 class Payload:
     data: bytes
@@ -175,6 +206,9 @@ class Payload:
     ledger_hashes: list[str] = field(default_factory=list)
     # What the coding-agent usage records hold, for the dry run.
     usage: dict[str, Any] = field(default_factory=dict)
+    # The org model files this payload removes from the workspace (D97), in
+    # the order of their org_file_delete lines.
+    deletes: list[str] = field(default_factory=list)
 
 
 def _sha(b: bytes) -> str:
@@ -306,24 +340,43 @@ def _ledger(path: Path | None) -> dict[str, Any]:
 
 # ── the payload ──────────────────────────────────────────────────────────────
 
+def org_file_names() -> tuple[str, ...]:
+    """The org model's file names (finops.org.model.KNOWN_FILES): the only
+    names --delete-org-file takes."""
+    from .org.model import KNOWN_FILES
+    return tuple(KNOWN_FILES)
+
+
 def build(*, org_dir: str | os.PathLike | None = None,
           ledger_path: Path | None = None, developer: str | None = None,
           developer_from: str = "", agent_usage: bool = True,
-          now: datetime | None = None, left_out: str | None = None) -> Payload:
+          now: datetime | None = None, left_out: str | None = None,
+          delete_files: list[str] | tuple[str, ...] = ()) -> Payload:
     """The payload, from what is on this machine now. Reads files only (and
     makes this install's source id, the first time agent usage is built).
 
     `developer` is the sender the agent usage is sent as; None leaves it
-    out, said with `left_out` (or a default reason). `now` fixes "today"."""
+    out, said with `left_out` (or a default reason). `now` fixes "today".
+    `delete_files` names org model files to remove from the workspace: one
+    org_file_delete line each, ahead of the org model, so a file this
+    machine also carries is applied after its delete (D97). A name that is
+    not an org model file is ValueError, before anything is read."""
+    names = org_file_names()
+    deletes = list(dict.fromkeys(delete_files))
+    if any(n not in names for n in deletes):
+        raise ValueError("a file to delete is not an org model file")
     org = _org(org_dir)
     led = _ledger(ledger_path)
-    parts: list[tuple[str, bytes]] = []
+    parts: list[tuple[str, bytes]] = [
+        (DELETE_KIND, _line({"file": n, "kind": DELETE_KIND, "v": FORMAT})) for n in deletes]
     org_sha = None
     if org["texts"] and not org["left_out"]:
         line = _line({"files": org["texts"], "kind": "org_model", "v": FORMAT})
-        if len(line) + 1 > BATCH_MAX:
-            org["left_out"] = (f"the org model is {len(line):,} bytes as one line, over the "
-                               f"{BATCH_MAX:,} one request takes")
+        together = len(line) + 1 + sum(len(x) + 1 for _k, x in parts)
+        if together > BATCH_MAX:
+            org["left_out"] = (f"the org model is {len(line):,} bytes as one line"
+                               + (", with the deletes before it," if deletes else "")
+                               + f" over the {BATCH_MAX:,} one request takes")
         else:
             parts.append(("org_model", line))
             org_sha = _sha(line)
@@ -383,7 +436,7 @@ def build(*, org_dir: str | os.PathLike | None = None,
     org.pop("texts", None)
     led.pop("lines", None)
     return Payload(data=data_b, sha256=_sha(data_b), lines=spans, org=org, ledger=led,
-                   org_sha256=org_sha, ledger_hashes=hashes, usage=usage)
+                   org_sha256=org_sha, ledger_hashes=hashes, usage=usage, deletes=deletes)
 
 
 # ── coding-agent usage ───────────────────────────────────────────────────────
@@ -681,15 +734,20 @@ def _units(payload: Payload, a: int, b: int) -> list[tuple[int, int]]:
     replaces a day's records whole)."""
     units: list[tuple[int, int]] = []
     last_day = None
+    last_kind = None
     for kind, s, e in payload.lines:
         if s < a or e > b:
             continue
         day = json.loads(payload.data[s:e])["day"] if kind == "agent_usage" else None
-        if day is not None and day == last_day and units and units[-1][1] == s:
+        # The deletes and the org model after them go in one request: a
+        # delete earlier in the same batch is what lets a file apply again.
+        org_run = last_kind == DELETE_KIND and kind in (DELETE_KIND, "org_model")
+        if units and units[-1][1] == s and (org_run or (day is not None and day == last_day)):
             units[-1] = (units[-1][0], e)
         else:
             units.append((s, e))
         last_day = day
+        last_kind = kind
     return units
 
 
@@ -720,7 +778,12 @@ def plan(payload: Payload, held: Mapping[str, Any] | None) -> list[tuple[int, in
     held_org = latest.get("sha256") if isinstance(latest, dict) else None
     ranges: list[tuple[int, int]] = []
     org = [x for x in payload.lines if x[0] == "org_model"]
-    if org and held_org != payload.org_sha256:
+    deletes = [x for x in payload.lines if x[0] == DELETE_KIND]
+    if deletes:
+        # Sent every time, with the org model after them whether or not the
+        # box holds it: the deletes are what the person asked for.
+        ranges.append((deletes[0][1], (org or deletes)[-1][2]))
+    elif org and held_org != payload.org_sha256:
         ranges.append((org[0][1], org[0][2]))
     usage = [x for x in payload.lines if x[0] == "agent_usage"]
     if usage:
@@ -821,7 +884,8 @@ def _urllib_opener(req: urllib.request.Request, timeout: float) -> tuple[int, by
 
 
 def _request(opener: Opener | None, method: str, url: str, key: str,
-             body: bytes | None = None) -> tuple[int, Any]:
+             body: bytes | None = None, *,
+             content_type: str = "application/x-ndjson") -> tuple[int, Any]:
     if not url.startswith("https://"):
         raise ConnectError("only HTTPS: the key and the payload never travel over plain HTTP")
     if _airgap():
@@ -830,7 +894,7 @@ def _request(opener: Opener | None, method: str, url: str, key: str,
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json",
                "User-Agent": "nable-cloud-connect"}
     if body is not None:
-        headers["Content-Type"] = "application/x-ndjson"
+        headers["Content-Type"] = content_type
     req = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
         status, raw = (opener or _urllib_opener)(req, TIMEOUT_S)
@@ -875,8 +939,13 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
         raise ConnectError("the box does not say it takes coding-agent usage records, so "
                            "nothing was sent. Run the dry run again with --no-agent-usage "
                            "to send the org model and the ledger without them.")
+    if payload.deletes and not (isinstance(accepts, list) and DELETE_KIND in accepts):
+        raise ConnectError("the box does not say it takes org_file_delete lines, so nothing "
+                           "was sent. Run the dry run again without --delete-org-file; a "
+                           "box that predates them keeps the org model files it holds.")
     batches = plan(payload, held)
     sent = 0
+    org_files: dict[str, list[Any]] = {}
     for n, (a, b) in enumerate(batches, start=1):
         code, doc = _request(opener, "POST", box + CONNECT_PATH, key, payload.data[a:b])
         if code != 200:
@@ -884,11 +953,60 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
             raise ConnectError(f"{why} {sent:,} bytes in {n - 1} batch(es) were accepted "
                                "before it; nothing after it was sent.")
         sent += b - a
+        _gather_org_files(org_files, doc)
         if say:
             say(f"  batch {n} of {len(batches)}: {b - a:,} bytes accepted")
-    return {"batches": len(batches), "bytes_sent": sent,
-            "bytes_already_held": len(payload.data) - sent,
-            "status": status(box, key, opener=opener) if batches else held}
+    out = {"batches": len(batches), "bytes_sent": sent,
+           "bytes_already_held": len(payload.data) - sent,
+           "status": status(box, key, opener=opener) if batches else held}
+    if org_files:
+        out["org_files"] = org_files
+    # The box and the workspace this machine's usage now goes to: the guard
+    # counts a standing from them alone (cloud_standing.usable). On a pooled
+    # box the URL is every workspace's, so the workspace is the status's
+    # reference, from the same key; a box that names none binds no workspace.
+    from . import cloud_standing
+    last = out["status"] if isinstance(out["status"], Mapping) else {}
+    try:
+        cloud_standing.bind(box, workspace=last.get("workspace_ref"))
+    except (OSError, ValueError) as exc:
+        out["box_record"] = (f"not kept ({type(exc).__name__}): the guard cannot tell which "
+                             "box a standing must come from")
+    return out
+
+
+_ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held")
+
+
+def _gather_org_files(into: dict[str, list[Any]], doc: Mapping[str, Any]) -> None:
+    """The box's per-file answer on the org model (accepted.org_files),
+    where it gives one: applied, unchanged, stale ({file, replaced_at}),
+    deleted and not_held. An older box gives none."""
+    acc = doc.get("accepted") if isinstance(doc, Mapping) else None
+    got = acc.get("org_files") if isinstance(acc, Mapping) else None
+    if not isinstance(got, Mapping):
+        return
+    for what in _ORG_FILE_ANSWERS:
+        for x in got.get(what) or []:
+            if isinstance(x, str) or (isinstance(x, Mapping) and isinstance(x.get("file"), str)):
+                into.setdefault(what, []).append(x)
+
+
+def standing(box: str, key: str, person: str, *,
+             opener: Opener | None = None) -> dict[str, Any]:
+    """The box's month to date for `person` (D107): POST STANDING_PATH with
+    exactly {"person": person}, nothing else. The answer as the box gave it,
+    or ConnectError."""
+    body = json.dumps({"person": person}, separators=(",", ":")).encode("utf-8")
+    code, doc = _request(opener, "POST", box + STANDING_PATH, key, body,
+                         content_type="application/json")
+    if code == 403 and isinstance(doc, Mapping) and doc.get("error") in PLAN_ERRORS:
+        msg = str(doc.get("message") or "")[:300]
+        raise NotOnPlan(f"the workspace's plan does not include a person's standing "
+                        f"({doc['error']}" + (f": {msg}" if msg else "") + ")")
+    if code != 200:
+        raise _refused("the standing request", code, doc)
+    return doc
 
 
 # ── the key ──────────────────────────────────────────────────────────────────
@@ -944,7 +1062,7 @@ def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
     return {"dry_run": True, "sent": False, "destination": {"box": box,
                                                             "host": host_of(box)},
             "org_model": payload.org, "ledger": payload.ledger,
-            "agent_usage": payload.usage,
+            "agent_usage": payload.usage, "org_file_deletes": list(payload.deletes),
             "payload": {"bytes": len(payload.data), "lines": len(payload.lines),
                         "sha256": payload.sha256,
                         "batches": len(plan(payload, None)),
@@ -969,6 +1087,13 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
         lines.append(f"  {name:<20} {size:>9,} bytes")
     for name, why in sorted((o.get("not_read") or {}).items()):
         lines.append(f"  {name:<20} left out: {why}")
+    for name in payload.deletes:
+        if name in (o.get("files") or {}) and not o.get("left_out"):
+            lines.append(f"  {name:<20} delete on the workspace, then this machine's copy "
+                         "after it: it applies even if the workspace held it before and "
+                         "replaced it")
+        else:
+            lines.append(f"  {name:<20} delete on the workspace (this machine sends no copy)")
     lines += ["", f"Guard ledger  {led.get('path')}"]
     n = led.get("records") or 0
     if led.get("ok") is None:

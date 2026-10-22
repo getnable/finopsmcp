@@ -336,22 +336,103 @@ def test_an_mcp_shell_running_a_self_rule_asks_and_is_judged_as_both(monkeypatch
 
 # ── 3 and 4. globs and recursive changes ask only over what is there ──────────
 
+# "{glob_root}" is a directory the test makes, standing in for a shared /tmp:
+# what the machine's own /tmp holds is not the test's to depend on, and past
+# guard_paths._GLOB_VISITS entries a glob over it is taken to match (below).
+GLOB_ROOT = "{glob_root}"
 SILENT_IN_A_REPO = [
     "rm -rf build/*", "chmod +x scripts/*", "cp config/*.yaml deploy/", "mv logs/* archive/",
-    'sed -i "s/v1/v2/" k8s/*.yaml', "rm -rf /tmp/pytest-*/*", "git rm -r --cached .",
+    'sed -i "s/v1/v2/" k8s/*.yaml', f"rm -rf {GLOB_ROOT}/pytest-*/*", "git rm -r --cached .",
     "chmod -R 755 .", "sudo chown -R $USER .", "rm -rf -- *", "rm -rf ./*",
     "cp budget.yml budget.yml.bak", "git checkout .", "git restore .", "git stash",
     "git stash pop", "git clean -fd",
 ]
+# A temp dir as empty as a fresh machine's, and one fuller than the guard lists.
+TMP_ENTRIES = (0, 5_000)
+
+
+def _fill_dir(root: Path, entries: int) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for i in range(entries):
+        (root / f"entry-{i:05d}").touch()
+    return root
+
+
+def _glob_root(machine, entries: int = 0) -> Path:
+    """A directory outside the home and the repo, holding a pytest-like
+    directory with one file in it and `entries` other names."""
+    root = machine["top"] / "tmp"
+    (root / "pytest-of-someone").mkdir(parents=True, exist_ok=True)
+    (root / "pytest-of-someone" / "old-run").write_text("x")
+    return _fill_dir(root, entries)
+
+
+@pytest.fixture(scope="module")
+def _tmp_dirs_made(tmp_path_factory) -> dict[int, Path]:
+    """One sandbox per size in TMP_ENTRIES, made once for the module."""
+    base = tmp_path_factory.mktemp("ambient-tmp")
+    return {n: _fill_dir(base / f"holding-{n}", n) for n in TMP_ENTRIES}
+
+
+@pytest.fixture(params=TMP_ENTRIES, ids=lambda n: f"tmp-{n}")
+def ambient_tmp(request, _tmp_dirs_made, monkeypatch):
+    """The machine's temp dir, as TMPDIR and tempfile name it: a sandbox
+    holding no entries or more than the guard lists. The real /tmp is
+    neither."""
+    tmp = _tmp_dirs_made[request.param]
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp))
+    return tmp
+
+
+@pytest.fixture
+def listed(monkeypatch):
+    """Every directory listed while the test runs."""
+    seen: list[str] = []
+    real = os.listdir
+
+    def spy(path="."):
+        seen.append(os.path.realpath(os.fspath(path)))
+        return real(path)
+    monkeypatch.setattr(gpa.os, "listdir", spy)
+    return seen
+
+
+def _tmp_dirs(*more: Path) -> set[str]:
+    return {os.path.realpath("/tmp"), *(os.path.realpath(p) for p in more)}
 
 
 @pytest.mark.parametrize("command", SILENT_IN_A_REPO)
-def test_ordinary_globs_and_recursive_changes_stay_silent(command, machine):
+def test_ordinary_globs_and_recursive_changes_stay_silent(command, machine, ambient_tmp,
+                                                          listed):
     repo = machine["repo"]
     for d in ("build", "scripts", "config", "deploy", "logs", "archive", "k8s"):
         (repo / d).mkdir()
         (repo / d / "file.yaml").write_text("x")
+    command = command.replace(GLOB_ROOT, str(_glob_root(machine)))
     assert _ask(command) is None, command
+    assert not _tmp_dirs(ambient_tmp) & set(listed), "the check listed a machine temp dir"
+
+
+def test_a_glob_past_the_visit_limit_asks_what_it_cannot_list(machine, listed):
+    """Past guard_paths._GLOB_VISITS directory entries the guard stops
+    listing and takes the glob to match: `*` there could be a budget file
+    (guard_paths.PROTECTED_NAMES) it did not get to see, so the write asks,
+    naming the glob. Under the limit the same glob expands exactly, to
+    nothing of the guard's, and stays silent."""
+    root = _glob_root(machine, TMP_ENTRIES[-1])
+    assert TMP_ENTRIES[-1] > gpa._GLOB_VISITS
+    command = f"rm -rf {root}/pytest-*/*"
+    assert gpa.glob_names(f"{root}/pytest-*/*") is None, "it listed past its limit"
+    v = _ask(command)
+    assert v is not None and v["decision"] == "ask" and v["action_type"] == "protected_write"
+    assert v["protected_path"] == f"{root}/pytest-*/*"
+    assert "budget file" in v["reason"]
+    for i in range(TMP_ENTRIES[-1]):
+        (root / f"entry-{i:05d}").unlink()
+    assert gpa.glob_names(f"{root}/pytest-*/*") == ["old-run"]
+    assert _ask(command) is None
+    assert not _tmp_dirs() & set(listed)
 
 
 @pytest.mark.parametrize("command", ["git rm -r --cached .", "chmod -R 755 .",

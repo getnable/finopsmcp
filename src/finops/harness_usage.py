@@ -404,7 +404,8 @@ def cursor_email() -> str:
 
 
 def _cursor_cache_path() -> Path:
-    d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
+    raw = os.getenv("FINOPS_DATA_DIR")      # "~/x" from a settings.json env entry
+    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
     d.mkdir(parents=True, exist_ok=True)
     return d / "cursor-usage.json"
 
@@ -416,7 +417,9 @@ def write_json_atomic(path: Path, data: Any) -> None:
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as fh:
-            json.dump(data, fh)
+            # dumps, not dump: json.dump encodes in pure Python, about ten
+            # times slower on a month of responses (ai_budget's caches).
+            fh.write(json.dumps(data))
         os.replace(tmp, path)
     except BaseException:
         try:
