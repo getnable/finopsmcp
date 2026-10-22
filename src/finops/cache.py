@@ -155,6 +155,14 @@ _hmac_key: bytes | None = None
 _hmac_key_loaded = False
 
 
+def _cache_dir() -> str:
+    """FINOPS_DATA_DIR by the one rule (_datadir), else ~/.nable."""
+    from pathlib import Path
+
+    from ._datadir import env_data_dir
+    return str(env_data_dir(Path.home() / ".nable")[0])
+
+
 def _cache_hmac_key() -> bytes | None:
     """Per-install key that authenticates the on-disk pickle blobs. Read from a
     0600 file in the data dir, created once. Returns None if it cannot be
@@ -164,7 +172,7 @@ def _cache_hmac_key() -> bytes | None:
     if _hmac_key_loaded:
         return _hmac_key
     _hmac_key_loaded = True
-    data_dir = os.getenv("FINOPS_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".nable")
+    data_dir = _cache_dir()
     path = os.path.join(data_dir, "cache.key")
     try:
         os.makedirs(data_dir, exist_ok=True)
@@ -232,7 +240,7 @@ def _disk_conn() -> "sqlite3.Connection | None":
     global _disk_ready
     if _DISABLED or _DISK_DISABLED:
         return None
-    data_dir = os.getenv("FINOPS_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".nable")
+    data_dir = _cache_dir()
     try:
         os.makedirs(data_dir, exist_ok=True)
         # storage/db.py gives each FINOPS_PROFILE its own database and vault, but

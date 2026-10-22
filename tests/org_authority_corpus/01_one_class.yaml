@@ -1,0 +1,10 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, max_commitment_usd_per_plan: 50000, approvers: ["email:Ana@Acme.example"], expires: 2027-06-30}
+  source: human
+  confidence: 1.0
+  status: confirmed
+  proposed_at: 2026-10-01
+  confirmed_by: ana@acme.example
+  confirmed_at: 2026-10-01

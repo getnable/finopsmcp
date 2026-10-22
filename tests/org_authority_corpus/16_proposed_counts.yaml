@@ -1,0 +1,19 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: "off"}
+  source: a-pull-request
+  status: proposed
+  proposed_at: 2026-10-10
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend}
+  source: a-pull-request
+  status: proposed
+  proposed_at: 2026-10-12

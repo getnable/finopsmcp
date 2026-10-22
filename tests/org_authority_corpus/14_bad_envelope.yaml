@@ -1,0 +1,31 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend}
+  source: human
+  status: maybe
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: recommend}
+  source: ""
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: recommend}
+  source: human
+  confidence: 2
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: recommend}
+  source: human
+  status: confirmed
+  confirmed_at: someday
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: [recommend]
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

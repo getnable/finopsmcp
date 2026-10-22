@@ -1,0 +1,14 @@
+# nable org model v1
+- fact: authority
+  subject: "action_class:RDS_RI"
+  value: {rung: approve_each, approvers: "Email: Ana@Acme.example", expires: "2027-06-30", note: kept as written}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01T09:30:00Z
+- fact: authority
+  subject: {kind: action_class, id: " ElastiCache_RI ", team: platform}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example", "email:ANA@acme.example"], expires: 2027-06-30, max_commitment_usd_per_plan: 7}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+  ticket: FIN-12

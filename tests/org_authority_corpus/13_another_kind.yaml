@@ -1,0 +1,12 @@
+# nable org model v1
+- fact: owner
+  subject: {kind: aws_account, id: "123456789012"}
+  value: {team: payments}
+  source: human
+  status: confirmed
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

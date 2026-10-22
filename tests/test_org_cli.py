@@ -173,7 +173,9 @@ def test_init_without_a_terminal_prints_the_questions(odir, capsys):
     proposed(dollars_monthly=100)
     code, out, _ = run(capsys, "init")
     assert code == 0
-    assert sorted(p.name for p in odir.iterdir()) == sorted(org.model.KNOWN_FILES)
+    # authority.yaml is made by the first entry a person writes, never by init.
+    assert sorted(p.name for p in odir.iterdir()) == sorted(
+        set(org.model.KNOWN_FILES) - set(store.ON_REQUEST_FILES))
     assert "Is it right that aws_account:123456789012 is owned by team payments" in out
     assert "nable org confirm" in out
     assert org.load().facts[0].status == "proposed"

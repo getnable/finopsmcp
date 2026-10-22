@@ -20,7 +20,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -29,9 +29,43 @@ import yaml
 from finops import org
 from finops.org import store
 from finops.org.cli import _who as human
-from finops.org.model import Fact, OrgModel, Subject, fact_key, local_today, pick
+from finops.org.model import Fact, OrgModel, Subject, fact_key, pick
 
-TODAY = local_today().isoformat()
+# The day every date the org model reads is, whatever the clock says: nothing
+# here reads the date at import, so a run whose clock crosses midnight passes.
+TODAY_DATE = date(2026, 6, 15)
+TODAY = TODAY_DATE.isoformat()
+
+
+@pytest.fixture(autouse=True)
+def _frozen_today(monkeypatch):
+    from finops.org import model
+    monkeypatch.setattr(model, "local_today", lambda: TODAY_DATE)
+    monkeypatch.setattr(store, "local_today", lambda: TODAY_DATE)
+    monkeypatch.setattr(model, "utc_today", lambda: TODAY_DATE)
+
+
+def test_this_module_reads_no_date_at_import():
+    import ast
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    assert _date_reads(tree) == []
+
+
+def _date_reads(tree) -> list[int]:
+    """Line numbers of a date or clock read outside any function: a call of
+    local_today, utc_today, date.today, datetime.now or datetime.utcnow."""
+    import ast
+    out = []
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Call):
+                fn = node.func
+                name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                if name in ("local_today", "utc_today", "today", "now", "utcnow"):
+                    out.append(node.lineno)
+    return out
 
 
 @pytest.fixture
@@ -230,7 +264,7 @@ def test_rejected_and_expired_never_answer():
 
 
 def test_a_stale_fact_is_still_used_and_flagged(odir):
-    past = (local_today() - timedelta(days=1)).isoformat()
+    past = (TODAY_DATE - timedelta(days=1)).isoformat()
     write(odir / "owners.yaml", [
         {"fact": "owner", "subject": {"kind": "aws_account", "id": "111111111111"},
          "value": {"team": "payments"}, "source": "human", "status": "confirmed",

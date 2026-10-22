@@ -85,10 +85,10 @@ def _fallback() -> llm_prices.ModelPrice:
 
 
 def _data_dir() -> Path:
-    # expanduser, as guard_paths reads it: a settings.json env entry gives
-    # "~/x" unexpanded, and the guard protects the home directory's ~/x.
-    raw = os.getenv("FINOPS_DATA_DIR")
-    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
+    # By guard_paths' rule (_datadir): a settings.json env entry gives "~/x"
+    # unexpanded, and the guard protects the home directory's ~/x.
+    from ._datadir import env_data_dir
+    d = env_data_dir(Path.home() / ".nable")[0]
     d.mkdir(parents=True, exist_ok=True)
     return d
 

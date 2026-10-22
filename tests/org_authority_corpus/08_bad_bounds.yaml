@@ -1,0 +1,37 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: -1}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: .nan}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: recommend, max_commitment_usd_per_plan: .inf}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: "5000"}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: true}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: 0}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

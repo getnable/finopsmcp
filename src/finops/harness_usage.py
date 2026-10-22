@@ -404,8 +404,9 @@ def cursor_email() -> str:
 
 
 def _cursor_cache_path() -> Path:
-    raw = os.getenv("FINOPS_DATA_DIR")      # "~/x" from a settings.json env entry
-    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
+    # "~/x" from a settings.json env entry expands, by the one rule (_datadir).
+    from ._datadir import env_data_dir
+    d = env_data_dir(Path.home() / ".nable")[0]
     d.mkdir(parents=True, exist_ok=True)
     return d / "cursor-usage.json"
 

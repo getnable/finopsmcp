@@ -29,6 +29,16 @@
                                  a coding-agent budget a month, in list-price-equivalent
                                  US dollars (budgets.yaml); the guard compares it with
                                  this machine's agent spend at the next shell or MCP call
+  nable org set authority --class rds_ri --rung approve_each --approver email:ana@acme.com
+                          --expires 2027-06-30 [--max-commitment-usd 50000]
+                                 purchase authority for one purchase kind (rds_ri,
+                                 elasticache_ri, database_savings_plan): off, recommend
+                                 or approve_each, the most a plan may commit, who may
+                                 approve and when it expires (authority.yaml). A paid
+                                 workspace applies the stricter of this and its opt-in,
+                                 so the file only narrows
+  nable org authority [--json]   what authority.yaml says of each purchase kind, the
+                                 strictest of every live entry, and each refused entry
   nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
                                  (init and questions first read the guard's
@@ -56,7 +66,7 @@ import sys
 from typing import Any
 
 _ACTIONS = ("init", "status", "review", "confirm", "reject", "set", "questions", "export",
-            "trust")
+            "trust", "authority")
 
 
 def add_parser(sub) -> None:
@@ -113,9 +123,9 @@ def add_parser(sub) -> None:
 
     x = osub.add_parser("set", parents=[common], help="State a fact directly (confirmed)")
     x.add_argument("org_set_kind", choices=["owner", "environment", "team", "threshold",
-                                             "freeze", "approval", "ai_budget"],
+                                             "freeze", "approval", "ai_budget", "authority"],
                    metavar="KIND", help="owner | environment | team | threshold | freeze | "
-                                        "approval | ai_budget")
+                                        "approval | ai_budget | authority")
     x.add_argument("--subject", "--scope", dest="org_subject", default=None, metavar="KIND:ID",
                    help="e.g. aws_account:123456789012, repo_path:infra/payments "
                         "(owner, environment); team:payments, environment:prod or org:org "
@@ -139,7 +149,20 @@ def add_parser(sub) -> None:
     x.add_argument("--approver", dest="org_approvers", action="append", default=None,
                    metavar="KIND:ID", help="approval: github:LOGIN, team:SLUG (a GitHub "
                                            "team), jira:ACCOUNT_ID, linear:USER_ID or "
-                                           "email:ADDRESS; repeatable")
+                                           "email:ADDRESS; authority: email:ADDRESS only; "
+                                           "repeatable")
+    x.add_argument("--class", dest="org_class", default=None, metavar="KIND",
+                   help="authority: the purchase kind, rds_ri | elasticache_ri | "
+                        "database_savings_plan")
+    x.add_argument("--rung", dest="org_rung", default=None, metavar="RUNG",
+                   help="authority: off | recommend | approve_each")
+    x.add_argument("--max-commitment-usd", dest="org_max_commitment", type=float,
+                   default=None, metavar="USD",
+                   help="authority: the most one plan may commit to this kind, in US dollars "
+                        "(the measure of the workspace opt-in's commitment cap)")
+    x.add_argument("--expires", dest="org_expires", default=None, metavar="YYYY-MM-DD",
+                   help="authority: the day it lapses to recommend, within 366 days "
+                        "(required at approve_each)")
     x.add_argument("--min", dest="org_min", type=int, default=None, metavar="N",
                    help="approval: how many of them must approve (default 1)")
     x.add_argument("--change-ticket", dest="org_change_ticket", action="store_true",
@@ -168,6 +191,11 @@ def add_parser(sub) -> None:
                    metavar="NAME", help="team: another name for it (repeatable)")
     x.add_argument("--review-after", dest="org_review_after", default=None, metavar="YYYY-MM-DD")
     x.add_argument("--as", dest="org_as", default=None, metavar="WHO")
+
+    x = osub.add_parser("authority", parents=[common],
+                        help="What authority.yaml says of each purchase kind, and each "
+                             "entry it refused")
+    x.add_argument("--json", dest="org_json", action="store_true")
 
     x = osub.add_parser("trust", parents=[common],
                         help="Trust this repo's nable.org/ (its owners pick the guard's "
@@ -265,6 +293,79 @@ def _status(parsed, org) -> int:
         logger.removeHandler(quiet)
 
 
+def _quiet(fn, parsed, org) -> int:
+    """fn(parsed, org) with the org model's log lines going nowhere: what it
+    prints says every problem the load found, once (see _status)."""
+    import logging
+    quiet = logging.NullHandler()
+    logger = logging.getLogger("finops.org")
+    logger.addHandler(quiet)
+    try:
+        return fn(parsed, org)
+    finally:
+        logger.removeHandler(quiet)
+
+
+def _usd(x: float) -> str:
+    return f"${x:,.2f}"
+
+
+def _authority_words(c: dict[str, Any]) -> str:
+    """One purchase kind's line, as `nable org authority` and status print it."""
+    if c["rung"] is None:
+        return "not named: a paid workspace's opt-in alone governs it"
+    parts = [c["rung"]]
+    if c["max_commitment_usd_per_plan"] is not None:
+        parts.append(f"up to {_usd(c['max_commitment_usd_per_plan'])} a plan")
+    if c["nobody_may_approve"]:
+        parts.append("nobody may approve (the entries name no approver in common)")
+    elif c["approvers"] is not None:
+        parts.append("approvers " + ", ".join(c["approvers"]))
+    if c["expired_on"]:
+        parts.append(f"expired on {c['expired_on']}")
+    elif c["expires"]:
+        parts.append(f"expires {c['expires']}")
+    for why in c["held"]:
+        parts.append(f"held at recommend: {why}")
+    return ", ".join(parts)
+
+
+def _refused_words(r: dict[str, Any]) -> str:
+    where = f"{r['file']} entry {r['entry']}" if r.get("entry") is not None else str(r["file"])
+    return (f"{where}, {r['field']}: {r['message']} (holds {r['holds']} at recommend)")
+
+
+_NARROWS = ("authority.yaml only narrows: a paid workspace applies the stricter of it and its "
+            "opt-in, and a named person who signed in and holds the workspace's purchase grant "
+            "still approves every purchase.")
+
+
+def _authority(parsed, org) -> int:
+    return _quiet(_authority_report, parsed, org)
+
+
+def _authority_report(parsed, org) -> int:
+    m = org.load(parsed.org_dir)
+    a = m.authority()
+    if getattr(parsed, "org_json", False):
+        _print(json.dumps({"dir": str(m.dir), **a, "narrows_only": _NARROWS}, default=str))
+        return 0
+    _print(f"Purchase authority (authority.yaml), as of {a['today']} UTC")
+    for f in a["files"]:
+        _print(f"  file: {f}")
+    if not a["files"]:
+        _print("  no authority.yaml here: a paid workspace's opt-in alone governs every "
+               "purchase kind (`nable org set authority` writes one)")
+    for name, c in a["classes"].items():
+        _print(f"  {name:<22} {_authority_words(c)}")
+        if c["keys"]:
+            _print(f"  {'':<22} entries: {', '.join(c['keys'])}")
+    for r in a["refused"]:
+        _print(f"  refused: {_refused_words(r)}")
+    _print(f"  {_NARROWS}")
+    return 0
+
+
 def _status_report(parsed, org) -> int:
     m = org.load(parsed.org_dir)
     cov = org.coverage(m)
@@ -275,8 +376,10 @@ def _status_report(parsed, org) -> int:
     untrusted = [layer for layer in m.layers if not layer.trusted]
     freezes = _freeze_rows(m)
     approvals = [f for f in m.by_kind("approval") if f.live]
+    authority = m.authority()
     if getattr(parsed, "org_json", False):
         _print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
+                          "authority": authority,
                           "freezes": [{**f.summary(), "state": state, "applies_as": how}
                                       for f, state, how in freezes],
                           "approvals": [f.summary() for f in approvals],
@@ -321,6 +424,15 @@ def _status_report(parsed, org) -> int:
                   f"{v.get('min', 1)} of {', '.join(v['approvers'])}"
                   + (", change ticket required" if v.get("change_ticket") else "")
                   + f"  ({sure})")
+    if authority["files"]:
+        _print(f"  authority (authority.yaml, as of {authority['today']} UTC): "
+               + "; ".join(f"{n} {_authority_words(c)}"
+                           for n, c in authority["classes"].items()))
+        for r in authority["refused"]:
+            _print(f"    refused: {_refused_words(r)}")
+    else:
+        _print("  authority: no authority.yaml, so a paid workspace's opt-in alone governs "
+               "every purchase kind")
     if cov["basis"] == "subjects" and cov["subjects"]["total"]:
         s = cov["subjects"]
         _print(f"    subjects: {s['confirmed_owner']} of {s['total']} with a confirmed owner, "
@@ -473,11 +585,29 @@ def _set(parsed, org) -> int:
     kind = parsed.org_set_kind
     people = [p.strip() for p in (parsed.org_people or "").split(",") if p.strip()]
     value: dict[str, Any]
+    when: dict[str, Any] = {}
     if kind in ("freeze", "approval"):
         built = _policy_value(parsed, kind)
         if isinstance(built, int):
             return built
         subject, value = parsed.org_subject, built
+    elif kind == "authority":
+        if not getattr(parsed, "org_class", None) or not getattr(parsed, "org_rung", None):
+            print("set authority needs --class KIND (rds_ri, elasticache_ri or "
+                  "database_savings_plan) and --rung off|recommend|approve_each",
+                  file=sys.stderr)
+            return 2
+        subject = f"action_class:{parsed.org_class}"
+        value = {"rung": parsed.org_rung}
+        if getattr(parsed, "org_max_commitment", None) is not None:
+            value["max_commitment_usd_per_plan"] = parsed.org_max_commitment
+        if parsed.org_approvers:
+            value["approvers"] = list(parsed.org_approvers)
+        if getattr(parsed, "org_expires", None):
+            value["expires"] = parsed.org_expires
+        # Confirmed today: the expiry is checked against today before anything is written.
+        from .store import _today
+        when = {"proposed_at": _today(), "confirmed_at": _today()}
     elif kind == "ai_budget":
         if not parsed.org_subject:
             print("set ai_budget needs --subject team:TEAM, person:EMAIL (or "
@@ -529,12 +659,16 @@ def _set(parsed, org) -> int:
         subject = _qualified(org, org.subject_of(subject), parsed.org_dir)
         fact = org.Fact.from_dict({"fact": kind, "subject": subject.to_dict(),
                                    "value": value, "source": "human", "status": "confirmed",
-                                   "review_after": parsed.org_review_after})
+                                   "review_after": parsed.org_review_after, **when})
         f = org.set_fact(fact, who, parsed.org_dir)
     except (org.FactError, org.OrgError) as e:
         print(f"Not set: {e}", file=sys.stderr)
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
+    if f.fact == "authority":
+        print("  authority.yaml only narrows: a paid workspace applies the stricter of this and "
+              "its opt-in, and a named person who signed in and holds the workspace's purchase "
+              "grant still approves every purchase.")
     if f.fact == "ai_budget":
         print("  In list-price-equivalent US dollars a month: what the agents' tokens cost at "
               "the provider's published rate, not an invoice. The guard compares it with this "
@@ -905,6 +1039,8 @@ def run(parsed) -> int:
             return _export(parsed, org)
         if action == "trust":
             return _trust(parsed, org)
+        if action == "authority":
+            return _authority(parsed, org)
     except (org.OrgError, org.FactError) as e:
         print(f"nable org {action}: {e}", file=sys.stderr)
         return 1

@@ -1,0 +1,16 @@
+# nable org model v1
+# Two entries for one kind: the lowest rung, the smallest bound, the
+# approvers both name, and the earliest expiry answer.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, max_commitment_usd_per_plan: 50000, approvers: ["email:ana@acme.example", "email:bo@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_by: ana@acme.example
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, max_commitment_usd_per_plan: 20000.5, approvers: ["EMAIL:Bo@ACME.example", "email:cy@acme.example"], expires: "2027-03-01"}
+  source: finance-review
+  status: proposed
+  proposed_at: 2026-10-05

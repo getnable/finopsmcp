@@ -1,0 +1,16 @@
+# nable org model v1
+# A rejected entry counts for nothing, so its expiry is not held to its dates:
+# a rejection never turns an entry into a refusal.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2026-01-01}
+  source: human
+  status: rejected
+  confirmed_by: bo@acme.example
+  confirmed_at: 2026-10-05
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-01-01}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-05

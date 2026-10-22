@@ -7492,6 +7492,8 @@ def doctor() -> dict[str, Any]:
         fix("correct the policy setting", problem)
     packs = _doctor_packs(covered, gaps, fix)
     ai_budgets = _doctor_ai_budgets(covered, gaps, fix)
+    data_dir = _doctor_data_dir(gaps, fix)
+    authority = _doctor_authority(covered, gaps, fix)
     try:
         from . import guard_paths
         protected = [e.as_dict() for e in guard_paths.protected()]
@@ -7518,6 +7520,8 @@ def doctor() -> dict[str, Any]:
         "editor_tools": editor_tools,
         "packs": packs,
         "ai_budgets": ai_budgets,
+        "data_dir": data_dir,
+        "authority": authority,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
@@ -7617,6 +7621,49 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
             "unpriced_tokens": usage["unpriced_tokens"],
             "price_source": ai_budget.price_source(usage["providers"]),
             "notes": usage["notes"]}
+
+
+def _doctor_data_dir(gaps: list[str], fix: Any) -> dict[str, Any]:
+    """The doctor's word on FINOPS_DATA_DIR (D139): the value as set, the
+    directory nable uses, and why a value was refused (a relative path:
+    nable then uses its default, and the guard protects that one)."""
+    from . import _datadir
+    got = _datadir.doctor()
+    if got["refused"]:
+        gaps.append(f"nable's data directory: {got['refused']} The guard protects "
+                    f"{got['dir']}, the directory nable writes.")
+        fix("set FINOPS_DATA_DIR to an absolute path, or unset it",
+            f"it is {got['value']!r} now")
+    return got
+
+
+def _doctor_authority(covered: list[str], gaps: list[str], fix: Any, *,
+                      cwd: str | None = None) -> dict[str, Any]:
+    """The doctor's word on the org model's purchase authority
+    (authority.yaml): that it is one of the guard's own files, and how many
+    of its entries were refused (each holds its kind at recommend on a paid
+    workspace). {"present": False} when no org dir holds one."""
+    from .org import store
+    from .org.model import AUTHORITY_FILE
+    try:
+        model = store.load(cwd=cwd)
+        files = [str(layer.dir / AUTHORITY_FILE) for layer in model.layers
+                 if (layer.dir / AUTHORITY_FILE).is_file()]
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        gaps.append(f"the org model's authority.yaml: it could not be read "
+                    f"({type(exc).__name__})")
+        return {"present": None, "error": type(exc).__name__}
+    if not files:
+        return {"present": False}
+    refused = [r for r in model.refused if str(r.get("file")) in files]
+    covered.append("authority.yaml, the org model's purchase authority: an agent's write, "
+                   "move, truncation or deletion of it asks, in every org dir")
+    if refused:
+        gaps.append(f"authority.yaml: {len(refused)} entr{'y' if len(refused) == 1 else 'ies'} "
+                    "refused, each holding its purchase kind (or every kind) at recommend on "
+                    "a paid workspace")
+        fix("nable org authority", "shows each refused entry with its file, entry and field")
+    return {"present": True, "files": files, "refused": len(refused)}
 
 
 def _doctor_packs(covered: list[str], gaps: list[str], fix: Any) -> dict[str, Any]:

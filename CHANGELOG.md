@@ -168,6 +168,66 @@ coding-agent spend a person can carry into a paid workspace.
 - Tests: the guard's glob test no longer reads the machine's own `/tmp`; it
   passes with a temp dir of 5,000 entries and with an empty one, and a glob
   past the guard's listing limit asking is asserted on its own.
+- **Purchase authority, written down.** A new fact kind, `authority`, in
+  `nable.org/authority.yaml`: per purchase kind a paid workspace's reservation
+  agent buys (an `action_class` subject, `rds_ri`, `elasticache_ri` or
+  `database_savings_plan`, a subject kind only authority facts may use), its
+  `rung` (`off`, `recommend` or `approve_each`; `rung: off` written without
+  quotes, which YAML reads as false, is off), `max_commitment_usd_per_plan`
+  (optional, finite, 0 or more), `approvers` (`email:` entries only, required
+  at `approve_each`) and `expires` (a date, required at `approve_each`, after
+  and at most 366 days after the entry's `confirmed_at`, else its
+  `proposed_at`). Each refusal names its field (`subject.id`, `value.rung`,
+  `value.approvers`, `value.max_commitment_usd_per_plan`, `value.expires`).
+  `nable org set authority --class C --rung R [--max-commitment-usd N]
+  [--approver email:X]... [--expires DATE]`, at a terminal or with `--as WHO`,
+  writes a confirmed entry; without either it is refused. No adapter, pack or
+  agent proposal may write one, `nable org init` never makes the file, and
+  authority facts live in `authority.yaml` alone, which holds nothing else.
+- **The strictest entry answers.** `OrgModel.authority(today=...)` gives per
+  kind the strictest of every live entry, a proposal included (each can only
+  narrow): the lowest rung, the smallest bound, the approvers every entry
+  names (none in common reads as nobody may approve) and the earliest expiry,
+  with the keys behind it. A rejected or superseded entry counts for nothing;
+  an entry from its `expires` date (UTC) holds its kind at recommend. A
+  refused entry is never only a warning: one whose kind can be read holds
+  that kind at recommend, and one whose kind cannot, or a file that cannot be
+  read, holds every kind there; each is listed with its file, entry and
+  field. `nable org authority [--json]` shows it all, and `nable org status`
+  has an Authority line. A rejection never turns an entry into a refusal (its
+  dates are not held to it); a confirmation that would put an entry's expiry
+  out of range is refused, naming `value.expires`.
+- **`authority.yaml` is one of the guard's own files** in a repo's
+  `nable.org/`, the data dir's org model and `FINOPS_ORG_DIR`, named on its
+  own: a write, move, truncation or deletion by an agent asks, by Claude
+  Code's file tools and by shell (through a glob and a redirect too), and the
+  reason names it. `nable guard doctor` says so (`authority` in `--json`,
+  with how many entries were refused).
+- **`nable cloud connect` sends `authority.yaml` only to a box that says it
+  takes it.** A box whose status does not list `org_file:authority.yaml` in
+  `accepts` would refuse the batch whole, so the send is refused before a
+  byte leaves, naming `--without-org-file authority.yaml`; so is a
+  `--delete-org-file authority.yaml`. `--without-org-file NAME` (repeatable,
+  any org model file, a name that is not one a usage error that does not
+  repeat it) leaves that file out: the dry run names it (`org_files_left_out`
+  in `--json`), and the confirm code covers the bytes without it.
+- **`FINOPS_DATA_DIR`, read in one place.** `finops._datadir.env_data_dir`
+  is the one reader, and every module that kept a file in the data dir asks
+  it with its own default: a leading `~` expands, and a relative value is
+  refused, so the default is used everywhere, the guard protects the
+  directory nable actually writes, a command says so once on stderr, the
+  guard hook never fails over it, and `nable guard doctor` names the value
+  and the directory used (`data_dir` in `--json`).
+- An org model file holding a date YAML cannot construct (`2027-02-30`) is
+  now "not readable as YAML", named with its fix, instead of an error out of
+  every command that reads the model.
+- Asking before an agent writes the coding agents' transcripts (D118) is not
+  built in this release, and SECURITY.md and `nable guard doctor` keep saying
+  so.
+- Tests: the org model tests read no date at import (a fixture freezes it,
+  so a run whose clock crosses midnight passes), and the onboarding tests
+  make their files under pytest's `tmp_path`, leaving nothing in the system
+  temp dir.
 
 ## 0.13.0 (2026-10-18)
 

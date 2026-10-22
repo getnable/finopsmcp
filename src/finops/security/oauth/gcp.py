@@ -51,7 +51,8 @@ def import_service_account_key(key_path: str | Path) -> None:
 
     # Write a temp credentials file that the GCP SDK can pick up
     # This file is re-created at startup from vault; never kept long-term
-    creds_path = Path(os.environ.get("FINOPS_DATA_DIR", Path.home() / ".finops")) / "gcp_sa.json"
+    from ..._datadir import env_data_dir
+    creds_path = env_data_dir(Path.home() / ".finops")[0] / "gcp_sa.json"
     vault.store("GOOGLE_APPLICATION_CREDENTIALS", str(creds_path))
 
     print("  ✓ GCP service account stored in vault")
