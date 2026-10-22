@@ -168,6 +168,102 @@ coding-agent spend a person can carry into a paid workspace.
 - Tests: the guard's glob test no longer reads the machine's own `/tmp`; it
   passes with a temp dir of 5,000 entries and with an empty one, and a glob
   past the guard's listing limit asking is asserted on its own.
+- **Purchase authority, written down.** A new fact kind, `authority`, in
+  `nable.org/authority.yaml`: per purchase kind a paid workspace's reservation
+  agent buys (an `action_class` subject, `rds_ri`, `elasticache_ri` or
+  `database_savings_plan`, a subject kind only authority facts may use), its
+  `rung` (`off`, `recommend` or `approve_each`; `rung: off` written without
+  quotes, which YAML reads as false, is off), `max_commitment_usd_per_plan`
+  (optional, finite, 0 or more), `approvers` (`email:` entries only, required
+  at `approve_each`) and `expires` (a date, required at `approve_each`, after
+  and at most 366 days after the entry's `confirmed_at`, else its
+  `proposed_at`). Each refusal names its field (`subject.id`, `value.rung`,
+  `value.approvers`, `value.max_commitment_usd_per_plan`, `value.expires`).
+  `nable org set authority --class C --rung R [--max-commitment-usd N]
+  [--approver email:X]... [--expires DATE]`, at a terminal or with `--as WHO`,
+  writes a confirmed entry; without either it is refused. No adapter, pack or
+  agent proposal may write one, `nable org init` never makes the file, and
+  authority facts live in `authority.yaml` alone, which holds nothing else.
+- **The strictest entry answers.** `OrgModel.authority(today=...)` gives per
+  kind the strictest of every live entry, a proposal included (each can only
+  narrow): the lowest rung, the smallest bound, the approvers every entry
+  names (none in common reads as nobody may approve) and the earliest expiry,
+  with the keys behind it. A rejected or superseded entry counts for nothing;
+  an entry from its `expires` date (UTC) holds its kind at recommend. A
+  refused entry is never only a warning: one whose kind can be read holds
+  that kind at recommend, and one whose kind cannot, or a file that cannot be
+  read, holds every kind there; each is listed with its file, entry and
+  field. `nable org authority [--json]` shows it all, and `nable org status`
+  has an Authority line. A rejection never turns an entry into a refusal (its
+  dates are not held to it); a confirmation that would put an entry's expiry
+  out of range is refused, naming `value.expires`.
+- **A typo in `authority.yaml` can only stop approvals.** A value field an
+  authority entry does not name (`max_commitment_usd` for
+  `max_commitment_usd_per_plan`, say) is refused, naming `value.<key>`, and
+  holds its kind at recommend, where other fact kinds keep unknown fields: a
+  misspelt bound was kept and ignored. A mapping that holds a key twice
+  (`rung: "off"` then `rung: approve_each`) makes the file unreadable, where
+  YAML keeps the last value in silence. An approver must be plain ASCII, as
+  lowercasing KELVIN SIGN gives `k`, another mailbox. An entry dated (its
+  `confirmed_at`, else `proposed_at`) more than a day after today holds its
+  kind at recommend until that date, so a year of authority cannot start
+  years ahead. The org model's parse cache moves to version 3, so a parse
+  made before is not reused.
+- **`authority.yaml` is one of the guard's own files** in a repo's
+  `nable.org/`, the data dir's org model and `FINOPS_ORG_DIR`, named on its
+  own: a write, move, truncation or deletion by an agent asks, by Claude
+  Code's file tools and by shell (through a glob and a redirect too), and the
+  reason names it. `nable guard doctor` says so (`authority` in `--json`,
+  with how many entries were refused).
+- **A git command that rewrites the org model's files asks.** `git merge`,
+  `pull`, `rebase`, `cherry-pick`, `revert`, `am`, `apply` (not `--check`,
+  `--stat`, `--numstat` or `--summary`) and `reset --hard` (or `--merge`,
+  `--keep`), and the `patch` program, change files named in a commit or a
+  patch the guard does not read: each now asks whenever the repo holds one of
+  the guard's own org files (`nable.org/`, or `nable.org/authority.yaml`'s
+  directory). In a repo with no org model they never ask. A branch switch
+  (`git checkout BRANCH`, `git switch`) is not asked, and `nable guard
+  doctor` lists it among the writes the guard cannot see coming.
+- **`nable cloud connect` never sends an `authority.yaml` wider than this
+  machine shows.** `nable org authority` answers with the strictest entry
+  across every layer the org model reads (a repo's `nable.org/` and the data
+  dir's model under it); cloud connect sends one directory. When the
+  `authority.yaml` it would send answers wider for any purchase kind (a kind
+  not named, a higher rung, and at approve_each a larger bound or none, an
+  approver not named here, or a later expiry), it is left out of the payload,
+  in the dry run and so in what leaves, with the reason naming the stricter
+  file and `--org-dir`. The workspace keeps what it holds. A send says when
+  the workspace held an `authority.yaml` (or its delete) instead of applying
+  it, because it would widen purchase authority there: a workspace admin with
+  the purchase grant confirms it on `/rds-ri`.
+- **`nable cloud connect` sends `authority.yaml` only to a box that says it
+  takes it.** A box whose status does not list `org_file:authority.yaml` in
+  `accepts` would refuse the batch whole, so the send is refused before a
+  byte leaves, naming `--without-org-file authority.yaml`; so is a
+  `--delete-org-file authority.yaml`. `--without-org-file NAME` (repeatable,
+  any org model file, a name that is not one a usage error that does not
+  repeat it) leaves that file out: the dry run names it (`org_files_left_out`
+  in `--json`), and the confirm code covers the bytes without it.
+- **`FINOPS_DATA_DIR`, read in one place.** `finops._datadir.env_data_dir`
+  is the one reader, and every module that kept a file in the data dir asks
+  it with its own default: a leading `~` expands, and a relative value is
+  refused, as is a value with whitespace before or after it (a shell splits
+  `$FINOPS_DATA_DIR/guard-off` on it, so stripping it would protect the
+  directory a command then writes unasked), so the default is used
+  everywhere, the guard protects the directory nable actually writes, a
+  command says so once on stderr, the guard hook never fails over it, and
+  `nable guard doctor` names the value and the directory used (`data_dir` in
+  `--json`).
+- An org model file holding a date YAML cannot construct (`2027-02-30`) is
+  now "not readable as YAML", named with its fix, instead of an error out of
+  every command that reads the model.
+- Asking before an agent writes the coding agents' transcripts (D118) is not
+  built in this release, and SECURITY.md and `nable guard doctor` keep saying
+  so.
+- Tests: the org model tests read no date at import (a fixture freezes it,
+  so a run whose clock crosses midnight passes), and the onboarding tests
+  make their files under pytest's `tmp_path`, leaving nothing in the system
+  temp dir.
 
 ## 0.13.0 (2026-10-18)
 

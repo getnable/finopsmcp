@@ -44,6 +44,25 @@ other) never meets either. The guard compares a budget with this machine's
 spend (finops.ai_budget); a proposal, or a budget from a repo nobody trusted,
 only ever asks.
 
+Purchase authority (authority, in authority.yaml) is what a paid workspace
+may do about one purchase kind (an action_class subject: rds_ri,
+elasticache_ri or database_savings_plan, the workspace's line kinds): its rung
+(off, recommend or approve_each), the most one plan may commit to it
+(max_commitment_usd_per_plan, the same measure as the workspace opt-in's cap),
+the people who may approve it (email: entries, required at approve_each) and
+when the entry expires (a date, required at approve_each, after and at most
+AUTHORITY_MAX_DAYS after its confirmed_at, else its proposed_at). An entry
+dated after today is not in force before its date. The file can only narrow
+what the workspace's opt-in allows, so every live entry counts, a proposal
+included, as freezes do, and per class the strictest answers
+(OrgModel.authority). A refused entry is never skipped in silence: it holds
+its class, or every class when its class cannot be read, at recommend; so
+does a value field the schema does not name (a misspelt bound is never
+ignored), an approver that is not plain ASCII, and, for the whole file, a
+mapping that holds a key twice. Only an authority fact may be about an
+action_class, and authority facts are authority.yaml's alone, as the
+workspace reads that file and no other.
+
 Nothing here imports more than the standard library. The guard hook will read
 this model on every agent tool call, and its budget is about 100 ms.
 """
@@ -56,19 +75,20 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import cached_property
 from typing import Any
 
 log = logging.getLogger("finops.org")
 
 FACT_KINDS = ("owner", "team", "environment", "tag_key", "tag_alias", "account", "threshold",
-              "freeze", "approval", "ai_budget")
+              "freeze", "approval", "ai_budget", "authority")
 # "environment" is a subject too, so a threshold can be scoped to one (policy.yaml).
 # "person" is an ai_budget's alone (an email or github:login).
+# "action_class" is an authority fact's alone (a purchase kind, AUTHORITY_CLASSES).
 SUBJECT_KINDS = ("aws_account", "gcp_project", "azure_subscription", "k8s_namespace",
                  "repo_path", "service", "tag_value", "resource", "team", "org",
-                 "environment", "person")
+                 "environment", "person", "action_class")
 ACCOUNT_KINDS = ("aws_account", "gcp_project", "azure_subscription")
 STATUSES = ("proposed", "confirmed", "rejected", "expired")
 LIVE = ("confirmed", "proposed")
@@ -88,6 +108,23 @@ AI_BUDGET_SUBJECTS = ("team", "person", "org")
 _EMAIL_RE = re.compile(r"^[^@\s:]+@[^@\s]+\.[^@\s]+$")
 # GitHub's own rule: 1 to 39 letters, digits or single hyphens.
 _GITHUB_RE = re.compile(r"^github:[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$")
+# The purchase kinds an authority fact is about: a paid workspace's line kinds
+# (its contract.LineKind values), in that order.
+AUTHORITY_CLASSES = ("rds_ri", "elasticache_ri", "database_savings_plan")
+# The rungs of the authority ladder, least first: nothing planned; planned and
+# shown, never approvable; each plan approved by a person the file names.
+RUNGS = ("off", "recommend", "approve_each")
+# How long after its confirmation (else its proposal) an entry may last.
+AUTHORITY_MAX_DAYS = 366
+AUTHORITY_FILE = "authority.yaml"
+# The fields an authority entry's value may hold. Any other is refused, never
+# kept: a misspelt bound kept and ignored would let a plan over it through.
+AUTHORITY_VALUE_KEYS = ("rung", "max_commitment_usd_per_plan", "approvers", "expires")
+# An authority entry dated (confirmed_at, else proposed_at) more than this
+# many days after today is not in force yet: a laptop ahead of UTC may date
+# it a day early.
+AUTHORITY_DATED_AHEAD_DAYS = 1
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # One file per fact kind, so a diff reads as "ownership changed" or "a tag
 # alias was added" and never both at once.
@@ -102,6 +139,7 @@ FILE_FOR_KIND = {
     "freeze": "freezes.yaml",
     "approval": "approvals.yaml",
     "ai_budget": "budgets.yaml",
+    "authority": AUTHORITY_FILE,
 }
 KNOWN_FILES = tuple(sorted(set(FILE_FOR_KIND.values())))
 HEADER = "# nable org model v1"
@@ -122,14 +160,32 @@ _ENV_WORDS = {
 }
 
 
+def utc_today() -> date:
+    """Today in UTC: the day a paid workspace, which runs in UTC, counts an
+    authority entry's expiry by, so the laptop and the box agree on it."""
+    return datetime.now(UTC).date()
+
+
 def local_today() -> date:
     """Today where the person is: a fact confirmed at 9pm in California is
     confirmed that day, not the next one."""
     return datetime.now(UTC).astimezone().date()
 
 
+_FIELD_RE = re.compile(r"^(subject\.(?:kind|id)|value\.[a-z_]+|fact|status|source|confidence|"
+                       r"confirmed_by|dollars_monthly|proposed_at|confirmed_at|review_after|"
+                       r"subject|value)\b")
+
+
 class FactError(ValueError):
-    """A fact that does not fit the schema. The message says which field."""
+    """A fact that does not fit the schema. The message says which field, and
+    `field` names it ("value.rung", "subject.id"), or "entry" when the
+    message names none."""
+
+    def __init__(self, message: str, *, field: str | None = None) -> None:
+        super().__init__(message)
+        m = _FIELD_RE.match(str(message))
+        self.field = field or (m.group(1) if m else "entry")
 
 
 @dataclass(frozen=True)
@@ -210,6 +266,11 @@ def subject_of(x: Subject | dict | str) -> Subject:
         if not (_EMAIL_RE.match(ident) or _GITHUB_RE.match(ident)):
             raise FactError(f"subject.id {ident[:80]!r} for a person is an email address or "
                             "github:LOGIN")
+    if kind == "action_class":
+        ident = ident.lower()
+        if ident not in AUTHORITY_CLASSES:
+            raise FactError(f"subject.id {ident[:80]!r} is not a purchase kind authority.yaml "
+                            f"governs ({', '.join(AUTHORITY_CLASSES)})")
     return Subject(kind, ident)
 
 
@@ -257,6 +318,9 @@ def core_value(fact: str, value: dict[str, Any]) -> tuple:
                 bool(v.get("change_ticket")))
     if fact == "ai_budget":
         return tuple(v.get(n) for n in ("monthly_usd", "per_person_usd"))
+    if fact == "authority":
+        return (_low(v.get("rung")), v.get("max_commitment_usd_per_plan"), many("approvers"),
+                _low(v.get("expires")))
     return (json.dumps(v, sort_keys=True, default=str),)
 
 
@@ -337,17 +401,96 @@ def _usd_above_zero(v: Any, name: str) -> float:
     return v
 
 
+def _usd_at_least_zero(v: Any, name: str) -> float:
+    """A cap a person writes: a finite number of US dollars, 0 or more."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise FactError(f"{name} must be a number of US dollars, 0 or more", field=name)
+    v = float(v)
+    if not math.isfinite(v) or v < 0:
+        raise FactError(f"{name} {v:g} must be a finite number of US dollars, 0 or more",
+                        field=name)
+    return v
+
+
+def _authority_approvers(v: Any) -> list[str]:
+    """email:ADDRESS entries, the address lowercased, each once. A name a
+    person may approve by is an email their company's sign-in carries; no
+    other kind of name is matched by anything, so none is taken."""
+    name = "value.approvers"
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list) or not all(isinstance(a, str) for a in v):
+        raise FactError(f"{name} must be a list of email:ADDRESS entries", field=name)
+    out: list[str] = []
+    for raw in v:
+        kind, sep, addr = raw.strip().partition(":")
+        addr = addr.strip()
+        # Plain ASCII only, lowercased as ASCII: str.lower maps some other
+        # letters onto ASCII ones (KELVIN SIGN onto k), another mailbox.
+        if not sep or kind.strip().lower() != "email" or not addr.isascii() \
+                or not _EMAIL_RE.match(addr.lower()):
+            raise FactError(f"{name}: {raw.strip()[:80]!r} is not email:ADDRESS in plain ASCII "
+                            "(authority.yaml names approvers by the email their sign-in "
+                            "carries)", field=name)
+        out.append(f"email:{addr.lower()}")
+    return list(dict.fromkeys(out))
+
+
+def _authority_day(v: Any) -> str:
+    """value.expires as YYYY-MM-DD: a date YAML read, or that text exactly."""
+    name = "value.expires"
+    if isinstance(v, datetime):
+        raise FactError(f"{name} must be a date (YYYY-MM-DD), not a date and time", field=name)
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, str) and _DAY_RE.match(v.strip()):
+        try:
+            return date.fromisoformat(v.strip()).isoformat()
+        except ValueError:
+            pass
+    raise FactError(f"{name} must be a date (YYYY-MM-DD)", field=name)
+
+
+def check_authority_dates(fact: str, value: dict[str, Any], status: str,
+                          confirmed_at: str | None, proposed_at: str | None) -> None:
+    """A live authority entry's expires is after, and at most
+    AUTHORITY_MAX_DAYS after, its confirmed_at, else its proposed_at. A
+    rejected or expired entry counts for nothing, so its dates are not held
+    to it (a rejection must never turn an entry into a refusal). Raises
+    FactError naming value.expires."""
+    if fact != "authority" or status not in LIVE or value.get("expires") is None:
+        return
+    name = "value.expires"
+    which, anchor = (("confirmed_at", confirmed_at) if confirmed_at
+                     else ("proposed_at", proposed_at))
+    if not anchor:
+        raise FactError(f"{name} is counted from the entry's confirmed_at or proposed_at, and "
+                        "it has neither", field=name)
+    start, end = date.fromisoformat(anchor), date.fromisoformat(str(value["expires"]))
+    if end <= start:
+        raise FactError(f"{name} {end.isoformat()} must be after its {which} "
+                        f"{start.isoformat()}", field=name)
+    if (end - start).days > AUTHORITY_MAX_DAYS:
+        raise FactError(f"{name} {end.isoformat()} is more than {AUTHORITY_MAX_DAYS} days after "
+                        f"its {which} {start.isoformat()}: an authority entry is confirmed "
+                        "again at least once a year", field=name)
+
+
 def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
     """A cleaned copy of `value` for this fact kind. Raises FactError.
 
     Keys the schema does not name are kept: a newer nable, or a person, may
-    know something this version does not, and dropping it would lose a fact."""
+    know something this version does not, and dropping it would lose a fact.
+    An authority entry is the exception: a key it does not name is refused."""
     if not isinstance(value, dict):
         raise FactError("value must be a mapping")
     v = dict(value)
     if subject.kind == "person" and kind != "ai_budget":
-        raise FactError(f"a person subject is for an ai_budget fact (budgets.yaml), not "
-                        f"{kind!r}")
+        raise FactError(f"subject.kind person is for an ai_budget fact (budgets.yaml), not "
+                        f"{kind!r}", field="subject.kind")
+    if subject.kind == "action_class" and kind != "authority":
+        raise FactError(f"subject.kind action_class is for an authority fact "
+                        f"({AUTHORITY_FILE}), not {kind!r}", field="subject.kind")
     if kind == "owner":
         _req_str(v, "team")
         _opt_str(v, "channel")
@@ -457,6 +600,40 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
                 raise FactError("value.per_person_usd is a team's alone (subject.kind team): "
                                 "what each of its people may spend a month")
             v["per_person_usd"] = _usd_above_zero(v["per_person_usd"], "value.per_person_usd")
+    elif kind == "authority":
+        if subject.kind != "action_class":
+            raise FactError("subject.kind of an authority fact must be action_class (one of "
+                            f"{', '.join(AUTHORITY_CLASSES)})", field="subject.kind")
+        unknown = sorted(str(k) for k in v if k not in AUTHORITY_VALUE_KEYS)
+        if unknown:
+            # Unlike other facts' values, nothing unknown is kept: a misspelt
+            # bound would be dropped in silence.
+            field_name = f"value.{unknown[0][:64]}"
+            raise FactError(f"{field_name} is not a field of an authority entry, which takes "
+                            f"{', '.join(AUTHORITY_VALUE_KEYS)}: it is refused, never ignored",
+                            field=field_name)
+        if v.get("rung") is False:
+            # `rung: off` unquoted, which YAML reads as false: the strictest
+            # rung either way, so it is taken as written.
+            v["rung"] = "off"
+        if v.get("rung") not in RUNGS:
+            raise FactError(f"value.rung must be one of {', '.join(RUNGS)}", field="value.rung")
+        if v.get("max_commitment_usd_per_plan") is not None:
+            v["max_commitment_usd_per_plan"] = _usd_at_least_zero(
+                v["max_commitment_usd_per_plan"], "value.max_commitment_usd_per_plan")
+        if v.get("approvers") is not None:
+            v["approvers"] = _authority_approvers(v["approvers"])
+        if v.get("expires") is not None:
+            v["expires"] = _authority_day(v["expires"])
+        if v["rung"] == "approve_each":
+            if not v.get("approvers"):
+                raise FactError("value.approvers is required at approve_each: the people, as "
+                                "email:ADDRESS, who may approve a plan of this kind",
+                                field="value.approvers")
+            if v.get("expires") is None:
+                raise FactError("value.expires is required at approve_each: the date, within "
+                                f"{AUTHORITY_MAX_DAYS} days of its confirmation, it lapses to "
+                                "recommend", field="value.expires")
     else:
         raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
     return v
@@ -626,6 +803,13 @@ class Fact:
         kind = raw.get("fact")
         if kind not in FACT_KINDS:
             raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
+        if origin and origin != "legacy" and (kind == "authority") != (origin == AUTHORITY_FILE):
+            # The workspace reads authority.yaml and nothing else for it, and
+            # nothing else from that file: an entry on the wrong side would be
+            # read here and never there, or the other way round.
+            raise FactError(f"fact {kind!r} does not belong in {origin}: authority facts are "
+                            f"{AUTHORITY_FILE}'s, and that file holds nothing else",
+                            field="fact")
         raw_subject = raw.get("subject")
         subject = subject_of(raw_subject)
         subject_extra = ({k: v for k, v in raw_subject.items() if k not in ("kind", "id")}
@@ -649,11 +833,12 @@ class Fact:
         if dollars is not None:
             dollars = _number(dollars, "dollars_monthly")
         extra = {k: v for k, v in raw.items() if k not in _KNOWN_FIELDS}
+        proposed_at = _iso_date(raw.get("proposed_at"), "proposed_at")
+        confirmed_at = _iso_date(raw.get("confirmed_at"), "confirmed_at")
+        check_authority_dates(kind, value, status, confirmed_at, proposed_at)
         return cls(fact=kind, subject=subject, value=value, source=source.strip(),
-                   confidence=confidence, status=status,
-                   proposed_at=_iso_date(raw.get("proposed_at"), "proposed_at"),
-                   confirmed_by=by or None,
-                   confirmed_at=_iso_date(raw.get("confirmed_at"), "confirmed_at"),
+                   confidence=confidence, status=status, proposed_at=proposed_at,
+                   confirmed_by=by or None, confirmed_at=confirmed_at,
                    review_after=_iso_date(raw.get("review_after"), "review_after"),
                    dollars_monthly=dollars, origin=origin, extra=extra,
                    subject_extra=subject_extra)
@@ -764,13 +949,17 @@ class OrgModel:
     before any proposal does."""
 
     def __init__(self, facts: list[Fact], *, dir: Any = None, dir_source: str = "",
-                 warnings: list[str] | None = None, layers: list[Any] | None = None) -> None:
+                 warnings: list[str] | None = None, layers: list[Any] | None = None,
+                 refused: list[dict[str, Any]] | None = None) -> None:
         self.facts = facts
         self.dir = dir
         self.dir_source = dir_source
         self.warnings = warnings if warnings is not None else []
         # store.Layer for each directory read, the working directory's first.
         self.layers = layers if layers is not None else []
+        # Each authority entry (or authority.yaml) the loader refused, as
+        # refusal() makes it: what OrgModel.authority holds at recommend.
+        self.refused = refused if refused is not None else []
         self._n = -1
         self._reset()
 
@@ -1429,3 +1618,131 @@ class OrgModel:
         if whole is not None:
             hit("org", whole, whole.value["monthly_usd"], True)
         return out
+
+    # ── purchase authority ────────────────────────────────────────────────────
+
+    def authority(self, *, today: date | None = None) -> dict[str, Any]:
+        """What authority.yaml says of each purchase kind, the strictest of
+        every live entry: the lowest rung, the smallest bound, the
+        intersection of the approver lists and the earliest expiry.
+
+        The file can only narrow a paid workspace's opt-in, so every live
+        entry counts, a proposal and an entry from a repo nobody trusted
+        included (as freezes do); a rejected or superseded entry counts for
+        nothing. An entry past its expires (from that date, UTC) holds its
+        class at recommend, and so does an entry dated (confirmed_at, else
+        proposed_at) more than AUTHORITY_DATED_AHEAD_DAYS after today, which
+        is not in force before its date, and a refused entry whose class can be
+        read; a refused entry whose class cannot, or a file that could not be
+        read, holds every class there. A class the file does not name is
+        governed by the workspace's opt-in alone (rung None).
+
+        {"today", "classes": {class: {...}}, "refused": [refusal()...],
+        "files": [...]}. Each class: named, rung, max_commitment_usd_per_plan,
+        approvers (None when no entry names any; [] when nobody may approve),
+        nobody_may_approve, expires, expired_on, keys (the entries behind it),
+        files, held (why it is held below what its entries say)."""
+        day = today or utc_today()
+        refused = [dict(r) for r in self.refused]
+        everywhere = [r for r in refused if r.get("holds") == "every class"]
+        live = [f for f in self.by_kind("authority") if f.live]
+        classes: dict[str, dict[str, Any]] = {}
+        for c in AUTHORITY_CLASSES:
+            mine = [f for f in live if f.subject.id == c]
+            held_by = [r for r in refused if r.get("holds") == c] + everywhere
+            classes[c] = _strictest(c, mine, held_by, day)
+        files = sorted({f.file for f in live if f.file}
+                       | {str(r["file"]) for r in refused if r.get("file")})
+        return {"today": day.isoformat(), "classes": classes, "refused": refused,
+                "files": files}
+
+
+_RANK = {r: i for i, r in enumerate(RUNGS)}
+
+
+def _strictest(cls: str, entries: list[Fact], held_by: list[dict[str, Any]],
+               day: date) -> dict[str, Any]:
+    """One class's answer from its live entries and the refusals that hold it."""
+    out: dict[str, Any] = {"class": cls, "named": bool(entries or held_by), "rung": None,
+                           "max_commitment_usd_per_plan": None, "approvers": None,
+                           "nobody_may_approve": False, "expires": None, "expired_on": None,
+                           "keys": sorted(f.key for f in entries),
+                           "files": sorted({f.file for f in entries if f.file}), "held": []}
+    if not out["named"]:
+        return out
+    rank = len(RUNGS) - 1
+    approvers: set[str] | None = None
+    for f in sorted(entries, key=lambda f: f.key):
+        v = f.value
+        r = _RANK[v["rung"]]
+        which, dated = (("confirmed_at", f.confirmed_at) if f.confirmed_at
+                        else ("proposed_at", f.proposed_at))
+        if dated and date.fromisoformat(dated) > day + timedelta(
+                days=AUTHORITY_DATED_AHEAD_DAYS):
+            if r > _RANK["recommend"]:
+                out["held"].append(f"entry {f.key} is dated {dated} ({which}), after today, "
+                                   "so it is not in force before then")
+            r = min(r, _RANK["recommend"])
+        expires = v.get("expires")
+        if expires is not None and day >= date.fromisoformat(expires):
+            if r > _RANK["recommend"]:
+                out["held"].append(f"entry {f.key} expired on {expires}")
+            r = min(r, _RANK["recommend"])
+            out["expired_on"] = min(filter(None, (out["expired_on"], expires)))
+        rank = min(rank, r)
+        bound = v.get("max_commitment_usd_per_plan")
+        if bound is not None:
+            cur = out["max_commitment_usd_per_plan"]
+            out["max_commitment_usd_per_plan"] = float(bound) if cur is None else min(cur,
+                                                                                    float(bound))
+        if v.get("approvers") is not None:
+            named = {str(a).lower() for a in v["approvers"]}
+            approvers = named if approvers is None else approvers & named
+        if expires is not None:
+            out["expires"] = min(filter(None, (out["expires"], expires)))
+    for r in held_by:
+        out["held"].append(f"{r['file']} entry {r['entry']} was refused ({r['field']})"
+                           if r.get("entry") is not None else
+                           f"{r['file']} could not be read")
+        rank = min(rank, _RANK["recommend"])
+    if not entries:
+        rank = _RANK["recommend"]
+    out["rung"] = RUNGS[rank]
+    if approvers is not None:
+        out["approvers"] = sorted(approvers)
+        out["nobody_may_approve"] = not approvers
+    return out
+
+
+def refusal(file: str, entry: int | None, raw: Any, exc: BaseException | str) -> dict[str, Any]:
+    """An authority entry the loader refused, as OrgModel.authority shows it:
+    {file, entry (its index, None for the whole file), field, message,
+    class (when its subject can still be read), holds (that class, or
+    "every class")}."""
+    if isinstance(exc, FactError):
+        field_name, message = exc.field, str(exc)
+    elif isinstance(exc, BaseException):
+        field_name, message = "entry", f"{type(exc).__name__}: {exc}"
+    else:
+        field_name, message = ("file" if entry is None else "entry"), str(exc)
+    cls = _readable_class(raw) if entry is not None else None
+    return {"file": file, "entry": entry, "field": field_name, "message": message[:300],
+            "class": cls, "holds": cls or "every class"}
+
+
+def _readable_class(raw: Any) -> str | None:
+    """The purchase kind a refused authority entry is about, when that much
+    of it can still be read: fact authority, subject action_class:<a kind>."""
+    if not isinstance(raw, dict) or raw.get("fact") != "authority":
+        return None
+    sub = raw.get("subject")
+    if isinstance(sub, str):
+        kind, _, ident = sub.partition(":")
+    elif isinstance(sub, dict):
+        kind, ident = sub.get("kind"), sub.get("id")
+    else:
+        return None
+    if str(kind or "").strip() != "action_class" or not isinstance(ident, str):
+        return None
+    ident = ident.strip().lower()
+    return ident if ident in AUTHORITY_CLASSES else None

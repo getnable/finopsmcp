@@ -94,8 +94,8 @@ def _data_dir() -> Path:
     if profile:
         d = Path.home() / ".finops" / "profiles" / profile
     else:
-        raw = os.environ.get("FINOPS_DATA_DIR", "")
-        d = Path(raw).expanduser() if raw else Path.home() / ".finops"
+        from ._datadir import env_data_dir
+        d = env_data_dir(Path.home() / ".finops")[0]
     d.mkdir(parents=True, exist_ok=True)
     try:
         d.chmod(0o700)

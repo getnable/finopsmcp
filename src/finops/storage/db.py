@@ -666,8 +666,8 @@ def data_dir() -> Path:
         if profile:
             _DATA_DIR = _profile_data_dir(profile)
         else:
-            raw = os.environ.get("FINOPS_DATA_DIR", "")
-            _DATA_DIR = Path(raw).expanduser() if raw else Path.home() / ".finops"
+            from .._datadir import env_data_dir
+            _DATA_DIR = env_data_dir(Path.home() / ".finops")[0]
             _DATA_DIR.mkdir(parents=True, exist_ok=True)
             _DATA_DIR.chmod(stat.S_IRWXU)
     return _DATA_DIR

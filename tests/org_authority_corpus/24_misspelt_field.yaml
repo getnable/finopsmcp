@@ -1,0 +1,16 @@
+# nable org model v1
+# A misspelt bound (max_commitment_usd for max_commitment_usd_per_plan) is
+# refused, naming the field, and holds its class at recommend: it is never
+# dropped in silence.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-06-30, max_commitment_usd: 1000}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-06-30, max_commitment_usd_per_plan: 1000}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

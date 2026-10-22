@@ -28,6 +28,13 @@ The payload is one JSON object per line, keys sorted, no spaces:
     regular file, is over ORG_FILE_MAX bytes or is not UTF-8 is left out and
     named. A repo's nable.org/ that nobody trusted on this machine (`nable
     org trust --here`) is not sent at all: its facts are somebody else's.
+    --without-org-file NAME (D138) leaves that file out on purpose, named in
+    the dry run; since the bytes change, so does the confirm code. A file a
+    box takes only when its status says so (ORG_FILE_TOKENS: authority.yaml,
+    which a box that predates it refuses whole) goes only to a box whose
+    status lists its token in `accepts`; to any other the send is refused
+    before a byte leaves, naming --without-org-file, since what leaves must
+    be what was shown.
   * the guard ledger: each line exactly as stored, newline-terminated ones
     only (guard_ledger.stored_lines). A record is the agent's command and
     the paths the guard judged, as the guard recorded them: credentials were
@@ -127,7 +134,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any
@@ -151,6 +158,9 @@ STANDING_PATH = "/api/free-tool/standing"
 READS_STANDING = "standing"
 # What a box's status lists in `accepts` when it takes an org_file_delete line.
 DELETE_KIND = "org_file_delete"
+# Org model files a box takes only when its status lists the token in
+# `accepts`: a box that predates one refuses a batch carrying it whole.
+ORG_FILE_TOKENS = {"authority.yaml": "org_file:authority.yaml"}
 PAYLOAD_NAME = "cloud-connect.payload.jsonl"
 # This install's id for its coding-agent usage records, beside the ledger.
 SOURCE_NAME = "agent-usage-source"
@@ -209,6 +219,15 @@ class Payload:
     # The org model files this payload removes from the workspace (D97), in
     # the order of their org_file_delete lines.
     deletes: list[str] = field(default_factory=list)
+    # The org model files --without-org-file left out (D138), sorted.
+    without: list[str] = field(default_factory=list)
+
+    @property
+    def org_files(self) -> list[str]:
+        """The org model files this payload carries, sorted."""
+        if not any(kind == "org_model" for kind, _a, _b in self.lines):
+            return []
+        return sorted(self.org.get("files") or {})
 
 
 def _sha(b: bytes) -> str:
@@ -270,13 +289,14 @@ def _read_org_file(path: Path) -> tuple[str | None, str | None]:
         return None, "not UTF-8 text"
 
 
-def _org(org_dir: str | os.PathLike | None) -> dict[str, Any]:
+def _org(org_dir: str | os.PathLike | None, without: list[str] | None = None, *,
+         today: date | None = None) -> dict[str, Any]:
     from .org.model import KNOWN_FILES
     from .org.store import git_root, is_trusted, resolve_dir
 
     d, rule = resolve_dir(org_dir)
     out: dict[str, Any] = {"dir": str(d), "rule": rule, "files": {}, "not_read": {},
-                           "texts": {}, "left_out": None}
+                           "texts": {}, "left_out": None, "without": sorted(without or [])}
     if rule == "repo" and not is_trusted(git_root(d.parent)):
         out["left_out"] = ("this repo's nable.org/ is not trusted on this machine, so its "
                            "facts are not sent (`nable org trust --here` trusts it; "
@@ -285,13 +305,76 @@ def _org(org_dir: str | os.PathLike | None) -> dict[str, Any]:
     if not d.is_dir():
         return out
     for name in KNOWN_FILES:
+        if name in out["without"]:
+            continue                    # --without-org-file: not even read
         text, why = _read_org_file(d / name)
         if why:
             out["not_read"][name] = why
         elif text is not None:
             out["texts"][name] = text
             out["files"][name] = len(text.encode("utf-8"))
+    if AUTHORITY in out["texts"]:
+        why = _authority_wider(org_dir, d, today=today)
+        if why:
+            # What leaves is never wider than what this machine shows: the box
+            # keeps the authority it has, and the dry run says why.
+            del out["texts"][AUTHORITY]
+            del out["files"][AUTHORITY]
+            out["not_read"][AUTHORITY] = why
     return out
+
+
+AUTHORITY = "authority.yaml"
+_RUNG_RANK = {"off": 0, "recommend": 1, "approve_each": 2}
+
+
+def _authority_wider(org_dir: str | os.PathLike | None, d: Path, *,
+                     today: date | None) -> str | None:
+    """Why the authority.yaml in `d` would answer wider on the box than this
+    machine shows (`nable org authority`: the strictest across every layer
+    the org model reads, the data dir's model under a repo's), or None when
+    it is as narrow or narrower. Wider, per purchase kind: not named where
+    another layer names it, a higher rung, and where a plan could be approved,
+    a larger bound or none, an approver another layer does not name, or a
+    later expiry."""
+    from .org import store
+    from .org.model import AUTHORITY_CLASSES, OrgModel
+
+    try:
+        shown = store.load(org_dir).authority(today=today)
+        fl = store._File(d / AUTHORITY).load([])
+        own = OrgModel(fl.facts, refused=fl.refusals).authority(today=today)
+    except Exception as exc:  # noqa: BLE001 - not compared is not sent
+        return (f"{AUTHORITY} could not be compared with this machine's org model "
+                f"({type(exc).__name__}), so it is not sent")
+    wider: list[str] = []
+    for cls in AUTHORITY_CLASSES:
+        o, n = shown["classes"][cls], own["classes"][cls]
+        if not o["named"]:
+            continue
+        if not n["named"]:
+            wider.append(f"{cls} is not named in it")
+            continue
+        if _RUNG_RANK[n["rung"]] > _RUNG_RANK[o["rung"]]:
+            wider.append(f"{cls} is {n['rung']} in it and {o['rung']} here")
+            continue
+        if n["rung"] != "approve_each":
+            continue
+        ob, nb = o["max_commitment_usd_per_plan"], n["max_commitment_usd_per_plan"]
+        if ob is not None and (nb is None or nb > ob):
+            wider.append(f"{cls} has a larger bound a plan in it, or none")
+        oa, na = o["approvers"], n["approvers"]
+        if oa is not None and (na is None or not set(na) <= set(oa)):
+            wider.append(f"{cls} names an approver in it that this machine does not")
+        if o["expires"] and (n["expires"] is None or n["expires"] > o["expires"]):
+            wider.append(f"{cls} expires later in it than {o['expires']}")
+    if not wider:
+        return None
+    others = [f for f in shown.get("files") or [] if Path(f) != d / AUTHORITY]
+    return (f"it answers wider on the workspace than this machine's org model shows "
+            f"({'; '.join(wider)}), as {', '.join(others) or 'another layer'} narrows it "
+            f"here. Put that entry in {d / AUTHORITY}, or send that file's directory with "
+            "--org-dir, so the workspace holds what you were shown")
 
 
 # ── the ledger ───────────────────────────────────────────────────────────────
@@ -351,7 +434,8 @@ def build(*, org_dir: str | os.PathLike | None = None,
           ledger_path: Path | None = None, developer: str | None = None,
           developer_from: str = "", agent_usage: bool = True,
           now: datetime | None = None, left_out: str | None = None,
-          delete_files: list[str] | tuple[str, ...] = ()) -> Payload:
+          delete_files: list[str] | tuple[str, ...] = (),
+          without_files: list[str] | tuple[str, ...] = ()) -> Payload:
     """The payload, from what is on this machine now. Reads files only (and
     makes this install's source id, the first time agent usage is built).
 
@@ -359,13 +443,18 @@ def build(*, org_dir: str | os.PathLike | None = None,
     out, said with `left_out` (or a default reason). `now` fixes "today".
     `delete_files` names org model files to remove from the workspace: one
     org_file_delete line each, ahead of the org model, so a file this
-    machine also carries is applied after its delete (D97). A name that is
-    not an org model file is ValueError, before anything is read."""
+    machine also carries is applied after its delete (D97). `without_files`
+    names org model files to leave out of the org model (D138). A name that
+    is not an org model file is ValueError, before anything is read."""
     names = org_file_names()
     deletes = list(dict.fromkeys(delete_files))
     if any(n not in names for n in deletes):
         raise ValueError("a file to delete is not an org model file")
-    org = _org(org_dir)
+    without = sorted(set(without_files))
+    if any(n not in names for n in without):
+        raise ValueError("a file to leave out is not an org model file")
+    org = _org(org_dir, without,
+               today=(now or datetime.now(UTC)).astimezone(UTC).date())
     led = _ledger(ledger_path)
     parts: list[tuple[str, bytes]] = [
         (DELETE_KIND, _line({"file": n, "kind": DELETE_KIND, "v": FORMAT})) for n in deletes]
@@ -436,7 +525,8 @@ def build(*, org_dir: str | os.PathLike | None = None,
     org.pop("texts", None)
     led.pop("lines", None)
     return Payload(data=data_b, sha256=_sha(data_b), lines=spans, org=org, ledger=led,
-                   org_sha256=org_sha, ledger_hashes=hashes, usage=usage, deletes=deletes)
+                   org_sha256=org_sha, ledger_hashes=hashes, usage=usage, deletes=deletes,
+                   without=without)
 
 
 # ── coding-agent usage ───────────────────────────────────────────────────────
@@ -943,6 +1033,18 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
         raise ConnectError("the box does not say it takes org_file_delete lines, so nothing "
                            "was sent. Run the dry run again without --delete-org-file; a "
                            "box that predates them keeps the org model files it holds.")
+    for name, token in ORG_FILE_TOKENS.items():
+        took = isinstance(accepts, list) and token in accepts
+        if name in payload.org_files and not took:
+            raise ConnectError(f"the box does not say it takes {name} (its status lists no "
+                               f"{token} in accepts), so nothing was sent: what leaves is "
+                               "what the dry run showed, or nothing. Run the dry run again "
+                               f"with --without-org-file {name} to send the rest without it.")
+        if name in payload.deletes and not took:
+            raise ConnectError(f"the box does not say it takes {name} (its status lists no "
+                               f"{token} in accepts), so nothing was sent. Run the dry run "
+                               f"again without --delete-org-file {name}: a box that predates "
+                               "it holds none.")
     batches = plan(payload, held)
     sent = 0
     org_files: dict[str, list[Any]] = {}
@@ -975,13 +1077,15 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
     return out
 
 
-_ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held")
+_ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held", "held")
 
 
 def _gather_org_files(into: dict[str, list[Any]], doc: Mapping[str, Any]) -> None:
     """The box's per-file answer on the org model (accepted.org_files),
     where it gives one: applied, unchanged, stale ({file, replaced_at}),
-    deleted and not_held. An older box gives none."""
+    deleted, not_held and held ({file, message}: an authority.yaml, or its
+    delete, that would widen purchase authority, held for a person on the
+    workspace to confirm). An older box gives none."""
     acc = doc.get("accepted") if isinstance(doc, Mapping) else None
     got = acc.get("org_files") if isinstance(acc, Mapping) else None
     if not isinstance(got, Mapping):
@@ -1063,6 +1167,7 @@ def summary(payload: Payload, box: str, out: Path | None) -> dict[str, Any]:
                                                             "host": host_of(box)},
             "org_model": payload.org, "ledger": payload.ledger,
             "agent_usage": payload.usage, "org_file_deletes": list(payload.deletes),
+            "org_files_left_out": list(payload.without),
             "payload": {"bytes": len(payload.data), "lines": len(payload.lines),
                         "sha256": payload.sha256,
                         "batches": len(plan(payload, None)),
@@ -1087,6 +1192,13 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
         lines.append(f"  {name:<20} {size:>9,} bytes")
     for name, why in sorted((o.get("not_read") or {}).items()):
         lines.append(f"  {name:<20} left out: {why}")
+    for name in payload.without:
+        lines.append(f"  {name:<20} left out: --without-org-file {name}")
+    for name, token in ORG_FILE_TOKENS.items():
+        if name in (o.get("files") or {}) and not o.get("left_out"):
+            lines.append(f"  {name:<20} goes only to a box whose status lists {token}; to "
+                         f"any other the send is refused before anything leaves "
+                         f"(--without-org-file {name} leaves it out)")
     for name in payload.deletes:
         if name in (o.get("files") or {}) and not o.get("left_out"):
             lines.append(f"  {name:<20} delete on the workspace, then this machine's copy "

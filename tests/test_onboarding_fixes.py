@@ -5,21 +5,26 @@ Covers the evidence-backed friction the diagnosis flagged:
   - never advertising the one-click key link while its template 404s
   - honest "which clients are wired" prose
 """
+import ast
 import json
 import pathlib
-import tempfile
 
 from finops import setup_wizard as W
 from finops import welcome as WC
 from finops.security import iam_setup as I
 
 
-def _tmp(name: str) -> pathlib.Path:
-    return pathlib.Path(tempfile.mkdtemp()) / name
+def test_this_module_leaves_nothing_in_the_system_temp_dir():
+    """Every file here is made under pytest's tmp_path, which pytest removes;
+    tempfile.mkdtemp left one directory in the system temp dir per test."""
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    used = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    used |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    assert "tempfile" not in used
 
 
-def test_merge_write_preserves_other_servers():
-    p = _tmp("mcp.json")
+def test_merge_write_preserves_other_servers(tmp_path):
+    p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}))
     assert W._merge_write_mcpservers(p, {"command": "uvx", "args": ["finops-mcp"]})
     res = json.loads(p.read_text())
@@ -27,8 +32,8 @@ def test_merge_write_preserves_other_servers():
     assert res["mcpServers"]["nable"]["command"] == "uvx"
 
 
-def test_merge_write_migrates_legacy_finops_key():
-    p = _tmp("mcp.json")
+def test_merge_write_migrates_legacy_finops_key(tmp_path):
+    p = tmp_path / "mcp.json"
     p.write_text(json.dumps({"mcpServers": {"finops": {"command": "old"}}}))
     W._merge_write_mcpservers(p, {"command": "new"})
     res = json.loads(p.read_text())
@@ -36,9 +41,9 @@ def test_merge_write_migrates_legacy_finops_key():
     assert res["mcpServers"]["nable"]["command"] == "new"
 
 
-def test_merge_write_refuses_unparseable_config():
+def test_merge_write_refuses_unparseable_config(tmp_path):
     # Never clobber a config we cannot read.
-    p = _tmp("mcp.json")
+    p = tmp_path / "mcp.json"
     p.write_text("{ not json")
     assert W._merge_write_mcpservers(p, {"command": "uvx"}) is False
     assert p.read_text() == "{ not json"
@@ -68,8 +73,8 @@ def test_build_entry_carries_managed_python(monkeypatch):
     assert "--python" in entry["args"] and W._MANAGED_PYTHON in entry["args"]
 
 
-def test_configure_cursor_writes_when_path_present(monkeypatch):
-    target = _tmp("mcp.json")
+def test_configure_cursor_writes_when_path_present(tmp_path, monkeypatch):
+    target = tmp_path / "mcp.json"
     monkeypatch.setattr(W, "_cursor_config_path", lambda: target)
     assert W._configure_cursor({"command": "uvx", "args": ["finops-mcp"]}) is True
     assert json.loads(target.read_text())["mcpServers"]["nable"]["command"] == "uvx"

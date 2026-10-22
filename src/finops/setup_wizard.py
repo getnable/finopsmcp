@@ -3639,8 +3639,9 @@ def _post_connect_message(provider: str | None) -> str:
 
 def _nable_dirs() -> list[Path]:
     """The directories nable keeps its own files in, without creating any."""
-    raw = os.environ.get("FINOPS_DATA_DIR", "")
-    dirs = [Path(raw).expanduser()] if raw else []
+    from ._datadir import env_data_dir
+    data, _why = env_data_dir(Path.home() / ".finops")
+    dirs = [data] if data != Path.home() / ".finops" else []
     return dirs + [Path.home() / ".finops", Path.home() / ".finops-mcp", Path.home() / ".nable"]
 
 
@@ -3747,6 +3748,11 @@ def main(args: list[str] | None = None) -> None:
         code = hook_main(args[2:])
         if code is not None:
             raise SystemExit(code)
+    else:
+        # A FINOPS_DATA_DIR nable will not use is said once, on stderr, by a
+        # CLI; never on the hook's path, whose output the harness reads.
+        from ._datadir import say_once
+        say_once()
 
     # Bare `finops` (what `uvx nable` runs) launches the guided welcome flow.
     # `finops setup` / `finops setup aws` keep the explicit provider menu/flow, so
@@ -5177,11 +5183,10 @@ def _state_dirs() -> "list[Path]":
     clock and install id, CLI sentinels, and the nable data dir."""
     home = Path.home()
     dirs = [home / ".finops", home / ".finops-mcp", home / ".config" / "finops", home / ".nable"]
-    data = os.environ.get("FINOPS_DATA_DIR", "").strip()
-    if data:
-        p = Path(data).expanduser()
-        if p not in dirs:
-            dirs.append(p)
+    from ._datadir import env_data_dir
+    p = env_data_dir(home / ".finops")[0]
+    if p not in dirs:
+        dirs.append(p)
     return dirs
 
 

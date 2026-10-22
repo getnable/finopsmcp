@@ -1,0 +1,9 @@
+# nable org model v1
+# KELVIN SIGN for the K: lowercased, it would read as another mailbox. An
+# approver is plain ASCII, so the entry is refused and holds its class.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:\u212aate@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

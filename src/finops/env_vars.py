@@ -101,7 +101,10 @@ DOC: dict[str, tuple[str, str]] = {
     "FINOPS_DATA_DIR": ("state", ("nable's data directory: the credential vault and its key file, "
                         "the cost history database, the guard ledger and off switch, "
                         "nable.policy.yaml and saved briefs (default ~/.finops). The AI budget "
-                        "and the response cache, which default to ~/.nable, move here too.")),
+                        "and the response cache, which default to ~/.nable, move here too. An "
+                        "absolute path; a leading ~ expands. A relative path is refused: nable "
+                        "uses the default, a command says so once, and `nable guard doctor` "
+                        "names both.")),
     "FINOPS_PROFILE": ("state", ("A named profile: its own vault, database and ledger under "
                        "~/.finops/profiles/NAME (`nable profile create NAME`, then "
                        "`nable profile use NAME`).")),

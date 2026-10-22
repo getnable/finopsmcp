@@ -51,6 +51,7 @@ from typing import Any
 
 from .adapters import ADAPTERS
 from .model import (
+    AUTHORITY_FILE,
     FILE_FOR_KIND,
     HEADER,
     KNOWN_FILES,
@@ -58,7 +59,9 @@ from .model import (
     FactError,
     OrgModel,
     _warn,
+    check_authority_dates,
     local_today,
+    refusal,
     sort_key,
     subject_of,
     validate_value,
@@ -335,17 +338,54 @@ def layers(dir: str | os.PathLike | None = None, *,
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
-def safe_yaml(text: str) -> Any:
+def safe_yaml(text: str, *, unique_keys: bool = False) -> Any:
     """yaml.safe_load, through libyaml's CSafeLoader where PyYAML has it: the
     same safe constructor on a C parser, about ten times faster. The guard
     hook reads the model inside its ~100 ms, and the pure-Python parser took
-    about 100 ms for a few hundred facts on its own."""
+    about 100 ms for a few hundred facts on its own.
+
+    With unique_keys, a mapping that holds a key twice is a YAMLError
+    (ConstructorError, "found duplicate key"), where YAML itself keeps the
+    last value in silence: authority.yaml is read that way, so `rung: off`
+    followed by `rung: approve_each` in one entry is never approve_each."""
     import yaml
     try:
         from yaml import CSafeLoader as SafeLoader
     except ImportError:                  # PyYAML built without libyaml
         from yaml import SafeLoader
-    return yaml.load(text, Loader=SafeLoader)
+    if unique_keys:
+        return yaml.load(text, Loader=_unique_loader(SafeLoader))  # nosec B506 - a SafeLoader
+    return yaml.load(text, Loader=SafeLoader)  # nosec B506 - a SafeLoader
+
+
+_UNIQUE: dict[Any, Any] = {}
+
+
+def _unique_loader(base: Any) -> Any:
+    """`base` (a safe loader), refusing a mapping that holds a key twice. The
+    paid workspace's own reader of authority.yaml (rds_ri.authority) refuses
+    it the same way."""
+    if base not in _UNIQUE:
+        import yaml
+        from yaml.constructor import ConstructorError
+
+        class _Unique(base):  # type: ignore[misc, valid-type]
+            def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+                if isinstance(node, yaml.MappingNode):
+                    self.flatten_mapping(node)
+                    seen: list[Any] = []
+                    for key_node, _value in node.value:
+                        key = self.construct_object(key_node, deep=deep)
+                        if any(key == k for k in seen):
+                            raise ConstructorError("while constructing a mapping",
+                                                   node.start_mark,
+                                                   f"found duplicate key {str(key)[:40]!r}",
+                                                   key_node.start_mark)
+                        seen.append(key)
+                return super().construct_mapping(node, deep=deep)
+
+        _UNIQUE[base] = _Unique
+    return _UNIQUE[base]
 
 
 def _is_comment(line: str) -> bool:
@@ -408,8 +448,15 @@ class _File:
         self.facts: list[Fact] = []
         self.unparsed: list[tuple[Any, list[str]]] = []
         self.why: list[str] = []          # why each unparsed entry did not parse
+        # In authority.yaml, each unparsed entry's refusal (model.refusal),
+        # in step with `unparsed`, and the file's own when it is unusable.
+        self.refusals: list[dict[str, Any]] = []
         self.error: str | None = None
         self.exists = path.exists()
+
+    @property
+    def authority(self) -> bool:
+        return self.path.name == AUTHORITY_FILE
 
     def load(self, warnings: list[str] | None = None) -> _File:
         if not self.exists:
@@ -427,11 +474,14 @@ class _File:
         if self._from_cache(digest, warnings):
             return self
         try:
-            data = safe_yaml(text)
-        except yaml.YAMLError as e:
+            data = safe_yaml(text, unique_keys=self.authority)
+        except (yaml.YAMLError, ValueError, OverflowError) as e:
+            # A date YAML cannot construct (2027-02-30) raises ValueError, not
+            # a YAMLError: the file is unreadable, said, and never a crash.
             mark = getattr(e, "problem_mark", None)
             where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
-            why = getattr(e, "problem", None) or type(e).__name__
+            why = getattr(e, "problem", None) or (
+                type(e).__name__ if isinstance(e, yaml.YAMLError) else str(e)[:120])
             self._unusable(f"is not readable as YAML ({why}{where})",
                            "correct the YAML" + (f" at line {mark.line + 1}" if mark else ""),
                            warnings)
@@ -472,11 +522,16 @@ class _File:
                 self.unparsed.append((_Verbatim(body) if body else raw, comments[i]))
                 reason = str(e) if isinstance(e, FactError) else f"{type(e).__name__}: {e}"
                 self.why.append(reason)
+                if self.authority:
+                    # Never only a warning: a refused entry holds its class
+                    # (or every class) at recommend (OrgModel.authority).
+                    self.refusals.append(refusal(str(self.path), i, raw, e))
+                    reason += " (it holds " + self.refusals[-1]["holds"] + " at recommend)"
                 skipped.append(f"{self.path.name}[{i}]: skipped, {reason}")
         for msg in skipped:
             _warn(warnings, msg)
         _cache_put(self.path, digest, self.header, self.facts, self.unparsed, skipped,
-                   self.why)
+                   self.why, self.refusals)
         return self
 
     def _unusable(self, what: str, fix: str, warnings: list[str] | None) -> None:
@@ -486,7 +541,11 @@ class _File:
         ignored`, with no directory (the org model reads several) and no way
         out. self.error stays the short form, which OrgError extends."""
         self.error = f"{self.path} {what}; ignored"
-        _warn(warnings, f"{self.path} {what}, so none of its facts are used. Fix: {fix}, "
+        held = (" It holds every purchase kind it could name at recommend."
+                if self.authority else "")
+        if self.authority:
+            self.refusals.append(refusal(str(self.path), None, None, f"{self.path.name} {what}"))
+        _warn(warnings, f"{self.path} {what}, so none of its facts are used.{held} Fix: {fix}, "
                         f"or move the file out of {self.path.parent}; `nable org status` "
                         "checks it again.")
 
@@ -507,9 +566,11 @@ class _File:
             header = [str(h) for h in doc["header"]]
             skipped = [str(w) for w in doc["warnings"]]
             why = [str(w) for w in doc["why"]]
+            refusals = [dict(r) for r in doc["refusals"]]
         except (KeyError, TypeError, ValueError):
             return False
         self.header, self.facts, self.unparsed, self.why = header, facts, unparsed, why
+        self.refusals = refusals
         for msg in skipped:
             _warn(warnings, msg)
         return True
@@ -523,7 +584,10 @@ class _File:
 # again. Derived data only: a missing, stale or broken entry is a parse.
 
 _CACHE_DIR = "org-parse-cache"
-_CACHE_VERSION = 1
+# 2: each entry's refusal in authority.yaml is kept beside its warning.
+# 3: authority.yaml refuses a value field it does not name, an approver that is
+#    not plain ASCII and a key twice, so a parse made before is not reused.
+_CACHE_VERSION = 3
 
 
 def _digest(text: str) -> str:
@@ -555,14 +619,14 @@ def _cache_get(path: Path, digest: str) -> dict[str, Any] | None:
 
 def _cache_put(path: Path, digest: str, header: list[str], facts: list[Fact],
                unparsed: list[tuple[Any, list[str]]], warnings: list[str],
-               why: list[str]) -> None:
+               why: list[str], refusals: list[dict[str, Any]]) -> None:
     p = _cache_file(path)
     if p is None:
         return
     try:
         body = json.dumps({
             "v": _CACHE_VERSION, "path": str(path.resolve()), "digest": digest,
-            "header": header, "warnings": warnings, "why": why,
+            "header": header, "warnings": warnings, "why": why, "refusals": refusals,
             "facts": [[f.to_cache(), f.comments, getattr(f, "_text", None)] for f in facts],
             "unparsed": [["text" if isinstance(u, _Verbatim) else "raw", u, c]
                          for u, c in unparsed]})
@@ -651,8 +715,9 @@ def load(dir: str | os.PathLike | None = None, *, legacy: bool = True,
     warnings: list[str] = []
     read = [(layer, _read_dir(layer.dir, warnings)) for layer in ls]
     facts = _assemble(read, warnings, legacy=legacy)
+    refused = [r for _layer, files in read for fl in files.values() for r in fl.refusals]
     return OrgModel(facts, dir=ls[0].dir, dir_source=ls[0].source, warnings=warnings,
-                    layers=ls)
+                    layers=ls, refused=refused)
 
 
 # ── write ─────────────────────────────────────────────────────────────────────
@@ -773,7 +838,12 @@ def _write_file(f: _File) -> None:
         for x, body in zip(facts, split[2], strict=False):
             x._text = body  # type: ignore[attr-defined]
     skipped = [f"{f.path.name}[{len(facts) + j}]: skipped, {why}" for j, why in enumerate(f.why)]
-    _cache_put(f.path, _digest(text), list(f.header), facts, f.unparsed, skipped, list(f.why))
+    # Entries nable could not read are written after the facts, so each
+    # refusal now names the place its entry has in the file as written.
+    f.refusals = [{**r, "entry": len(facts) + j} if r.get("entry") is not None else r
+                  for j, r in enumerate(f.refusals)]
+    _cache_put(f.path, _digest(text), list(f.header), facts, f.unparsed, skipped, list(f.why),
+               f.refusals)
 
 
 @contextlib.contextmanager
@@ -801,12 +871,20 @@ def _today() -> str:
     return local_today().isoformat()
 
 
+# Made when a person writes the first entry, never by init: a workspace whose
+# box predates the file refuses an org model that carries it, so the free
+# tool sends it only to a box that says it takes it.
+ON_REQUEST_FILES = (AUTHORITY_FILE,)
+
+
 def ensure_dir(d: Path) -> list[Path]:
-    """Create the org dir and any missing file, header only. Returns the
-    files created."""
+    """Create the org dir and any missing file, header only (not
+    ON_REQUEST_FILES). Returns the files created."""
     made: list[Path] = []
     d.mkdir(parents=True, exist_ok=True)
     for name in KNOWN_FILES:
+        if name in ON_REQUEST_FILES:
+            continue
         p = d / name
         if not p.exists():
             _atomic_write(p, _yaml_text([]))
@@ -815,15 +893,21 @@ def ensure_dir(d: Path) -> list[Path]:
 
 
 def _proposal(fact: Fact) -> Fact:
-    """The fact as a proposer may write it: proposed, no human fields."""
+    """The fact as a proposer may write it: proposed, no human fields. An
+    authority entry is never a proposer's: a person writes it (`nable org
+    set authority`, or by hand), since it says who may approve a purchase."""
+    if fact.fact == "authority":
+        raise FactError("fact authority is a person's to write (`nable org set authority`), "
+                        "never an adapter's, a pack's or an agent's proposal", field="fact")
     subject = subject_of(fact.subject.to_dict())
     value = validate_value(fact.fact, subject, fact.value)
     if not isinstance(fact.source, str) or not fact.source.strip():
         raise FactError("source must be a non-empty string")
     conf = min(max(float(fact.confidence), 0.0), 1.0)
+    proposed_at = fact.proposed_at or _today()
+    check_authority_dates(fact.fact, value, "proposed", None, proposed_at)
     return replace(fact, subject=subject, value=value, status="proposed", confidence=conf,
-                   proposed_at=fact.proposed_at or _today(), confirmed_by=None,
-                   confirmed_at=None, origin=None)
+                   proposed_at=proposed_at, confirmed_by=None, confirmed_at=None, origin=None)
 
 
 def propose(fact: Fact, dir: str | os.PathLike | None = None) -> str:
@@ -971,6 +1055,12 @@ def _decide_many(keys: list[str], by: HumanDecision, status: str,
                 continue
             review = _next_review(target, today) if status == "confirmed" else \
                 target.review_after
+            try:
+                # Confirmed today, an authority entry's expiry is counted from today.
+                check_authority_dates(target.fact, target.value, status, today,
+                                      target.proposed_at)
+            except FactError as e:
+                raise OrgError(f"{target.key} not {status}: {e}") from None
             decided = replace(target, status=status, confirmed_by=who, confirmed_at=today,
                               review_after=review)
             changed |= {(home, n) for n in _replace_in_files(
@@ -1042,6 +1132,8 @@ def set_fact(fact: Fact, by: HumanDecision, dir: str | os.PathLike | None = None
     human = replace(fact, value=value, status="confirmed", confidence=1.0,
                     source=fact.source or "human", proposed_at=fact.proposed_at or _today(),
                     confirmed_by=who, confirmed_at=_today(), origin=None)
+    check_authority_dates(human.fact, value, "confirmed", human.confirmed_at,
+                          human.proposed_at)
     d, _ = resolve_dir(dir)
     with _locked(d):
         _replace_in_files(_files(d), human, supersede=True)

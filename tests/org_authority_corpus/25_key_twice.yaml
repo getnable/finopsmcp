@@ -1,0 +1,9 @@
+# nable org model v1
+# rung twice in one entry: YAML would keep the last (approve_each) in silence.
+# The file is refused whole, and holds every class at recommend.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: "off", approvers: ["email:ana@acme.example"], expires: 2027-06-30, rung: approve_each}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

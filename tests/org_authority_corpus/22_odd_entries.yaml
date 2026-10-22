@@ -1,0 +1,54 @@
+# nable org model v1
+- just a line of text
+- fact: authorityy
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: off}
+- fact: authority
+  subject: {kind: person, id: ana@acme.example}
+  value: {rung: off}
+  source: human
+  status: confirmed
+- fact: authority
+  subject: {kind: aws_account, id: 12345}
+  value: {rung: off}
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value:
+  source: human
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: recommend}
+  status: confirmed
+  confirmed_by: 7
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: recommend}
+  status: confirmed
+  dollars_monthly: -3
+- fact: authority
+  subject: {kind: action_class, id: elasticache_ri}
+  value: {rung: recommend}
+  status: confirmed
+  review_after: later
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-01-01}
+  status: confirmed
+  confirmed_at: 2026-10-01 at noon
+  confidence: 0.9
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-01-01}
+  status: rejected
+  confirmed_at: 2026-10-01 at noon
+  confidence: 0.9
+- fact: authority
+  subject: {kind: action_class, id: rds_ri, note: "the same entry twice, the first answers"}
+  value: {rung: recommend, max_commitment_usd_per_plan: 12}
+  status: rejected
+  confirmed_at: 2026-10-02
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: recommend, max_commitment_usd_per_plan: 12}
+  status: confirmed
+  confirmed_at: 2026-10-02

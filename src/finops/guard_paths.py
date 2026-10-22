@@ -79,6 +79,12 @@ _GIT_CONFIG_WHAT = ("a git config file, which holds the user.email whose AI budg
                     "machine's agents are held to")
 POLICY_FILE_NAME = "nable.policy.yaml"
 ORG_DIR_NAME = "nable.org"
+# finops.org.model.AUTHORITY_FILE, copied: the org model's purchase authority,
+# named on its own in every org dir so the reason a person reads says which
+# file it is (the directory rule already holds it).
+AUTHORITY_FILE = "authority.yaml"
+_AUTHORITY_WHAT = ("the org model's purchase authority (authority.yaml), which says which "
+                   "purchases a paid workspace may approve, up to what and by whom")
 # Any file with one of these names: `nable budget ci-gate --budget-file` and
 # sync_budgets_from_yaml read budgets from it, wherever it is kept.
 PROTECTED_NAMES = {"budget.yml": "a budget file the guard's budgets come from",
@@ -127,8 +133,8 @@ def data_dir() -> Path:
     profile = _env("FINOPS_PROFILE")
     if profile:
         return _home() / ".finops" / "profiles" / profile
-    raw = os.environ.get("FINOPS_DATA_DIR", "")
-    return Path(raw).expanduser() if raw else _home() / ".finops"
+    from ._datadir import env_data_dir
+    return env_data_dir(_home() / ".finops")[0]
 
 
 def _ledger() -> Path:
@@ -391,12 +397,15 @@ def protected(cwd: str | None = None) -> list[Protected]:
     entries: list[tuple[Path, str, bool]] = []
     org_env = _env("FINOPS_ORG_DIR")
     if org_env:
+        entries.append((Path(org_env).expanduser() / AUTHORITY_FILE, _AUTHORITY_WHAT, False))
         entries.append((Path(org_env).expanduser(), "the org model (FINOPS_ORG_DIR)", True))
     root = git_root(cwd)
     if root is not None:
         # Whether it exists or not: creating it is what makes it the org
         # model this repo's agents are judged by.
+        entries.append((root / ORG_DIR_NAME / AUTHORITY_FILE, _AUTHORITY_WHAT, False))
         entries.append((root / ORG_DIR_NAME, "this repo's org model", True))
+    entries.append((data / "org" / AUTHORITY_FILE, _AUTHORITY_WHAT, False))
     entries.append((data / "org", "the org model in nable's data directory", True))
     entries += [(p, "the guard's policy file", False) for p in _policy_files()]
     packs = _packs_root()
@@ -405,8 +414,8 @@ def protected(cwd: str | None = None) -> list[Protected]:
     for dirpath in dict.fromkeys((ledger.parent, data)):
         entries += [(dirpath / name, what, False) for name, what in _LEDGER_FILES]
         entries += [(dirpath / name, what, True) for name, what in _LEDGER_DIRS]
-    ai = Path(os.environ["FINOPS_DATA_DIR"]).expanduser() if os.environ.get(
-        "FINOPS_DATA_DIR") else _home() / ".nable"
+    from ._datadir import env_data_dir
+    ai = env_data_dir(_home() / ".nable")[0]
     entries.append((ai / "ai-budget.json", "the agent's AI budget", False))
     entries += [(ai / name, what, tree) for name, what, tree in _AI_BUDGET_FILES]
     entries += [(p, _GIT_CONFIG_WHAT, False) for p in git_config_files(root)]
@@ -659,6 +668,8 @@ def _org_component(real: str) -> Protected | None:
     if ORG_DIR_NAME not in parts:
         return None
     d = os.sep.join(parts[:parts.index(ORG_DIR_NAME) + 1])
+    if len(parts) == parts.index(ORG_DIR_NAME) + 2 and parts[-1] == AUTHORITY_FILE:
+        return Protected(real, _shown(Path(real)), _AUTHORITY_WHAT)
     return Protected(d, _shown(Path(d)), "a repo's org model", True)
 
 

@@ -5920,9 +5920,19 @@ def _landing_names(entries: list[Any]) -> set[str]:
     return out | set(guard_paths.PROTECTED_NAMES) | {guard_paths.ORG_DIR_NAME}
 
 
+# git commands that rewrite tracked files from a commit or a patch the guard
+# does not read (reset only with --hard, --merge or --keep), and the apply
+# options that only read a patch.
+_GIT_REWRITES = ("merge", "pull", "rebase", "cherry-pick", "revert", "am", "apply", "reset")
+_APPLY_READS = ("--check", "--stat", "--numstat", "--summary")
+
+
 def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str]:
     """(targets, directory) for a git command: checkout and restore of paths,
-    rm, mv and clean. `git -C dir` and `--work-tree=dir` move the directory."""
+    rm, mv and clean; and the commands that rewrite tracked files from a
+    commit or a patch (merge, pull, rebase, cherry-pick, revert, am, apply,
+    a hard reset), as the whole repo ("repo"). `git -C dir` and
+    `--work-tree=dir` move the directory."""
     i = 0
     while i < len(args) and args[i].startswith("-"):
         w = args[i]
@@ -5970,6 +5980,18 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         else:
             mode = "changed"
         return [(p, mode) for p in (spec or [str(root) if root else "."])], base
+    if sub in _GIT_REWRITES and not (
+            "-h" in rest or "--help" in rest
+            or (sub == "apply" and any(w in _APPLY_READS for w in rest)
+                and "--apply" not in rest)
+            or (sub == "reset" and not any(w in ("--hard", "--merge", "--keep")
+                                           for w in rest))):
+        # What it changes is in a commit or a patch the guard does not read:
+        # it asks whenever the repo holds one of the guard's own org files,
+        # or the org directory one would be made in.
+        from . import guard_paths
+        root = guard_paths.git_root(base)
+        return [(str(root) if root else ".", "repo")], base
     if sub == "rm" and "--cached" in rest:
         # The index only: the files stay, but the next commit drops what is
         # tracked from the repo (nable.org/ with it) for everyone else.
@@ -5992,6 +6014,17 @@ def _write_targets(prog: str, args: list[str], base: str,
     "exists" when only what is there is touched (a clean of untracked files)."""
     if prog in _DELETES:
         return [(p, True) for p in _plain_args(args)], base
+    if prog == "patch":
+        # The files it writes are named inside the patch, which the guard does
+        # not read: the whole repo it runs in, as a git apply.
+        from . import guard_paths
+        where = _flag_value(args, ("-d",), ("--directory",))
+        if where:
+            base = os.path.join(base, os.path.expanduser(where))
+        root = guard_paths.git_root(base)
+        named = _plain_args([a for i, a in enumerate(args)
+                             if not (i and args[i - 1] in _PATCH_VALUES)])
+        return [(str(root) if root else base, "repo")] + [(p, False) for p in named[:1]], base
     if prog in _PERMS:
         return [(p, True) for p in _plain_args(args)], base
     if prog in _WRITES or prog in _EDITORS:
@@ -6033,6 +6066,12 @@ def _write_targets(prog: str, args: list[str], base: str,
     if prog == "git":
         return _git_targets(args, base)
     return [], base
+
+
+# patch's options that take the next word as their value.
+_PATCH_VALUES = ("-i", "-o", "-d", "-D", "-B", "-F", "-V", "-z", "-r", "-Y", "-p", "--input",
+                 "--output", "--directory", "--ifdef", "--prefix", "--fuzz", "--suffix",
+                 "--reject-file", "--basename-prefix", "--strip")
 
 
 def _command_words(words: list[str], env: dict[str, str]) -> list[str]:
@@ -6254,6 +6293,19 @@ def _protected_commands(form: str, code: str, base: str, entries: list[Any],
     def look(path: str, ancestors: Any, where: str | None) -> Any:
         if ancestors in ("changed", "tracked"):
             return _git_would_change(path, ancestors, where or base, env, entries)
+        if ancestors == "repo":
+            # A merge, a patch: an org model file under it (nable.org/) that
+            # is there, or whose directory is (it could be made there).
+            real = guard_paths.resolve(path, where or base, env=env)
+            if real is None:
+                return None
+            for e in entries:
+                if (guard_paths.ORG_DIR_NAME in Path(e.path).parts
+                        and guard_paths.is_under(e.path, real)
+                        and (os.path.lexists(e.path)
+                             or (not e.tree and os.path.isdir(os.path.dirname(e.path))))):
+                    return e
+            return None
         if isinstance(ancestors, tuple) or ancestors == "exists":
             # Only what is there: a clean of untracked files, a find -delete
             # (whose -name patterns, when it has any, must match a name in
@@ -7429,7 +7481,8 @@ def doctor() -> dict[str, Any]:
                 "and nothing else")
     gaps.append("writes to the guard's own files that the guard cannot see coming: a path "
                 "built at run time ($(...), a loop variable), a script the agent runs, "
-                "git reset or stash, an archive unpacked over them")
+                "a git branch switch (checkout or switch of a branch, which can change the "
+                "org model's files), an archive unpacked over them")
     for name, (label, _what) in _ADAPTER_SURFACES.items():
         if any(r["harness"] == name and r.get("runs") for r in adapter_rows):
             gaps.append(f"{label}: {_EDITOR_GAPS[name]}")
@@ -7492,6 +7545,8 @@ def doctor() -> dict[str, Any]:
         fix("correct the policy setting", problem)
     packs = _doctor_packs(covered, gaps, fix)
     ai_budgets = _doctor_ai_budgets(covered, gaps, fix)
+    data_dir = _doctor_data_dir(gaps, fix)
+    authority = _doctor_authority(covered, gaps, fix)
     try:
         from . import guard_paths
         protected = [e.as_dict() for e in guard_paths.protected()]
@@ -7518,6 +7573,8 @@ def doctor() -> dict[str, Any]:
         "editor_tools": editor_tools,
         "packs": packs,
         "ai_budgets": ai_budgets,
+        "data_dir": data_dir,
+        "authority": authority,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
@@ -7617,6 +7674,49 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
             "unpriced_tokens": usage["unpriced_tokens"],
             "price_source": ai_budget.price_source(usage["providers"]),
             "notes": usage["notes"]}
+
+
+def _doctor_data_dir(gaps: list[str], fix: Any) -> dict[str, Any]:
+    """The doctor's word on FINOPS_DATA_DIR (D139): the value as set, the
+    directory nable uses, and why a value was refused (a relative path:
+    nable then uses its default, and the guard protects that one)."""
+    from . import _datadir
+    got = _datadir.doctor()
+    if got["refused"]:
+        gaps.append(f"nable's data directory: {got['refused']} The guard protects "
+                    f"{got['dir']}, the directory nable writes.")
+        fix("set FINOPS_DATA_DIR to an absolute path, or unset it",
+            f"it is {got['value']!r} now")
+    return got
+
+
+def _doctor_authority(covered: list[str], gaps: list[str], fix: Any, *,
+                      cwd: str | None = None) -> dict[str, Any]:
+    """The doctor's word on the org model's purchase authority
+    (authority.yaml): that it is one of the guard's own files, and how many
+    of its entries were refused (each holds its kind at recommend on a paid
+    workspace). {"present": False} when no org dir holds one."""
+    from .org import store
+    from .org.model import AUTHORITY_FILE
+    try:
+        model = store.load(cwd=cwd)
+        files = [str(layer.dir / AUTHORITY_FILE) for layer in model.layers
+                 if (layer.dir / AUTHORITY_FILE).is_file()]
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        gaps.append(f"the org model's authority.yaml: it could not be read "
+                    f"({type(exc).__name__})")
+        return {"present": None, "error": type(exc).__name__}
+    if not files:
+        return {"present": False}
+    refused = [r for r in model.refused if str(r.get("file")) in files]
+    covered.append("authority.yaml, the org model's purchase authority: an agent's write, "
+                   "move, truncation or deletion of it asks, in every org dir")
+    if refused:
+        gaps.append(f"authority.yaml: {len(refused)} entr{'y' if len(refused) == 1 else 'ies'} "
+                    "refused, each holding its purchase kind (or every kind) at recommend on "
+                    "a paid workspace")
+        fix("nable org authority", "shows each refused entry with its file, entry and field")
+    return {"present": True, "files": files, "refused": len(refused)}
 
 
 def _doctor_packs(covered: list[str], gaps: list[str], fix: Any) -> dict[str, Any]:
