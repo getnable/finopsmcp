@@ -11,6 +11,7 @@ model never ask. A branch switch is not asked, and `nable guard doctor` says so.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -25,6 +26,14 @@ OFF = ('# nable org model v1\n- fact: authority\n  subject: {kind: action_class,
 
 
 GIT = shutil.which("git")
+
+# The org file or the org directory named as a whole word in the ask (not as
+# part of another name such as my-nable.org.bak).
+_ORG_FILE_NAMED = re.compile(r"(?<![\w.-])(?:authority\.yaml|nable\.org)(?![\w-])")
+
+
+def _names_org_files(text: str) -> bool:
+    return _ORG_FILE_NAMED.search(text) is not None
 
 
 def _git_env() -> dict[str, str]:
@@ -80,7 +89,7 @@ def test_a_command_that_can_rewrite_the_org_files_asks(repo, cmd):
     (r / "sub").mkdir(exist_ok=True)
     v = g.gate_command(cmd.format(p=patch), "s1", cwd=str(r), record=False)
     assert v is not None and v["decision"] in ("ask", "deny"), (cmd, v)
-    assert "authority.yaml" in v["reason"] or "nable.org" in v["reason"], v["reason"]
+    assert _names_org_files(v["reason"]), v["reason"]
 
 
 @pytest.mark.parametrize("cmd", ["git apply --check {p}", "git apply --stat {p}",
