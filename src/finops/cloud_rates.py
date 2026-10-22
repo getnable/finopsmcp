@@ -443,55 +443,6 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
             "note": " ".join(x for x in (note, book_note) if x)}
 
 
-def _profile_region(environ: Any) -> str | None:
-    """The region the AWS CLI's config file gives the active profile, when
-    it names one (AWS_CONFIG_FILE, else ~/.aws/config; AWS_PROFILE, else
-    default). At most MAX_BYTES of it are read, and only from a regular file:
-    a FIFO or a device in its place is not waited on."""
-    import configparser
-    import stat
-    where = environ.get("AWS_CONFIG_FILE", "").strip() or str(Path.home() / ".aws" / "config")
-    try:
-        fd = os.open(os.path.expanduser(where), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-    except OSError:
-        return None
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        raw = os.read(fd, MAX_BYTES + 1)
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
-    if len(raw) > MAX_BYTES:
-        return None
-    profile = (environ.get("AWS_PROFILE", "").strip()
-               or environ.get("AWS_DEFAULT_PROFILE", "").strip() or "default")
-    cp = configparser.RawConfigParser(strict=False)
-    try:
-        cp.read_string(raw.decode("utf-8", "replace"))
-    except configparser.Error:
-        return None
-    section = "default" if profile == "default" else f"profile {profile}"
-    if not cp.has_section(section) and profile == "default":
-        section = "profile default"
-    v = cp.get(section, "region", fallback="") if cp.has_section(section) else ""
-    v = v.strip()
-    return v if _REGION_RE.match(v) else None
-
-
-def env_region(environ: Any = None) -> str | None:
-    """The region the AWS CLI would use when a command names none:
-    AWS_REGION, then AWS_DEFAULT_REGION, then the active profile's region in
-    the AWS CLI's config file (_profile_region)."""
-    env = os.environ if environ is None else environ
-    for name in ("AWS_REGION", "AWS_DEFAULT_REGION"):
-        v = env.get(name, "").strip()
-        if v and _REGION_RE.match(v):
-            return v
-    return _profile_region(env)
-
-
 def text(got: dict[str, Any], block: Any) -> str:
     """What `nable cloud status` and `nable cloud connect --send` say of the
     rates block: kept for the guard, or shown and not kept, and why."""

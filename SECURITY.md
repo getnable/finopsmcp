@@ -105,10 +105,8 @@ resource ids the tool printed (EC2 instance ids, RDS and ElastiCache ARNs,
 terraform's `[id=...]` in those forms; at most 20), raw, so the workspace can
 find them on its bill; they stay in this machine's ledger and leave only in
 the lines a send carries, and the dry run counts the lines that name them.
-The guard also reads the AWS CLI's config file (`AWS_CONFIG_FILE`, else
-`~/.aws/config`) for the active profile's region when a priced command names
-none, and nothing else of it.
-The
+Nothing on the priced path reads the AWS CLI's config file: a command that
+names no region is shown at list price. The
 workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
 0600, or a hidden prompt; it is never an argument, and it is never stored,
 printed or logged. No host is built in, and nable adds nothing about the

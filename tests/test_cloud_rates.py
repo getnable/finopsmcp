@@ -388,45 +388,6 @@ def test_several_skus_are_priced_each_and_recorded_as_a_list(laptop):
     assert got["effective"]["monthly_usd"] == 398.05
 
 
-def test_the_region_comes_from_the_environment_then_the_cli_config(laptop, monkeypatch):
-    cfg = laptop / "aws-config"
-    cfg.write_text("[default]\nregion = eu-west-1\n[profile ops]\nregion = ap-south-1\n")
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(cfg))
-    assert cloud_rates.env_region() == "eu-west-1"
-    monkeypatch.setenv("AWS_PROFILE", "ops")
-    assert cloud_rates.env_region() == "ap-south-1"
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
-    assert cloud_rates.env_region() == "us-west-2"
-    monkeypatch.setenv("AWS_REGION", "us-east-2")
-    assert cloud_rates.env_region() == "us-east-2"
-    monkeypatch.setenv("AWS_REGION", "not a region")
-    assert cloud_rates.env_region() == "us-west-2"
-
-
-def test_a_cli_config_that_does_not_parse_names_no_region(laptop, monkeypatch):
-    cfg = laptop / "aws-config"
-    cfg.write_text("region = eu-west-1\n[default\n")
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(cfg))
-    assert cloud_rates.env_region() is None
-
-
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
-def test_a_cli_config_that_is_a_fifo_is_not_waited_on(laptop, monkeypatch):
-    import threading
-    fifo = laptop / "aws-config-fifo"
-    os.mkfifo(fifo)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(fifo))
-    got: dict = {}
-    t = threading.Thread(target=lambda: got.update(r=cloud_rates.env_region()), daemon=True)
-    t.start()
-    t.join(5)
-    if t.is_alive():
-        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))     # let the reader go
-        t.join(5)
-        pytest.fail("env_region waited on a FIFO")
-    assert got == {"r": None}
-
-
 def test_the_module_names_no_network_client():
     import ast
     import inspect
