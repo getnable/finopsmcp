@@ -1,0 +1,19 @@
+# nable org model v1
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: recommend}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: action_class:Ticket
+  value: {rung: recommend, approvers: "email:Bo@Acme.example"}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: offhours_schedule}
+  value: {rung: bounded, environments: [sandbox, dr], max_resources_per_call: 50, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
