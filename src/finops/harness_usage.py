@@ -404,7 +404,8 @@ def cursor_email() -> str:
 
 
 def _cursor_cache_path() -> Path:
-    d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
+    raw = os.getenv("FINOPS_DATA_DIR")      # "~/x" from a settings.json env entry
+    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
     d.mkdir(parents=True, exist_ok=True)
     return d / "cursor-usage.json"
 

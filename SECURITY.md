@@ -71,9 +71,17 @@ the file name alone, shown in the dry run and covered by its confirm code.
 `nable cloud status` also POSTs exactly `{"person": P}` to
 `/api/free-tool/standing` when the box's status lists `standing` in `reads`:
 P is `--as WHO`, else `FINOPS_GUARD_PERSON`, else git's `user.email`, the
-person the guard holds this machine's agents to. Nothing else is in that
-request. The answer is kept in `cloud-standing.json` beside the ledger
-(0600), without the key; the guard reads that file and never the network. The
+person the guard holds this machine's agents to, and it is sent only when it
+is an email or `github:LOGIN` of at most 320 characters; every answer says
+who was asked. Nothing else is in that request. The answer is kept in
+`cloud-standing.json` beside the ledger (0600), without the key, only when
+it is about the guard's own person and from the box and the workspace this
+machine last sent its usage to (the box's opaque workspace reference, kept in
+`cloud-box.json` at each send): on a pooled box one URL serves every
+workspace, so a standing read with another workspace's key is never used.
+The guard reads that file and never the network, and its ledger lines never
+carry the box's figure, host or times, since the ledger can be sent to
+another workspace. The
 workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
 0600, or a hidden prompt; it is never an argument, and it is never stored,
 printed or logged. No host is built in, and nable adds nothing about the
@@ -114,7 +122,13 @@ repo's `.git/config` (and a worktree's), `~/.gitconfig`, the XDG
 As a backstop, when git's email for a repo changes since the guard last read
 it, the next call asks once, naming both, and the earlier email's budgets still
 apply for the rest of that UTC month. Nothing about a budget leaves the machine
-unless you send the org model.
+unless you send the org model. The month to date the guard compares is read
+from the coding agents' own logs (Claude Code's transcripts under its projects
+directory, Codex's rollouts), which are not among the guard's own files: an
+agent that rewrites or removes them outside the guard's view lowers this
+machine's figure, and the guard does not ask before it does. A response two
+transcripts hold counts once, the larger copy, and usage already sent to a box
+stays there. `nable guard doctor` says so.
 
 **Version check.** To tell you when your build is out of date, nable makes one
 GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run

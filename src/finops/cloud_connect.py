@@ -96,7 +96,10 @@ is told so before anything is sent (--no-agent-usage leaves the records out).
 POST STANDING_PATH with exactly {"person": P}) when the box's status lists
 "standing" in `reads`; cloud_standing keeps the answer for the guard, which
 reads it and never this module. A successful send records the box it went
-to (cloud_standing.bind): the guard counts a standing from that box alone.
+to and the workspace reference its status gave (cloud_standing.bind): the
+guard counts a standing from that box and that workspace alone. A standing
+refused for the workspace's plan (403 not_on_plan or plan_required) is
+NotOnPlan: said, and not a failure of the key.
 
 HTTPS only. The box is https://host[:port] with no path, query or user info; a
 redirect is refused, not followed (it would carry the key to wherever it
@@ -178,6 +181,15 @@ Opener = Callable[[urllib.request.Request, float], "tuple[int, bytes]"]
 class ConnectError(Exception):
     """Something the person has to fix or decide, said in one sentence that
     never carries the key."""
+
+
+class NotOnPlan(ConnectError):
+    """The box answered, and the workspace's plan does not include what was
+    asked (403 not_on_plan or plan_required): the key is fine."""
+
+
+# The refusals that are about the workspace's plan, not the key.
+PLAN_ERRORS = ("not_on_plan", "plan_required")
 
 
 @dataclass
@@ -949,11 +961,14 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
            "status": status(box, key, opener=opener) if batches else held}
     if org_files:
         out["org_files"] = org_files
-    # The box this machine's usage now goes to: the guard counts a standing
-    # from it alone (cloud_standing.usable).
+    # The box and the workspace this machine's usage now goes to: the guard
+    # counts a standing from them alone (cloud_standing.usable). On a pooled
+    # box the URL is every workspace's, so the workspace is the status's
+    # reference, from the same key; a box that names none binds no workspace.
     from . import cloud_standing
+    last = out["status"] if isinstance(out["status"], Mapping) else {}
     try:
-        cloud_standing.bind(box)
+        cloud_standing.bind(box, workspace=last.get("workspace_ref"))
     except (OSError, ValueError) as exc:
         out["box_record"] = (f"not kept ({type(exc).__name__}): the guard cannot tell which "
                              "box a standing must come from")
@@ -985,6 +1000,10 @@ def standing(box: str, key: str, person: str, *,
     body = json.dumps({"person": person}, separators=(",", ":")).encode("utf-8")
     code, doc = _request(opener, "POST", box + STANDING_PATH, key, body,
                          content_type="application/json")
+    if code == 403 and isinstance(doc, Mapping) and doc.get("error") in PLAN_ERRORS:
+        msg = str(doc.get("message") or "")[:300]
+        raise NotOnPlan(f"the workspace's plan does not include a person's standing "
+                        f"({doc['error']}" + (f": {msg}" if msg else "") + ")")
     if code != 200:
         raise _refused("the standing request", code, doc)
     return doc

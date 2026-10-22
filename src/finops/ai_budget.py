@@ -85,7 +85,10 @@ def _fallback() -> llm_prices.ModelPrice:
 
 
 def _data_dir() -> Path:
-    d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
+    # expanduser, as guard_paths reads it: a settings.json env entry gives
+    # "~/x" unexpanded, and the guard protects the home directory's ~/x.
+    raw = os.getenv("FINOPS_DATA_DIR")
+    d = Path(raw).expanduser() if raw else Path.home() / ".nable"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -1317,12 +1320,16 @@ def _other_responses(since_epoch: float, *, allow_network: bool = False
 # appends) has its new lines read and priced, and nothing else; any other
 # change to it makes its entry again from the transcript. A response logged
 # in more than one transcript (a resumed session copies the one it resumes)
-# counts once: the copy in the transcript whose path sorts last.
+# counts once: the larger copy, so a copy rewritten lower in either file does
+# not lower the month. A transcript that cannot be read is left out of that
+# call's figure and said (a note), and nothing about it is kept: no shard, no
+# index entry and no total, so the next call reads it again. A failed read is
+# never kept as $0.
 
 MONTH_CACHE = "ai-budget-month.json"
 MONTH_TOTAL = "ai-budget-month.total.json"
 MONTH_SHARDS = "ai-budget-month"
-_MONTH_CACHE_VERSION = 1
+_MONTH_CACHE_VERSION = 2
 
 
 def prices_version() -> str:
@@ -1343,6 +1350,12 @@ def _priced(r: dict[str, Any]) -> list[Any]:
     price = llm_prices.price_for(r["model"]) if got is not None else None
     return [r["ts"], None if got is None else str(got), _tokens(r), str(r["model"]),
             price.provider if price is not None else None]
+
+
+def _copy_size(row: list[Any]) -> tuple[Decimal, int]:
+    """How large one priced copy of a response is: its list price (an
+    unpriced one below any priced one), then its tokens."""
+    return (Decimal(row[1]) if row[1] is not None else Decimal(-1), int(row[2]))
 
 
 def _key_hash(key: str) -> str:
@@ -1413,7 +1426,9 @@ class _MonthTally:
     def _read_file(self, path: str, st: os.stat_result,
                    entry: dict[str, Any] | None) -> dict[str, Any]:
         """The transcript's shard: extended by its new lines, each priced,
-        when it only grew since `entry`; else made again from the file."""
+        when it only grew since `entry`; else made again from the file.
+        OSError when the file could not be read whole: the caller keeps
+        nothing of it."""
         try:
             tail = bytes.fromhex(str(entry.get("tail") or "")) if entry else b""
             was = int(entry.get("offset") or 0) if entry else 0
@@ -1427,20 +1442,17 @@ class _MonthTally:
             responses = dict(entry["r"])
             offset, lines = was, int(entry.get("lines") or 0)
         last = b""
-        try:
-            with open(path, "rb") as fh:
-                fh.seek(offset)
-                for line in fh:
-                    if not line.endswith(b"\n"):
-                        break          # a line still being written: read it next time
-                    hit = _parse_usage_line(line, Path(path), lines)
-                    if hit is not None and hit[1]["ts"] >= self.header["since"]:
-                        responses[json.dumps(list(hit[0]))] = _priced(hit[1])
-                    lines += 1
-                    offset += len(line)
-                    last = line
-        except OSError:
-            responses, offset, lines, last = {}, 0, 0, b""
+        with open(path, "rb") as fh:
+            fh.seek(offset)
+            for line in fh:
+                if not line.endswith(b"\n"):
+                    break          # a line still being written: read it next time
+                hit = _parse_usage_line(line, Path(path), lines)
+                if hit is not None and hit[1]["ts"] >= self.header["since"]:
+                    responses[json.dumps(list(hit[0]))] = _priced(hit[1])
+                lines += 1
+                offset += len(line)
+                last = line
         if not last and offset == was:
             last = tail                # nothing new was read: keep the line it ended on
         return {"path": path, "size": st.st_size, "mtime_ns": st.st_mtime_ns,
@@ -1458,57 +1470,73 @@ class _MonthTally:
         index = self._load(self.root / MONTH_CACHE).get("files")
         index = index if isinstance(index, dict) else {}
         files: dict[str, Any] = {}
+        not_read = 0
         for p, st in stats:
             f = index.get(p)
             if isinstance(f, dict) and f.get("stat") == [st.st_size, st.st_mtime_ns, st.st_ino]:
                 files[p] = f
                 continue
             shard = self._load(self._shard(p))
-            entry = self._read_file(p, st, shard or None)
+            try:
+                entry = self._read_file(p, st, shard or None)
+            except OSError:
+                not_read += 1      # nothing of it is kept, so the next call reads it again
+                continue
             self._write(self._shard(p), entry)
             rows = entry["r"]
             files[p] = {"stat": [st.st_size, st.st_mtime_ns, st.st_ino], **_sums(rows.values()),
                         "keys": [_key_hash(k) for k in rows], "shared": {}}
-        claude = self._combine(files, [p for p, _st in stats])
+        claude = self._combine(files, [p for p, _st in stats if p in files])
         self._write(self.root / MONTH_CACHE, {"files": files})
         if set(index) - set(files):
-            self._prune({self._shard(p).name for p in files})
+            self._prune({self._shard(p).name for p, _st in stats})
+        if not_read:
+            # No total for stats a transcript was left out of: a later call
+            # with the same stats would take it as the whole month.
+            claude["not_read"] = not_read
+            self._write(self.root / MONTH_TOTAL, {"stamp": None, "claude": None,
+                                                   "other": kept.get("other") or {}})
+            return claude
         self._write(self.root / MONTH_TOTAL, {"stamp": stamp, "claude": claude,
                                                "other": kept.get("other") or {}})
         return claude
 
     def _combine(self, files: dict[str, Any], order: list[str]) -> dict[str, Any]:
         """The month's total over `files`, a response two transcripts hold
-        counted once (the copy in the one whose path sorts last). The figures
-        of a copy that does not count are read from its shard once and kept
-        in the index (shared)."""
-        owner: dict[str, str] = {}
+        counted once: the larger copy (by list price, then tokens), whatever
+        the paths, so a copy rewritten lower does not lower the month. Each
+        copy's figures are read from its shard once and kept in the index
+        (shared)."""
+        holders: dict[str, list[str]] = {}
         for p in order:
             for h in files[p]["keys"]:
-                owner[h] = p
+                holders.setdefault(h, []).append(p)
         usd = sum((Decimal(files[p]["usd"]) for p in order), Decimal(0))
         unpriced = sum(int(files[p]["unpriced"]) for p in order)
         models = {m for p in order for m in files[p]["models"]}
         providers = {x for p in order for x in files[p]["providers"]}
-        for p in order:
-            extra = [h for h in files[p]["keys"] if owner[h] != p]
-            if not extra:
-                continue
+        dup = {h: ps for h, ps in holders.items() if len(ps) > 1}
+        for p in dict.fromkeys(p for ps in dup.values() for p in ps):
+            mine = [h for h in files[p]["keys"] if h in dup]
             shared = files[p].setdefault("shared", {})
-            if any(h not in shared for h in extra):
+            if any(h not in shared for h in mine):
                 rows = self._load(self._shard(p)).get("r") or {}
                 by_hash = {_key_hash(k): v for k, v in rows.items()}
-                shared.update({h: by_hash[h] for h in extra if h in by_hash})
-            for h in extra:
-                row = shared.get(h)
-                if not row:
+                shared.update({h: by_hash[h] for h in mine if h in by_hash})
+        for h, ps in dup.items():
+            copies = [row for p in ps if (row := files[p]["shared"].get(h))]
+            if not copies:
+                continue
+            kept = max(copies, key=_copy_size)
+            for row in copies:
+                if row is kept:
                     continue
                 if row[1] is None:
                     unpriced -= int(row[2])
                 else:
                     usd -= Decimal(row[1])
         return {"usd": str(usd), "unpriced_tokens": unpriced, "unpriced_models": sorted(models),
-                "providers": sorted(providers), "responses": len(owner)}
+                "providers": sorted(providers), "responses": len(holders)}
 
     def _prune(self, keep: set[str]) -> None:
         """Drop the shards of transcripts that are gone."""
@@ -1549,6 +1577,12 @@ def month_agent_usage(*, allow_network: bool = False) -> dict[str, Any]:
         "usd": "0", "unpriced_tokens": 0, "unpriced_models": [], "providers": [],
         "responses": 0}
     others, notes = _other_responses(since, allow_network=allow_network)
+    if claude.get("not_read"):
+        n = claude["not_read"]
+        what = "1 Claude Code transcript was" if n == 1 else f"{n} Claude Code transcripts were"
+        notes.append(f"{what} not read on this call and {'is' if n == 1 else 'are'} not in the "
+                     "figure, which can only under-count; the next call reads "
+                     f"{'it' if n == 1 else 'them'} again")
     usd = Decimal(claude["usd"])
     unpriced = int(claude["unpriced_tokens"])
     unpriced_models: set[str] = set(claude["unpriced_models"])
@@ -1642,8 +1676,10 @@ def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
         compared = "box" if theirs is not None and theirs > machine else "machine"
         larger = theirs if compared == "box" else machine
         pct = float(larger) / h["usd"] if h["usd"] > 0 else 0.0
+        cover = (cloud_standing.coverage(box, h["scope"], h["subject"])
+                 if theirs is not None else None)
         rows.append({**h, "pct": pct, "verdict": _verdict(pct), "machine_usd": machine,
-                     "box_usd": theirs, "compared": compared})
+                     "box_usd": theirs, "compared": compared, "box_cover": cover})
     worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
     if worst["scope"] in ("person", "per_person") and worst["person"] != person:
         person, source = worst["person"], (f"git user.email earlier this month; it is "
@@ -1701,33 +1737,77 @@ def org_budget_words(st: dict[str, Any]) -> str:
     return _unpriced_and_notes(text, u)
 
 
+def _cover_words(h: dict[str, Any]) -> str:
+    """How current the box's figure for this budget is, from its own records:
+    the box's as_of is the newest receipt from anyone in the workspace."""
+    c = h.get("box_cover") or {}
+    if h["scope"] == "team":
+        return (f"; {c.get('people_sent', 0)} of the team's {c.get('people', 0)} people sent, "
+                f"their records running to {c.get('latest_day') or 'no day'}, the oldest of "
+                f"their last days {c.get('oldest_last_day') or 'none'}")
+    if h["scope"] == "org":
+        return (f"; {c.get('people_sent', 0)} people sent, their records running to "
+                f"{c.get('latest_day') or 'no day'}")
+    return (f"; {h['person']}'s records cover {c.get('days', 0)} day(s), the last "
+            f"{c.get('last_day') or 'none'}")
+
+
+# What the box said, as a reason shows it -> the same reason without the box's
+# figures, for the ledger (ledger_safe). Bounded: one entry per reason made.
+_LEDGER_SAFE: dict[str, str] = {}
+_LEDGER_SAFE_MAX = 32
+
+
+def ledger_safe(text: str) -> str:
+    """`text` with every reason _box_words made in this process replaced by
+    its version without the box's figures, coverage, host and times. The
+    guard ledger is sent to whichever workspace this machine sends it to,
+    and the box's figures are its own workspace's."""
+    for shown, safe in _LEDGER_SAFE.items():
+        if shown in text:
+            text = text.replace(shown, safe)
+    return text
+
+
 def _box_words(st: dict[str, Any], h: dict[str, Any], u: dict[str, Any], *, budget: str,
                agents: str, mine: str) -> str:
-    """The reason when the box's standing counts: both figures, the box's
-    as-of time and age, and which, the larger, was compared (never their
-    sum)."""
+    """The reason when the box's standing counts: both figures, how current
+    the box's is, and which, the larger, was compared (never their sum).
+    Its version for the ledger says the box's figure was read, not what it
+    was (ledger_safe)."""
     from .budget.summary import age_words
     box = st.get("box") or {}
     theirs = _cents(h["box_usd"])
     at = box.get("as_of") or box.get("fetched_at")
-    when = (f"as of {at} ({age_words(box.get('age_hours'))} old, read by `nable cloud "
-            f"status` at {box.get('fetched_at')})")
+    when = (f"the box's records are as of {at}, the newest it received from anyone in the "
+            f"workspace ({age_words(box.get('age_hours'))} old, read by `nable cloud status` "
+            f"at {box.get('fetched_at')})")
     on_box = (f"on the box ({box.get('host')}), {_whose(h)} stands at {theirs} in "
-              f"list-price-equivalent dollars this month, {when}, from what people sent "
-              "with `nable cloud connect`")
+              f"list-price-equivalent dollars this month, from what people sent with "
+              f"`nable cloud connect`{_cover_words(h)}; {when}")
+    on_box_safe = (f"on the box, the month to date of {_whose(h)} was read by `nable cloud "
+                   "status` (its figure is not kept in this ledger)")
     here = f"this machine's coding agents ({agents}) have spent {mine}"
     pct = f"{h['pct'] * 100:.0f}%"
     if h["compared"] == "box":
         text = (f"{on_box[0].upper()}{on_box[1:]}; {here}. The larger, the box's {theirs}, is "
                 f"the one compared: {pct} of {budget}")
+        safe = (f"{on_box_safe[0].upper()}{on_box_safe[1:]}; {here}. The larger, the box's, "
+                f"is the one compared, against {budget}")
     else:
         text = (f"{here[0].upper()}{here[1:]}; {on_box}. The larger, this machine's {mine}, "
                 f"is the one compared: {pct} of {budget}")
-    text += (f". The two are never added: the box's figure already holds whatever this "
-             f"machine sent. Priced at {price_source(u['providers'])} on each machine that "
-             "sent: usage, not an invoice. A machine that has not sent is not in the box's "
-             "figure, so it can still under-count")
-    return _unpriced_and_notes(text, u)
+        safe = (f"{here[0].upper()}{here[1:]}; {on_box_safe}. The larger, this machine's "
+                f"{mine}, is the one compared: {pct} of {budget}")
+    rest = (f". The two are never added: the box's figure already holds whatever this "
+            f"machine sent. Priced at {price_source(u['providers'])} on each machine that "
+            "sent: usage, not an invoice. A machine that has not sent is not in the box's "
+            "figure, so it can still under-count")
+    text, safe = _unpriced_and_notes(text + rest, u), _unpriced_and_notes(safe + rest, u)
+    if len(_LEDGER_SAFE) >= _LEDGER_SAFE_MAX:
+        _LEDGER_SAFE.clear()
+    _LEDGER_SAFE[text] = safe
+    return text
 
 
 def _unpriced_and_notes(text: str, u: dict[str, Any]) -> str:

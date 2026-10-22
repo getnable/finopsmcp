@@ -3393,15 +3393,14 @@ def _org_budget_verdict(session_id: str | None, cwd: str | None) -> dict[str, An
 def _org_budget_figure(st: dict[str, Any]) -> dict[str, Any]:
     """What an org model budget verdict was judged on, for the ledger: which
     figure was compared (the larger of this machine's and the box's, never
-    their sum), both figures as text, and the box's as-of time."""
-    hit, box = st["hit"], st.get("box") or {}
-    theirs = hit.get("box_usd")
-    out = {"compared": hit.get("compared") or "machine",
-           "machine_usd": st["usage"]["usd_cents"],
-           "box_usd": None if theirs is None else str(theirs)}
-    if theirs is not None:
-        out.update(box_host=box.get("host"), box_as_of=box.get("as_of"))
-    return out
+    their sum), this machine's figure, and whether the box's was beside it.
+    Not the box's figure, host or time: the ledger goes to whichever
+    workspace this machine sends it to, and those are the box's workspace's
+    (the reason is recorded without them too, ai_budget.ledger_safe)."""
+    hit = st["hit"]
+    return {"compared": hit.get("compared") or "machine",
+            "machine_usd": st["usage"]["usd_cents"],
+            "box_figure_read": hit.get("box_usd") is not None}
 
 
 # How often the "close to your AI budget" note may show in one session. Every
@@ -6552,6 +6551,13 @@ def _session_field(session_id: Any) -> dict[str, Any]:
     return {"session": guard_ledger.redact(session_id, limit=128)}
 
 
+def _ledger_safe(text: str) -> str:
+    """`text` without the box's figures (ai_budget.ledger_safe), when the AI
+    budget gate made a reason from them in this process."""
+    ab = sys.modules.get("finops.ai_budget")
+    return ab.ledger_safe(text) if ab is not None and isinstance(text, str) else text
+
+
 def _record(v: dict[str, Any], *, tool: str, command: str,
             session_id: str | None = None) -> None:
     """Append one verdict to the ledger. Cheap, and never raises: a ledger
@@ -6570,7 +6576,8 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             "monthly_usd": est.get("monthly_usd"),
             "total_usd": est.get("total_usd"),
             "basis": est.get("basis"),
-            "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
+            "reason": (guard_ledger.redact(_ledger_safe(v["reason"]), limit=600)
+                       if v.get("reason") else None),
             # Which history check turned this into an ask, when one did.
             **({"history": v["history"]} if v.get("history") else {}),
             # What loop detection matches on: a hash of the creation and its
@@ -6581,8 +6588,8 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # What the budget lens found for a priced change: the figures
             # behind an over-budget stop, or why the budget went unchecked.
             **({"budget_check": v["budget_check"]} if v.get("budget_check") else {}),
-            # An org model AI budget's figures: this machine's and the box's,
-            # and which, the larger, was compared (D108).
+            # An org model AI budget's figure: this machine's, and which, the
+            # larger of it and the box's, was compared (D108).
             **({"budget_figure": v["budget_figure"]} if v.get("budget_figure") else {}),
             # The installed pack rules that matched (pack:rule), whether or
             # not they tightened the verdict; the pack whose price book priced
@@ -7581,6 +7588,12 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
                        + (f" for {person} ({source})" if person else "")
                        + ", compared at every shell and MCP call with this machine's "
                          "coding-agent spend at list price")
+        gaps.append("the coding agents' transcripts this machine's month to date is read "
+                    "from (Claude Code's projects directory, Codex's rollouts) are not among "
+                    "the guard's own files: an agent that rewrites or removes them lowers "
+                    "this machine's figure, and the guard does not ask first. A response two "
+                    "transcripts hold counts once, the larger copy; what was sent to a box "
+                    "stays there")
     box, why = ai_budget.box_standing(person)
     standing = ai_budget._box_said(box, why)
     if applies and box is not None:

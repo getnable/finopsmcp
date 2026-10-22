@@ -268,3 +268,101 @@ def test_a_grown_transcript_is_the_only_one_read_again(heavy, monkeypatch):
     u = ab.month_agent_usage()
     assert opened == ["s-a.jsonl"]
     assert u["usd_cents"] == _uncached()
+
+
+def test_a_transcript_that_could_not_be_read_is_never_kept_as_zero(heavy, monkeypatch):
+    """A read that fails (a permission error, a sharing violation while
+    another process holds the file) is said as not read, nothing about the
+    file is kept, and the next call reads it: a failed read then a good one
+    gives the full figure, and never $0 for that transcript after."""
+    import builtins
+    real_open = builtins.open
+    fail = {"left": 1}
+
+    def flaky(file, *a, **k):
+        if str(file).endswith("s-b.jsonl") and fail["left"]:
+            fail["left"] -= 1
+            raise PermissionError(13, "Permission denied")
+        return real_open(file, *a, **k)
+    monkeypatch.setattr(builtins, "open", flaky)
+    u = ab.month_agent_usage()
+    full = Decimal(_uncached())
+    assert Decimal(u["usd_exact"]) == full - Decimal("4.5") * 15
+    assert any("1 Claude Code transcript was not read" in n for n in u["notes"])
+    data = heavy["tmp"] / "data"
+    assert not (data / ab.MONTH_TOTAL).exists() or json.loads(
+        (data / ab.MONTH_TOTAL).read_text()).get("stamp") is None
+    assert all("s-b.jsonl" not in p for p in json.loads(
+        (data / ab.MONTH_CACHE).read_text())["files"])
+    monkeypatch.setattr(builtins, "open", real_open)
+    u = ab.month_agent_usage()
+    assert u["usd_cents"] == _uncached() and Decimal(u["usd_exact"]) == full
+    assert not any("not read" in n for n in u["notes"])
+    assert ab.month_agent_usage()["usd_cents"] == _uncached()
+
+
+def test_a_transcript_read_cut_short_is_not_kept_either(heavy, monkeypatch):
+    """The read fails after some lines: nothing of that transcript is kept."""
+    ab.month_agent_usage()
+    _append(heavy["claude"], "s-b", 3)
+    real = ab._parse_usage_line
+    seen = {"n": 0}
+
+    def cut(line, path, lineno):
+        if path.name == "s-b.jsonl":
+            seen["n"] += 1
+            if seen["n"] == 2:
+                raise OSError(5, "Input/output error")
+        return real(line, path, lineno)
+    monkeypatch.setattr(ab, "_parse_usage_line", cut)
+    u = ab.month_agent_usage()
+    assert any("not read" in n for n in u["notes"])
+    monkeypatch.setattr(ab, "_parse_usage_line", real)
+    assert ab.month_agent_usage()["usd_cents"] == _uncached()
+
+
+@pytest.mark.parametrize("lowered", ["s-a", "s-resumed"])
+def test_two_copies_that_differ_count_the_larger_whatever_their_paths(heavy, lowered):
+    """A response two transcripts hold counts once: the larger copy, so a
+    copy rewritten lower in either file does not lower the month."""
+    projects = heavy["claude"] / "projects" / "-home-alice-work"
+    src = projects / "s-a.jsonl"
+    (projects / "s-resumed.jsonl").write_text(src.read_text())
+    target = projects / f"{lowered}.jsonl"
+    rows = [json.loads(x) for x in target.read_text().splitlines()]
+    for r in rows:
+        if r.get("sessionId") == "s-a":
+            r["message"]["usage"]["input_tokens"] = 1
+            r["message"]["usage"]["output_tokens"] = 0
+    target.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    for f in projects.glob("*.jsonl"):
+        os.utime(f, (AT.timestamp(), AT.timestamp()))
+    u = ab.month_agent_usage()
+    assert Decimal(u["usd_exact"]) == Decimal("4.5") * 31
+    assert ab.month_agent_usage()["usd_exact"] == u["usd_exact"]
+
+
+def test_a_data_dir_written_with_a_tilde_is_the_one_the_guard_protects(heavy, monkeypatch):
+    """FINOPS_DATA_DIR=~/nd, as a settings.json env entry gives it: the month
+    cache goes under the home directory, where the guard's own files are,
+    never under a literal ~ in the agent's working directory."""
+    from finops import guard_paths, harness_usage
+    home = heavy["tmp"] / "home"
+    monkeypatch.setenv("FINOPS_DATA_DIR", "~/nd")
+    work = heavy["tmp"] / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    ab.month_agent_usage()
+    assert (home / "nd" / ab.MONTH_TOTAL).is_file()
+    assert not (work / "~").exists()
+    assert harness_usage._cursor_cache_path() == home / "nd" / "cursor-usage.json"
+    assert ab._budget_path() == home / "nd" / "ai-budget.json"
+    shown = {e.path for e in guard_paths.protected()}
+    assert os.path.realpath(home / "nd" / ab.MONTH_TOTAL) in shown
+
+
+def test_doctor_says_the_transcripts_are_not_the_guards_own_files(heavy):
+    """The month to date is read from the agents' own logs, which the guard
+    does not protect: doctor says so wherever an org model budget applies."""
+    gaps = guard.doctor()["not_covered"]
+    assert any("transcripts" in g and "not among the guard's own files" in g for g in gaps), gaps

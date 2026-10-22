@@ -6,8 +6,8 @@ the guard (D107, D108).
 /api/free-tool/standing, from the cloud CLI's own client) and keeps the
 answer here, beside the guard ledger, as cloud-standing.json (0600):
 
-    {"v": 1, "box": "https://HOST", "host": "HOST", "fetched_at": ISO 8601,
-     "month": "YYYY-MM", "person": "<the person asked about>",
+    {"v": 1, "box": "https://HOST", "host": "HOST", "workspace": "<the box's ref>",
+     "fetched_at": ISO 8601, "month": "YYYY-MM", "person": "<the person asked about>",
      "as_of": ISO 8601 or null, "basis": "list-price equivalent",
      "budgets_from": {...} or null,
      "figures": {"person": {"id", "usd", "days", "last_day", "budget"},
@@ -17,6 +17,10 @@ answer here, beside the guard ledger, as cloud-standing.json (0600):
 
 Every dollar is a decimal string, or null where the box received no records
 for it ("no records received", never $0). No key is ever written here.
+`workspace` is the box's opaque reference to the workspace the key reaches
+(its answer's workspace_ref): on a pooled box every workspace sits behind one
+URL, and the key alone decides which one answers, so the URL cannot say
+whose figures these are. An answer that names no workspace is not kept.
 
 The guard's AI budget gate reads this file and never the network
 (ai_budget.org_budget_status). For each budget that applies on this machine,
@@ -30,9 +34,11 @@ is said with it):
   * it is for this UTC month;
   * it is for the person the guard holds this machine's agents to
     (ai_budget.developer);
-  * it comes from the box this machine sends its usage to: the box of its
-    last `nable cloud connect --send` (cloud-box.json, BOX_FILE_NAME), or
-    from any box while this machine has sent to none.
+  * it comes from the box and the workspace this machine sends its usage
+    to: those of its last `nable cloud connect --send` (cloud-box.json,
+    BOX_FILE_NAME, which keeps the workspace reference the box's status
+    gave), or from any box while this machine has sent to none. A send to a
+    box that named no workspace binds nothing a standing can match.
 
 Otherwise the gate uses this machine's figure alone, and `nable guard doctor`
 says why (usable()). Only the local budgets.yaml sets a threshold; the box's
@@ -67,6 +73,8 @@ _TEXT_MAX = 320
 _USD_RE = re.compile(r"^\d{1,12}(?:\.\d{1,6})?$")
 _MONTH_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# The box's reference to a workspace: opaque, never the workspace's own id.
+_REF_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 
 class StandingError(ValueError):
@@ -150,6 +158,11 @@ def _budget(v: Any, name: str) -> dict[str, Any] | None:
             "state": state}
 
 
+def workspace_ref(v: Any) -> str | None:
+    """`v` when it is a workspace reference as the box gives one, else None."""
+    return v if isinstance(v, str) and _REF_RE.match(v) else None
+
+
 def _obj(v: Any, name: str) -> dict[str, Any]:
     if not isinstance(v, dict):
         raise StandingError(f"{name} is not an object")
@@ -158,11 +171,16 @@ def _obj(v: Any, name: str) -> dict[str, Any]:
 
 def normalize(answer: Any, *, box: str, person: str, fetched_at: datetime) -> dict[str, Any]:
     """The file's document from the box's answer, keeping only the fields
-    this module checks, or StandingError. The answer must be about `person`."""
+    this module checks, or StandingError. The answer must be about `person`
+    and name the workspace it is from (workspace_ref)."""
     a = _obj(answer, "the answer")
     month = a.get("month")
     if not isinstance(month, str) or not _MONTH_RE.match(month):
         raise StandingError("month is not YYYY-MM")
+    ref = workspace_ref(a.get("workspace_ref"))
+    if ref is None:
+        raise StandingError("the answer names no workspace (workspace_ref), so the guard "
+                            "could not tell whose figures they are")
     p = _obj(a.get("person"), "person")
     pid = _text(p.get("id"), "person.id").strip().lower()
     if pid != person:
@@ -178,7 +196,7 @@ def normalize(answer: Any, *, box: str, person: str, fetched_at: datetime) -> di
                  "uploaded_at": _iso(f.get("uploaded_at"), "budgets_from.uploaded_at")}
     host = box.split("://", 1)[-1]
     return {
-        "v": FORMAT, "box": box, "host": host,
+        "v": FORMAT, "box": box, "host": host, "workspace": ref,
         "fetched_at": fetched_at.astimezone(UTC).isoformat(timespec="seconds"),
         "month": month, "person": person,
         "as_of": _iso(a.get("as_of"), "as_of"),
@@ -233,10 +251,12 @@ def write(doc: dict[str, Any]) -> Path:
     return _write(path(), doc)
 
 
-def bind(box: str, *, at: datetime | None = None) -> Path:
-    """Record `box` as the box this machine sends its usage to."""
+def bind(box: str, *, workspace: str | None = None, at: datetime | None = None) -> Path:
+    """Record `box`, and the workspace its status named (workspace_ref, or
+    None when it named none), as where this machine sends its usage."""
     when = (at or datetime.now(UTC)).astimezone(UTC).isoformat(timespec="seconds")
-    return _write(box_path(), {"v": FORMAT, "box": box, "at": when})
+    return _write(box_path(), {"v": FORMAT, "box": box, "workspace": workspace_ref(workspace),
+                               "at": when})
 
 
 def _read_json(p: Path) -> tuple[Any, str | None]:
@@ -259,9 +279,10 @@ def _read_json(p: Path) -> tuple[Any, str | None]:
         return None, "it is not JSON"
 
 
-def bound_box() -> tuple[str | None, str | None]:
-    """(the box this machine last sent to, None), (None, None) when it has
-    sent to none, or (None, why the record was not read)."""
+def bound() -> tuple[dict[str, Any] | None, str | None]:
+    """({"box", "workspace"} this machine last sent to, None), (None, None)
+    when it has sent to none, or (None, why the record was not read). The
+    workspace is None when that box's status named none."""
     doc, why = _read_json(box_path())
     if why:
         return None, f"{BOX_FILE_NAME} was not read: {why}"
@@ -270,7 +291,7 @@ def bound_box() -> tuple[str | None, str | None]:
     box = doc.get("box") if isinstance(doc, dict) and doc.get("v") == FORMAT else None
     if not isinstance(box, str) or not box.startswith("https://"):
         return None, f"{BOX_FILE_NAME} was not read: it is not this format"
-    return box, None
+    return {"box": box, "workspace": workspace_ref(doc.get("workspace"))}, None
 
 
 def read() -> tuple[dict[str, Any] | None, str | None]:
@@ -286,7 +307,8 @@ def read() -> tuple[dict[str, Any] | None, str | None]:
         if not isinstance(box, str) or not box.startswith("https://"):
             raise StandingError("it names no https box")
         fetched = datetime.fromisoformat(str(doc.get("fetched_at")))
-        checked = normalize({**doc, "person": doc.get("figures", {}).get("person"),
+        checked = normalize({**doc, "workspace_ref": doc.get("workspace"),
+                             "person": doc.get("figures", {}).get("person"),
                              "teams": doc.get("figures", {}).get("teams"),
                              "org": doc.get("figures", {}).get("org")},
                             box=box, person=str(doc.get("person")), fetched_at=fetched)
@@ -296,29 +318,41 @@ def read() -> tuple[dict[str, Any] | None, str | None]:
 
 
 def usable(doc: dict[str, Any] | None, why: str | None, *, person: str | None,
-           month: str) -> str | None:
+           month: str, what: str = FILE_NAME) -> str | None:
     """None when the box's figures in `doc` count for `person` in `month`,
-    else why not, in words for `nable guard doctor` and the reason."""
+    else why not, in words for `nable guard doctor` and the reason. `what`
+    names `doc` in them (`nable cloud status` asks before it keeps one)."""
     if why:
-        return f"{FILE_NAME} was not read: {why}"
+        return f"{what} was not read: {why}"
     if doc is None:
-        return (f"there is no {FILE_NAME}: `nable cloud status --box https://HOST` reads the "
+        return (f"there is no {what}: `nable cloud status --box https://HOST` reads the "
                 "box's standing")
     if doc["month"] != month:
-        return (f"{FILE_NAME} is for {doc['month']}, not this UTC month ({month}); run "
+        return (f"{what} is for {doc['month']}, not this UTC month ({month}); run "
                 f"`nable cloud status --box {doc['box']}` again")
     if not person:
-        return (f"{FILE_NAME} is for {doc['person']}, and nobody is named on this machine "
+        return (f"{what} is for {doc['person']}, and nobody is named on this machine "
                 "(FINOPS_GUARD_PERSON, or git's user.email)")
     if doc["person"] != person:
-        return (f"{FILE_NAME} is for {doc['person']}, and this machine's agents spend for "
+        return (f"{what} is for {doc['person']}, and this machine's agents spend for "
                 f"{person}; run `nable cloud status --box {doc['box']} --as {person}`")
-    bound, bound_why = bound_box()
+    sent, bound_why = bound()
     if bound_why:
         return bound_why
-    if bound is not None and bound != doc["box"]:
-        return (f"{FILE_NAME} is from {doc['host']}, and this machine last sent its usage to "
-                f"{bound.split('://', 1)[-1]}; run `nable cloud status --box {bound}`")
+    if sent is None:
+        return None
+    host = sent["box"].split("://", 1)[-1]
+    if sent["box"] != doc["box"]:
+        return (f"{what} is from {doc['host']}, and this machine last sent its usage to "
+                f"{host}; run `nable cloud status --box {sent['box']}`")
+    if sent["workspace"] is None:
+        return (f"this machine last sent its usage to {host} when the box named no "
+                f"workspace, so nothing says {what} is that workspace's; send again with "
+                f"`nable cloud connect --box {sent['box']} --send`")
+    if sent["workspace"] != doc["workspace"]:
+        return (f"{what} is from another workspace on {host} than the one this machine last "
+                f"sent its usage to; run `nable cloud status --box {sent['box']}` with that "
+                "workspace's key")
     return None
 
 
@@ -355,6 +389,22 @@ def figure(doc: dict[str, Any], scope: str, subject: str) -> Decimal | None:
         return None
     if scope == "org":
         return _dollars(f["org"]["usd"])
+    return None
+
+
+def coverage(doc: dict[str, Any], scope: str, subject: str) -> dict[str, Any] | None:
+    """What the box's figure for one budget covers (figure's match): the
+    person's days and last day, the team's people who sent and their latest
+    and oldest last days, or the org's. as_of is the workspace's newest
+    receipt from anyone, so this is how current the figure itself is."""
+    f = doc["figures"]
+    if scope in ("person", "per_person"):
+        return f["person"]
+    if scope == "team":
+        want = subject.split(":", 1)[-1].strip().lower()
+        return next((t for t in f["teams"] if t["team"].strip().lower() == want), None)
+    if scope == "org":
+        return f["org"]
     return None
 
 

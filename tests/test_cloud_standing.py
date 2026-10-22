@@ -40,12 +40,17 @@ from tests.test_guard_org_budget import box as _box  # noqa: F401 - a fixture
 
 OTHER_BOX = "https://other-box.example.com"
 YESTERDAY = (AT - timedelta(days=1)).isoformat()
+# The box's references to two workspaces on one pooled box, and B's key.
+WS_A = "ws_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+WS_B = "ws_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+KEY_B = "nbl_other_workspace_key_B_0123456789ab"  # pragma: allowlist secret
 
 
 def answer(*, person="alice@acme.example", team_usd="5420", person_usd="120.5",
-           org_usd="9000", month="2026-10", as_of=YESTERDAY, **over):
+           org_usd="9000", month="2026-10", as_of=YESTERDAY, workspace_ref=WS_A, **over):
     """The box's standing answer, in the shape the enterprise route gives."""
     doc = {"month": month, "as_of": as_of, "basis": "list-price equivalent",
+           "workspace_ref": workspace_ref,
            "budgets_from": {"version": 3, "uploaded_at": "2026-10-02T09:00:00+00:00"},
            "person": {"id": person, "usd": person_usd, "days": 4, "last_day": "2026-10-04",
                       "budget": {"monthly_usd": None, "per_person_usd": "400",
@@ -64,15 +69,19 @@ class StandingBox(Box):
     """The fake box, with its status listing what it reads and a standing
     route that records exactly what it was sent."""
 
-    def __init__(self, *, reads=("standing",), standing=None, refuse=None, **kw):
+    def __init__(self, *, reads=("standing",), standing=None, refuse=None,
+                 refuse_error="forbidden", workspace_ref=WS_A, **kw):
         super().__init__(**kw)
         self.reads = list(reads)
         self.answer = standing if standing is not None else answer()
         self.refuse = refuse
+        self.refuse_error = refuse_error
+        self.workspace_ref = workspace_ref
 
     def status(self) -> dict:
         return {**super().status(), "reads": self.reads,
-                "accepts": ["org_model", "ledger_line", "agent_usage", "org_file_delete"]}
+                "accepts": ["org_model", "ledger_line", "agent_usage", "org_file_delete"],
+                **({"workspace_ref": self.workspace_ref} if self.workspace_ref else {})}
 
     def __call__(self, req: urllib.request.Request, timeout: float):
         path = req.full_url.split("://", 1)[1].split("/", 1)[1]
@@ -80,8 +89,8 @@ class StandingBox(Box):
             self.requests.append({"method": "POST", "url": req.full_url,
                                   "headers": dict(req.header_items()), "body": req.data})
             if self.refuse:
-                return self.refuse, json.dumps({"error": "plan_required",
-                                                "message": "not active"}).encode()
+                return self.refuse, json.dumps({"error": self.refuse_error,
+                                                "message": "not this one"}).encode()
             return 200, json.dumps(self.answer).encode()
         return super().__call__(req, timeout)
 
@@ -174,7 +183,7 @@ def test_a_box_that_does_not_read_standing_is_asked_nothing_and_says_so(laptop):
     code, out, _err = _status(box)
     assert code == 0 and box.standing_posts == []
     assert [r["method"] for r in box.requests] == ["GET"]
-    assert "does not offer a person's standing yet" in out
+    assert "does not offer a person's standing to this workspace" in out
     assert not cloud_standing.path().exists()
 
 
@@ -211,7 +220,8 @@ def test_a_refused_standing_exits_1_says_why_and_keeps_the_last_one(laptop):
     assert _status(StandingBox())[0] == 0
     before = cloud_standing.path().read_bytes()
     code, out, err = _status(StandingBox(refuse=403))
-    assert code == cli_cloud.EXIT_REFUSED and "403" in out and "plan_required" in out
+    assert code == cli_cloud.EXIT_REFUSED and "403" in out and "forbidden" in out
+    assert "not read for alice@acme.example (git user.email)" in out
     assert KEY not in out + err
     assert cloud_standing.path().read_bytes() == before
 
@@ -261,8 +271,7 @@ def test_the_boxs_larger_team_figure_asks_and_names_both(team, monkeypatch):
     assert "The larger, the box's $5,420.00, is the one compared" in r
     assert "$5,720" not in r and "5720" not in r
     assert v["budget_figure"] == {"compared": "box", "machine_usd": "300.00",
-                                  "box_usd": "5420", "box_host": "box.example.com",
-                                  "box_as_of": YESTERDAY}
+                                  "box_figure_read": True}
     monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
     v = guard.gate_command("ls -la")
     assert v["decision"] == "deny" and "$5,420.00" in v["reason"]
@@ -418,7 +427,7 @@ def test_a_standing_that_does_not_count_is_this_machines_figure_and_doctor_says_
 def test_a_standing_from_the_box_this_machine_sends_to_counts_at_any_age(team, monkeypatch):
     _machine(team, 300)
     _keep(answer(as_of=(AT - timedelta(days=20)).isoformat()))
-    cloud_standing.bind(BOX)
+    cloud_standing.bind(BOX, workspace=WS_A)
     v = guard.gate_command("ls -la")
     assert v["decision"] == "ask" and "20 days old" in v["reason"]
     d = guard.doctor()["ai_budgets"]
@@ -438,6 +447,169 @@ def test_a_send_records_the_box_this_machine_sends_to(team, monkeypatch, tmp_pat
     _keep(answer())                            # from box.example.com
     v = guard.gate_command("ls -la")
     assert v is None, "a standing from another box than the one sent to was used"
+
+
+# ── the workspace a standing is from ─────────────────────────────────────────
+
+class PooledBox:
+    """One pooled box: every workspace behind one URL, and the key alone
+    decides which answers. Each workspace is a StandingBox with its own
+    reference and answer."""
+
+    def __init__(self, workspaces: dict):
+        self.ws = {key: StandingBox(standing=doc, workspace_ref=ref)
+                   for key, (ref, doc) in workspaces.items()}
+
+    def __call__(self, req: urllib.request.Request, timeout: float):
+        key = dict(req.header_items())["Authorization"].split(" ", 1)[1]
+        return self.ws[key](req, timeout)
+
+
+def _send_to(box_opener, key, team, monkeypatch):
+    from tests.test_cloud_connect import records, write_ledger
+    write_ledger(records(2))
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(team["org"]))
+    cc.send(cc.build(agent_usage=False), BOX, key, opener=box_opener)
+
+
+def _pooled():
+    return PooledBox({KEY: (WS_A, answer(team_usd="200")),
+                      KEY_B: (WS_B, answer(team_usd="9000", workspace_ref=WS_B))})
+
+
+def test_another_workspaces_standing_on_the_same_pooled_box_never_reaches_the_guard(
+        team, monkeypatch):
+    """This machine sends to workspace A. `nable cloud status` with
+    workspace B's key on the same box URL reads B's $9,000, which neither
+    replaces the guard's file nor meets A's $5,000 budget."""
+    pooled = _pooled()
+    _send_to(pooled, KEY, team, monkeypatch)
+    assert json.loads(cloud_standing.box_path().read_text())["workspace"] == WS_A
+    _machine(team, 300)
+    code, out, _err = _status(pooled, environ={cc.KEY_ENV: KEY_B})
+    assert code == 0 and "$9,000.00" in out
+    assert "Not kept for the guard" in out and "another workspace" in out
+    assert not cloud_standing.path().exists()
+    assert guard.gate_command("ls -la") is None
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    assert guard.gate_command("ls -la") is None
+
+
+def test_the_workspace_this_machine_sends_to_keeps_its_standing_against_another(
+        team, monkeypatch):
+    """A's own standing ($5,420) asks; reading B's ($200) with B's key on the
+    same box leaves A's in place, so the ask stands."""
+    pooled = PooledBox({KEY: (WS_A, answer(team_usd="5420")),
+                        KEY_B: (WS_B, answer(team_usd="200", workspace_ref=WS_B))})
+    _send_to(pooled, KEY, team, monkeypatch)
+    _machine(team, 300)
+    assert _status(pooled)[0] == 0
+    kept = cloud_standing.path().read_bytes()
+    assert json.loads(kept)["workspace"] == WS_A
+    assert guard.gate_command("ls -la")["decision"] == "ask"
+    assert _status(pooled, environ={cc.KEY_ENV: KEY_B})[0] == 0
+    assert cloud_standing.path().read_bytes() == kept
+    assert guard.gate_command("ls -la")["decision"] == "ask"
+
+
+def test_a_standing_file_from_another_workspace_is_not_used_and_doctor_says_why(team):
+    """Written by hand, or by a version before this one: the box matches,
+    the workspace does not."""
+    cloud_standing.bind(BOX, workspace=WS_A)
+    _machine(team, 300)
+    _keep(answer(team_usd="9000", workspace_ref=WS_B))
+    assert guard.gate_command("ls -la") is None
+    d = guard.doctor()["ai_budgets"]["box_standing"]
+    assert d["used"] is False and "another workspace" in d["why"]
+
+
+def test_a_send_to_a_box_that_names_no_workspace_binds_none_a_standing_matches(
+        team, monkeypatch):
+    _send_to(StandingBox(workspace_ref=None), KEY, team, monkeypatch)
+    assert json.loads(cloud_standing.box_path().read_text())["workspace"] is None
+    _machine(team, 300)
+    _keep(answer(team_usd="9000"))
+    assert guard.gate_command("ls -la") is None
+    why = guard.doctor()["ai_budgets"]["box_standing"]["why"]
+    assert "named no workspace" in why and "nable cloud connect" in why
+
+
+def test_an_answer_that_names_no_workspace_is_not_kept(laptop):
+    doc = answer()
+    del doc["workspace_ref"]
+    code, out, _err = _status(StandingBox(standing=doc))
+    assert code == cli_cloud.EXIT_REFUSED and "names no workspace" in out
+    assert not cloud_standing.path().exists()
+    for bad in ("", "short", "ws_" + "x" * 200, "ws_a/../b", 12345678):
+        assert cloud_standing.workspace_ref(bad) is None
+
+
+def test_another_persons_standing_is_shown_and_never_replaces_the_guards(laptop):
+    """`--as bob` reads bob's standing for a team lead; the guard's own file
+    for alice stays, so her team's breach still asks."""
+    assert _status(StandingBox())[0] == 0
+    kept = cloud_standing.path().read_bytes()
+    code, out, _err = _status(StandingBox(standing=answer(person="bob@acme.example")),
+                              "--as", "bob@acme.example")
+    assert code == 0 and "Standing for bob@acme.example (--as)" in out
+    assert "Not kept for the guard" in out and "alice@acme.example" in out
+    assert cloud_standing.path().read_bytes() == kept
+
+
+def test_the_ledger_and_the_payload_never_carry_the_boxs_figure(team, monkeypatch):
+    """The ledger goes to whichever workspace this machine sends it to: the
+    box's figure, host and times stay out of its lines, reason included."""
+    from finops import guard_ledger
+    _machine(team, 300)
+    _keep(answer(team_usd="5420"))
+    v = guard.gate_command("ls -la", record=True)
+    assert "$5,420.00" in v["reason"] and "box.example.com" in v["reason"]
+    raw = guard_ledger.ledger_path().read_text()
+    line = json.loads(raw.splitlines()[-1])
+    assert (line["decision"], line["action_type"]) == ("ask", "ai_budget")
+    assert "the month to date of the team payments was read by" in line["reason"]
+    for leak in ("5420", "5,420", "box.example.com", YESTERDAY, "2026-10-04", "2026-10-01"):
+        assert leak not in raw, leak
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(team["org"]))
+    payload = cc.build(agent_usage=False)
+    assert b"5420" not in payload.data and b"5,420" not in payload.data
+    assert b"box.example.com" not in payload.data
+
+
+def test_a_figure_is_dated_by_its_own_records_not_the_workspaces_newest(team):
+    """as_of is the newest receipt from anyone in the workspace; the reason
+    also says how far the team's own records run."""
+    _machine(team, 300)
+    _keep(answer(team_usd="5420"))
+    r = guard.gate_command("ls -la")["reason"]
+    assert "the newest it received from anyone in the workspace" in r
+    assert "3 of the team's 4 people sent" in r
+    assert "their records running to 2026-10-04" in r
+    assert "the oldest of their last days 2026-10-01" in r
+
+
+def test_a_standing_the_plan_does_not_include_is_said_and_exits_0(laptop):
+    for error in ("not_on_plan", "plan_required"):
+        code, out, err = _status(StandingBox(refuse=403, refuse_error=error))
+        assert code == 0, (error, out, err)
+        assert "plan does not include a person's standing" in out and error in out
+        assert "analyst key" not in out
+        assert "not read for alice@acme.example (git user.email)" in out
+    code, out, _err = _status(StandingBox(refuse=403, refuse_error="not_on_plan"), "--json")
+    got = json.loads(out)["standing"]
+    assert code == 0 and got["read"] is False and got["asked"] is True and got["plan"] is True
+
+
+@pytest.mark.parametrize("person", ["x" * 3000 + "@acme.example", "nobody-in-particular",
+                                    "alice@acme.example\nX-Injected: 1"],
+                         ids=["3000 characters", "not an email", "two lines"])
+def test_a_person_the_box_would_not_take_is_never_sent(laptop, monkeypatch, person):
+    monkeypatch.setenv("FINOPS_GUARD_PERSON", person)
+    box = StandingBox()
+    code, out, err = _status(box)
+    assert code == 0 and box.standing_posts == []
+    assert "FINOPS_GUARD_PERSON is not an email or github:LOGIN" in out
+    assert person not in out + err and "x" * 100 not in out + err
 
 
 # ── the guard's own file, and no network ─────────────────────────────────────
@@ -530,8 +702,8 @@ def test_the_ledger_line_keeps_decision_and_action_type_and_adds_the_figures(tea
     guard.gate_command("ls -la", record=True)
     line = [json.loads(x) for x in guard_ledger.ledger_path().read_text().splitlines()][-1]
     assert (line["decision"], line["action_type"]) == ("ask", "ai_budget")
-    assert line["budget_figure"]["compared"] == "box"
-    assert line["budget_figure"]["box_usd"] == "5420"
+    assert line["budget_figure"] == {"compared": "box", "machine_usd": "300.00",
+                                     "box_figure_read": True}
 
 
 def test_the_standing_file_keeps_no_key_and_no_more_than_it_checked(laptop):
@@ -563,6 +735,7 @@ def test_the_file_lives_beside_the_ledger_and_is_a_guard_file(laptop):
 # reads past keys it does not keep.
 RECORDED = {
     "month": "2026-10", "as_of": "2026-10-17T12:00:00+00:00",
+    "workspace_ref": "ws_0c5f2b0f8f7e4c1a9d3b6e2f1a0b9c8d",
     "person": {"id": "alice@acme.example", "usd": "5.75", "days": 2, "last_day": "2026-10-16",
                "budget": {"monthly_usd": None, "per_person_usd": "4", "state": "over"},
                "status": "ok"},
@@ -577,6 +750,7 @@ RECORDED = {
     "basis": "list-price equivalent"}
 RECORDED_NONE = {
     "month": "2026-10", "as_of": None,
+    "workspace_ref": "ws_0c5f2b0f8f7e4c1a9d3b6e2f1a0b9c8d",
     "person": {"id": "dana@acme.example", "usd": None, "days": 0, "last_day": None,
                "budget": None, "status": "no records received"},
     "teams": [], "org": {"usd": None, "people_sent": 0, "latest_day": None, "budget": None,
