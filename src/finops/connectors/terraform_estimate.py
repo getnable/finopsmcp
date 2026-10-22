@@ -29,6 +29,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import sys
@@ -583,21 +584,65 @@ _ESTIMATORS: dict[str, Any] = {
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def _plan_region(plan_data: dict, default: str | None) -> str | None:
-    """The AWS provider's region when the plan's configuration holds it as a
-    constant; `default` (the environment's, which the provider then uses)
-    when the provider names no region at all; else None (a variable, an
-    expression, or an aliased provider the guard does not follow)."""
+def _provider_keys(plan_data: dict) -> dict[str, str]:
+    """{a resource's configuration address (module path and type.name, no
+    instance keys): the provider_config_key it is made through}, from the
+    plan's configuration (the root module and its module calls)."""
+    out: dict[str, str] = {}
+
+    def walk(module: Any, prefix: str, depth: int) -> None:
+        if not isinstance(module, dict) or depth > 16:
+            return
+        for r in module.get("resources") or []:
+            if isinstance(r, dict) and isinstance(r.get("address"), str):
+                key = r.get("provider_config_key")
+                out[prefix + r["address"]] = key if isinstance(key, str) else ""
+        calls = module.get("module_calls") or {}
+        if isinstance(calls, dict):
+            for name, call in calls.items():
+                if isinstance(call, dict):
+                    walk(call.get("module"), f"{prefix}module.{name}.", depth + 1)
     try:
-        cfg = plan_data["configuration"]["provider_config"]["aws"]
-        exprs = cfg.get("expressions") or {}
-    except (KeyError, TypeError, AttributeError):
+        walk(plan_data["configuration"]["root_module"], "", 0)
+    except (KeyError, TypeError):
+        pass
+    return out
+
+
+_INSTANCE_KEY_RE = re.compile(r"\[[^\]]*\]")
+
+
+def _plan_region(plan_data: dict, rc: ResourceChange, default: str | None,
+                 keys: dict[str, str] | None = None) -> str | None:
+    """The region of the AWS provider `rc` is made through (its
+    provider_config_key in the plan's configuration, the default `aws`
+    provider when the configuration names none) when that provider holds it
+    as a constant; `default` when the provider names no region at all; else
+    None (a variable, an expression, a provider the configuration does not
+    hold, or a resource the configuration does not list while an aliased
+    provider could have made it)."""
+    try:
+        providers = plan_data["configuration"]["provider_config"]
+    except (KeyError, TypeError):
         return default
+    if not isinstance(providers, dict):
+        return None
+    keys = _provider_keys(plan_data) if keys is None else keys
+    key = keys.get(_INSTANCE_KEY_RE.sub("", rc.address))
+    if key is None:
+        aws = [k for k, v in providers.items() if isinstance(v, dict) and v.get("name") == "aws"]
+        if aws != ["aws"]:
+            return None if aws else default
+        key = "aws"
+    cfg = providers.get(key or "aws")
+    if not isinstance(cfg, dict) or cfg.get("name", "aws") != "aws":
+        return None
+    exprs = cfg.get("expressions") or {}
     if not isinstance(exprs, dict) or "region" not in exprs:
         return default
     expr = exprs["region"]
     value = expr.get("constant_value") if isinstance(expr, dict) else None
-    return value if isinstance(value, str) and value.strip() else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def priced_skus(plan_data: dict, *, default_region: str | None = None
@@ -605,12 +650,13 @@ def priced_skus(plan_data: dict, *, default_region: str | None = None
     """What a saved plan creates that the workspace's effective rates can
     price (D146): each aws_instance, aws_db_instance (MySQL, MariaDB and
     PostgreSQL) and aws_elasticache_cluster it creates, as the guard's SKU
-    (guard._sku): product code, the provider's region (_plan_region), the
-    usage type as the bill names it, the quantity, the list hourly rate one
-    unit is priced at, and that unit's monthly figure. A resource a price
+    (guard._sku): product code, the region of the provider it is made
+    through (_plan_region; `default_region` where that provider names none),
+    the usage type as the bill names it, the quantity, the list hourly rate
+    one unit is priced at, and that unit's monthly figure. A resource a price
     book prices is marked, so its book figure stands. Nothing here changes a
     figure the plan's estimate judges."""
-    region = _plan_region(plan_data, default_region)
+    keys = _provider_keys(plan_data)
     out: list[dict[str, Any]] = []
     for rc in parse_plan(plan_data):
         if not rc.is_create or rc.is_delete:
@@ -637,7 +683,9 @@ def priced_skus(plan_data: dict, *, default_region: str | None = None
         product, usage_type, qty, hourly, name = sku
         if hourly is None or not name:
             continue
-        out.append({"product_code": product, "region": region, "usage_type": usage_type,
+        out.append({"product_code": product,
+                    "region": _plan_region(plan_data, rc, default_region, keys),
+                    "usage_type": usage_type,
                     "quantity": qty, "unit": "Hrs", "hours": HOURS_PER_MONTH,
                     "usd_hour": round(float(hourly), 6),
                     "monthly_usd": round(float(hourly) * qty * HOURS_PER_MONTH, 2),

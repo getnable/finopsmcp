@@ -173,6 +173,80 @@ def test_a_saved_plan_with_an_instance_and_a_database_shows_both_at_your_effecti
     assert v["effective"]["monthly_usd"] == pytest.approx(listed * 0.3, abs=0.02)
 
 
+def _aliased_plan(region_west: dict, *, key: str = "aws.west", module: bool = False) -> dict:
+    """A plan whose default provider is in us-east-1 and whose aws.west
+    provider (`region_west`, its region expression) creates the instance."""
+    res = {"address": "aws_instance.web", "mode": "managed", "type": "aws_instance",
+           "name": "web", "provider_config_key": key}
+    db = {"address": "aws_db_instance.db", "mode": "managed", "type": "aws_db_instance",
+          "name": "db", "provider_config_key": "aws"}
+    root: dict = {"resources": [db]}
+    address = "aws_instance.web"
+    if module:
+        root["module_calls"] = {"app": {"source": "./app", "module": {"resources": [res]}}}
+        address = "module.app[0].aws_instance.web"
+    else:
+        root["resources"].append(res)
+    change = {"mode": "managed", "change": {"actions": ["create"], "before": None}}
+    return {"format_version": "1.2", "configuration": {
+        "provider_config": {
+            "aws": {"name": "aws", "expressions": {"region": {"constant_value": "us-east-1"}}},
+            "aws.west": {"name": "aws", "alias": "west", "expressions": {"region": region_west}}},
+        "root_module": root},
+        "resource_changes": [
+            {**change, "address": address, "type": "aws_instance",
+             **({"module_address": "module.app[0]"} if module else {}),
+             "change": {**change["change"], "after": {"instance_type": "m5.4xlarge"}}},
+            {**change, "address": "aws_db_instance.db", "type": "aws_db_instance",
+             "change": {**change["change"], "after": {"instance_class": "db.r5.large",
+                                                      "engine": "postgres"}}}]}
+
+
+@pytest.mark.parametrize("module", [False, True], ids=["root", "module"])
+def test_a_resource_made_through_an_aliased_provider_is_priced_in_that_providers_region(
+        module):
+    from finops.connectors.terraform_estimate import priced_skus
+    skus = priced_skus(_aliased_plan({"constant_value": "us-west-2"}, module=module))
+    assert {s["usage_type"]: s["region"] for s in skus} == {
+        "BoxUsage:m5.4xlarge": "us-west-2", "InstanceUsage:db.r5.large": "us-east-1"}
+
+
+@pytest.mark.parametrize("region", [{"references": ["var.region"]}, {}],
+                         ids=["a variable", "no region"])
+def test_an_aliased_providers_region_that_is_not_a_constant_names_none(region):
+    from finops.connectors.terraform_estimate import priced_skus
+    skus = priced_skus(_aliased_plan(region))
+    assert {s["usage_type"]: s["region"] for s in skus} == {
+        "BoxUsage:m5.4xlarge": None, "InstanceUsage:db.r5.large": "us-east-1"}
+
+
+def test_a_provider_naming_no_region_is_not_given_the_environments(monkeypatch):
+    """The provider then takes the environment's region when it applies; the
+    plan's figure is us-east-1's list price, so no factor is matched."""
+    from finops.connectors.terraform_estimate import priced_skus
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    doc = _aliased_plan({"constant_value": "us-west-2"})
+    doc["configuration"]["provider_config"]["aws"]["expressions"] = {}
+    skus = priced_skus(doc)
+    assert {s["usage_type"]: s["region"] for s in skus} == {
+        "BoxUsage:m5.4xlarge": "us-west-2", "InstanceUsage:db.r5.large": None}
+
+
+def test_a_plan_through_an_aliased_provider_is_not_matched_to_the_default_regions_rate(
+        tmp_path, monkeypatch):
+    doc = _aliased_plan({"constant_value": "us-west-2"})
+    (tmp_path / "plan.out").write_bytes(b"binary plan")
+    monkeypatch.setattr(g, "_plan_read", lambda *a, **k: ("terraform", "plan.out", doc))
+    keep_rates()
+    v = g.gate_command("terraform apply plan.out", cwd=str(tmp_path))
+    assert v["decision"] == "ask"
+    by_type = {p["usage_type"]: p for p in v["priced"]}
+    assert by_type["BoxUsage:m5.4xlarge"]["region"] == "us-west-2"
+    assert by_type["BoxUsage:m5.4xlarge"]["factor"] is None
+    assert by_type["InstanceUsage:db.r5.large"]["factor"] == LOW
+    assert "BoxUsage:m5.4xlarge in us-east-1" not in v["reason"]
+
+
 # ── rule 13: the same verdict, with and without the rate ─────────────────────
 
 def _judged(v: dict) -> dict:
@@ -287,13 +361,67 @@ def test_without_a_usable_rate_the_ask_says_at_list_price(monkeypatch, case, why
     assert _records()[-1]["price_basis"] == "list" and "effective" not in _records()[-1]
 
 
-def test_the_cli_configs_region_matches_a_rate(tmp_path, monkeypatch):
+@pytest.mark.parametrize("how", ["the cli config", "AWS_REGION", "--profile",
+                                 "an inline AWS_PROFILE"])
+def test_a_region_the_command_does_not_name_is_not_matched_to_its_list_price(
+        tmp_path, monkeypatch, how):
+    """A command that names no region is priced at us-east-1's list price,
+    while the AWS CLI launches it in the environment's or the profile's
+    region. Neither is matched to a rate: one region's factor is never
+    applied to another region's list price, and the ledger names no region
+    the price was not figured in."""
     cfg = tmp_path / "aws-config"
-    cfg.write_text("[default]\nregion = us-east-1\n")
+    cfg.write_text("[default]\nregion = us-east-1\n[profile eu]\nregion = eu-west-1\n")
     monkeypatch.setenv("AWS_CONFIG_FILE", str(cfg))
+    cmd = EC2.replace("--region us-east-1 ", "")
+    if how == "AWS_REGION":
+        monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    elif how == "--profile":
+        cmd = cmd.replace("run-instances", "run-instances --profile eu")
+    elif how == "an inline AWS_PROFILE":
+        cmd = "AWS_PROFILE=eu " + cmd
+    keep_rates(rows=[*ROWS, *(_row("AmazonEC2", "BoxUsage:m5.2xlarge", region=r)
+                              for r in ("eu-west-1", "eu-central-1"))])
+    v = g.gate_command(cmd)
+    assert v["decision"] == "ask" and v["price_basis"] == "list" and "effective" not in v
+    assert v["priced"]["region"] is None
+    assert v["priced"]["usd_hour"] == EC2_HOURLY["m5.2xlarge"]
+    assert "names no region" in v["reason"] and "at your effective rate" not in v["reason"]
+
+
+def test_a_named_region_is_the_one_the_list_price_and_the_rate_are_for():
+    from finops.aws_prices import EC2_REGION_RANGE
+    keep_rates(rows=[*ROWS, _row("AmazonEC2", "BoxUsage:m5.2xlarge", region="eu-central-1")])
+    v = g.gate_command(EC2.replace("us-east-1", "eu-central-1"))
+    low = EC2_REGION_RANGE["eu-central-1"][0]
+    assert v["priced"]["region"] == "eu-central-1"
+    assert v["priced"]["usd_hour"] == round(EC2_HOURLY["m5.2xlarge"] * low, 6)
+    assert v["price_basis"] == "effective"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+@pytest.mark.parametrize("cmd", [EC2.replace("--region us-east-1 ", ""),
+                                 RDS.replace("--region us-east-1 ", "")])
+def test_a_fifo_in_place_of_the_aws_cli_config_never_holds_the_priced_ask(
+        tmp_path, monkeypatch, cmd):
+    """The hook fails open when it runs out of time, so a file the guard
+    waits on would cost the ask."""
+    import threading
+    home = tmp_path / "home"
+    (home / ".aws").mkdir(parents=True)
+    fifo = home / ".aws" / "config"
+    os.mkfifo(fifo)
+    monkeypatch.delenv("AWS_CONFIG_FILE")
     keep_rates()
-    v = g.gate_command(EC2.replace("--region us-east-1 ", ""))
-    assert v["price_basis"] == "effective" and v["priced"]["region"] == "us-east-1"
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.update(v=g.gate_command(cmd)), daemon=True)
+    t.start()
+    t.join(5)
+    if t.is_alive():
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))     # let the reader go
+        t.join(5)
+        pytest.fail("the guard waited on a FIFO in place of ~/.aws/config")
+    assert got["v"]["decision"] == "ask" and got["v"]["price_basis"] == "list"
 
 
 def test_a_price_book_sku_keeps_the_books_figure_and_no_effective_rate(monkeypatch):

@@ -283,10 +283,16 @@ coding-agent spend a person can carry into a paid workspace.
   the book's figure stands and no effective rate is applied. A rate that is
   missing, more than 45 days past its as_of, another workspace's or box's, or
   not held for that usage type and region says "Priced at list price" and
-  why. The region is the command's, else `AWS_REGION`, `AWS_DEFAULT_REGION`
-  or the AWS CLI config's for the active profile. `cloud-rates.json` is one
-  of the guard's own files. The guard reads it with no connection, and only
-  on a priced call.
+  why. The region is the one the command names (`--region`, or an inline
+  `AWS_REGION=` or `AWS_DEFAULT_REGION=`), the one its list price is figured
+  in; a command that names none is priced at us-east-1's list price while
+  the AWS CLI may launch it elsewhere (the environment's region, `--profile`),
+  so no rate is matched and it says so. Nothing on the priced path reads the
+  AWS CLI's config file. In a saved plan each resource takes the region of
+  the provider it is made through (`provider = aws.west`), a constant only;
+  a variable, or a provider naming no region, matches no rate.
+  `cloud-rates.json` is one of the guard's own files. The guard reads it with
+  no connection, and only on a priced call.
 - **The ledger says what it priced (contract 2).** A verdict line on a priced
   launch carries `priced` (product code, region, usage type, quantity, unit,
   the hours a month priced over, and the hourly rate one unit was priced at;
@@ -317,8 +323,29 @@ coding-agent spend a person can carry into a paid workspace.
   naming the files; the same tree with no local changes under it stays
   silent; a branch made at HEAD (`checkout -b`, `switch -c`, `--detach`)
   stays silent. When it cannot tell (an unresolvable ref, a missing object, a
-  spent meter) it asks whenever the repo holds org files, as the rewrites
-  above do. `nable guard doctor` no longer lists the branch switch as a gap.
+  spent meter, a repo that replaces objects with refs/replace or grafts) it
+  asks whenever the repo holds org files, as the rewrites above do. A switch
+  that is not forced to the same org tree stays silent, since git carries
+  local changes over; a forced one (`-f`, `--force`, `--discard-changes`,
+  or paths read with `--pathspec-from-file`) asks when the files on disk
+  differ from the target's, read by content, so moving HEAD first with
+  `git update-ref` or `git reset --soft` does not hide it. Short options
+  are read one letter at a time (`-qb NAME`, `-fq`). A switch, checkout,
+  restore or stash through another git directory, index, object store or
+  work tree (`--git-dir`, `--work-tree`, `--namespace`, `GIT_DIR`,
+  `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `-c core.worktree`) asks wherever that
+  work tree holds org files, as does `read-tree -u`, `checkout-index` of
+  all files (or one under the org directory), `bisect` when it checks a
+  commit out, `sparse-checkout`, `submodule update`, `merge-file`,
+  `merge-index`, `mergetool` and `filter-branch`. An alias (from `-c
+  alias.NAME=...` or the git config files the guard reads) is judged as
+  what it runs; a shell alias, one the guard cannot read (a config with an
+  include), and a command git does not ship (git-lfs, git-flow) ask
+  wherever the repo holds org files. Every git file is read without
+  waiting, so a FIFO in place of one is "could not tell", never a hook that
+  runs out of time. `nable guard doctor` no longer lists the branch switch
+  as a gap, and names what git runs for you (a hook, a filter, a merge
+  driver) as one.
 - **Each box figure dated by its own as_of.** The box's standing sends an
   as_of on each figure (the person's, each team's and the org's: the latest
   receipt among the records in it). The guard's reason, the figure's age and

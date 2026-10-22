@@ -410,6 +410,23 @@ def test_a_cli_config_that_does_not_parse_names_no_region(laptop, monkeypatch):
     assert cloud_rates.env_region() is None
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+def test_a_cli_config_that_is_a_fifo_is_not_waited_on(laptop, monkeypatch):
+    import threading
+    fifo = laptop / "aws-config-fifo"
+    os.mkfifo(fifo)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(fifo))
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.update(r=cloud_rates.env_region()), daemon=True)
+    t.start()
+    t.join(5)
+    if t.is_alive():
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))     # let the reader go
+        t.join(5)
+        pytest.fail("env_region waited on a FIFO")
+    assert got == {"r": None}
+
+
 def test_the_module_names_no_network_client():
     import ast
     import inspect

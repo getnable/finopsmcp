@@ -1694,16 +1694,19 @@ def _book_field(book: dict[str, Any], judged: bool = True,
 
 # What an estimate priced, for the workspace's effective rate (cloud_rates,
 # D146) and for the ledger (contract 2's `priced`): the product code, the
-# region the command or the environment names, the usage type as the bill
-# names it without its region prefix, the quantity, and the hourly rate one
-# unit was priced at. Only on-demand launches of the families the box derives
-# rates for (EC2 run-instances, RDS create-db-instance, ElastiCache
-# create-cache-cluster, and the same resources in a saved Terraform plan).
-# Nothing here changes a figure the guard judges.
+# region the command names (the one its list price is figured in), the usage
+# type as the bill names it without its region prefix, the quantity, and the
+# hourly rate one unit was priced at. A command that names no region is
+# priced at us-east-1's list price while the AWS CLI launches it in the
+# environment's or the profile's region, so it records no region and no
+# factor is applied to it; nothing on this path reads the environment's AWS
+# config. Only on-demand launches of the families the box derives rates for
+# (EC2 run-instances, RDS create-db-instance, ElastiCache create-cache-cluster,
+# and the same resources in a saved Terraform plan). Nothing here changes a
+# figure the guard judges.
 def _sku(product: str, usage_type: str, quantity: float, hourly: float, monthly: float,
          book: dict[str, Any] | None) -> dict[str, Any]:
-    from .cloud_rates import env_region
-    return {"product_code": product, "region": _PRICING_REGION.get() or env_region(),
+    return {"product_code": product, "region": _PRICING_REGION.get(),
             "usage_type": usage_type, "quantity": quantity, "unit": "Hrs",
             "hours": _hours_per_month(), "usd_hour": round(hourly, 6),
             "monthly_usd": round(monthly, 2), "price_book": book is not None}
@@ -2942,9 +2945,8 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
     basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}{booked}"
              + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
                 if unpriced else ""))
-    from .cloud_rates import env_region
     from .connectors.terraform_estimate import priced_skus
-    skus = priced_skus(doc, default_region=env_region())
+    skus = priced_skus(doc)
     return {
         "monthly_usd": round(monthly, 2),
         "plan": plan,
@@ -6051,36 +6053,126 @@ def _landing_names(entries: list[Any]) -> set[str]:
 
 
 # git commands that rewrite tracked files from a commit or a patch the guard
-# does not read (reset only with --hard, --merge or --keep), and the apply
+# does not read (reset only with --hard, --merge or --keep), or that run
+# something which may (merge-index, mergetool, filter-branch), and the apply
 # options that only read a patch.
-_GIT_REWRITES = ("merge", "pull", "rebase", "cherry-pick", "revert", "am", "apply", "reset")
+_GIT_REWRITES = ("merge", "pull", "rebase", "cherry-pick", "revert", "am", "apply", "reset",
+                 "merge-index", "merge-one-file", "mergetool", "filter-branch")
 _APPLY_READS = ("--check", "--stat", "--numstat", "--summary")
+# git's own commands that write no tracked file of the work tree from
+# another commit or the index. A word not here and not judged below is an
+# alias (resolved, _git_alias) or a command outside git (git-lfs, git-flow,
+# git-svn), judged as a rewrite wherever the repo holds org files.
+_GIT_KNOWN = frozenset((
+    "add", "annotate", "archive", "blame", "branch", "bugreport", "bundle", "cat-file",
+    "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "cherry", "citool",
+    "clone", "column", "commit", "commit-graph", "commit-tree", "config", "count-objects",
+    "credential", "credential-cache", "credential-store", "describe", "diagnose", "diff",
+    "diff-files", "diff-index", "diff-tree", "difftool", "fast-export", "fast-import", "fetch",
+    "fetch-pack", "fmt-merge-msg", "for-each-ref", "for-each-repo", "format-patch", "fsck",
+    "fsck-objects", "gc", "get-tar-commit-id", "grep", "gui", "hash-object", "help", "hook",
+    "index-pack", "init", "init-db", "instaweb", "interpret-trailers", "log", "ls-files",
+    "ls-remote", "ls-tree", "mailinfo", "mailsplit", "maintenance", "merge-base",
+    "merge-tree", "mktag", "mktree", "multi-pack-index", "name-rev", "notes", "pack-objects",
+    "pack-redundant", "pack-refs", "patch-id", "prune", "prune-packed", "push", "range-diff",
+    "receive-pack", "reflog", "remote", "repack", "replace", "request-pull", "rerere",
+    "rev-list", "rev-parse", "send-email", "send-pack", "shortlog", "show", "show-branch",
+    "show-index", "show-ref", "stage", "status", "stripspace", "symbolic-ref", "tag",
+    "unpack-file", "unpack-objects", "update-index", "update-ref", "update-server-info",
+    "upload-archive", "upload-pack", "var", "verify-commit", "verify-pack", "verify-tag",
+    "version", "whatchanged", "worktree", "write-tree"))
+# bisect's words that check out no commit.
+_BISECT_READS = ("log", "visualize", "view", "terms", "help")
+# What points git at objects, refs, an index, a config or a work tree other
+# than those of the repo the guard finds from the working directory.
+_GIT_ELSEWHERE_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                      "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+                      "GIT_REPLACE_REF_BASE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT")
+# What points git at other config files than guard_paths.git_config_files
+# names, from which an alias is read.
+_GIT_CONFIG_ENV = ("HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+                   "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG")
+# git's global options that take no value. Any other word before the
+# command is one the guard cannot place (a quoted alias read as words).
+_GIT_GLOBAL_FLAGS = frozenset(("-p", "-P", "--paginate", "--no-pager", "--no-replace-objects",
+                               "--no-lazy-fetch", "--no-optional-locks", "--no-advice",
+                               "--bare", "--literal-pathspecs", "--glob-pathspecs",
+                               "--noglob-pathspecs", "--icase-pathspecs", "--version", "-v",
+                               "--help", "-h", "--html-path", "--man-path", "--info-path"))
+_GIT_ALIAS_DEPTH = 8
+_GIT_CONFIG_MAX = 256 * 1024
+_GIT_SECTION_RE = _Lazy(r'\[\s*([A-Za-z0-9.-]+)(?:\s+"(?:[^"\\]|\\.)*")?\s*\]\s*(.*)')
 
 
-def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str]:
+def _git_targets(args: list[str], base: str, env: dict[str, str] | None = None,
+                 depth: int = 0) -> tuple[list[tuple[str, Any]], str]:
     """(targets, directory) for a git command: checkout and restore of paths,
-    rm, mv and clean; and the commands that rewrite tracked files from a
-    commit or a patch (merge, pull, rebase, cherry-pick, revert, am, apply,
-    a hard reset), as the whole repo ("repo"). `git -C dir` and
-    `--work-tree=dir` move the directory."""
+    rm, mv, clean, merge-file and checkout-index of paths; and the commands
+    that rewrite tracked files from a commit, the index or a patch (merge,
+    pull, rebase, cherry-pick, revert, am, apply, a hard reset, read-tree -u,
+    checkout-index of all, bisect, sparse-checkout, submodule update), as the
+    whole repo ("repo"). `git -C dir` moves the directory. An alias is judged
+    as what it runs, and a word git does not know as a rewrite. Another git
+    directory, index, object store or work tree (--git-dir, GIT_DIR,
+    GIT_WORK_TREE, -c core.worktree, ...) makes a switch, a checkout, a
+    restore and a stash a rewrite of the work tree it writes, as a merge is
+    judged: the guard reads the working directory's repo, not that one."""
+    from . import guard_paths
+    env = env or {}
+    start = base
+    elsewhere = any(k in env for k in _GIT_ELSEWHERE_ENV)
+    git_dir = "GIT_DIR" in env
+    work_tree = (os.path.join(base, os.path.expanduser(env["GIT_WORK_TREE"]))
+                 if env.get("GIT_WORK_TREE") else None)
+    aliases: dict[str, str | None] = {}
+    files_ok = not any(k in env for k in _GIT_CONFIG_ENV)
+    unplaced = False
     i = 0
     while i < len(args) and args[i].startswith("-"):
         w = args[i]
-        if w == "-C" and i + 1 < len(args):
-            base = os.path.join(base, os.path.expanduser(args[i + 1]))
-            i += 2
-            continue
-        if w.startswith("--work-tree="):
-            base = os.path.join(base, os.path.expanduser(w.split("=", 1)[1]))
-        i += 2 if w in ("-c", "--git-dir", "--work-tree", "--namespace") else 1
+        name, eq, attached = w.partition("=")
+        takes = name in _GIT_GLOBAL_WITH_VALUE and not eq
+        value = (args[i + 1] if i + 1 < len(args) else "") if takes else attached
+        if name not in _GIT_GLOBAL_WITH_VALUE and name not in _GIT_GLOBAL_FLAGS:
+            unplaced = True
+        if name == "-C" and takes:
+            base = os.path.join(base, os.path.expanduser(value))
+        elif name == "--work-tree":
+            work_tree = os.path.join(base, os.path.expanduser(value))
+            elsewhere = True
+        elif name in ("--git-dir", "--bare"):
+            elsewhere = git_dir = True
+        elif name == "--namespace":
+            elsewhere = True
+        elif name in ("-c", "--config-env"):
+            key, has, val = value.partition("=")
+            key = key.strip().lower()
+            if key == "core.worktree" or key.startswith("include"):
+                elsewhere = True
+                files_ok = False
+            if key.startswith("alias."):
+                # --config-env reads the value from a variable: not known here;
+                # a shell alias runs anything.
+                aliases[key[6:]] = val if has and name == "-c" else None
+                unplaced = unplaced or val.lstrip("'\"").startswith("!")
+        i += 2 if takes else 1
     if i >= len(args):
         return [], base
+
+    def repo() -> list[tuple[str, Any]]:
+        # The work tree git writes: the one named, else the working
+        # directory under another git directory, else the repo's root.
+        top = work_tree or (base if git_dir else str(guard_paths.git_root(base) or base))
+        return [(top, "repo")]
     sub, rest = args[i], args[i + 1:]
+    if unplaced:
+        return repo(), base
+    if elsewhere and sub in ("checkout", "switch", "restore", "stash"):
+        return repo() + [(p, False) for p in _plain_args(rest)], base
     switch = _branch_switch(sub, rest, base)
     if switch is not None:
         if switch is False:
             return [], base
-        from . import guard_paths
         root = guard_paths.git_root(base)
         return [(str(root) if root else ".", ("switch", switch))], base
     if sub in ("checkout", "restore"):
@@ -6107,7 +6199,6 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         # It takes back the changes to every tracked file in the repo (or
         # under the pathspecs after `--`), untracked ones too with -u or -a;
         # pop and apply put back whatever the stash holds.
-        from . import guard_paths
         spec = rest[rest.index("--") + 1:] if "--" in rest else []
         root = guard_paths.git_root(base)
         if rest and rest[0] in ("pop", "apply"):
@@ -6117,18 +6208,42 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         else:
             mode = "changed"
         return [(p, mode) for p in (spec or [str(root) if root else "."])], base
-    if sub in _GIT_REWRITES and not (
-            "-h" in rest or "--help" in rest
-            or (sub == "apply" and any(w in _APPLY_READS for w in rest)
-                and "--apply" not in rest)
-            or (sub == "reset" and not any(w in ("--hard", "--merge", "--keep")
-                                           for w in rest))):
+    if "-h" in rest or "--help" in rest:
+        return [], base
+    if sub in _GIT_REWRITES:
+        if (sub == "apply" and any(w in _APPLY_READS for w in rest)
+                and "--apply" not in rest) or (sub == "reset" and not any(
+                    w in ("--hard", "--merge", "--keep") for w in rest)):
+            return [], base             # it reads, or moves the index alone
         # What it changes is in a commit or a patch the guard does not read:
         # it asks whenever the repo holds one of the guard's own org files,
         # or the org directory one would be made in.
-        from . import guard_paths
-        root = guard_paths.git_root(base)
-        return [(str(root) if root else ".", "repo")], base
+        return repo(), base
+    if sub == "read-tree":
+        # -u writes the work tree from the trees it reads (-n: a dry run).
+        writes = (_has_short(rest, "u") and not (_has_short(rest, "n") or "--dry-run" in rest))
+        return (repo() if writes else []), base
+    if sub == "checkout-index":
+        force = _has_short(rest, "f") or "--force" in rest
+        if "--temp" in rest or ((_has_short(rest, "n") or "--no-create" in rest) and not force):
+            return [], base             # temporary files, or nothing new and nothing over
+        if _has_short(rest, "a") or any(w in ("--all", "--stdin") or w.startswith("--prefix")
+                                         for w in rest):
+            return repo(), base
+        return [(p, False) for p in _plain_args(rest)], base
+    if sub == "merge-file":
+        if _has_short(rest, "p") or "--stdout" in rest:
+            return [], base
+        plain = _plain_args([w for j, w in enumerate(rest)
+                             if not (j and rest[j - 1] in ("-L", "--diff-algorithm"))])
+        return [(p, False) for p in plain[:1]], base
+    if sub == "bisect":
+        return ([] if not rest or rest[0] in _BISECT_READS else repo()), base
+    if sub == "sparse-checkout":
+        return ([] if not rest or rest[0] == "list" else repo()), base
+    if sub == "submodule":
+        words = _plain_args(rest)
+        return (repo() if words and words[0] in ("update", "deinit", "foreach") else []), base
     if sub == "rm" and "--cached" in rest:
         # The index only: the files stay, but the next commit drops what is
         # tracked from the repo (nable.org/ with it) for everyone else.
@@ -6139,24 +6254,133 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
             _has_short(rest, "n") or "--dry-run" in rest):
         # It deletes what is untracked, so only a protected file that is there.
         return [(p, "exists") for p in (_plain_args(rest) or ["."])], base
-    return [], base
+    if sub in _GIT_KNOWN or sub in ("stash", "clean") or sub.startswith("-"):
+        return [], base                 # stash list, clean -n, ...
+    # An alias runs what it names; a shell alias (!...), an alias the guard
+    # cannot read, and a command outside git may rewrite anything.
+    value = aliases[sub.lower()] if sub.lower() in aliases else (
+        _git_alias(sub, guard_paths.git_root(start)) if files_ok else None)
+    if value and not value.startswith("!") and depth < _GIT_ALIAS_DEPTH:
+        import shlex
+        try:
+            expanded = shlex.split(value)
+        except ValueError:
+            expanded = []
+        if expanded:
+            return _git_targets([*args[:i], *expanded, *rest], start, env, depth + 1)
+    return repo(), base
+
+
+def _git_config_value(raw: str) -> str | None:
+    """A git config value as git reads it (quotes, escapes, a trailing
+    comment), or None for one this does not read (continued on the next
+    line, an open quote)."""
+    out: list[str] = []
+    quoted = False
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if c == "\\":
+            if i + 1 >= len(raw):
+                return None
+            out.append({"n": "\n", "t": "\t", "b": "\b"}.get(raw[i + 1], raw[i + 1]))
+            i += 2
+            continue
+        if c == '"':
+            quoted = not quoted
+        elif c in "#;" and not quoted:
+            break
+        else:
+            out.append(c)
+        i += 1
+    return None if quoted else "".join(out).strip()
+
+
+def _git_alias(sub: str, root: Path | None) -> str | None:
+    """What alias.<sub> runs, from the config files git reads it from
+    (guard_paths.git_config_files, in git's order, the last one winning);
+    None when none defines it, or when that cannot be told: a file not read
+    whole, a value this does not read, or a file that brings in another
+    (include, includeIf)."""
+    from . import guard_paths
+    want = sub.lower()
+    found: str | None = None
+    for path in guard_paths.git_config_files(root):
+        if path.name == "commondir":
+            continue
+        try:
+            raw = guard_paths.read_regular(path, _GIT_CONFIG_MAX + 1)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError:
+            return None
+        if len(raw) > _GIT_CONFIG_MAX:
+            return None
+        guard_paths.charge(1 + len(raw) // (64 * 1024))
+        section = ""
+        for line in raw.decode("utf-8", "replace").splitlines():
+            t = line.strip()
+            if not t or t[0] in "#;":
+                continue
+            m = _GIT_SECTION_RE.match(t)
+            if m:
+                section = m.group(1).lower()
+                if section.startswith("include"):
+                    return None
+                t = m.group(2).strip()
+                if not t:
+                    continue
+            if section != "alias":
+                continue
+            name, eq, value = t.partition("=")
+            if name.strip().lower() != want:
+                continue
+            got = _git_config_value(value) if eq else None
+            if got is None:
+                return None
+            found = got
+    return found
 
 
 # git checkout's and git switch's options that take the next word as their
-# value, and those that create a branch (its name is that value).
+# value, and those that create a branch (its name is that value); the short
+# ones among them, read inside a cluster (`-qb NAME`, `-bNAME`).
 _CHECKOUT_VALUES = ("-b", "-B", "--orphan", "--conflict", "--pathspec-from-file")
 _SWITCH_VALUES = ("-c", "-C", "--create", "--force-create", "--orphan", "--conflict")
 _CREATES = ("-b", "-B", "-c", "-C", "--create", "--force-create", "--orphan")
 
 
+def _short_options(rest: list[str], valued: str) -> list[str]:
+    """`rest` with each cluster of short options (`-qf`, `-qb NAME`) written
+    out one option a word; a letter in `valued` takes the rest of its
+    cluster as its value, or the next word."""
+    out: list[str] = []
+    for j, w in enumerate(rest):
+        if w == "--":
+            return out + rest[j:]
+        if not w.startswith("-") or w.startswith("--") or len(w) <= 2:
+            out.append(w)
+            continue
+        for k, ch in enumerate(w[1:], 1):
+            out.append("-" + ch)
+            if ch in valued:
+                if w[k + 1:]:
+                    out.append(w[k + 1:])
+                break
+    return out
+
+
 def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
     """For `git checkout` and `git switch` of a branch or commit (D157): the
-    switch to judge, (target, branch first, orphan); False for one that
-    changes no file (a branch made at HEAD, a bare checkout); None when the
-    words are not a switch (a checkout of paths, judged as before)."""
+    switch to judge, (target, branch first, orphan, forced); False for one
+    that changes no file (a branch made at HEAD, a bare checkout); None when
+    the words are not a switch (a checkout of paths, judged as before). A
+    checkout of paths read from a file (--pathspec-from-file) is judged as a
+    forced switch: it writes over what changed under them."""
     if sub not in ("checkout", "switch") or "-h" in rest or "--help" in rest:
         return None
     values = _CHECKOUT_VALUES if sub == "checkout" else _SWITCH_VALUES
+    rest = _short_options(rest, "bB" if sub == "checkout" else "cC")
     words, paths, j = [], None, 0
     creates = detach = orphan = force = False
     while j < len(rest):
@@ -6168,6 +6392,7 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
         if name in values:
             creates = creates or name in _CREATES
             orphan = orphan or name == "--orphan"
+            force = force or name == "--pathspec-from-file"
             j += 1 if "=" in w else 2
             continue
         if w == "--detach" or (sub == "switch" and w == "-d"):
@@ -6182,10 +6407,10 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
     if sub == "checkout" and len(words) > 1:
         return None                     # `git checkout REF PATHS`
     if orphan and sub == "switch":
-        return (None, True, True)       # an orphan branch: an empty tree
+        return (None, True, True, force)    # an orphan branch: an empty tree
     if not words and force:
-        # A forced checkout at HEAD throws away what changed since it moved.
-        return ("HEAD", True, False)
+        # A forced checkout at HEAD writes HEAD's content over what differs.
+        return ("HEAD", True, False, True)
     if not words:
         return False if (creates or detach or orphan or sub == "checkout"
                          or paths is not None) else None
@@ -6201,7 +6426,7 @@ def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
         except (guard_git.Unknown, guard_paths.TooMuch, OSError):
             if os.path.lexists(os.path.join(base, os.path.expanduser(target))):
                 return None
-    return (target, not detach, False)
+    return (target, not detach, False, force)
 
 
 def _write_targets(prog: str, args: list[str], base: str,
@@ -6263,7 +6488,7 @@ def _write_targets(prog: str, args: list[str], base: str,
             starts.append((a, ("exists", names)))
         return starts or [(".", ("exists", names))], base
     if prog == "git":
-        return _git_targets(args, base)
+        return _git_targets(args, base, env)
     return [], base
 
 
@@ -6423,15 +6648,16 @@ def _org_entries_under(real: str, entries: list[Any]) -> list[Any]:
                  or e.what.startswith("the org model"))]
 
 
-def _switch_hit(path: str, spec: tuple[Any, bool, bool], where: str, env: dict[str, str],
-                entries: list[Any]) -> Any:
+def _switch_hit(path: str, spec: tuple[Any, bool, bool, bool], where: str,
+                env: dict[str, str], entries: list[Any]) -> Any:
     """The protected entry a branch switch would rewrite (D157), with the
     files that differ named in its words; None when the org model's tree is
-    the same at HEAD and the target and nothing under it changed since HEAD
-    last moved. When that cannot be told, the org directory when the repo
-    holds one, as a merge is judged."""
+    the same at HEAD and the target and the switch is not forced (git
+    carries local changes over), or forced over files on disk that already
+    hold the target's content. When that cannot be told, the org directory
+    when the repo holds one, as a merge is judged."""
     from . import guard_git, guard_paths
-    target, branch_first, orphan = spec
+    target, branch_first, orphan, force = spec
     real = guard_paths.resolve(path, where, env=env)
     if real is None:
         return None
@@ -6443,8 +6669,11 @@ def _switch_hit(path: str, spec: tuple[Any, bool, bool], where: str, env: dict[s
     outer = guard_paths._METER.get()
     token = guard_paths.meter(_GIT_UNITS)
     why = None
+    on_disk: list[str] = []
     try:
         got = guard_git.compare(real, target, rels, branch_first=branch_first, empty=orphan)
+        if got["same"] and force and got.get("target"):
+            on_disk = guard_git.differs_on_disk(real, got["target"], rels)
     except guard_git.NotARepo:
         got, why = {"same": True, "files": []}, None    # git refuses: nothing changes
         target = None
@@ -6463,6 +6692,15 @@ def _switch_hit(path: str, spec: tuple[Any, bool, bool], where: str, env: dict[s
     def entry(at: str, what: str) -> Any:
         return guard_paths.Protected(path=at, shown=guard_paths._shown(Path(at)), what=what,
                                      tree=True)
+
+    def listed(files: list[str]) -> str:
+        return ", ".join(files[:_SWITCH_FILES_SHOWN]) + (
+            f" and {len(files) - _SWITCH_FILES_SHOWN} more"
+            if len(files) > _SWITCH_FILES_SHOWN else "")
+
+    def first(files: list[str]) -> str:
+        return next((os.path.join(real, *r.split("/")) for r in rels
+                     if any(f == r or f.startswith(r + "/") for f in files)), own)
     if got is None:
         # As a merge: an org directory there, or the one that would be made.
         here = [e.path for e in org if os.path.lexists(e.path)]
@@ -6472,22 +6710,14 @@ def _switch_hit(path: str, spec: tuple[Any, bool, bool], where: str, env: dict[s
                      f"this repo's org model, which a switch to {shown_to} may rewrite (the "
                      f"guard could not tell: {why})")
     if got["same"]:
-        if target is None and not orphan:
-            return None                 # a branch made at HEAD changes no file
-        for rel in rels:
-            p = os.path.join(real, *rel.split("/"))
-            if os.path.lexists(p) and guard_paths.git_changed(p, real, tree=True) is not False:
-                return entry(p, f"this repo's org model, whose files changed since HEAD last "
-                                f"moved; a switch to {shown_to} carries those changes over, or "
-                                "forced, throws them away")
-        return None
+        if not on_disk:
+            return None                 # nothing under it is written
+        return entry(first(on_disk), f"this repo's org model, whose files here differ from "
+                                     f"{shown_to}'s ({listed(on_disk)}): a forced switch to "
+                                     f"{shown_to} writes over them")
     files = got["files"]
-    named = ", ".join(files[:_SWITCH_FILES_SHOWN]) + (
-        f" and {len(files) - _SWITCH_FILES_SHOWN} more" if len(files) > _SWITCH_FILES_SHOWN
-        else "")
-    at = next((os.path.join(real, *r.split("/")) for r in rels
-               if any(f == r or f.startswith(r + "/") for f in files)), own)
-    return entry(at, f"this repo's org model: a switch to {shown_to} rewrites {named}")
+    return entry(first(files), f"this repo's org model: a switch to {shown_to} rewrites "
+                               f"{listed(files)}")
 
 
 # What starts a command substitution (`$(...)`, a backtick) or a process
@@ -7771,7 +8001,8 @@ def doctor() -> dict[str, Any]:
                 "and nothing else")
     gaps.append("writes to the guard's own files that the guard cannot see coming: a path "
                 "built at run time ($(...), a loop variable), a script the agent runs, "
-                "an archive unpacked over them")
+                "an archive unpacked over them, a command git runs for you (a hook, a filter "
+                "or a merge driver in its config)")
     for name, (label, _what) in _ADAPTER_SURFACES.items():
         if any(r["harness"] == name and r.get("runs") for r in adapter_rows):
             gaps.append(f"{label}: {_EDITOR_GAPS[name]}")

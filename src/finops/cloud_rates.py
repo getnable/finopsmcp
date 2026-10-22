@@ -390,9 +390,10 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
             unmatched.append((s, why or "no rate is kept"))
             continue
         if not s.get("region"):
-            unmatched.append((s, ("the command names no region (--region, AWS_REGION, or "
-                                  "the AWS CLI's configured region), so no rate of your "
-                                  "workspace's is matched")))
+            unmatched.append((s, ("the command names no region (--region, or an inline "
+                                  "AWS_REGION=), so its list price is us-east-1's while it "
+                                  "may launch elsewhere, and no rate of your workspace's is "
+                                  "matched")))
             continue
         row = lookup(doc, s["product_code"], s["region"], s["usage_type"])
         if row is None or row["on_demand_factor"] is None:
@@ -445,14 +446,23 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
 def _profile_region(environ: Any) -> str | None:
     """The region the AWS CLI's config file gives the active profile, when
     it names one (AWS_CONFIG_FILE, else ~/.aws/config; AWS_PROFILE, else
-    default). At most MAX_BYTES of it are read."""
+    default). At most MAX_BYTES of it are read, and only from a regular file:
+    a FIFO or a device in its place is not waited on."""
     import configparser
+    import stat
     where = environ.get("AWS_CONFIG_FILE", "").strip() or str(Path.home() / ".aws" / "config")
     try:
-        with open(os.path.expanduser(where), "rb") as fh:
-            raw = fh.read(MAX_BYTES + 1)
+        fd = os.open(os.path.expanduser(where), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        raw = os.read(fd, MAX_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
     if len(raw) > MAX_BYTES:
         return None
     profile = (environ.get("AWS_PROFILE", "").strip()

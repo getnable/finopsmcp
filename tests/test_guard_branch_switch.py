@@ -320,13 +320,42 @@ def test_the_same_org_tree_with_no_local_changes_stays_silent(repo, cmd):
     assert _ask(cmd, repo.root) is None, cmd
 
 
-def test_the_same_tree_with_local_changes_under_it_asks(repo):
-    """A forced switch would throw the changes away; the guard cannot tell
-    which switch it is, so it asks."""
+@pytest.mark.parametrize("cmd", ["git checkout docs", "git switch docs", "git checkout main",
+                                 "git switch --detach docs", "git checkout -m docs",
+                                 "git checkout -q docs"])
+def test_the_same_tree_with_local_changes_under_it_carries_them_over_silently(repo, cmd):
+    """Without -f git carries local changes over a switch that changes no org
+    file, so nothing under nable.org/ is written."""
     (repo.root / "nable.org" / "teams.yaml").write_text(TEAMS + "# edited\n")
-    v = _ask("git checkout docs", repo.root)
-    assert v is not None and v["decision"] == "ask"
-    assert "changed since HEAD last moved" in v["reason"]
+    assert _ask(cmd, repo.root) is None, cmd
+
+
+@pytest.mark.parametrize("cmd", ["git checkout -f docs", "git checkout --force docs",
+                                 "git checkout -qf docs", "git checkout -fq",
+                                 "git checkout -qf", "git switch -qf docs",
+                                 "git checkout docs --pathspec-from-file=list.txt",
+                                 "git checkout HEAD --pathspec-from-file list.txt"])
+def test_the_same_tree_with_local_changes_under_it_asks_when_forced(repo, cmd):
+    """A forced switch, or paths read from a file, throws the changes away."""
+    (repo.root / "nable.org" / "teams.yaml").write_text(TEAMS + "# edited\n")
+    v = _ask(cmd, repo.root)
+    assert v is not None and v["decision"] == "ask", cmd
+    assert "a forced switch to" in v["reason"] and _TEAMS_NAMED.search(v["reason"])
+
+
+@pytest.mark.parametrize("cmd", ["git checkout -qb mine evil", "git checkout -fb mine evil",
+                                 "git checkout -qB mine evil", "git checkout -bmine evil",
+                                 "git switch -qc mine evil", "git switch -fC mine evil",
+                                 "git switch -qd evil"])
+def test_clustered_short_options_are_read_one_letter_at_a_time(repo, cmd):
+    v = _ask(cmd, repo.root)
+    assert v is not None and v["decision"] == "ask", (cmd, v)
+    assert _ORG_FILE_NAMED.search(v["reason"]), v["reason"]
+
+
+@pytest.mark.parametrize("cmd", ["git checkout -qb feature", "git switch -qc feature"])
+def test_a_clustered_branch_made_at_head_stays_silent(repo, cmd):
+    assert _ask(cmd, repo.root) is None, cmd
 
 
 @pytest.mark.parametrize("cmd", ["git checkout -b feature", "git switch -c feature",
@@ -497,9 +526,189 @@ def test_a_forced_checkout_over_local_org_changes_asks(repo, cmd):
     (repo.root / "nable.org" / "teams.yaml").write_text(TEAMS + "# edited\n")
     v = _ask(cmd, repo.root)
     assert v is not None and v["decision"] == "ask", cmd
-    assert "changed since HEAD last moved" in v["reason"]
+    assert "a forced switch to" in v["reason"] and _TEAMS_NAMED.search(v["reason"])
+
+
+def test_a_forced_checkout_after_the_branch_moved_under_the_files_asks(repo):
+    """`git update-ref` or `git reset --soft` moves HEAD to another tree and
+    leaves the files: a forced checkout then writes that tree over them,
+    however recently HEAD moved."""
+    repo.ref("refs/heads/main", repo.shas["evil"])
+    repo.checkout_files(MAIN)               # the files older than HEAD's reflog
+    v = _ask("git checkout -f", repo.root)
+    assert v is not None and v["decision"] == "ask"
+    assert _ORG_FILE_NAMED.search(v["reason"]) and not _TEAMS_NAMED.search(v["reason"])
+    assert _ask("git checkout main", repo.root) is None, "not forced: nothing is written"
 
 
 def test_a_forced_checkout_with_nothing_changed_stays_silent(repo):
     assert _ask("git checkout -f", repo.root) is None
     assert _ask("git switch -f docs", repo.root) is None
+
+
+# ── another git directory, global options and other words ────────────────────
+
+@pytest.fixture
+def other(machine):
+    """A second repo elsewhere on disk whose main holds the widened authority."""
+    r = GitRepo(machine / "other")
+    main = r.snapshot(EVIL)
+    r.ref("refs/heads/main", main)
+    r.head("main")
+    return r
+
+
+@pytest.mark.parametrize("cmd", [
+    "git --git-dir={o}/.git --work-tree=. checkout -f main",
+    "git --git-dir {o}/.git --work-tree . checkout -f main",
+    "GIT_DIR={o}/.git GIT_WORK_TREE=. git checkout -f main",
+    "env GIT_DIR={o}/.git GIT_WORK_TREE=. git checkout -f main",
+    "export GIT_DIR={o}/.git; git checkout -f main",
+    "GIT_INDEX_FILE={o}/.git/index git checkout docs",
+    "GIT_OBJECT_DIRECTORY={o}/.git/objects git checkout docs",
+    "git -c core.worktree=. --git-dir={o}/.git checkout main",
+    "git --namespace other checkout main",
+    "git --git-dir={o}/.git restore --source main .",
+    "GIT_DIR={o}/.git git stash",
+])
+def test_a_switch_through_another_git_directory_asks_where_org_files_are(repo, other, cmd):
+    """Objects, refs and index from elsewhere: the guard cannot compare the
+    trees, so it asks whenever the work tree holds org files, as a merge."""
+    v = _ask(cmd.format(o=other.root), repo.root)
+    assert v is not None and v["decision"] == "ask", cmd
+
+
+def test_another_git_directory_over_a_work_tree_with_no_org_files_stays_silent(other, machine):
+    plain = GitRepo(machine / "plain")
+    sha = plain.snapshot({"app.py": "x = 1\n"})
+    plain.ref("refs/heads/main", sha)
+    plain.head("main")
+    plain.checkout_files({"app.py": "x = 1\n"})
+    assert _ask(f"GIT_DIR={other.root}/.git git checkout -f main", plain.root) is None
+    assert _ask(f"git --git-dir={other.root}/.git status", plain.root) is None
+
+
+@pytest.mark.parametrize("cmd", ["git --attr-source HEAD checkout evil",
+                                 "git --config-env core.x=HOME checkout evil",
+                                 "git --exec-path=/usr/lib/git-core checkout evil",
+                                 "git --no-pager -p checkout evil",
+                                 "git --super-prefix=x/ checkout evil"])
+def test_global_options_with_a_value_before_the_switch_are_skipped(repo, cmd):
+    v = _ask(cmd, repo.root)
+    assert v is not None and _ORG_FILE_NAMED.search(v["reason"]), (cmd, v)
+
+
+@pytest.mark.parametrize("cmd", [
+    "git -c alias.co=checkout co evil",
+    "git -c alias.sw=switch sw evil",
+    "git -c alias.co=checkout -c alias.c2=co c2 evil",
+    "git co evil",
+])
+def test_an_alias_of_a_switch_is_judged_as_the_switch(repo, cmd):
+    (Path(os.environ["HOME"]) / ".gitconfig").write_text(
+        "[user]\n\tname = T\n[alias]\n\tco = checkout\n\tst = status\n")
+    v = _ask(cmd, repo.root)
+    assert v is not None and _ORG_FILE_NAMED.search(v["reason"]), (cmd, v)
+
+
+@pytest.mark.parametrize("cmd", ["git st", "git -c alias.st=status st", "git co docs",
+                                 "git -c alias.lg=log lg", "git -c alias.l=lg -c alias.lg=log l"])
+def test_an_alias_of_a_read_or_a_same_tree_switch_stays_silent(repo, cmd):
+    (Path(os.environ["HOME"]) / ".gitconfig").write_text(
+        "[alias]\n\tco = checkout\n\tst = status\n")
+    assert _ask(cmd, repo.root) is None, cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "git -c alias.x='!git checkout evil' x",
+    "git frob evil",
+    "git read-tree -u -m HEAD evil",
+    "git read-tree -u --reset evil",
+    "git read-tree --reset -u evil",
+    "git checkout-index -f -a",
+    "git checkout-index -fa",
+    "git checkout-index -f nable.org/authority.yaml",
+    "git bisect start evil main",
+    "git bisect bad",
+    "git bisect good main",
+    "git bisect skip",
+    "git bisect reset evil",
+    "git bisect run ./test.sh",
+    "git sparse-checkout set src",
+    "git merge-file nable.org/authority.yaml base.yaml theirs.yaml",
+    "git merge-index git-merge-one-file -a",
+    "git filter-branch --tree-filter true HEAD",
+    "git submodule update --init",
+])
+def test_other_words_that_rewrite_tracked_files_ask_where_org_files_are(repo, cmd):
+    v = _ask(cmd, repo.root)
+    assert v is not None and v["decision"] == "ask", (cmd, v)
+
+
+@pytest.mark.parametrize("cmd", ["git read-tree evil", "git read-tree -m HEAD evil",
+                                 "git checkout-index -n -a", "git bisect log",
+                                 "git bisect visualize", "git bisect terms",
+                                 "git status", "git log --oneline", "git diff evil",
+                                 "git show evil:nable.org/authority.yaml", "git fetch",
+                                 "git branch -a", "git worktree list", "git rev-parse HEAD",
+                                 "git ls-files", "git version", "git help checkout"])
+def test_words_that_rewrite_no_tracked_file_stay_silent(repo, cmd):
+    assert _ask(cmd, repo.root) is None, cmd
+
+
+def test_an_unknown_command_outside_an_org_repo_stays_silent(machine):
+    plain = GitRepo(machine / "plain")
+    sha = plain.snapshot({"app.py": "x = 1\n"})
+    plain.ref("refs/heads/main", sha)
+    plain.head("main")
+    plain.checkout_files({"app.py": "x = 1\n"})
+    assert _ask("git frob main", plain.root) is None
+    assert _ask("git read-tree -u -m HEAD main", plain.root) is None
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+def test_a_git_config_that_is_a_fifo_is_not_waited_on(repo):
+    import threading
+    fifo = Path(os.environ["HOME"]) / ".gitconfig"
+    os.mkfifo(fifo)
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.update(v=_ask("git co evil", repo.root)),
+                         daemon=True)
+    t.start()
+    t.join(5)
+    if t.is_alive():
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))     # let the reader go
+        t.join(5)
+        pytest.fail("the guard waited on a FIFO in place of ~/.gitconfig")
+    assert got["v"] is not None and got["v"]["decision"] == "ask"
+
+
+def test_a_repo_that_replaces_objects_asks(repo):
+    """refs/replace makes git check out another commit's tree than the one
+    the guard reads, so it cannot tell."""
+    repo.ref(f"refs/replace/{repo.shas['docs']}", repo.shas["evil"])
+    v = _ask("git checkout docs", repo.root)
+    assert v is not None and v["decision"] == "ask" and "could not tell" in v["reason"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+@pytest.mark.parametrize("name", ["packed-refs", "commondir"])
+def test_a_git_file_that_is_a_fifo_is_not_waited_on(repo, name):
+    import threading
+    fifo = repo.git / name
+    os.mkfifo(fifo)
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.update(v=_ask("git checkout no-such", repo.root)),
+                         daemon=True)
+    t.start()
+    t.join(5)
+    if t.is_alive():
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))     # let the reader go
+        t.join(5)
+        pytest.fail(f"the guard waited on a FIFO in place of .git/{name}")
+    assert got["v"] is not None and got["v"]["decision"] == "ask"
+
+
+def test_doctor_names_what_git_runs_for_you_as_a_gap(repo):
+    gaps = " ".join(g.doctor()["not_covered"])
+    assert "a hook, a filter or a merge driver" in gaps

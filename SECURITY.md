@@ -174,15 +174,24 @@ opt-in, so the file can only narrow, and an entry nable cannot read holds its
 kind (or every kind) at recommend rather than being skipped. Nothing on this
 machine acts on it.
 A git command that can rewrite the org model's files without naming them
-asks: a merge, pull, rebase, cherry-pick, revert, am, apply or hard reset
-whenever the repo holds org files, and a branch switch (`git checkout
-BRANCH` or `COMMIT`, `git switch [--detach] REF`) when the org directory's
-tree differs between HEAD and the target, naming the files, or when files
-under it changed since HEAD last moved. The guard reads the repo's own
-objects and refs for that in process, loose and packed, under its meter: it
-runs no git and opens no connection. When it cannot tell (a ref it cannot
-resolve, a missing object, the meter spent) it asks whenever the repo holds
-org files.
+asks: a merge, pull, rebase, cherry-pick, revert, am, apply or hard reset,
+read-tree -u, checkout-index of all files, a bisect that checks a commit
+out, sparse-checkout, submodule update, merge-index, mergetool or
+filter-branch whenever the repo holds org files, and a branch switch (`git
+checkout BRANCH` or `COMMIT`, `git switch [--detach] REF`) when the org
+directory's tree differs between HEAD and the target, naming the files, or,
+forced, when the files on disk differ from the target's. A switch through
+another git directory, index or work tree (`--git-dir`, `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE`, `-c core.worktree`) asks wherever that
+work tree holds org files. An alias is judged as what it runs; a shell
+alias, one the guard cannot read and a command git does not ship ask
+wherever the repo holds org files. The guard reads the repo's own objects,
+refs and config for that in process, loose and packed, under its meter and
+without waiting on any file: it runs no git and opens no connection. When
+it cannot tell (a ref it cannot resolve, a missing object, a repo that
+replaces objects, the meter spent) it asks whenever the repo holds org
+files. What git itself runs for you (a hook, a filter or a merge driver in
+its config) is not seen, and `nable guard doctor` says so.
 
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,

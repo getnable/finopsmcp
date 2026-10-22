@@ -11,13 +11,18 @@ directory's objects and refs, and compares the org directory's tree at HEAD
 with the target's:
 
   the same tree     nothing under it changes: the guard stays silent, unless
-                    the files there changed since HEAD last moved (a forced
-                    switch would throw those changes away)
+                    the switch is forced and the files on disk differ from
+                    the target's (differs_on_disk), which it writes over
   another tree      the switch rewrites the files that differ, and the guard
                     asks, naming them
   cannot tell       an unresolvable ref, a missing object, a shape this does
                     not read, or the meter spent: the caller asks whenever
                     the repo holds org files, as for a merge (Unknown)
+
+A repo that replaces objects (refs/replace, info/grafts) is Unknown: git
+would check out another tree than the one read here. Every file is opened
+without waiting (guard_paths.open_regular), so a FIFO in place of one is
+Unknown, never a hook that runs out of time and fails open.
 
 In process, standard library only: no subprocess, no network, nothing
 written. Every read is charged to guard_paths' meter (a quarter of a
@@ -27,8 +32,10 @@ DELTA_DEPTH deltas a chain, a pack index searched by seeks, never read whole.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import stat
 import zlib
 from pathlib import Path
 from typing import Any
@@ -47,6 +54,9 @@ _TYPES = {1: "commit", 2: "tree", 3: "blob", 4: "tag"}
 _OFS_DELTA, _REF_DELTA = 6, 7
 _PACKED_REFS_MAX = 16 * 1024 * 1024
 _REFLOG_TAIL = 64 * 1024
+# A loose object as stored (deflated): an object of OBJECT_MAX bytes, and
+# what zlib adds to one that does not compress.
+_LOOSE_MAX = OBJECT_MAX + 1024 * 1024
 
 
 class Unknown(Exception):
@@ -62,6 +72,15 @@ def _charge(n_bytes: int) -> None:
     guard_paths.charge(1 + n_bytes // _UNIT_BYTES)
 
 
+def _open(p: Path) -> Any:
+    """A file of the repo's, for reading, opened without waiting."""
+    return os.fdopen(guard_paths.open_regular(p), "rb")
+
+
+def _read(p: Path, most: int) -> bytes:
+    return guard_paths.read_regular(p, most)
+
+
 class Repo:
     """One repository's objects and refs, read in place."""
 
@@ -75,7 +94,7 @@ class Repo:
         self.git_dir = gd
         common = gd
         try:
-            raw = (gd / "commondir").read_text(encoding="utf-8", errors="replace")[:4096]
+            raw = _read(gd / "commondir", 4096).decode("utf-8", "replace")
             c = Path(raw.strip())
             common = c if c.is_absolute() else gd / c
         except FileNotFoundError:
@@ -98,11 +117,11 @@ class Repo:
         for d in dict.fromkeys(dirs):
             p = d / name
             try:
-                if p.is_file():
-                    _charge(0)
-                    return p.read_text(encoding="utf-8", errors="replace")[:512].strip()
+                raw = _read(p, 512)
             except OSError:
-                return None
+                continue                # none there, or not a regular file
+            _charge(0)
+            return raw.decode("utf-8", "replace").strip()
         return None
 
     def packed_refs(self) -> dict[str, str]:
@@ -110,14 +129,16 @@ class Repo:
             out: dict[str, str] = {}
             p = self.common / "packed-refs"
             try:
-                size = p.stat().st_size
+                data: bytes | None = _read(p, _PACKED_REFS_MAX + 1)
+            except FileNotFoundError:
+                data = None
             except OSError:
-                size = -1
-            if size > _PACKED_REFS_MAX:
+                raise Unknown("packed-refs could not be read (not a regular file?)") from None
+            if data is not None and len(data) > _PACKED_REFS_MAX:
                 raise Unknown("packed-refs is larger than the guard reads")
-            if size >= 0:
-                _charge(size)
-                for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+            if data is not None:
+                _charge(len(data))
+                for line in data.decode("utf-8", "replace").splitlines():
                     if line.startswith(("#", "^")) or " " not in line:
                         continue
                     sha, name = line.split(" ", 1)
@@ -140,6 +161,21 @@ class Repo:
             return raw
         raise Unknown(f"the ref {name} does not read as an object name")
 
+    def replaces(self) -> bool:
+        """Whether git would read some objects as others here: a replace
+        ref (refs/replace/, loose or packed) or a graft."""
+        if any(n.startswith("refs/replace/") for n in self.packed_refs()):
+            return True
+        if (self.common / "info" / "grafts").exists():
+            return True
+        try:
+            with os.scandir(self.common / "refs" / "replace") as it:
+                return any(True for _ in it)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+
     def head_branch(self) -> str | None:
         raw = self._loose_ref("HEAD")
         return raw[4:].strip() if raw and raw.startswith("ref:") else None
@@ -149,7 +185,7 @@ class Repo:
         from HEAD's reflog."""
         p = self.git_dir / "logs" / "HEAD"
         try:
-            with p.open("rb") as fh:
+            with _open(p) as fh:
                 size = fh.seek(0, os.SEEK_END)
                 fh.seek(max(0, size - _REFLOG_TAIL))
                 tail = fh.read(_REFLOG_TAIL)
@@ -277,7 +313,7 @@ class Repo:
         sorted names (each probe a seek and a 20-byte read)."""
         want = bytes.fromhex(sha)
         try:
-            with idx.open("rb") as fh:
+            with _open(idx) as fh:
                 fan = self._idx_header(fh)
                 total = fan[255]
                 lo = fan[want[0] - 1] if want[0] else 0
@@ -307,7 +343,7 @@ class Repo:
         out: set[str] = set()
         first = int(prefix[:2], 16)
         try:
-            with idx.open("rb") as fh:
+            with _open(idx) as fh:
                 fan = self._idx_header(fh)
                 lo = fan[first - 1] if first else 0
                 hi = fan[first]
@@ -329,11 +365,13 @@ class Repo:
         """(type, content) of one object."""
         loose = self.objects / sha[:2] / sha[2:]
         try:
-            raw = loose.read_bytes()
+            raw = _read(loose, _LOOSE_MAX + 1)
         except FileNotFoundError:
             raw = None
         except OSError:
             raise Unknown("an object could not be read") from None
+        if raw is not None and len(raw) > _LOOSE_MAX:
+            raise Unknown("an object is larger than the guard reads")
         if raw is not None:
             _charge(len(raw))
             data = _inflate(raw, OBJECT_MAX + 64)
@@ -353,7 +391,7 @@ class Repo:
         if depth > DELTA_DEPTH:
             raise Unknown("a delta chain is deeper than the guard reads")
         try:
-            with pack.open("rb") as fh:
+            with _open(pack) as fh:
                 fh.seek(off)
                 b = fh.read(1)
                 if not b:
@@ -562,6 +600,9 @@ def compare(root: str | os.PathLike, target: str | None, rels: list[str], *,
     switch to an orphan branch, whose tree holds nothing. Unknown when that
     cannot be told."""
     repo = Repo(root)
+    if repo.replaces():
+        raise Unknown("the repo replaces objects (refs/replace or info/grafts), so git may "
+                      "check out another tree than the one the guard reads")
     head = repo.resolve("HEAD")
     if empty:
         to = None
@@ -577,3 +618,51 @@ def compare(root: str | os.PathLike, target: str | None, rels: list[str], *,
         after = repo.files(repo.at(to, rel), rel) if to is not None else {}
         changed |= {p for p in set(before) | set(after) if before.get(p) != after.get(p)}
     return {"same": not changed, "files": sorted(changed), "head": head, "target": to}
+
+
+def _blob_sha(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\x00" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+def differs_on_disk(root: str | os.PathLike, commit: str, rels: list[str]) -> list[str]:
+    """The files under each of `rels` that a forced switch of the work tree
+    at `root` to `commit` writes: each the commit holds whose content on
+    disk is not the commit's (or that is not on disk), and each on disk that
+    the commit does not hold and the index may (git removes it). Untracked
+    files git leaves alone are not counted. Unknown when that cannot be told."""
+    repo = Repo(root)
+    if repo.replaces():
+        raise Unknown("the repo replaces objects (refs/replace or info/grafts)")
+    out: set[str] = set()
+    for rel in rels:
+        want = repo.files(repo.at(commit, rel), rel)
+        for path, (mode, sha) in want.items():
+            p = Path(root, *path.split("/"))
+            try:
+                st = os.lstat(p)
+                if mode == "120000":
+                    same = stat.S_ISLNK(st.st_mode) and _blob_sha(
+                        os.fsencode(os.readlink(p))) == sha
+                elif not stat.S_ISREG(st.st_mode) or st.st_size > OBJECT_MAX:
+                    same = False
+                else:
+                    data = _read(p, OBJECT_MAX)
+                    _charge(len(data))
+                    same = _blob_sha(data) == sha
+            except OSError:
+                same = False
+            if not same:
+                out.add(path)
+        top = Path(root, *rel.split("/"))
+        seen = 0
+        for dirpath, _dirs, names in os.walk(top):
+            for name in names:
+                seen += 1
+                if seen > FILES_MAX:
+                    raise Unknown("the org directory holds more files than the guard compares")
+                path = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
+                if path not in want and guard_paths.git_tracked(
+                        os.path.join(dirpath, name), str(root)) is not False:
+                    out.add(path)
+            _charge(len(names) * 64)
+    return sorted(out)
