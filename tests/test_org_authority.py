@@ -132,6 +132,66 @@ def test_approvers_are_email_entries_lowercased_each_once():
     assert f.value["approvers"] == ["email:ana@acme.example", "email:bo@acme.example"]
 
 
+@pytest.mark.parametrize("who", ["email:\u212aate@example.com", "email:ana@\u0430cme.example",
+                                 "email:J\u00f6rg@example.com"])
+def test_an_approver_that_is_not_plain_ascii_is_refused(who):
+    """str.lower maps KELVIN SIGN onto k: a name a person may approve by is
+    plain ASCII, so it can never be lowercased onto another mailbox."""
+    with pytest.raises(FactError) as e:
+        _entry(value=_each(approvers=[who]))
+    assert e.value.field == "value.approvers"
+
+
+@pytest.mark.parametrize("key", ["max_commitment_usd", "approver", "expiry", "note"])
+def test_a_value_field_the_schema_does_not_name_is_refused_never_kept(key):
+    """A misspelt bound kept and ignored would let a plan over it be
+    approved: refused, naming value.<key>, it holds its class at recommend."""
+    with pytest.raises(FactError) as e:
+        _entry(value=_each(**{key: 1000}))
+    assert e.value.field == f"value.{key}"
+
+
+def test_a_key_twice_in_a_mapping_makes_authority_yaml_unreadable(tmp_path):
+    """YAML keeps the last of two values in silence (rung off, then
+    approve_each): authority.yaml refuses it, and holds every class."""
+    d = tmp_path / "org"
+    d.mkdir()
+    (d / "authority.yaml").write_text(
+        "# nable org model v1\n- fact: authority\n  subject: action_class:rds_ri\n"
+        "  value: {rung: \"off\", approvers: ['email:ana@acme.example'], expires: 2027-06-30, "
+        "rung: approve_each}\n  status: confirmed\n  confirmed_at: 2026-10-01\n")
+    a = store.load(d, legacy=False).authority(today=TODAY)
+    assert [(r["entry"], r["field"], r["holds"]) for r in a["refused"]] == [
+        (None, "file", "every class")]
+    assert "duplicate" in a["refused"][0]["message"]
+    assert {c: v["rung"] for c, v in a["classes"].items()} == dict.fromkeys(
+        model.AUTHORITY_CLASSES, "recommend")
+    # The other org files keep YAML's own reading of a key twice.
+    (d / "authority.yaml").unlink()
+    (d / "teams.yaml").write_text("# nable org model v1\n- fact: team\n  subject: team:a\n"
+                                  "  value: {name: a, name: b}\n  status: confirmed\n")
+    assert store.load(d, legacy=False).by_kind("team")
+
+
+@pytest.mark.parametrize("anchor", ["confirmed_at", "proposed_at"])
+def test_an_entry_dated_after_today_is_not_in_force_before_its_date(anchor):
+    """confirmed_at 2030-07-01, expires 2031-06-30: counted from its own
+    date, it would hold approve_each for years. It is in force from that
+    date (a day early for a laptop ahead of UTC), so a year is a year."""
+    status = "confirmed" if anchor == "confirmed_at" else "proposed"
+    raw = {"fact": "authority", "subject": "action_class:rds_ri",
+           "value": _each(expires="2031-06-30"), "source": "human", "status": status,
+           anchor: "2030-07-01"}
+    f = Fact.from_dict(raw)
+    got = _model(f).authority(today=TODAY)["classes"]["rds_ri"]
+    assert got["rung"] == "recommend" and got["expires"] == "2031-06-30"
+    assert any("2030-07-01" in h for h in got["held"])
+    assert _model(f).authority(today=date(2030, 6, 30))["classes"]["rds_ri"]["rung"] == \
+        "approve_each"
+    assert _model(f).authority(today=date(2030, 6, 29))["classes"]["rds_ri"]["rung"] == \
+        "recommend"
+
+
 @pytest.mark.parametrize("missing,field", [("approvers", "value.approvers"),
                                            ("expires", "value.expires")])
 def test_approve_each_needs_approvers_and_an_expiry(missing, field):

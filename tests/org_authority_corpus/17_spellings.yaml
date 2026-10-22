@@ -1,7 +1,7 @@
 # nable org model v1
 - fact: authority
   subject: "action_class:RDS_RI"
-  value: {rung: approve_each, approvers: "Email: Ana@Acme.example", expires: "2027-06-30", note: kept as written}
+  value: {rung: approve_each, approvers: "Email: Ana@Acme.example", expires: "2027-06-30"}
   source: human
   status: confirmed
   confirmed_at: 2026-10-01T09:30:00Z

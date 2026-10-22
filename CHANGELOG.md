@@ -197,6 +197,18 @@ coding-agent spend a person can carry into a paid workspace.
   has an Authority line. A rejection never turns an entry into a refusal (its
   dates are not held to it); a confirmation that would put an entry's expiry
   out of range is refused, naming `value.expires`.
+- **A typo in `authority.yaml` can only stop approvals.** A value field an
+  authority entry does not name (`max_commitment_usd` for
+  `max_commitment_usd_per_plan`, say) is refused, naming `value.<key>`, and
+  holds its kind at recommend, where other fact kinds keep unknown fields: a
+  misspelt bound was kept and ignored. A mapping that holds a key twice
+  (`rung: "off"` then `rung: approve_each`) makes the file unreadable, where
+  YAML keeps the last value in silence. An approver must be plain ASCII, as
+  lowercasing KELVIN SIGN gives `k`, another mailbox. An entry dated (its
+  `confirmed_at`, else `proposed_at`) more than a day after today holds its
+  kind at recommend until that date, so a year of authority cannot start
+  years ahead. The org model's parse cache moves to version 3, so a parse
+  made before is not reused.
 - **`authority.yaml` is one of the guard's own files** in a repo's
   `nable.org/`, the data dir's org model and `FINOPS_ORG_DIR`, named on its
   own: a write, move, truncation or deletion by an agent asks, by Claude

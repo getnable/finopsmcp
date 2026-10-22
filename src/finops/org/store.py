@@ -338,17 +338,54 @@ def layers(dir: str | os.PathLike | None = None, *,
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
-def safe_yaml(text: str) -> Any:
+def safe_yaml(text: str, *, unique_keys: bool = False) -> Any:
     """yaml.safe_load, through libyaml's CSafeLoader where PyYAML has it: the
     same safe constructor on a C parser, about ten times faster. The guard
     hook reads the model inside its ~100 ms, and the pure-Python parser took
-    about 100 ms for a few hundred facts on its own."""
+    about 100 ms for a few hundred facts on its own.
+
+    With unique_keys, a mapping that holds a key twice is a YAMLError
+    (ConstructorError, "found duplicate key"), where YAML itself keeps the
+    last value in silence: authority.yaml is read that way, so `rung: off`
+    followed by `rung: approve_each` in one entry is never approve_each."""
     import yaml
     try:
         from yaml import CSafeLoader as SafeLoader
     except ImportError:                  # PyYAML built without libyaml
         from yaml import SafeLoader
-    return yaml.load(text, Loader=SafeLoader)
+    if unique_keys:
+        return yaml.load(text, Loader=_unique_loader(SafeLoader))  # nosec B506 - a SafeLoader
+    return yaml.load(text, Loader=SafeLoader)  # nosec B506 - a SafeLoader
+
+
+_UNIQUE: dict[Any, Any] = {}
+
+
+def _unique_loader(base: Any) -> Any:
+    """`base` (a safe loader), refusing a mapping that holds a key twice. The
+    paid workspace's own reader of authority.yaml (rds_ri.authority) refuses
+    it the same way."""
+    if base not in _UNIQUE:
+        import yaml
+        from yaml.constructor import ConstructorError
+
+        class _Unique(base):  # type: ignore[misc, valid-type]
+            def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+                if isinstance(node, yaml.MappingNode):
+                    self.flatten_mapping(node)
+                    seen: list[Any] = []
+                    for key_node, _value in node.value:
+                        key = self.construct_object(key_node, deep=deep)
+                        if any(key == k for k in seen):
+                            raise ConstructorError("while constructing a mapping",
+                                                   node.start_mark,
+                                                   f"found duplicate key {str(key)[:40]!r}",
+                                                   key_node.start_mark)
+                        seen.append(key)
+                return super().construct_mapping(node, deep=deep)
+
+        _UNIQUE[base] = _Unique
+    return _UNIQUE[base]
 
 
 def _is_comment(line: str) -> bool:
@@ -437,7 +474,7 @@ class _File:
         if self._from_cache(digest, warnings):
             return self
         try:
-            data = safe_yaml(text)
+            data = safe_yaml(text, unique_keys=self.authority)
         except (yaml.YAMLError, ValueError, OverflowError) as e:
             # A date YAML cannot construct (2027-02-30) raises ValueError, not
             # a YAMLError: the file is unreadable, said, and never a crash.
@@ -548,7 +585,9 @@ class _File:
 
 _CACHE_DIR = "org-parse-cache"
 # 2: each entry's refusal in authority.yaml is kept beside its warning.
-_CACHE_VERSION = 2
+# 3: authority.yaml refuses a value field it does not name, an approver that is
+#    not plain ASCII and a key twice, so a parse made before is not reused.
+_CACHE_VERSION = 3
 
 
 def _digest(text: str) -> str:

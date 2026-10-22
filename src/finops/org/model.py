@@ -51,13 +51,17 @@ elasticache_ri or database_savings_plan, the workspace's line kinds): its rung
 (max_commitment_usd_per_plan, the same measure as the workspace opt-in's cap),
 the people who may approve it (email: entries, required at approve_each) and
 when the entry expires (a date, required at approve_each, after and at most
-AUTHORITY_MAX_DAYS after its confirmed_at, else its proposed_at). The file can
-only narrow what the workspace's opt-in allows, so every live entry counts, a
-proposal included, as freezes do, and per class the strictest answers
+AUTHORITY_MAX_DAYS after its confirmed_at, else its proposed_at). An entry
+dated after today is not in force before its date. The file can only narrow
+what the workspace's opt-in allows, so every live entry counts, a proposal
+included, as freezes do, and per class the strictest answers
 (OrgModel.authority). A refused entry is never skipped in silence: it holds
-its class, or every class when its class cannot be read, at recommend. Only an
-authority fact may be about an action_class, and authority facts are
-authority.yaml's alone, as the workspace reads that file and no other.
+its class, or every class when its class cannot be read, at recommend; so
+does a value field the schema does not name (a misspelt bound is never
+ignored), an approver that is not plain ASCII, and, for the whole file, a
+mapping that holds a key twice. Only an authority fact may be about an
+action_class, and authority facts are authority.yaml's alone, as the
+workspace reads that file and no other.
 
 Nothing here imports more than the standard library. The guard hook will read
 this model on every agent tool call, and its budget is about 100 ms.
@@ -71,7 +75,7 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import cached_property
 from typing import Any
 
@@ -113,6 +117,13 @@ RUNGS = ("off", "recommend", "approve_each")
 # How long after its confirmation (else its proposal) an entry may last.
 AUTHORITY_MAX_DAYS = 366
 AUTHORITY_FILE = "authority.yaml"
+# The fields an authority entry's value may hold. Any other is refused, never
+# kept: a misspelt bound kept and ignored would let a plan over it through.
+AUTHORITY_VALUE_KEYS = ("rung", "max_commitment_usd_per_plan", "approvers", "expires")
+# An authority entry dated (confirmed_at, else proposed_at) more than this
+# many days after today is not in force yet: a laptop ahead of UTC may date
+# it a day early.
+AUTHORITY_DATED_AHEAD_DAYS = 1
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # One file per fact kind, so a diff reads as "ownership changed" or "a tag
@@ -413,11 +424,15 @@ def _authority_approvers(v: Any) -> list[str]:
     out: list[str] = []
     for raw in v:
         kind, sep, addr = raw.strip().partition(":")
-        addr = addr.strip().lower()
-        if not sep or kind.strip().lower() != "email" or not _EMAIL_RE.match(addr):
-            raise FactError(f"{name}: {raw.strip()[:80]!r} is not email:ADDRESS (authority.yaml "
-                            "names approvers by the email their sign-in carries)", field=name)
-        out.append(f"email:{addr}")
+        addr = addr.strip()
+        # Plain ASCII only, lowercased as ASCII: str.lower maps some other
+        # letters onto ASCII ones (KELVIN SIGN onto k), another mailbox.
+        if not sep or kind.strip().lower() != "email" or not addr.isascii() \
+                or not _EMAIL_RE.match(addr.lower()):
+            raise FactError(f"{name}: {raw.strip()[:80]!r} is not email:ADDRESS in plain ASCII "
+                            "(authority.yaml names approvers by the email their sign-in "
+                            "carries)", field=name)
+        out.append(f"email:{addr.lower()}")
     return list(dict.fromkeys(out))
 
 
@@ -465,7 +480,8 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
     """A cleaned copy of `value` for this fact kind. Raises FactError.
 
     Keys the schema does not name are kept: a newer nable, or a person, may
-    know something this version does not, and dropping it would lose a fact."""
+    know something this version does not, and dropping it would lose a fact.
+    An authority entry is the exception: a key it does not name is refused."""
     if not isinstance(value, dict):
         raise FactError("value must be a mapping")
     v = dict(value)
@@ -588,6 +604,14 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
         if subject.kind != "action_class":
             raise FactError("subject.kind of an authority fact must be action_class (one of "
                             f"{', '.join(AUTHORITY_CLASSES)})", field="subject.kind")
+        unknown = sorted(str(k) for k in v if k not in AUTHORITY_VALUE_KEYS)
+        if unknown:
+            # Unlike other facts' values, nothing unknown is kept: a misspelt
+            # bound would be dropped in silence.
+            field_name = f"value.{unknown[0][:64]}"
+            raise FactError(f"{field_name} is not a field of an authority entry, which takes "
+                            f"{', '.join(AUTHORITY_VALUE_KEYS)}: it is refused, never ignored",
+                            field=field_name)
         if v.get("rung") is False:
             # `rung: off` unquoted, which YAML reads as false: the strictest
             # rung either way, so it is taken as written.
@@ -1606,7 +1630,9 @@ class OrgModel:
         entry counts, a proposal and an entry from a repo nobody trusted
         included (as freezes do); a rejected or superseded entry counts for
         nothing. An entry past its expires (from that date, UTC) holds its
-        class at recommend, and so does a refused entry whose class can be
+        class at recommend, and so does an entry dated (confirmed_at, else
+        proposed_at) more than AUTHORITY_DATED_AHEAD_DAYS after today, which
+        is not in force before its date, and a refused entry whose class can be
         read; a refused entry whose class cannot, or a file that could not be
         read, holds every class there. A class the file does not name is
         governed by the workspace's opt-in alone (rung None).
@@ -1649,6 +1675,14 @@ def _strictest(cls: str, entries: list[Fact], held_by: list[dict[str, Any]],
     for f in sorted(entries, key=lambda f: f.key):
         v = f.value
         r = _RANK[v["rung"]]
+        which, dated = (("confirmed_at", f.confirmed_at) if f.confirmed_at
+                        else ("proposed_at", f.proposed_at))
+        if dated and date.fromisoformat(dated) > day + timedelta(
+                days=AUTHORITY_DATED_AHEAD_DAYS):
+            if r > _RANK["recommend"]:
+                out["held"].append(f"entry {f.key} is dated {dated} ({which}), after today, "
+                                   "so it is not in force before then")
+            r = min(r, _RANK["recommend"])
         expires = v.get("expires")
         if expires is not None and day >= date.fromisoformat(expires):
             if r > _RANK["recommend"]:
