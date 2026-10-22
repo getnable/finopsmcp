@@ -408,12 +408,15 @@ def _ledger(path: Path | None) -> dict[str, Any]:
         return out
     lines, chain = got["lines"], got["chain"]
     created = [_created_count(x) for x in lines]
+    planned = [_identifier_count(x) for x in lines]
     out.update(records=len(lines), ok=chain["ok"], head=chain["head"],
                partial=got["partial"], lines=lines,
                records_naming=sum(1 for x in lines
                                   if _NAMING.search(x.decode("utf-8", "replace"))),
                records_creating=sum(1 for n in created if n),
-               created_ids=sum(created))
+               created_ids=sum(created),
+               records_planning=sum(1 for n in planned if n),
+               planned_identifiers=sum(planned))
     if lines:
         out["chain_id"] = _sha(lines[0])
     if not chain["ok"]:
@@ -1093,7 +1096,54 @@ def send(payload: Payload, box: str, key: str, *, opener: Opener | None = None,
     except OSError as exc:
         out["rates"] = {"kept": False, "file": None, "rows": 0,
                         "why": f"not kept ({type(exc).__name__})"}
+    # The box's standing of the authority ladder's classes (seam S2), from
+    # the same answer, kept as the rates are; nothing without the module.
+    kept = keep_authority(last, box=box, fetched_at=datetime.now(UTC))
+    if kept is not None:
+        out["authority"] = kept
     return out
+
+
+AUTHORITY_STANDING = "finops.authority_standing"
+
+
+def authority_standing() -> Any:
+    """finops.authority_standing (seam S2), or None when it is not installed."""
+    import importlib
+    try:
+        return importlib.import_module(AUTHORITY_STANDING)
+    except ModuleNotFoundError as exc:
+        if exc.name in (AUTHORITY_STANDING, "finops"):
+            return None
+        raise
+
+
+def keep_authority(st: Mapping[str, Any], *, box: str,
+                   fetched_at: datetime) -> dict[str, Any] | None:
+    """authority_standing.keep on the status answer's `authority` block,
+    with its box, workspace reference and when it was fetched; None when the
+    module is not installed. Never raises: a failure is said as not kept."""
+    try:
+        mod = authority_standing()
+        if mod is None:
+            return None
+        got = mod.keep(st.get("authority"), box=box, workspace_ref=st.get("workspace_ref"),
+                       fetched_at=fetched_at)
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        return {"kept": False, "why": f"not kept ({type(exc).__name__})"}
+    return got if isinstance(got, dict) else {"kept": False, "why": "not kept"}
+
+
+def authority_text(got: Mapping[str, Any], st: Mapping[str, Any]) -> str | None:
+    """authority_standing.text for what keep_authority answered, or None
+    when the module is not installed (nothing is said)."""
+    try:
+        mod = authority_standing()
+        if mod is None:
+            return None
+        return str(mod.text(dict(got), st.get("authority")))
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        return f"Authority standing: not shown ({type(exc).__name__})"
 
 
 _ORG_FILE_ANSWERS = ("applied", "unchanged", "stale", "deleted", "not_held", "held")
@@ -1210,6 +1260,22 @@ def _created_count(line: bytes) -> int:
     return len(got) if isinstance(got, list) else 0
 
 
+def _identifier_count(line: bytes) -> int:
+    """How many priced SKUs of a verdict line name the identifier a saved
+    plan creates them with (contract 2's `priced`, D167, D169); 0 for any
+    other line, an older line with one priced SKU or none naming one."""
+    if b'"identifier"' not in line or b'"priced"' not in line:
+        return 0
+    try:
+        doc = json.loads(line)
+    except ValueError:
+        return 0
+    priced = doc.get("priced") if isinstance(doc, dict) else None
+    skus = priced if isinstance(priced, list) else [priced]
+    return sum(1 for s in skus if isinstance(s, dict) and isinstance(s.get("identifier"), str)
+               and s["identifier"])
+
+
 def describe(payload: Payload, box: str, out: Path | None) -> str:
     """The dry run as a person reads it."""
     o, led = payload.org, payload.ledger
@@ -1264,6 +1330,14 @@ def describe(payload: Payload, box: str, out: Path | None) -> str:
                              f"{ids:,} resource id{'s' if ids != 1 else ''} an approved ask "
                              "created, as the tool printed them, so the workspace can find "
                              "them on its bill at day 30")
+            planning = led.get("records_planning") or 0
+            if planning:
+                names = led.get("planned_identifiers") or 0
+                lines.append(f"  {planning:,} of them name{'s' if planning == 1 else ''} "
+                             f"{names:,} identifier{'s' if names != 1 else ''} a saved plan "
+                             "creates an RDS instance or an ElastiCache cluster with, so the "
+                             "workspace can find them on its bill by name (matched by name, "
+                             "believed until seen on a real bill)")
     if led.get("partial"):
         lines.append("  the last record was still being written; it waits for the next connect")
     lines += ["", *_describe_usage(payload.usage), ""]

@@ -1,0 +1,139 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "offerCode": "AmazonElastiCache",
+ "version": "20261014221139",
+ "publicationDate": "2026-10-14T22:11:39Z",
+ "products": {
+  "XRYU5DPB7QK6S94A": {
+   "sku": "XRYU5DPB7QK6S94A",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "memory": "13.07 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Redis",
+    "usagetype": "NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:0002",
+    "normalizationSizeFactor": "4",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "RV2VBCDBY8RZE2WZ": {
+   "sku": "RV2VBCDBY8RZE2WZ",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "memory": "13.07 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Valkey",
+    "usagetype": "NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:Valkey",
+    "normalizationSizeFactor": "3.2",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "D3Y7CNKGUTH3CE59": {
+   "sku": "D3Y7CNKGUTH3CE59",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "US East (N. Virginia)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.m5.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Standard",
+    "vcpu": "2",
+    "memory": "6.38 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Redis",
+    "usagetype": "NodeUsage:cache.m5.large",
+    "operation": "CreateCacheCluster:0002",
+    "normalizationSizeFactor": "4",
+    "regionCode": "us-east-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  }
+ },
+ "terms": {
+  "OnDemand": {
+   "XRYU5DPB7QK6S94A": {
+    "XRYU5DPB7QK6S94A.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "XRYU5DPB7QK6S94A",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "XRYU5DPB7QK6S94A.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "XRYU5DPB7QK6S94A.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.206 per Memory optimized r6g.large node hour running Redis",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.2060000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "RV2VBCDBY8RZE2WZ": {
+    "RV2VBCDBY8RZE2WZ.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "RV2VBCDBY8RZE2WZ",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "RV2VBCDBY8RZE2WZ.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "RV2VBCDBY8RZE2WZ.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.1648 per Memory optimized r6g.large node hour running Valkey",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1648000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "D3Y7CNKGUTH3CE59": {
+    "D3Y7CNKGUTH3CE59.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "D3Y7CNKGUTH3CE59",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "D3Y7CNKGUTH3CE59.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "D3Y7CNKGUTH3CE59.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.156 per Gen Purpose M5.large node hour running Redis",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1560000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   }
+  }
+ }
+}

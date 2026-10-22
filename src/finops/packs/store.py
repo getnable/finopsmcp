@@ -48,6 +48,8 @@ INDEX_SCHEMA = 1
 MAX_FILES = 2000
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
+# The most read of the packs index: far past one for every installed pack.
+_INDEX_MAX_BYTES = 16 * 1024 * 1024
 # Skipped when a pack is copied from a working directory or a git checkout.
 IGNORED_DIRS = frozenset({".git"})
 # Refused anywhere in a pack: compiled Python runs instead of its source.
@@ -114,8 +116,10 @@ def now_iso() -> str:
 
 
 def sha256_file(path: Path) -> str:
+    from ..guard_paths import open_regular
     h = hashlib.sha256()
-    with open(path, "rb") as f:
+    # Without waiting, and only a regular file (guard_paths.open_regular).
+    with os.fdopen(open_regular(path), "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
@@ -222,8 +226,14 @@ def read_index() -> dict[str, Any]:
     file exists but cannot be read as an index: installing over it would drop
     the record of what was approved."""
     path = index_path()
+    from ..guard_paths import read_regular
     try:
-        raw = path.read_text(encoding="utf-8")
+        # Without waiting, and only a regular file: the guard's hook reads
+        # the index, and a FIFO in its place is "could not be read".
+        data = read_regular(path, _INDEX_MAX_BYTES + 1)
+        if len(data) > _INDEX_MAX_BYTES:
+            raise PackError(f"{path} is over the {_INDEX_MAX_BYTES:,} bytes nable reads")
+        raw = data.decode("utf-8")
     except FileNotFoundError:
         return empty_index()
     except OSError as e:

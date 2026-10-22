@@ -43,6 +43,8 @@ _PYTHON_RE = re.compile(r"--python(?:=|\s+)([0-9][0-9.]*)\b")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 CHECK_ENV = "FINOPS_GUARD_RELEASE_CHECK"
+# The most read of Claude Code's installed_plugins.json.
+_PLUGINS_JSON_MAX = 16 * 1024 * 1024
 OFFLINE_TIMEOUT_S = 30
 ONLINE_TIMEOUT_S = 120
 
@@ -141,8 +143,10 @@ def _installed_plugin_dirs(plugins: Path) -> list[Path]:
     """Where Claude Code says the nable plugin is installed
     (installed_plugins.json), or [] when it does not say."""
     from .guard_plugin import PLUGIN_KEY
+    from .guard_paths import read_regular
     try:
-        doc = json.loads((plugins / "installed_plugins.json").read_text(encoding="utf-8"))
+        doc = json.loads(read_regular(plugins / "installed_plugins.json",
+                                      _PLUGINS_JSON_MAX).decode("utf-8"))
     except (OSError, ValueError):
         return []
     entries = (doc.get("plugins") or {}).get(PLUGIN_KEY) if isinstance(doc, dict) else None

@@ -116,6 +116,14 @@ def _usd(x: float) -> str:
     return f"${x:,.0f}"
 
 
+def _at_factor(listed: float, factor: str = LOW) -> float:
+    """A list figure times the factor, rounded up to the cent: what the guard
+    shows at an effective rate is never below it (D168, rule 15)."""
+    from decimal import ROUND_CEILING, Decimal
+    return float((Decimal(str(listed)) * Decimal(factor)).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING))
+
+
 # ── the ask shows the effective price beside list ───────────────────────────
 
 @pytest.mark.parametrize("cmd, monthly, usage_type", [
@@ -130,7 +138,7 @@ def test_an_ask_shows_the_price_at_your_effective_rate_and_is_judged_at_list(
     assert v["decision"] == "ask" and v["rule"] == "threshold"
     assert v["monthly_delta_usd"] == monthly and v["estimate"]["monthly_usd"] == monthly
     r = v["reason"]
-    shown = round(monthly * 0.3, 2)
+    shown = _at_factor(monthly)
     assert f"This is ~{_usd(shown)}/mo at your effective rate" in r, r
     assert "over 2026-09-19 to 2026-10-18 (as of 2026-10-18)" in r
     assert "on-demand factor 0.3000 for" in r and usage_type in r
@@ -390,13 +398,18 @@ def test_a_region_the_command_does_not_name_is_not_matched_to_its_list_price(
 
 
 def test_a_named_region_is_the_one_the_list_price_and_the_rate_are_for():
+    """The region the command names is the one its list price is figured
+    in and the one its rate is looked up for. An EC2 rate there is the
+    region's floor, not its listed rate, so no factor is applied to it
+    (D168): it is at list price, and says why."""
     from finops.aws_prices import EC2_REGION_RANGE
     keep_rates(rows=[*ROWS, _row("AmazonEC2", "BoxUsage:m5.2xlarge", region="eu-central-1")])
     v = g.gate_command(EC2.replace("us-east-1", "eu-central-1"))
     low = EC2_REGION_RANGE["eu-central-1"][0]
     assert v["priced"]["region"] == "eu-central-1"
     assert v["priced"]["usd_hour"] == round(EC2_HOURLY["m5.2xlarge"] * low, 6)
-    assert v["price_basis"] == "effective"
+    assert v["price_basis"] == "list" and "effective" not in v
+    assert "Priced at list price" in v["reason"] and "floor" in v["reason"]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
@@ -450,8 +463,8 @@ def test_the_ledger_line_carries_contract_2_and_keeps_the_judged_figures():
     assert rec["priced"] == {"product_code": "AmazonEC2", "region": "us-east-1",
                              "usage_type": "BoxUsage:m5.2xlarge", "quantity": 2,
                              "unit": "Hrs", "hours": 730.0,
-                             "usd_hour": EC2_HOURLY["m5.2xlarge"]}
-    assert rec["effective"] == {"monthly_usd": round(EC2_MONTHLY * 0.3, 2), "factor": LOW,
+                             "usd_hour": EC2_HOURLY["m5.2xlarge"], "path": "cli"}
+    assert rec["effective"] == {"monthly_usd": _at_factor(EC2_MONTHLY), "factor": LOW,
                                 "blended_factor": LOW, "as_of": "2026-10-18",
                                 "window": ["2026-09-19", "2026-10-18"], "workspace_ref": WS_A}
 

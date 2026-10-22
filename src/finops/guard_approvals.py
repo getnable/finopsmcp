@@ -52,6 +52,8 @@ EXPIRY_MINUTES = 15
 # denies. Copilot is one only under its cloud agent.
 DENY_ONLY = ("codex", "gemini", "cline")
 _LOCK_WAIT_S = 0.2
+# The most the guard reads of the approvals store: far past any real one.
+_STORE_MAX_BYTES = 16 * 1024 * 1024
 _VERSION = 1
 
 
@@ -119,7 +121,7 @@ def _locked(d: Path) -> Iterator[bool]:
     except ImportError:            # no flock (Windows): best effort
         yield True
         return
-    fd = os.open(d, os.O_RDONLY)
+    fd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         deadline = time.monotonic() + _LOCK_WAIT_S
         while True:
@@ -139,8 +141,14 @@ def _locked(d: Path) -> Iterator[bool]:
 
 
 def _read(p: Path) -> dict[str, dict[str, Any]]:
+    from .guard_paths import read_regular
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        # Without waiting, and only a regular file: a FIFO in its place is
+        # no approval, never a hook that waits.
+        raw = read_regular(p, _STORE_MAX_BYTES + 1)
+        if len(raw) > _STORE_MAX_BYTES:
+            return {}
+        doc = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError):
         return {}
     rows = doc.get("approvals") if isinstance(doc, dict) else None

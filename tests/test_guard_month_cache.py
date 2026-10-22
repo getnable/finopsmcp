@@ -275,8 +275,9 @@ def test_a_transcript_that_could_not_be_read_is_never_kept_as_zero(heavy, monkey
     another process holds the file) is said as not read, nothing about the
     file is kept, and the next call reads it: a failed read then a good one
     gives the full figure, and never $0 for that transcript after."""
-    import builtins
-    real_open = builtins.open
+    # Transcripts are opened without waiting (guard_paths.open_regular, D171),
+    # through os.open: the failure is made there.
+    real_open = os.open
     fail = {"left": 1}
 
     def flaky(file, *a, **k):
@@ -284,7 +285,7 @@ def test_a_transcript_that_could_not_be_read_is_never_kept_as_zero(heavy, monkey
             fail["left"] -= 1
             raise PermissionError(13, "Permission denied")
         return real_open(file, *a, **k)
-    monkeypatch.setattr(builtins, "open", flaky)
+    monkeypatch.setattr(os, "open", flaky)
     u = ab.month_agent_usage()
     full = Decimal(_uncached())
     assert Decimal(u["usd_exact"]) == full - Decimal("4.5") * 15
@@ -294,7 +295,7 @@ def test_a_transcript_that_could_not_be_read_is_never_kept_as_zero(heavy, monkey
         (data / ab.MONTH_TOTAL).read_text()).get("stamp") is None
     assert all("s-b.jsonl" not in p for p in json.loads(
         (data / ab.MONTH_CACHE).read_text())["files"])
-    monkeypatch.setattr(builtins, "open", real_open)
+    monkeypatch.setattr(os, "open", real_open)
     u = ab.month_agent_usage()
     assert u["usd_cents"] == _uncached() and Decimal(u["usd_exact"]) == full
     assert not any("not read" in n for n in u["notes"])

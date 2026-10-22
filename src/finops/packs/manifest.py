@@ -475,7 +475,11 @@ def load_manifest(root: Path) -> Manifest:
                                   [Problem(MANIFEST_NAME, "is missing (or not a regular file)")])
         if path.stat().st_size > MAX_MANIFEST_BYTES:
             raise ValidationError(f"{MANIFEST_NAME} is larger than {MAX_MANIFEST_BYTES} bytes")
-        text = path.read_text(encoding="utf-8")
+        from ..guard_paths import read_regular
+        raw = read_regular(path, MAX_MANIFEST_BYTES + 1)
+        if len(raw) > MAX_MANIFEST_BYTES:
+            raise ValidationError(f"{MANIFEST_NAME} is larger than {MAX_MANIFEST_BYTES} bytes")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise ValidationError(f"{MANIFEST_NAME} is not UTF-8 text") from None
     except OSError as e:

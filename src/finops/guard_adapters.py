@@ -122,6 +122,28 @@ LABELS = {"claude": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI",
 _LABEL_WIDTH = max(len(v) for v in LABELS.values())
 
 # Cursor names its events itself, so these alone identify a Cursor payload.
+# The most read of one harness's hook or settings file: far past any real one.
+_CONFIG_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _read_bytes(path: Path) -> bytes:
+    """The bytes of a harness's hook or settings file, or of one of the
+    guard's own beside the ledger, read without waiting and only when it is
+    a regular file (guard_paths.read_regular): a FIFO in its place is an
+    OSError, never a hook or an install that waits. OSError past
+    _CONFIG_MAX_BYTES."""
+    from .guard_paths import read_regular
+    raw = read_regular(path, _CONFIG_MAX_BYTES + 1)
+    if len(raw) > _CONFIG_MAX_BYTES:
+        raise OSError(errno.EFBIG, f"over the {_CONFIG_MAX_BYTES:,} bytes nable reads",
+                      str(path))
+    return raw
+
+
+def _read_text(path: Path, errors: str = "strict") -> str:
+    return _read_bytes(path).decode("utf-8", errors)
+
+
 _CURSOR_SHELL = "beforeShellExecution"
 _CURSOR_MCP = "beforeMCPExecution"
 # The post hook's event (guard_outcome): shell commands only. The cookbook
@@ -944,7 +966,7 @@ def _backup(path: Path, raw: bytes) -> Path | None:
 def _load(path: Path, *, comments_allowed: bool = False) -> dict:
     if not path.exists():
         return {}
-    raw = path.read_bytes()
+    raw = _read_bytes(path)
     if not raw.strip():
         return {}                       # an empty file (a `touch`) holds no settings yet
     try:
@@ -1126,7 +1148,7 @@ def post_hook_missing(path: Path) -> bool:
     A post hook pinned to another release is a re-pin, like the PreToolUse
     hook's. Read-only; False on anything odd."""
     try:
-        s = json.loads(path.read_text())
+        s = json.loads(_read_text(path))
         pre = list(guard._our_hooks((s.get("hooks") or {}).get("PreToolUse") or []))
         if not pre:
             return False
@@ -1579,7 +1601,7 @@ def _created_key(path: Path) -> str:
 
 def _created_all() -> dict:
     try:
-        data = json.loads(_created_path().read_text(encoding="utf-8"))
+        data = json.loads(_read_text(_created_path()))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -1646,7 +1668,7 @@ def _cline_command_in(text: str) -> str | None:
 
 def _cline_read(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        return _read_text(path, errors="replace")
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
         return None
 
@@ -1789,7 +1811,7 @@ def state(harness: str, global_scope: bool) -> str:
             return "broken" if guard.broken_hook_command(path) else "installed"
         if harness == "cline":
             return _cline_state(path)
-        doc = json.loads(path.read_text())
+        doc = json.loads(_read_text(path))
         ours = [c for c in _ADAPTERS[harness][2](doc) if _is_ours(c)]
     except Exception:
         return "absent"
@@ -1805,7 +1827,7 @@ def _our_commands(harness: str, global_scope: bool) -> list[str]:
         text = _cline_read(path)
         current = _cline_command_in(text) if text is not None else None
         return [current] if current and _is_ours(current) else []
-    doc = json.loads(path.read_text())
+    doc = json.loads(_read_text(path))
     return [c for c in _ADAPTERS[harness][2](doc) if _is_ours(c)]
 
 
@@ -1872,7 +1894,7 @@ def hook_releases(harness: str, global_scope: bool) -> set[str | None]:
             text = _cline_read(path)
             cmds = [_cline_command_in(text)] if text is not None else []
         else:
-            cmds = list(_strings(json.loads(path.read_text(encoding="utf-8"))))
+            cmds = list(_strings(json.loads(_read_text(path))))
     except (OSError, ValueError, TypeError, RecursionError):
         return set()
     return {uvx_release(c) for c in cmds if _is_ours(c)}
@@ -1884,7 +1906,7 @@ def sees_mcp(harness: str, global_scope: bool) -> bool:
     install runs again. Read-only, never raises."""
     path = hooks_path(harness, global_scope)
     try:
-        doc = json.loads(path.read_text())
+        doc = json.loads(_read_text(path))
         if harness == "cursor":
             return any(_is_ours(c) and _runnable(c)
                        for c in _cursor_event_commands(doc, _CURSOR_MCP))
@@ -1983,7 +2005,7 @@ def _plugin_hook_docs(root: Path):
             continue
         path = Path(dirpath) / "hooks.json"
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = json.loads(_read_text(path))
         except (OSError, ValueError):
             continue
         if isinstance(doc, dict):

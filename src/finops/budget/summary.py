@@ -38,6 +38,8 @@ from typing import Any
 
 SUMMARY_NAME = "budget-summary.json"
 SUMMARY_VERSION = 1
+# The most the guard reads of the summary: far past one for every budget.
+SUMMARY_MAX_BYTES = 16 * 1024 * 1024
 # How old the summary may be before the guard stops trusting it. Cost data
 # itself lands about a day late, so a summary refreshed daily stays inside
 # this with a day to spare.
@@ -93,8 +95,13 @@ def write_summary(results: list[dict[str, Any]], *, spend_through: str | None = 
 
 def read_summary() -> dict[str, Any] | None:
     """The cached summary, or None when there is none or it cannot be read."""
+    from ..guard_paths import read_regular
     try:
-        doc = json.loads(summary_path().read_text())
+        # Without waiting, and only a regular file: the guard's hook reads it.
+        raw = read_regular(summary_path(), SUMMARY_MAX_BYTES + 1)
+        if len(raw) > SUMMARY_MAX_BYTES:
+            return None
+        doc = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, dict) or not isinstance(doc.get("budgets"), list):

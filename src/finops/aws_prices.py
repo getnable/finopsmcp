@@ -34,9 +34,12 @@ PRICE_SOURCES below names the offer file, version and filter each table was
 read from, and the date it was read. tests/test_price_sources.py fails on a
 priced constant here that has no entry, and on an entry without a date.
 
-RDS is the one service priced outside us-east-1 too: rds_rate() answers from
+RDS and ElastiCache are priced outside us-east-1 too: rds_rate() answers from
 price_data/rds_on_demand.json, sixteen regions' listed on-demand rows with
-their SKUs, Multi-AZ as its own listed row (see rds_rate).
+their SKUs, Multi-AZ as its own listed row (see rds_rate), and
+elasticache_rate() from price_data/elasticache_on_demand.json, the same
+sixteen regions' listed node-hour rows. Both tables are read on first use,
+without waiting (guard_paths.read_regular): the guard's hook reads them.
 """
 from __future__ import annotations
 
@@ -134,6 +137,14 @@ PRICE_SOURCES: dict[str, dict[str, str]] = {
                                      "Multi-AZ, No license required, current generation; each "
                                      "row carries its SKU (scripts/build_rds_price_tables.py)",
                            "as_of": "2026-10-17"},
+    "ELASTICACHE_ON_DEMAND_JSON": {"source": "AWS Price List, AmazonElastiCache regional "
+                                             "offers, version 20261014221139 (published "
+                                             "2026-10-14), the 16 regions of "
+                                             "RDS_ON_DEMAND_JSON, OnDemand node hours "
+                                             "(NodeUsage) for Redis OSS, Memcached and Valkey, "
+                                             "current generation; each row carries its SKU "
+                                             "(scripts/build_elasticache_price_tables.py)",
+                                   "as_of": "2026-10-22"},
 }
 
 # Constants here that are not read from a price source: a convention, or a
@@ -480,6 +491,21 @@ def rds_hourly(instance_class: str, engine: str) -> float | None:
 # guard's hook imports this module and must not pay for a table it never asks.
 RDS_ON_DEMAND_JSON = "price_data/rds_on_demand.json"
 _RDS_REGIONAL: dict[str, dict] | None = None
+# The most a shipped table may be: a larger file is not this table.
+_TABLE_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _package_table(name: str) -> str:
+    """A price table shipped in the package, read without waiting and only
+    when it is a regular file (guard_paths.read_regular): the guard's hook
+    reads it, and a FIFO in its place costs the figure, never the hook's
+    time. OSError or ValueError when it cannot be read whole."""
+    from .guard_paths import read_regular
+
+    raw = read_regular(Path(__file__).parent / name, _TABLE_MAX_BYTES + 1)
+    if len(raw) > _TABLE_MAX_BYTES:
+        raise ValueError(f"{name} is over {_TABLE_MAX_BYTES:,} bytes")
+    return raw.decode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -510,8 +536,7 @@ def _rds_regional() -> dict[str, dict]:
         import json
         table: dict[str, dict] = {}
         try:
-            raw = json.loads((Path(__file__).parent / RDS_ON_DEMAND_JSON)
-                             .read_text(encoding="utf-8"))
+            raw = json.loads(_package_table(RDS_ON_DEMAND_JSON))
             for region, entry in raw["regions"].items():
                 table[region] = {
                     "version": str(entry["version"]), "read": str(entry["read"]),
@@ -549,6 +574,84 @@ def rds_rate(instance_class: str, engine: str, region: str, *,
                    source=(f"AWS Price List, AmazonRDS {where} offer, version "
                            f"{entry['version']}, SKU {sku}"),
                    as_of=entry["read"])
+
+
+# ── ElastiCache by region ────────────────────────────────────────────────────
+#
+# terraform_estimate's ElastiCache tables are us-east-1's. ElastiCache lists
+# other regions at their own node-hour rates, mostly higher (cache.r6g.large
+# Redis OSS $0.206 in us-east-1, $0.229 in eu-west-1, $0.41 in sa-east-1) and
+# a few lower (cache.r8g.large Valkey $0.1523 in ap-south-1 against $0.1756).
+# scripts/build_elasticache_price_tables.py writes every listed node-hour row
+# for the sixteen regions of rds_on_demand.json into
+# price_data/elasticache_on_demand.json, each with its SKU and the offer
+# version it came from. Read on first use, as the RDS table is.
+ELASTICACHE_ON_DEMAND_JSON = "price_data/elasticache_on_demand.json"
+_CACHE_REGIONAL: dict[str, dict] | None = None
+
+
+@dataclass(frozen=True)
+class CacheRate:
+    """One listed ElastiCache on-demand node-hour rate.
+
+    hourly_usd is the USD price per node hour exactly as the offer lists it (a
+    decimal string such as "0.2290000000"); engine is redis, memcached or
+    valkey; source names the regional offer, its version and the SKU; as_of
+    is the day that offer was read."""
+
+    hourly_usd: str
+    region: str
+    engine: str
+    node: str
+    sku: str
+    source: str
+    as_of: str
+
+
+def _cache_regional() -> dict[str, dict]:
+    """{region: {"version", "read", "rows": {(engine, node): (usd, sku)}}},
+    read once. A table that cannot be read is an empty one: no figure, never
+    a guessed one."""
+    global _CACHE_REGIONAL
+    if _CACHE_REGIONAL is None:
+        import json
+        table: dict[str, dict] = {}
+        try:
+            raw = json.loads(_package_table(ELASTICACHE_ON_DEMAND_JSON))
+            for region, entry in raw["regions"].items():
+                table[region] = {
+                    "version": str(entry["version"]), "read": str(entry["read"]),
+                    "rows": {(e, n): (usd, sku) for e, n, usd, sku in entry["rows"]},
+                }
+        except (OSError, ValueError, KeyError, TypeError):
+            table = {}
+        _CACHE_REGIONAL = table
+    return _CACHE_REGIONAL
+
+
+def elasticache_rate(node_type: str, engine: str, region: str) -> CacheRate | None:
+    """The listed on-demand node-hour rate for one ElastiCache node type, or
+    None.
+
+    engine is ElastiCache's own id (redis, memcached or valkey, any case;
+    Redis OSS and Memcached list alike, Valkey lower); region a region code.
+    None for anything the table does not hold: a region outside the sixteen,
+    a node type not listed there, an engine it does not name."""
+    if not all(isinstance(x, str) for x in (node_type, engine, region)):
+        return None
+    where = region.strip().lower()
+    entry = _cache_regional().get(where)
+    if entry is None:
+        return None
+    eng = engine.strip().lower()
+    hit = entry["rows"].get((eng, node_type.strip()))
+    if hit is None:
+        return None
+    usd, sku = hit
+    return CacheRate(hourly_usd=usd, region=where, engine=eng, node=node_type.strip(), sku=sku,
+                     source=(f"AWS Price List, AmazonElastiCache {where} offer, version "
+                             f"{entry['version']}, SKU {sku}"),
+                     as_of=entry["read"])
 
 
 # Rounded to cents at definition, for the reason given above ALB_PER_MONTH.
