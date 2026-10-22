@@ -319,6 +319,23 @@ def test_the_dry_run_says_the_records_can_name_paths_hosts_and_users(org_dir):
     assert "redacted when written" not in text
 
 
+def test_the_dry_run_says_which_records_name_resources_a_create_made(org_dir):
+    """D149: an approved priced create's outcome line names the resource ids
+    the tool printed. They leave only inside the lines a person sends, and
+    the dry run says how many lines carry them, and how many ids."""
+    recs = records(3)
+    recs[1].update({"kind": "outcome", "outcome": "ran",
+                    "created": [{"kind": "ec2_instance", "id": "i-0123456789abcdef0"},
+                                {"kind": "ec2_instance", "id": "i-0fedcba9876543210"}]})
+    write_ledger(recs)
+    p = cc.build()
+    assert b"i-0123456789abcdef0" in p.data
+    assert (p.ledger["records_creating"], p.ledger["created_ids"]) == (1, 2)
+    text = cc.describe(p, BOX, None)
+    assert ("1 of them names 2 resource ids an approved ask created, as the tool printed "
+            "them") in text
+
+
 # ── C4: the box, the key, the send ───────────────────────────────────────────
 
 @pytest.mark.parametrize("url, ok", [

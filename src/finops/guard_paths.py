@@ -30,9 +30,11 @@ case, the comparison does too.
 from __future__ import annotations
 
 import contextvars
+import errno
 import fnmatch
 import os
 import re
+import stat
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -59,6 +61,10 @@ _LEDGER_FILES = (
     # rewritten, the gate falls back to this machine's figure alone.
     ("cloud-standing.json", "the box's month to date the AI budget gate compares"),
     ("cloud-box.json", "the box this machine sends its coding-agent usage to"),
+    # cloud_rates.FILE_NAME: the workspace's effective rates the guard shows an
+    # ask's price at. Rewritten, an ask would show a person a price the
+    # workspace's bill never gave.
+    ("cloud-rates.json", "the workspace's effective rates the guard shows prices at"),
 )
 # Beside ai-budget.json (ai_budget._data_dir): the month's priced responses
 # the AI budget gate totals (ai_budget.MONTH_CACHE, MONTH_TOTAL, MONTH_SHARDS)
@@ -168,6 +174,38 @@ def _policy_files() -> list[Path]:
     return out
 
 
+def open_regular(path: str | os.PathLike) -> int:
+    """A descriptor for reading `path`, opened without waiting: a FIFO, a
+    socket or a device in its place is OSError, not a read that blocks. The
+    hook fails open when it runs out of time, so the guard never waits on a
+    file an agent can put there."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def read_regular(path: str | os.PathLike, most: int) -> bytes:
+    """Up to `most` bytes of the regular file at `path` (open_regular)."""
+    fd = open_regular(path)
+    try:
+        chunks: list[bytes] = []
+        left = most
+        while left > 0:
+            got = os.read(fd, min(left, 1 << 20))
+            if not got:
+                break
+            chunks.append(got)
+            left -= len(got)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def git_root(start: str | os.PathLike | None = None) -> Path | None:
     """finops.org.store.git_root, copied: the org package is not light."""
     try:
@@ -202,13 +240,14 @@ def git_config_files(root: Path | None) -> list[Path]:
         out.append(git / "config")
         try:
             if git.is_file():
-                text = git.read_text(encoding="utf-8")
+                text = read_regular(git, 4096).decode("utf-8", "replace")
                 gd = next((line[7:].strip() for line in text.splitlines()
                            if line.startswith("gitdir:")), "")
                 if gd:
                     gdir = Path(gd) if Path(gd).is_absolute() else (Path(root) / gd)
                     out += [gdir / "config.worktree", gdir / "commondir"]
-                    common = (gdir / (gdir / "commondir").read_text().strip())
+                    common = (gdir / read_regular(gdir / "commondir", 4096).decode(
+                        "utf-8", "replace").strip())
                     out.append(common / "config")
             else:
                 out.append(git / "config.worktree")
@@ -233,7 +272,7 @@ def _git_dir(root: str) -> Path | None:
     if dot.is_dir():
         return dot
     try:
-        text = dot.read_text(encoding="utf-8", errors="replace")[:4096]
+        text = read_regular(dot, 4096).decode("utf-8", "replace")
     except OSError:
         return None
     if not text.startswith("gitdir:"):
@@ -259,8 +298,10 @@ def git_tracked(path: str, root: str, tree: bool = False) -> bool | None:
         if index.stat().st_size > _INDEX_MAX:
             return None
         charge(1 + index.stat().st_size // (1024 * 1024))
-        data = index.read_bytes()
+        data = read_regular(index, _INDEX_MAX + 1)
     except OSError:
+        return None
+    if len(data) > _INDEX_MAX:
         return None
     if data[:4] != b"DIRC" or int.from_bytes(data[4:8], "big") not in (2, 3):
         return None

@@ -29,6 +29,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import sys
@@ -582,6 +583,115 @@ _ESTIMATORS: dict[str, Any] = {
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
+def _provider_keys(plan_data: dict) -> dict[str, str]:
+    """{a resource's configuration address (module path and type.name, no
+    instance keys): the provider_config_key it is made through}, from the
+    plan's configuration (the root module and its module calls)."""
+    out: dict[str, str] = {}
+
+    def walk(module: Any, prefix: str, depth: int) -> None:
+        if not isinstance(module, dict) or depth > 16:
+            return
+        for r in module.get("resources") or []:
+            if isinstance(r, dict) and isinstance(r.get("address"), str):
+                key = r.get("provider_config_key")
+                out[prefix + r["address"]] = key if isinstance(key, str) else ""
+        calls = module.get("module_calls") or {}
+        if isinstance(calls, dict):
+            for name, call in calls.items():
+                if isinstance(call, dict):
+                    walk(call.get("module"), f"{prefix}module.{name}.", depth + 1)
+    try:
+        walk(plan_data["configuration"]["root_module"], "", 0)
+    except (KeyError, TypeError):
+        pass
+    return out
+
+
+_INSTANCE_KEY_RE = re.compile(r"\[[^\]]*\]")
+
+
+def _plan_region(plan_data: dict, rc: ResourceChange, default: str | None,
+                 keys: dict[str, str] | None = None) -> str | None:
+    """The region of the AWS provider `rc` is made through (its
+    provider_config_key in the plan's configuration, the default `aws`
+    provider when the configuration names none) when that provider holds it
+    as a constant; `default` when the provider names no region at all; else
+    None (a variable, an expression, a provider the configuration does not
+    hold, or a resource the configuration does not list while an aliased
+    provider could have made it)."""
+    try:
+        providers = plan_data["configuration"]["provider_config"]
+    except (KeyError, TypeError):
+        return default
+    if not isinstance(providers, dict):
+        return None
+    keys = _provider_keys(plan_data) if keys is None else keys
+    key = keys.get(_INSTANCE_KEY_RE.sub("", rc.address))
+    if key is None:
+        aws = [k for k, v in providers.items() if isinstance(v, dict) and v.get("name") == "aws"]
+        if aws != ["aws"]:
+            return None if aws else default
+        key = "aws"
+    cfg = providers.get(key or "aws")
+    if not isinstance(cfg, dict) or cfg.get("name", "aws") != "aws":
+        return None
+    exprs = cfg.get("expressions") or {}
+    if not isinstance(exprs, dict) or "region" not in exprs:
+        return default
+    expr = exprs["region"]
+    value = expr.get("constant_value") if isinstance(expr, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def priced_skus(plan_data: dict, *, default_region: str | None = None
+                ) -> list[dict[str, Any]]:
+    """What a saved plan creates that the workspace's effective rates can
+    price (D146): each aws_instance, aws_db_instance (MySQL, MariaDB and
+    PostgreSQL) and aws_elasticache_cluster it creates, as the guard's SKU
+    (guard._sku): product code, the region of the provider it is made
+    through (_plan_region; `default_region` where that provider names none),
+    the usage type as the bill names it, the quantity, the list hourly rate
+    one unit is priced at, and that unit's monthly figure. A resource a price
+    book prices is marked, so its book figure stands. Nothing here changes a
+    figure the plan's estimate judges."""
+    keys = _provider_keys(plan_data)
+    out: list[dict[str, Any]] = []
+    for rc in parse_plan(plan_data):
+        if not rc.is_create or rc.is_delete:
+            continue
+        cfg = rc.after or {}
+        if rc.type == "aws_instance":
+            itype = str(cfg.get("instance_type") or "")
+            hourly = _EC2_HOURLY.get(itype)
+            sku = ("AmazonEC2", f"BoxUsage:{itype}", 1, hourly, itype)
+        elif rc.type == "aws_db_instance":
+            cls = str(cfg.get("instance_class") or "")
+            engine = str(cfg.get("engine") or "").strip().lower()
+            hourly = rds_hourly(cls, engine) if engine else None
+            maz = bool(cfg.get("multi_az", False))
+            sku = ("AmazonRDS", f"{'Multi-AZUsage' if maz else 'InstanceUsage'}:{cls}", 1,
+                   hourly * 2 if hourly is not None and maz else hourly, cls)
+        elif rc.type == "aws_elasticache_cluster":
+            node = str(cfg.get("node_type") or "")
+            nodes = elasticache_node_count(rc.type, cfg)
+            sku = ("AmazonElastiCache", f"NodeUsage:{node}", nodes,
+                   elasticache_hourly(node, str(cfg.get("engine") or "redis")), node)
+        else:
+            continue
+        product, usage_type, qty, hourly, name = sku
+        if hourly is None or not name:
+            continue
+        out.append({"product_code": product,
+                    "region": _plan_region(plan_data, rc, default_region, keys),
+                    "usage_type": usage_type,
+                    "quantity": qty, "unit": "Hrs", "hours": HOURS_PER_MONTH,
+                    "usd_hour": round(float(hourly), 6),
+                    "monthly_usd": round(float(hourly) * qty * HOURS_PER_MONTH, 2),
+                    "price_book": _book_hourly(name) is not None})
+    return out[:20]
+
 
 def _price_changes(changes: list[ResourceChange]) -> tuple[list[CostLine], list[dict]]:
     lines: list[CostLine] = []

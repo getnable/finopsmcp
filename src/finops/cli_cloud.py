@@ -31,6 +31,11 @@ org_file:authority.yaml among what it accepts; to any other box the send is
 refused before anything leaves, and the refusal names --without-org-file
 authority.yaml.
 
+`status` and a send keep the workspace's effective rates the status answer
+carries (its `rates` block, D147) as cloud-rates.json for the guard, only
+when they come from the box and the workspace this machine last sent to
+(finops.cloud_rates); otherwise they are shown and not kept, with why.
+
 `status` also reads the box's month to date for one person, when the box
 lists "standing" among what it reads (POST /api/free-tool/standing with
 exactly {"person": P}): P is --as WHO, else FINOPS_GUARD_PERSON, else git's
@@ -326,11 +331,14 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         except cc.ConnectError as exc:
             return _fail("refused", EXIT_REFUSED, str(exc), as_json=as_json, out=out, err=err)
         got = _standing(box, k, st, who, opener=opener, now=now)
+        rates = _rates(box, st, now=now)
         if as_json:
-            print(json.dumps({**st, "standing": got}, indent=2, default=str), file=out)
+            print(json.dumps({**st, "standing": got, "rates_kept": rates}, indent=2,
+                             default=str), file=out)
         else:
             print(_status_text(box, st), file=out)
             print(_standing_text(got), file=out)
+            print(_rates_text(rates, st), file=out)
         failed = got["read"] is False and got.get("asked") and not got.get("plan")
         return EXIT_REFUSED if failed else EXIT_OK
 
@@ -419,7 +427,25 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         for line in _org_files_text(result.get("org_files") or {}):
             print(line, file=out)
         print(_status_text(box, result.get("status") or {}), file=out)
+        if isinstance(result.get("rates"), Mapping):
+            print(_rates_text(result["rates"], result.get("status") or {}), file=out)
     return EXIT_OK
+
+
+def _rates(box: str, st: Mapping[str, Any], *, now: datetime | None) -> dict[str, Any]:
+    """Keep the status answer's rates block for the guard (D147), only as
+    the box's and the workspace's this machine last sent to; otherwise it is
+    shown and not kept, with why (cloud_rates.keep)."""
+    from datetime import UTC
+
+    from . import cloud_rates
+    return cloud_rates.keep(st.get("rates"), box=box, workspace_ref=st.get("workspace_ref"),
+                            fetched_at=now or datetime.now(UTC))
+
+
+def _rates_text(got: Mapping[str, Any], st: Mapping[str, Any]) -> str:
+    from . import cloud_rates
+    return cloud_rates.text(dict(got), st.get("rates"))
 
 
 def _org_files_text(got: Mapping[str, Any]) -> list[str]:

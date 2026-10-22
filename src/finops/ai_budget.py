@@ -1678,8 +1678,15 @@ def org_budget_status(cwd: str | None = None) -> dict[str, Any] | None:
         pct = float(larger) / h["usd"] if h["usd"] > 0 else 0.0
         cover = (cloud_standing.coverage(box, h["scope"], h["subject"])
                  if theirs is not None else None)
+        # How current that figure is: its own as_of, else (a box that sends
+        # none) the answer's.
+        at, own = (cloud_standing.figure_as_of(box, h["scope"], h["subject"])
+                   if theirs is not None else (None, False))
+        age = (cloud_standing.figure_age_hours(box, h["scope"], h["subject"])
+               if theirs is not None else None)
         rows.append({**h, "pct": pct, "verdict": _verdict(pct), "machine_usd": machine,
-                     "box_usd": theirs, "compared": compared, "box_cover": cover})
+                     "box_usd": theirs, "compared": compared, "box_cover": cover,
+                     "box_as_of": at, "box_as_of_own": own, "box_age_hours": age})
     worst = max(rows, key=lambda h: (_RANK[h["verdict"]], h["sure"], h["pct"]))
     if worst["scope"] in ("person", "per_person") and worst["person"] != person:
         person, source = worst["person"], (f"git user.email earlier this month; it is "
@@ -1737,6 +1744,15 @@ def org_budget_words(st: dict[str, Any]) -> str:
     return _unpriced_and_notes(text, u)
 
 
+def _whose_records(h: dict[str, Any]) -> str:
+    """Whose records a figure sums, as the reason names them."""
+    if h["scope"] == "team":
+        return "the team's records"
+    if h["scope"] == "org":
+        return "the org's records"
+    return f"{h['person']}'s records"
+
+
 def _cover_words(h: dict[str, Any]) -> str:
     """How current the box's figure for this budget is, from its own records:
     the box's as_of is the newest receipt from anyone in the workspace."""
@@ -1778,9 +1794,13 @@ def _box_words(st: dict[str, Any], h: dict[str, Any], u: dict[str, Any], *, budg
     from .budget.summary import age_words
     box = st.get("box") or {}
     theirs = _cents(h["box_usd"])
-    at = box.get("as_of") or box.get("fetched_at")
-    when = (f"the box's records are as of {at}, the newest it received from anyone in the "
-            f"workspace ({age_words(box.get('age_hours'))} old, read by `nable cloud status` "
+    # The compared figure's own as_of when the box sent one; the answer's,
+    # the newest receipt from anyone in the workspace, only when it did not.
+    at = h.get("box_as_of") or box.get("fetched_at")
+    newest = (f"the newest of {_whose_records(h)} it received" if h.get("box_as_of_own")
+              else "the newest it received from anyone in the workspace")
+    when = (f"the box's records are as of {at}, {newest} "
+            f"({age_words(h.get('box_age_hours'))} old, read by `nable cloud status` "
             f"at {box.get('fetched_at')})")
     on_box = (f"on the box ({box.get('host')}), {_whose(h)} stands at {theirs} in "
               f"list-price-equivalent dollars this month, from what people sent with "

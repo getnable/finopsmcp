@@ -6,7 +6,9 @@ the guard reads git's index, not what a commit or a patch would change. So
 each asks whenever the repo holds one of the guard's own org files (or the
 org directory it would be made in), the way a stash pop does; one that only
 reads (`git apply --check`, `git merge --help`) and one in a repo with no org
-model never ask. A branch switch is not asked, and `nable guard doctor` says so.
+model never ask. A branch switch is judged by what it changes (D157,
+tests/test_guard_branch_switch.py): here, against repos real git wrote, loose
+and after `git gc` packed them with deltas.
 """
 from __future__ import annotations
 
@@ -30,6 +32,10 @@ GIT = shutil.which("git")
 # The org file or the org directory named as a whole word in the ask (not as
 # part of another name such as my-nable.org.bak).
 _ORG_FILE_NAMED = re.compile(r"(?<![\w.-])(?:authority\.yaml|nable\.org)(?![\w-])")
+
+
+# The org model's authority file named by its path from the repo root.
+_AUTHORITY_NAMED = re.compile(r"(?<![\w.-])nable\.org/authority\.yaml(?![\w-])")
 
 
 def _names_org_files(text: str) -> bool:
@@ -111,6 +117,22 @@ def test_a_repo_with_no_org_model_is_never_asked(repo, tmp_path):
         assert g.gate_command(cmd, "s1", cwd=str(other), record=False) is None, cmd
 
 
-def test_the_doctor_names_the_branch_switch_it_does_not_ask(repo):
+def test_the_doctor_no_longer_names_a_branch_switch_as_a_gap(repo):
     gaps = " ".join(g.doctor()["not_covered"])
-    assert "branch" in gaps and "git merge" not in gaps and "git reset" not in gaps
+    assert "branch switch" not in gaps and "git merge" not in gaps and "git reset" not in gaps
+
+
+@pytest.mark.parametrize("packed", [False, True], ids=["loose", "packed by git gc"])
+def test_a_switch_real_git_would_make_is_read_from_its_own_objects(repo, packed):
+    """The reader against what git itself wrote: a switch to evil rewrites
+    authority.yaml and asks, naming it; a branch made at HEAD stays silent."""
+    r, _patch = repo
+    if packed:
+        subprocess.run([GIT, "gc", "-q", "--aggressive"], cwd=r, check=True,
+                       capture_output=True, env=_git_env(), timeout=120)
+        assert not any((r / ".git" / "objects").glob("[0-9a-f][0-9a-f]/*"))
+    for cmd in ("git checkout evil", "git switch evil", "git switch --detach evil"):
+        v = g.gate_command(cmd, "s1", cwd=str(r), record=False)
+        assert v is not None and v["decision"] == "ask", (cmd, v)
+        assert _AUTHORITY_NAMED.search(v["reason"]), v["reason"]
+    assert g.gate_command("git checkout -b feature", "s1", cwd=str(r), record=False) is None

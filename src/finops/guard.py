@@ -349,6 +349,7 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
+    (r"\baws\s+elasticache\s+create-cache-cluster\b", "infra_apply"),
     # Changes that resize what is already running, or launch capacity by other
     # verbs than run-instances. Reversible, but a class change to
     # db.r6g.16xlarge or a desired capacity of 100 is a bill like any launch.
@@ -1568,6 +1569,7 @@ _STRUCT_TYPE_RE = re.compile(r"\bInstanceType\s*[=:]\s*([a-z0-9]+\.[a-z0-9]+)")
 # guard's job is the ceiling a human is about to authorise, not the floor.
 _COUNT_RE = re.compile(r"--count[=\s]+(\d+)(?::(\d+))?")
 _RDS_CREATE_RE = re.compile(r"\baws\s+rds\s+create-db-instance\b")
+_CACHE_CREATE_RE = re.compile(r"\baws\s+elasticache\s+create-cache-cluster\b")
 _RDS_MODIFY_RE = re.compile(r"\baws\s+rds\s+modify-db-instance\b")
 _EC2_MODIFY_RE = re.compile(r"\baws\s+ec2\s+modify-instance-attribute\b")
 _SPOT_RE = re.compile(r"\baws\s+ec2\s+request-spot-instances\b")
@@ -1688,6 +1690,26 @@ def _book_field(book: dict[str, Any], judged: bool = True,
         # Below list: shown, not used for the verdict.
         out.update(below_list=True, monthly_usd=round(book_monthly or 0.0, 2))
     return out
+
+
+# What an estimate priced, for the workspace's effective rate (cloud_rates,
+# D146) and for the ledger (contract 2's `priced`): the product code, the
+# region the command names (the one its list price is figured in), the usage
+# type as the bill names it without its region prefix, the quantity, and the
+# hourly rate one unit was priced at. A command that names no region is
+# priced at us-east-1's list price while the AWS CLI launches it in the
+# environment's or the profile's region, so it records no region and no
+# factor is applied to it; nothing on this path reads the environment's AWS
+# config. Only on-demand launches of the families the box derives rates for
+# (EC2 run-instances, RDS create-db-instance, ElastiCache create-cache-cluster,
+# and the same resources in a saved Terraform plan). Nothing here changes a
+# figure the guard judges.
+def _sku(product: str, usage_type: str, quantity: float, hourly: float, monthly: float,
+         book: dict[str, Any] | None) -> dict[str, Any]:
+    return {"product_code": product, "region": _PRICING_REGION.get(),
+            "usage_type": usage_type, "quantity": quantity, "unit": "Hrs",
+            "hours": _hours_per_month(), "usd_hour": round(hourly, 6),
+            "monthly_usd": round(monthly, 2), "price_book": book is not None}
 
 
 # A size the tables do not list, in a family they do: `c6i.32xlarge`,
@@ -1906,6 +1928,10 @@ def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     basis = _ON_DEMAND_BASIS + "; the AMI's root volume is not counted" + (
         f", nor {unsized} volume{'s' if unsized != 1 else ''} from a snapshot" if unsized else "")
     est = _price_ec2(m.group(1), count or 1, basis=basis)
+    if est is not None:
+        book = est.get("price_book")
+        est["sku"] = _sku("AmazonEC2", f"BoxUsage:{est['instance_type']}", est["count"],
+                          est["hourly_usd"], est["monthly_usd"], book)
     if est is None or not per_instance:
         return est
     n = est["count"]
@@ -2022,16 +2048,71 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     elif family:
         basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
+    # The bill names a Multi-AZ instance's hours as one Multi-AZUsage line,
+    # its rate the standby's included.
+    sku = _sku("AmazonRDS", f"{'Multi-AZUsage' if multi_az else 'InstanceUsage'}:{cls}", 1,
+               hourly * (2 if multi_az else 1), monthly, book)
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": cls,
         "count": 2 if multi_az else 1,
         "basis": basis,
+        "sku": sku,
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         "line": (f"{cls} {engine or 'RDS'}{' Multi-AZ' if multi_az else ''} {at}"
                  f"{_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
+                 f"is ~${monthly:,.0f}/mo"
+                 + (_below_list(book, hours) if book and not judged else "")),
+    }
+
+
+_CACHE_BASIS = (f"{_ON_DEMAND_BASIS}, node hours only; a replication group's other nodes "
+                "and backup storage not included")
+
+
+def _price_cache_cluster(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-cache-cluster: its nodes at the ElastiCache table's node-hour
+    rate for the engine (the Terraform estimator's, which names its offer and
+    SKUs), scaled from the family's listed sizes when the size is not listed,
+    or the org's price book rate. No --cache-node-type, no figure."""
+    from .connectors.terraform_estimate import (
+        _ELASTICACHE_HOURLY,
+        _ELASTICACHE_VALKEY_HOURLY,
+        elasticache_hourly,
+    )
+    node = _flag(cmd, "cache-node-type")
+    if not node:
+        return None
+    engine = (_flag(cmd, "engine") or "redis").lower()
+    if engine not in ("redis", "memcached", "valkey"):
+        return None
+    nodes = _int_flag(cmd, "num-cache-nodes") or 1
+    listed, family = elasticache_hourly(node, engine), ""
+    if listed is None:
+        listed, family = _scaled(_ELASTICACHE_VALKEY_HOURLY if engine == "valkey"
+                                 else _ELASTICACHE_HOURLY, node)
+    hourly, book, judged = _gated("aws", node, listed)
+    if hourly is None:
+        return None
+    hours = nodes * _hours_per_month()
+    monthly = hourly * hours
+    basis = _CACHE_BASIS
+    if book and judged:
+        basis = _book_basis(basis, book)
+    elif family:
+        basis = _scaled_basis(basis, family)
+    at = "at your price book rate of " if judged else "at "
+    return {
+        "monthly_usd": round(monthly, 2),
+        "hourly_usd": hourly,
+        "instance_type": node,
+        "count": nodes,
+        "basis": basis,
+        "sku": _sku("AmazonElastiCache", f"NodeUsage:{node}", nodes, hourly, monthly, book),
+        **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
+        "line": (f"{nodes}x {node} {engine} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
     }
@@ -2864,9 +2945,12 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
     basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}{booked}"
              + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
                 if unpriced else ""))
+    from .connectors.terraform_estimate import priced_skus
+    skus = priced_skus(doc)
     return {
         "monthly_usd": round(monthly, 2),
         "plan": plan,
+        **({"skus": skus} if skus else {}),
         "priced_resources": len(result["lines"]),
         "unpriced_resources": unpriced,
         "basis": basis,
@@ -2880,6 +2964,7 @@ _PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_CAPACITY_RESERVATION_RE, _price_capacity_reservation),
     (_RDS_CREATE_RE, _price_rds),
+    (_CACHE_CREATE_RE, _price_cache_cluster),
     (_RDS_MODIFY_RE, _price_rds_class_change),
     (_EC2_MODIFY_RE, _price_instance_type_change),
     (_SPOT_RE, _price_spot),
@@ -3048,12 +3133,22 @@ def _added_up(parts: list[dict[str, Any]], unpriced: int) -> dict[str, Any] | No
                                        if p.get("price_book")))
             if books:
                 est["price_book"] = {"pack": ", ".join(books)}
+            skus = [x for p in parts for x in _skus_of(p)]
+            if skus:
+                est["skus"] = skus
     if unpriced:
         est = {**est, "unpriced_changes": unpriced,
                "line": (f"{est['line']} ({unpriced} more change"
                         f"{'s' if unpriced != 1 else ''} in this command "
                         f"{'have' if unpriced != 1 else 'has'} no figure)")}
     return est
+
+
+def _skus_of(est: dict[str, Any]) -> list[dict[str, Any]]:
+    """The SKUs an estimate priced for the effective rate (_sku), in order."""
+    if est.get("skus"):
+        return [x for x in est["skus"] if isinstance(x, dict)]
+    return [est["sku"]] if isinstance(est.get("sku"), dict) else []
 
 
 def _size(est: dict[str, Any]) -> float:
@@ -4043,7 +4138,8 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         err = org.error
         v = _judged(command, hit, context=context, via=via, cwd=cwd,
                     org=_OrgLens(command, cwd, on=False))
-        return {**v, "_org_error": err}
+        return {**_with_effective(v), "_org_error": err}
+    v = _with_effective(v)
     v = _with_owner(v, org)
     v = _with_scope(v, org)
     if org.error is not None:
@@ -4053,6 +4149,41 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         # ledger keeps which figures, from which scope and which file.
         v = {**v, "org_thresholds": org._memo["thresholds"]}
     return v
+
+
+def _with_effective(v: dict[str, Any]) -> dict[str, Any]:
+    """A priced verdict, after it is judged: what it priced (contract 2's
+    `priced`), on which basis it is shown, and, where this machine keeps the
+    workspace's effective rates (cloud_rates), the figure at that rate,
+    appended to the reason of an ask, a deny or a warning as its own sentence
+    (price_note). Rule 13: the decision, the rule, the thresholds and the
+    figures every check judged are the list figures, untouched; a price is
+    shown, never trusted to skip a check. A failure here costs the note,
+    never the verdict."""
+    est = v.get("estimate")
+    skus = _skus_of(est) if isinstance(est, dict) else []
+    if not skus:
+        return v
+    try:
+        from . import cloud_rates
+        judged = est.get("monthly_usd") if isinstance(est.get("monthly_usd"), int | float) \
+            else None
+        got = cloud_rates.effective(skus, judged_monthly=judged)
+    except Exception:  # noqa: BLE001 - the note, never the verdict
+        return v
+    if got is None:
+        return v
+    out = {**v, "priced": got["priced"], "price_basis": got["price_basis"]}
+    if got.get("effective"):
+        out["effective"] = got["effective"]
+    if got["note"] and v.get("decision") in ("ask", "deny", "warn") and v.get("reason"):
+        note = got["note"]
+        if v.get("decision") != "ask":
+            note = note.replace(cloud_rates.JUDGED_AT_LIST, cloud_rates.JUDGED_AT_LIST.replace(
+                "this ask", "this call"))
+        out["reason"] = f"{v['reason']} {note}"
+        out["price_note"] = note
+    return out
 
 
 def _with_scope(v: dict[str, Any], org: _OrgLens) -> dict[str, Any]:
@@ -4506,6 +4637,7 @@ _LOOP_ARGS: list[tuple[Any, tuple[str, ...]]] = [
     (re.compile(r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b"),
      ("template-file", "template-url", "template-body")),
     (_RDS_CREATE_RE, ("db-instance-class", "engine")),
+    (_CACHE_CREATE_RE, ("cache-node-type", "engine", "num-cache-nodes")),
     (_GCE_CREATE_RE, ("machine-type",)),
     (_AZ_VM_CREATE_RE, ("size", "count")),
 ]
@@ -5921,31 +6053,128 @@ def _landing_names(entries: list[Any]) -> set[str]:
 
 
 # git commands that rewrite tracked files from a commit or a patch the guard
-# does not read (reset only with --hard, --merge or --keep), and the apply
+# does not read (reset only with --hard, --merge or --keep), or that run
+# something which may (merge-index, mergetool, filter-branch), and the apply
 # options that only read a patch.
-_GIT_REWRITES = ("merge", "pull", "rebase", "cherry-pick", "revert", "am", "apply", "reset")
+_GIT_REWRITES = ("merge", "pull", "rebase", "cherry-pick", "revert", "am", "apply", "reset",
+                 "merge-index", "merge-one-file", "mergetool", "filter-branch")
 _APPLY_READS = ("--check", "--stat", "--numstat", "--summary")
+# git's own commands that write no tracked file of the work tree from
+# another commit or the index. A word not here and not judged below is an
+# alias (resolved, _git_alias) or a command outside git (git-lfs, git-flow,
+# git-svn), judged as a rewrite wherever the repo holds org files.
+_GIT_KNOWN = frozenset((
+    "add", "annotate", "archive", "blame", "branch", "bugreport", "bundle", "cat-file",
+    "check-attr", "check-ignore", "check-mailmap", "check-ref-format", "cherry", "citool",
+    "clone", "column", "commit", "commit-graph", "commit-tree", "config", "count-objects",
+    "credential", "credential-cache", "credential-store", "describe", "diagnose", "diff",
+    "diff-files", "diff-index", "diff-tree", "difftool", "fast-export", "fast-import", "fetch",
+    "fetch-pack", "fmt-merge-msg", "for-each-ref", "for-each-repo", "format-patch", "fsck",
+    "fsck-objects", "gc", "get-tar-commit-id", "grep", "gui", "hash-object", "help", "hook",
+    "index-pack", "init", "init-db", "instaweb", "interpret-trailers", "log", "ls-files",
+    "ls-remote", "ls-tree", "mailinfo", "mailsplit", "maintenance", "merge-base",
+    "merge-tree", "mktag", "mktree", "multi-pack-index", "name-rev", "notes", "pack-objects",
+    "pack-redundant", "pack-refs", "patch-id", "prune", "prune-packed", "push", "range-diff",
+    "receive-pack", "reflog", "remote", "repack", "replace", "request-pull", "rerere",
+    "rev-list", "rev-parse", "send-email", "send-pack", "shortlog", "show", "show-branch",
+    "show-index", "show-ref", "stage", "status", "stripspace", "symbolic-ref", "tag",
+    "unpack-file", "unpack-objects", "update-index", "update-ref", "update-server-info",
+    "upload-archive", "upload-pack", "var", "verify-commit", "verify-pack", "verify-tag",
+    "version", "whatchanged", "worktree", "write-tree"))
+# bisect's words that check out no commit.
+_BISECT_READS = ("log", "visualize", "view", "terms", "help")
+# What points git at objects, refs, an index, a config or a work tree other
+# than those of the repo the guard finds from the working directory.
+_GIT_ELSEWHERE_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                      "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+                      "GIT_REPLACE_REF_BASE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT")
+# What points git at other config files than guard_paths.git_config_files
+# names, from which an alias is read.
+_GIT_CONFIG_ENV = ("HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+                   "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG")
+# git's global options that take no value. Any other word before the
+# command is one the guard cannot place (a quoted alias read as words).
+_GIT_GLOBAL_FLAGS = frozenset(("-p", "-P", "--paginate", "--no-pager", "--no-replace-objects",
+                               "--no-lazy-fetch", "--no-optional-locks", "--no-advice",
+                               "--bare", "--literal-pathspecs", "--glob-pathspecs",
+                               "--noglob-pathspecs", "--icase-pathspecs", "--version", "-v",
+                               "--help", "-h", "--html-path", "--man-path", "--info-path"))
+_GIT_ALIAS_DEPTH = 8
+_GIT_CONFIG_MAX = 256 * 1024
+_GIT_SECTION_RE = _Lazy(r'\[\s*([A-Za-z0-9.-]+)(?:\s+"(?:[^"\\]|\\.)*")?\s*\]\s*(.*)')
 
 
-def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str]:
+def _git_targets(args: list[str], base: str, env: dict[str, str] | None = None,
+                 depth: int = 0) -> tuple[list[tuple[str, Any]], str]:
     """(targets, directory) for a git command: checkout and restore of paths,
-    rm, mv and clean; and the commands that rewrite tracked files from a
-    commit or a patch (merge, pull, rebase, cherry-pick, revert, am, apply,
-    a hard reset), as the whole repo ("repo"). `git -C dir` and
-    `--work-tree=dir` move the directory."""
+    rm, mv, clean, merge-file and checkout-index of paths; and the commands
+    that rewrite tracked files from a commit, the index or a patch (merge,
+    pull, rebase, cherry-pick, revert, am, apply, a hard reset, read-tree -u,
+    checkout-index of all, bisect, sparse-checkout, submodule update), as the
+    whole repo ("repo"). `git -C dir` moves the directory. An alias is judged
+    as what it runs, and a word git does not know as a rewrite. Another git
+    directory, index, object store or work tree (--git-dir, GIT_DIR,
+    GIT_WORK_TREE, -c core.worktree, ...) makes a switch, a checkout, a
+    restore and a stash a rewrite of the work tree it writes, as a merge is
+    judged: the guard reads the working directory's repo, not that one."""
+    from . import guard_paths
+    env = env or {}
+    start = base
+    elsewhere = any(k in env for k in _GIT_ELSEWHERE_ENV)
+    git_dir = "GIT_DIR" in env
+    work_tree = (os.path.join(base, os.path.expanduser(env["GIT_WORK_TREE"]))
+                 if env.get("GIT_WORK_TREE") else None)
+    aliases: dict[str, str | None] = {}
+    files_ok = not any(k in env for k in _GIT_CONFIG_ENV)
+    unplaced = False
     i = 0
     while i < len(args) and args[i].startswith("-"):
         w = args[i]
-        if w == "-C" and i + 1 < len(args):
-            base = os.path.join(base, os.path.expanduser(args[i + 1]))
-            i += 2
-            continue
-        if w.startswith("--work-tree="):
-            base = os.path.join(base, os.path.expanduser(w.split("=", 1)[1]))
-        i += 2 if w in ("-c", "--git-dir", "--work-tree", "--namespace") else 1
+        name, eq, attached = w.partition("=")
+        takes = name in _GIT_GLOBAL_WITH_VALUE and not eq
+        value = (args[i + 1] if i + 1 < len(args) else "") if takes else attached
+        if name not in _GIT_GLOBAL_WITH_VALUE and name not in _GIT_GLOBAL_FLAGS:
+            unplaced = True
+        if name == "-C" and takes:
+            base = os.path.join(base, os.path.expanduser(value))
+        elif name == "--work-tree":
+            work_tree = os.path.join(base, os.path.expanduser(value))
+            elsewhere = True
+        elif name in ("--git-dir", "--bare"):
+            elsewhere = git_dir = True
+        elif name == "--namespace":
+            elsewhere = True
+        elif name in ("-c", "--config-env"):
+            key, has, val = value.partition("=")
+            key = key.strip().lower()
+            if key == "core.worktree" or key.startswith("include"):
+                elsewhere = True
+                files_ok = False
+            if key.startswith("alias."):
+                # --config-env reads the value from a variable: not known here;
+                # a shell alias runs anything.
+                aliases[key[6:]] = val if has and name == "-c" else None
+                unplaced = unplaced or val.lstrip("'\"").startswith("!")
+        i += 2 if takes else 1
     if i >= len(args):
         return [], base
+
+    def repo() -> list[tuple[str, Any]]:
+        # The work tree git writes: the one named, else the working
+        # directory under another git directory, else the repo's root.
+        top = work_tree or (base if git_dir else str(guard_paths.git_root(base) or base))
+        return [(top, "repo")]
     sub, rest = args[i], args[i + 1:]
+    if unplaced:
+        return repo(), base
+    if elsewhere and sub in ("checkout", "switch", "restore", "stash"):
+        return repo() + [(p, False) for p in _plain_args(rest)], base
+    switch = _branch_switch(sub, rest, base)
+    if switch is not None:
+        if switch is False:
+            return [], base
+        root = guard_paths.git_root(base)
+        return [(str(root) if root else ".", ("switch", switch))], base
     if sub in ("checkout", "restore"):
         source = any(w in ("-s", "--source") or w.startswith("--source=") for w in rest)
         if sub == "restore" and (_has_short(rest, "S") or "--staged" in rest) and not (
@@ -5970,7 +6199,6 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         # It takes back the changes to every tracked file in the repo (or
         # under the pathspecs after `--`), untracked ones too with -u or -a;
         # pop and apply put back whatever the stash holds.
-        from . import guard_paths
         spec = rest[rest.index("--") + 1:] if "--" in rest else []
         root = guard_paths.git_root(base)
         if rest and rest[0] in ("pop", "apply"):
@@ -5980,18 +6208,42 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
         else:
             mode = "changed"
         return [(p, mode) for p in (spec or [str(root) if root else "."])], base
-    if sub in _GIT_REWRITES and not (
-            "-h" in rest or "--help" in rest
-            or (sub == "apply" and any(w in _APPLY_READS for w in rest)
-                and "--apply" not in rest)
-            or (sub == "reset" and not any(w in ("--hard", "--merge", "--keep")
-                                           for w in rest))):
+    if "-h" in rest or "--help" in rest:
+        return [], base
+    if sub in _GIT_REWRITES:
+        if (sub == "apply" and any(w in _APPLY_READS for w in rest)
+                and "--apply" not in rest) or (sub == "reset" and not any(
+                    w in ("--hard", "--merge", "--keep") for w in rest)):
+            return [], base             # it reads, or moves the index alone
         # What it changes is in a commit or a patch the guard does not read:
         # it asks whenever the repo holds one of the guard's own org files,
         # or the org directory one would be made in.
-        from . import guard_paths
-        root = guard_paths.git_root(base)
-        return [(str(root) if root else ".", "repo")], base
+        return repo(), base
+    if sub == "read-tree":
+        # -u writes the work tree from the trees it reads (-n: a dry run).
+        writes = (_has_short(rest, "u") and not (_has_short(rest, "n") or "--dry-run" in rest))
+        return (repo() if writes else []), base
+    if sub == "checkout-index":
+        force = _has_short(rest, "f") or "--force" in rest
+        if "--temp" in rest or ((_has_short(rest, "n") or "--no-create" in rest) and not force):
+            return [], base             # temporary files, or nothing new and nothing over
+        if _has_short(rest, "a") or any(w in ("--all", "--stdin") or w.startswith("--prefix")
+                                         for w in rest):
+            return repo(), base
+        return [(p, False) for p in _plain_args(rest)], base
+    if sub == "merge-file":
+        if _has_short(rest, "p") or "--stdout" in rest:
+            return [], base
+        plain = _plain_args([w for j, w in enumerate(rest)
+                             if not (j and rest[j - 1] in ("-L", "--diff-algorithm"))])
+        return [(p, False) for p in plain[:1]], base
+    if sub == "bisect":
+        return ([] if not rest or rest[0] in _BISECT_READS else repo()), base
+    if sub == "sparse-checkout":
+        return ([] if not rest or rest[0] == "list" else repo()), base
+    if sub == "submodule":
+        words = _plain_args(rest)
+        return (repo() if words and words[0] in ("update", "deinit", "foreach") else []), base
     if sub == "rm" and "--cached" in rest:
         # The index only: the files stay, but the next commit drops what is
         # tracked from the repo (nable.org/ with it) for everyone else.
@@ -6002,7 +6254,179 @@ def _git_targets(args: list[str], base: str) -> tuple[list[tuple[str, Any]], str
             _has_short(rest, "n") or "--dry-run" in rest):
         # It deletes what is untracked, so only a protected file that is there.
         return [(p, "exists") for p in (_plain_args(rest) or ["."])], base
-    return [], base
+    if sub in _GIT_KNOWN or sub in ("stash", "clean") or sub.startswith("-"):
+        return [], base                 # stash list, clean -n, ...
+    # An alias runs what it names; a shell alias (!...), an alias the guard
+    # cannot read, and a command outside git may rewrite anything.
+    value = aliases[sub.lower()] if sub.lower() in aliases else (
+        _git_alias(sub, guard_paths.git_root(start)) if files_ok else None)
+    if value and not value.startswith("!") and depth < _GIT_ALIAS_DEPTH:
+        import shlex
+        try:
+            expanded = shlex.split(value)
+        except ValueError:
+            expanded = []
+        if expanded:
+            return _git_targets([*args[:i], *expanded, *rest], start, env, depth + 1)
+    return repo(), base
+
+
+def _git_config_value(raw: str) -> str | None:
+    """A git config value as git reads it (quotes, escapes, a trailing
+    comment), or None for one this does not read (continued on the next
+    line, an open quote)."""
+    out: list[str] = []
+    quoted = False
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if c == "\\":
+            if i + 1 >= len(raw):
+                return None
+            out.append({"n": "\n", "t": "\t", "b": "\b"}.get(raw[i + 1], raw[i + 1]))
+            i += 2
+            continue
+        if c == '"':
+            quoted = not quoted
+        elif c in "#;" and not quoted:
+            break
+        else:
+            out.append(c)
+        i += 1
+    return None if quoted else "".join(out).strip()
+
+
+def _git_alias(sub: str, root: Path | None) -> str | None:
+    """What alias.<sub> runs, from the config files git reads it from
+    (guard_paths.git_config_files, in git's order, the last one winning);
+    None when none defines it, or when that cannot be told: a file not read
+    whole, a value this does not read, or a file that brings in another
+    (include, includeIf)."""
+    from . import guard_paths
+    want = sub.lower()
+    found: str | None = None
+    for path in guard_paths.git_config_files(root):
+        if path.name == "commondir":
+            continue
+        try:
+            raw = guard_paths.read_regular(path, _GIT_CONFIG_MAX + 1)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError:
+            return None
+        if len(raw) > _GIT_CONFIG_MAX:
+            return None
+        guard_paths.charge(1 + len(raw) // (64 * 1024))
+        section = ""
+        for line in raw.decode("utf-8", "replace").splitlines():
+            t = line.strip()
+            if not t or t[0] in "#;":
+                continue
+            m = _GIT_SECTION_RE.match(t)
+            if m:
+                section = m.group(1).lower()
+                if section.startswith("include"):
+                    return None
+                t = m.group(2).strip()
+                if not t:
+                    continue
+            if section != "alias":
+                continue
+            name, eq, value = t.partition("=")
+            if name.strip().lower() != want:
+                continue
+            got = _git_config_value(value) if eq else None
+            if got is None:
+                return None
+            found = got
+    return found
+
+
+# git checkout's and git switch's options that take the next word as their
+# value, and those that create a branch (its name is that value); the short
+# ones among them, read inside a cluster (`-qb NAME`, `-bNAME`).
+_CHECKOUT_VALUES = ("-b", "-B", "--orphan", "--conflict", "--pathspec-from-file")
+_SWITCH_VALUES = ("-c", "-C", "--create", "--force-create", "--orphan", "--conflict")
+_CREATES = ("-b", "-B", "-c", "-C", "--create", "--force-create", "--orphan")
+
+
+def _short_options(rest: list[str], valued: str) -> list[str]:
+    """`rest` with each cluster of short options (`-qf`, `-qb NAME`) written
+    out one option a word; a letter in `valued` takes the rest of its
+    cluster as its value, or the next word."""
+    out: list[str] = []
+    for j, w in enumerate(rest):
+        if w == "--":
+            return out + rest[j:]
+        if not w.startswith("-") or w.startswith("--") or len(w) <= 2:
+            out.append(w)
+            continue
+        for k, ch in enumerate(w[1:], 1):
+            out.append("-" + ch)
+            if ch in valued:
+                if w[k + 1:]:
+                    out.append(w[k + 1:])
+                break
+    return out
+
+
+def _branch_switch(sub: str, rest: list[str], base: str) -> Any:
+    """For `git checkout` and `git switch` of a branch or commit (D157): the
+    switch to judge, (target, branch first, orphan, forced); False for one
+    that changes no file (a branch made at HEAD, a bare checkout); None when
+    the words are not a switch (a checkout of paths, judged as before). A
+    checkout of paths read from a file (--pathspec-from-file) is judged as a
+    forced switch: it writes over what changed under them."""
+    if sub not in ("checkout", "switch") or "-h" in rest or "--help" in rest:
+        return None
+    values = _CHECKOUT_VALUES if sub == "checkout" else _SWITCH_VALUES
+    rest = _short_options(rest, "bB" if sub == "checkout" else "cC")
+    words, paths, j = [], None, 0
+    creates = detach = orphan = force = False
+    while j < len(rest):
+        w = rest[j]
+        if w == "--":
+            paths = rest[j + 1:]
+            break
+        name = w.split("=", 1)[0]
+        if name in values:
+            creates = creates or name in _CREATES
+            orphan = orphan or name == "--orphan"
+            force = force or name == "--pathspec-from-file"
+            j += 1 if "=" in w else 2
+            continue
+        if w == "--detach" or (sub == "switch" and w == "-d"):
+            detach = True
+        elif w in ("-f", "--force", "--discard-changes"):
+            force = True
+        elif not w.startswith("-") or w == "-":
+            words.append(w)
+        j += 1
+    if paths:
+        return None                     # `git checkout REF -- PATHS`
+    if sub == "checkout" and len(words) > 1:
+        return None                     # `git checkout REF PATHS`
+    if orphan and sub == "switch":
+        return (None, True, True, force)    # an orphan branch: an empty tree
+    if not words and force:
+        # A forced checkout at HEAD writes HEAD's content over what differs.
+        return ("HEAD", True, False, True)
+    if not words:
+        return False if (creates or detach or orphan or sub == "checkout"
+                         or paths is not None) else None
+    target = words[0]
+    if sub == "checkout" and not (creates or detach) and paths is None:
+        # `git checkout X`: a branch or a commit when X names one, else a path.
+        from . import guard_git, guard_paths
+        root = guard_paths.git_root(base)
+        if root is None:
+            return None
+        try:
+            guard_git.Repo(root).resolve(target)
+        except (guard_git.Unknown, guard_paths.TooMuch, OSError):
+            if os.path.lexists(os.path.join(base, os.path.expanduser(target))):
+                return None
+    return (target, not detach, False, force)
 
 
 def _write_targets(prog: str, args: list[str], base: str,
@@ -6064,7 +6488,7 @@ def _write_targets(prog: str, args: list[str], base: str,
             starts.append((a, ("exists", names)))
         return starts or [(".", ("exists", names))], base
     if prog == "git":
-        return _git_targets(args, base)
+        return _git_targets(args, base, env)
     return [], base
 
 
@@ -6209,6 +6633,93 @@ def _git_would_change(path: str, mode: str, where: str, env: dict[str, str],
     return None
 
 
+# What a branch switch may spend reading the repo's objects, of the meter.
+_GIT_UNITS = 2048
+_SWITCH_FILES_SHOWN = 8
+
+
+def _org_entries_under(real: str, entries: list[Any]) -> list[Any]:
+    """The org model directories under a repo's root: its own nable.org and
+    any other the guard protects there."""
+    from . import guard_paths
+    return [e for e in entries
+            if e.tree and guard_paths.is_under(e.path, real)
+            and (guard_paths.ORG_DIR_NAME in Path(e.path).parts
+                 or e.what.startswith("the org model"))]
+
+
+def _switch_hit(path: str, spec: tuple[Any, bool, bool, bool], where: str,
+                env: dict[str, str], entries: list[Any]) -> Any:
+    """The protected entry a branch switch would rewrite (D157), with the
+    files that differ named in its words; None when the org model's tree is
+    the same at HEAD and the target and the switch is not forced (git
+    carries local changes over), or forced over files on disk that already
+    hold the target's content. When that cannot be told, the org directory
+    when the repo holds one, as a merge is judged."""
+    from . import guard_git, guard_paths
+    target, branch_first, orphan, force = spec
+    real = guard_paths.resolve(path, where, env=env)
+    if real is None:
+        return None
+    org = _org_entries_under(real, entries)
+    own = os.path.join(real, guard_paths.ORG_DIR_NAME)
+    rels = sorted({os.path.relpath(e.path, real).replace(os.sep, "/") for e in org}
+                  | {guard_paths.ORG_DIR_NAME})
+    shown_to = "an orphan branch" if orphan else (target or "HEAD")
+    outer = guard_paths._METER.get()
+    token = guard_paths.meter(_GIT_UNITS)
+    why = None
+    on_disk: list[str] = []
+    try:
+        got = guard_git.compare(real, target, rels, branch_first=branch_first, empty=orphan)
+        if got["same"] and force and got.get("target"):
+            on_disk = guard_git.differs_on_disk(real, got["target"], rels)
+    except guard_git.NotARepo:
+        got, why = {"same": True, "files": []}, None    # git refuses: nothing changes
+        target = None
+    except guard_git.Unknown as exc:
+        got, why = None, str(exc)
+    except guard_paths.TooMuch:
+        got, why = None, "the repo is larger than the guard reads before its hook times out"
+    except (OSError, ValueError, MemoryError) as exc:
+        got, why = None, f"the repo could not be read ({type(exc).__name__})"
+    finally:
+        spent = _GIT_UNITS - max(guard_paths._METER.get()[0], 0)
+        guard_paths.unmeter(token)
+    if outer is not None:
+        guard_paths.charge(spent)
+
+    def entry(at: str, what: str) -> Any:
+        return guard_paths.Protected(path=at, shown=guard_paths._shown(Path(at)), what=what,
+                                     tree=True)
+
+    def listed(files: list[str]) -> str:
+        return ", ".join(files[:_SWITCH_FILES_SHOWN]) + (
+            f" and {len(files) - _SWITCH_FILES_SHOWN} more"
+            if len(files) > _SWITCH_FILES_SHOWN else "")
+
+    def first(files: list[str]) -> str:
+        return next((os.path.join(real, *r.split("/")) for r in rels
+                     if any(f == r or f.startswith(r + "/") for f in files)), own)
+    if got is None:
+        # As a merge: an org directory there, or the one that would be made.
+        here = [e.path for e in org if os.path.lexists(e.path)]
+        if not here and not os.path.isdir(own):
+            return None
+        return entry(here[0] if here else own,
+                     f"this repo's org model, which a switch to {shown_to} may rewrite (the "
+                     f"guard could not tell: {why})")
+    if got["same"]:
+        if not on_disk:
+            return None                 # nothing under it is written
+        return entry(first(on_disk), f"this repo's org model, whose files here differ from "
+                                     f"{shown_to}'s ({listed(on_disk)}): a forced switch to "
+                                     f"{shown_to} writes over them")
+    files = got["files"]
+    return entry(first(files), f"this repo's org model: a switch to {shown_to} rewrites "
+                               f"{listed(files)}")
+
+
 # What starts a command substitution (`$(...)`, a backtick) or a process
 # substitution (`<(...)`, `>(...)`), and the parentheses that close one.
 _SUBST_TOKEN_RE = _Lazy(r"\$\(|[<>]\(|[()`]")
@@ -6291,6 +6802,8 @@ def _protected_commands(form: str, code: str, base: str, entries: list[Any],
         return checks.once(key, lambda: look(path, ancestors, where))
 
     def look(path: str, ancestors: Any, where: str | None) -> Any:
+        if isinstance(ancestors, tuple) and ancestors and ancestors[0] == "switch":
+            return _switch_hit(path, ancestors[1], where or base, env, entries)
         if ancestors in ("changed", "tracked"):
             return _git_would_change(path, ancestors, where or base, env, entries)
         if ancestors == "repo":
@@ -6648,6 +7161,13 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # the change; the guard's own file a write would have changed.
             **({"pack_rules": v["pack_rules"]} if v.get("pack_rules") else {}),
             **({"price_book": est["price_book"]} if est.get("price_book") else {}),
+            # Contract 2: what was priced, on which basis it was shown, and,
+            # at an effective rate, that figure with its factor, window, as_of
+            # and the workspace it came from. monthly_usd and total_usd above
+            # stay the figures the guard judged.
+            **({"priced": v["priced"], "price_basis": v["price_basis"]}
+               if v.get("priced") else {}),
+            **({"effective": v["effective"]} if v.get("effective") else {}),
             **({"protected_path": guard_ledger.redact(v["protected_path"], limit=300)}
                if v.get("protected_path") else {}),
             # Who owns what the call touched, when the org model said (cited
@@ -7481,8 +8001,8 @@ def doctor() -> dict[str, Any]:
                 "and nothing else")
     gaps.append("writes to the guard's own files that the guard cannot see coming: a path "
                 "built at run time ($(...), a loop variable), a script the agent runs, "
-                "a git branch switch (checkout or switch of a branch, which can change the "
-                "org model's files), an archive unpacked over them")
+                "an archive unpacked over them, a command git runs for you (a hook, a filter "
+                "or a merge driver in its config)")
     for name, (label, _what) in _ADAPTER_SURFACES.items():
         if any(r["harness"] == name and r.get("runs") for r in adapter_rows):
             gaps.append(f"{label}: {_EDITOR_GAPS[name]}")
@@ -7654,11 +8174,24 @@ def _doctor_ai_budgets(covered: list[str], gaps: list[str], fix: Any, *,
     box, why = ai_budget.box_standing(person)
     standing = ai_budget._box_said(box, why)
     if applies and box is not None:
+        from . import cloud_standing
         from .budget.summary import age_words
-        covered.append(f"the box's month to date for {box['person']} from {box['host']} (as "
-                       f"of {box['as_of'] or box['fetched_at']}, "
-                       f"{age_words(standing['age_hours'])} old), beside this machine's: the "
-                       "larger is compared, never their sum")
+        # Each budget's figure dated by its own as_of, the answer's only for
+        # a box that sends none.
+        dated = []
+        for h in applies:
+            if cloud_standing.figure(box, h["scope"], h["subject"]) is None:
+                continue
+            at, _own = cloud_standing.figure_as_of(box, h["scope"], h["subject"])
+            age = cloud_standing.figure_age_hours(box, h["scope"], h["subject"])
+            dated.append(f"{ai_budget._whose(h)} as of {at or box['fetched_at']}, "
+                         f"{age_words(age)} old")
+        when = "; ".join(dict.fromkeys(dated)) or (
+            f"as of {box['as_of'] or box['fetched_at']}, "
+            f"{age_words(standing['age_hours'])} old")
+        covered.append(f"the box's month to date for {box['person']} from {box['host']} "
+                       f"({when}), beside this machine's: the larger is compared, never "
+                       "their sum")
     elif applies:
         gaps.append(f"the box's month to date for these budgets: the guard uses this "
                     f"machine's figure alone, since {why}")
