@@ -86,7 +86,29 @@ machine last sent its usage to (the box's opaque workspace reference, kept in
 workspace, so a standing read with another workspace's key is never used.
 The guard reads that file and never the network, and its ledger lines never
 carry the box's figure, host or times, since the ledger can be sent to
-another workspace. The
+another workspace.
+The status answer may also carry the workspace's effective rates (a `rates`
+block: per EC2, RDS and ElastiCache usage type and region, what the
+workspace's own bill paid against the public on-demand price, as factors).
+`nable cloud status` and a send keep it in `cloud-rates.json` beside the
+ledger (0600), without the key, only when it names the workspace its status
+names and comes from the box and the workspace this machine last sent to; a
+block that is not exactly the shape this version reads is refused whole and
+said. The guard reads that file on a priced call only, never the network,
+and uses it only for the price it shows: every verdict, threshold, velocity
+cap and budget is judged at list price as before, and a price book's figure
+stands where it prices the SKU. A ledger line records what was priced, on
+which basis it was shown and, at an effective rate, that figure with its
+factor, window, as_of and the workspace reference it came from. When a person
+approved a priced create and it ran, the post hook's outcome line records the
+resource ids the tool printed (EC2 instance ids, RDS and ElastiCache ARNs,
+terraform's `[id=...]` in those forms; at most 20), raw, so the workspace can
+find them on its bill; they stay in this machine's ledger and leave only in
+the lines a send carries, and the dry run counts the lines that name them.
+The guard also reads the AWS CLI's config file (`AWS_CONFIG_FILE`, else
+`~/.aws/config`) for the active profile's region when a priced command names
+none, and nothing else of it.
+The
 workspace key is read from `NABLE_WORKSPACE_KEY`, a `--key-file` with mode
 0600, or a hidden prompt; it is never an argument, and it is never stored,
 printed or logged. No host is built in, and nable adds nothing about the
@@ -151,6 +173,16 @@ reason names it. A workspace applies the stricter of the file and its own
 opt-in, so the file can only narrow, and an entry nable cannot read holds its
 kind (or every kind) at recommend rather than being skipped. Nothing on this
 machine acts on it.
+A git command that can rewrite the org model's files without naming them
+asks: a merge, pull, rebase, cherry-pick, revert, am, apply or hard reset
+whenever the repo holds org files, and a branch switch (`git checkout
+BRANCH` or `COMMIT`, `git switch [--detach] REF`) when the org directory's
+tree differs between HEAD and the target, naming the files, or when files
+under it changed since HEAD last moved. The guard reads the repo's own
+objects and refs for that in process, loose and packed, under its meter: it
+runs no git and opens no connection. When it cannot tell (a ref it cannot
+resolve, a missing object, the meter spent) it asks whenever the repo holds
+org files.
 
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,

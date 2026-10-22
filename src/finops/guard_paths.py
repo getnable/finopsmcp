@@ -59,6 +59,10 @@ _LEDGER_FILES = (
     # rewritten, the gate falls back to this machine's figure alone.
     ("cloud-standing.json", "the box's month to date the AI budget gate compares"),
     ("cloud-box.json", "the box this machine sends its coding-agent usage to"),
+    # cloud_rates.FILE_NAME: the workspace's effective rates the guard shows an
+    # ask's price at. Rewritten, an ask would show a person a price the
+    # workspace's bill never gave.
+    ("cloud-rates.json", "the workspace's effective rates the guard shows prices at"),
 )
 # Beside ai-budget.json (ai_budget._data_dir): the month's priced responses
 # the AI budget gate totals (ai_budget.MONTH_CACHE, MONTH_TOTAL, MONTH_SHARDS)

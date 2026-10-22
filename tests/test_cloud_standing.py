@@ -780,3 +780,88 @@ def test_the_enterprise_answer_reads_on_the_laptop():
     assert cloud_standing.figure(none, "org", "org:org") is None
     assert "no records received" in cli_cloud._standing_text(
         {"read": True, "standing": none, "file": "f", "person_from": "--as"})
+
+
+# ── each figure's own as_of (the iteration 7 carry-over) ────────────────────
+# The box sends an as_of on each figure (the person's, each team's, the
+# org's): the latest receipt among the records in that figure. The guard's
+# reason, its age and doctor date the compared figure by it, and fall back
+# to the answer's top-level as_of only for a box that sends none.
+
+TEAM_AS_OF = (AT - timedelta(days=6)).isoformat()
+PERSON_AS_OF = (AT - timedelta(hours=30)).isoformat()
+
+
+def _own(**over):
+    doc = answer(**over)
+    doc["person"]["as_of"] = PERSON_AS_OF
+    doc["teams"][0]["as_of"] = TEAM_AS_OF
+    doc["org"]["as_of"] = None
+    return doc
+
+
+def test_each_figures_own_as_of_is_kept_and_read_back(laptop):
+    _keep(_own())
+    doc, why = cloud_standing.read()
+    assert why is None
+    assert doc["figures"]["person"]["as_of"] == PERSON_AS_OF
+    assert doc["figures"]["teams"][0]["as_of"] == TEAM_AS_OF
+    assert doc["figures"]["org"]["as_of"] is None and "as_of" in doc["figures"]["org"]
+    assert cloud_standing.figure_as_of(doc, "team", "team:payments") == (TEAM_AS_OF, True)
+    assert cloud_standing.figure_as_of(doc, "person", "person:x") == (PERSON_AS_OF, True)
+
+
+def test_a_box_that_sends_no_figure_as_of_keeps_none(laptop):
+    _keep(answer())
+    doc, _why = cloud_standing.read()
+    assert "as_of" not in doc["figures"]["person"]
+    assert all("as_of" not in t for t in doc["figures"]["teams"])
+    assert "as_of" not in doc["figures"]["org"]
+    assert cloud_standing.figure_as_of(doc, "team", "team:payments") == (YESTERDAY, False)
+
+
+def test_a_figure_as_of_that_is_not_a_time_refuses_the_answer(laptop):
+    bad = _own()
+    bad["teams"][0]["as_of"] = "last tuesday"
+    with pytest.raises(cloud_standing.StandingError, match="as_of"):
+        cloud_standing.normalize(bad, box=BOX, person="alice@acme.example", fetched_at=AT)
+
+
+def test_the_reason_dates_the_compared_figure_by_its_own_as_of(team):
+    _machine(team, 300)
+    _keep(_own(team_usd="5420"))
+    r = guard.gate_command("ls -la")["reason"]
+    assert TEAM_AS_OF in r and "6 days old" in r, r
+    assert YESTERDAY not in r and "24 hours old" not in r
+    assert "the newest of the team's records it received" in r
+    assert "from anyone in the workspace" not in r
+
+
+def test_the_age_falls_back_to_the_answers_as_of_only_for_a_box_that_sends_none(team):
+    _machine(team, 300)
+    _keep(answer(team_usd="5420"))
+    r = guard.gate_command("ls -la")["reason"]
+    assert YESTERDAY in r and "24 hours old" in r
+    assert "the newest it received from anyone in the workspace" in r
+
+
+def test_doctor_dates_each_budgets_figure_by_its_own_as_of(team):
+    _machine(team, 300)
+    _keep(_own(team_usd="5420"))
+    cloud_standing.bind(BOX, workspace=WS_A)
+    covered = " ".join(guard.doctor()["covered"])
+    assert f"the team payments as of {TEAM_AS_OF}" in covered and "6 days old" in covered
+    assert YESTERDAY not in covered
+
+
+def test_the_figure_age_is_from_its_own_as_of(laptop):
+    doc = cloud_standing.normalize(_own(), box=BOX, person="alice@acme.example",
+                                   fetched_at=AT)
+    assert cloud_standing.figure_age_hours(doc, "team", "team:payments",
+                                           now=AT.timestamp()) == pytest.approx(144)
+    assert cloud_standing.figure_age_hours(doc, "person", "person:a",
+                                           now=AT.timestamp()) == pytest.approx(30)
+    old = cloud_standing.normalize(answer(), box=BOX, person="alice@acme.example",
+                                   fetched_at=AT)
+    assert cloud_standing.figure_age_hours(old, "team", "team:payments",
+                                           now=AT.timestamp()) == pytest.approx(24)

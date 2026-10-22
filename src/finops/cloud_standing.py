@@ -10,13 +10,17 @@ answer here, beside the guard ledger, as cloud-standing.json (0600):
      "fetched_at": ISO 8601, "month": "YYYY-MM", "person": "<the person asked about>",
      "as_of": ISO 8601 or null, "basis": "list-price equivalent",
      "budgets_from": {...} or null,
-     "figures": {"person": {"id", "usd", "days", "last_day", "budget"},
+     "figures": {"person": {"id", "usd", "days", "last_day", "budget", "as_of"},
                  "teams": [{"team", "usd", "people", "people_sent",
-                            "latest_day", "oldest_last_day", "budget"}],
-                 "org": {"usd", "people_sent", "latest_day", "budget"}}}
+                            "latest_day", "oldest_last_day", "budget", "as_of"}],
+                 "org": {"usd", "people_sent", "latest_day", "budget", "as_of"}}}
 
 Every dollar is a decimal string, or null where the box received no records
-for it ("no records received", never $0). No key is ever written here.
+for it ("no records received", never $0). Each figure's own as_of is the
+latest receipt among the records in it, kept only when the box sent one: the
+guard dates the figure it compares by it (figure_as_of), and by the answer's
+as_of, the newest receipt from anyone in the workspace, only for a box that
+sends none. No key is ever written here.
 `workspace` is the box's opaque reference to the workspace the key reaches
 (its answer's workspace_ref): on a pooled box every workspace sits behind one
 URL, and the key alone decides which one answers, so the URL cannot say
@@ -195,6 +199,11 @@ def normalize(answer: Any, *, box: str, person: str, fetched_at: datetime) -> di
         from_ = {"version": _count(f.get("version"), "budgets_from.version"),
                  "uploaded_at": _iso(f.get("uploaded_at"), "budgets_from.uploaded_at")}
     host = box.split("://", 1)[-1]
+
+    def own(fig: dict[str, Any], name: str) -> dict[str, Any]:
+        # The figure's own as_of, kept only when the box sent one: a box
+        # that sends none is told apart from a figure with no records.
+        return {"as_of": _iso(fig.get("as_of"), f"{name}.as_of")} if "as_of" in fig else {}
     return {
         "v": FORMAT, "box": box, "host": host, "workspace": ref,
         "fetched_at": fetched_at.astimezone(UTC).isoformat(timespec="seconds"),
@@ -205,7 +214,8 @@ def normalize(answer: Any, *, box: str, person: str, fetched_at: datetime) -> di
             "person": {"id": pid, "usd": _usd(p.get("usd"), "person.usd"),
                        "days": _count(p.get("days", 0), "person.days"),
                        "last_day": _day(p.get("last_day"), "person.last_day"),
-                       "budget": _budget(p.get("budget"), "person.budget")},
+                       "budget": _budget(p.get("budget"), "person.budget"),
+                       **own(p, "person")},
             "teams": [{"team": _text(t.get("team"), f"teams[{i}].team", most=128),
                        "usd": _usd(t.get("usd"), f"teams[{i}].usd"),
                        "people": _count(t.get("people", 0), f"teams[{i}].people"),
@@ -214,12 +224,14 @@ def normalize(answer: Any, *, box: str, person: str, fetched_at: datetime) -> di
                        "latest_day": _day(t.get("latest_day"), f"teams[{i}].latest_day"),
                        "oldest_last_day": _day(t.get("oldest_last_day"),
                                                f"teams[{i}].oldest_last_day"),
-                       "budget": _budget(t.get("budget"), f"teams[{i}].budget")}
+                       "budget": _budget(t.get("budget"), f"teams[{i}].budget"),
+                       **own(t, f"teams[{i}]")}
                       for i, t in enumerate(_obj(x, "a team") for x in teams)],
             "org": {"usd": _usd(o.get("usd"), "org.usd"),
                     "people_sent": _count(o.get("people_sent", 0), "org.people_sent"),
                     "latest_day": _day(o.get("latest_day"), "org.latest_day"),
-                    "budget": _budget(o.get("budget"), "org.budget")},
+                    "budget": _budget(o.get("budget"), "org.budget"),
+                    **own(o, "org")},
         },
     }
 
@@ -408,12 +420,34 @@ def coverage(doc: dict[str, Any], scope: str, subject: str) -> dict[str, Any] | 
     return None
 
 
-def age_hours(doc: dict[str, Any], *, now: float | None = None) -> float | None:
-    """How old the box's figures are: from its as_of, else from when they
-    were fetched."""
-    at = doc.get("as_of") or doc.get("fetched_at")
+def _hours_since(at: Any, now: float | None) -> float | None:
     try:
         t = datetime.fromisoformat(str(at)).timestamp()
     except ValueError:
         return None
     return max((now_epoch() if now is None else now) - t, 0) / 3600
+
+
+def age_hours(doc: dict[str, Any], *, now: float | None = None) -> float | None:
+    """How old the box's figures are: from its as_of, else from when they
+    were fetched."""
+    return _hours_since(doc.get("as_of") or doc.get("fetched_at"), now)
+
+
+def figure_as_of(doc: dict[str, Any], scope: str, subject: str) -> tuple[str | None, bool]:
+    """(when the box's figure for one budget is as of, whether that is the
+    figure's own): the latest receipt among the records in that figure, as
+    the box sent it on the figure; else, for a box that sends none, the
+    answer's as_of, the newest receipt from anyone in the workspace."""
+    cover = coverage(doc, scope, subject)
+    if cover is not None and "as_of" in cover:
+        return cover["as_of"], True
+    return doc.get("as_of"), False
+
+
+def figure_age_hours(doc: dict[str, Any], scope: str, subject: str, *,
+                     now: float | None = None) -> float | None:
+    """How old the box's figure for one budget is: from its own as_of (or
+    the answer's, figure_as_of), else from when it was fetched."""
+    at, _own = figure_as_of(doc, scope, subject)
+    return _hours_since(at or doc.get("fetched_at"), now)

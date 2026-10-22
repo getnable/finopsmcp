@@ -583,6 +583,68 @@ _ESTIMATORS: dict[str, Any] = {
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _plan_region(plan_data: dict, default: str | None) -> str | None:
+    """The AWS provider's region when the plan's configuration holds it as a
+    constant; `default` (the environment's, which the provider then uses)
+    when the provider names no region at all; else None (a variable, an
+    expression, or an aliased provider the guard does not follow)."""
+    try:
+        cfg = plan_data["configuration"]["provider_config"]["aws"]
+        exprs = cfg.get("expressions") or {}
+    except (KeyError, TypeError, AttributeError):
+        return default
+    if not isinstance(exprs, dict) or "region" not in exprs:
+        return default
+    expr = exprs["region"]
+    value = expr.get("constant_value") if isinstance(expr, dict) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def priced_skus(plan_data: dict, *, default_region: str | None = None
+                ) -> list[dict[str, Any]]:
+    """What a saved plan creates that the workspace's effective rates can
+    price (D146): each aws_instance, aws_db_instance (MySQL, MariaDB and
+    PostgreSQL) and aws_elasticache_cluster it creates, as the guard's SKU
+    (guard._sku): product code, the provider's region (_plan_region), the
+    usage type as the bill names it, the quantity, the list hourly rate one
+    unit is priced at, and that unit's monthly figure. A resource a price
+    book prices is marked, so its book figure stands. Nothing here changes a
+    figure the plan's estimate judges."""
+    region = _plan_region(plan_data, default_region)
+    out: list[dict[str, Any]] = []
+    for rc in parse_plan(plan_data):
+        if not rc.is_create or rc.is_delete:
+            continue
+        cfg = rc.after or {}
+        if rc.type == "aws_instance":
+            itype = str(cfg.get("instance_type") or "")
+            hourly = _EC2_HOURLY.get(itype)
+            sku = ("AmazonEC2", f"BoxUsage:{itype}", 1, hourly, itype)
+        elif rc.type == "aws_db_instance":
+            cls = str(cfg.get("instance_class") or "")
+            engine = str(cfg.get("engine") or "").strip().lower()
+            hourly = rds_hourly(cls, engine) if engine else None
+            maz = bool(cfg.get("multi_az", False))
+            sku = ("AmazonRDS", f"{'Multi-AZUsage' if maz else 'InstanceUsage'}:{cls}", 1,
+                   hourly * 2 if hourly is not None and maz else hourly, cls)
+        elif rc.type == "aws_elasticache_cluster":
+            node = str(cfg.get("node_type") or "")
+            nodes = elasticache_node_count(rc.type, cfg)
+            sku = ("AmazonElastiCache", f"NodeUsage:{node}", nodes,
+                   elasticache_hourly(node, str(cfg.get("engine") or "redis")), node)
+        else:
+            continue
+        product, usage_type, qty, hourly, name = sku
+        if hourly is None or not name:
+            continue
+        out.append({"product_code": product, "region": region, "usage_type": usage_type,
+                    "quantity": qty, "unit": "Hrs", "hours": HOURS_PER_MONTH,
+                    "usd_hour": round(float(hourly), 6),
+                    "monthly_usd": round(float(hourly) * qty * HOURS_PER_MONTH, 2),
+                    "price_book": _book_hourly(name) is not None})
+    return out[:20]
+
+
 def _price_changes(changes: list[ResourceChange]) -> tuple[list[CostLine], list[dict]]:
     lines: list[CostLine] = []
     unpriced: list[dict] = []

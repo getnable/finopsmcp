@@ -41,6 +41,23 @@ The outcome names the ask by the sha256 of its line, the hash the chain
 already uses, and an ask already answered is not answered twice (the plugin's
 hook and a settings hook can both run).
 
+What a priced create made (D149). When the ask the outcome answers priced
+an EC2 instance, an RDS instance or an ElastiCache node (its `priced`,
+contract 2), the outcome also records the resource ids the tool printed, as
+`created`: [{"kind": "ec2_instance" | "rds_instance" | "cache_cluster",
+"id": "<as printed>"}], so the box can find them on the bill at day 30.
+Read from the tool's output (Claude Code's tool_response, Cursor's output,
+Copilot's toolResult): the aws CLI's JSON (Instances[].InstanceId,
+DBInstance.DBInstanceArn, CacheCluster.ARN) and terraform's "Creation
+complete ... [id=...]" lines. Only ids in the believed forms (ID_FORMS) of
+the kinds the ask priced are kept, raw, at most CREATED_MAX of at most
+ID_MAX characters each; at most OUTPUT_MAX of the output is read, and only
+for such an ask. The forms, the field names and that a resource's bill lines
+carry the id as printed are believed from AWS's documentation, not seen on a
+real bill. The ids stay in this machine's ledger: they leave it only inside
+the ledger lines a person sends with `nable cloud connect`, whose dry run
+shows them.
+
 The fast path, like the pre hook's silent answers: standard library only,
 never the guard (guard.py costs a few hundred ms to import), one bounded read
 from the end of the ledger and at most one append. Fails safe: always exit 0,
@@ -79,6 +96,29 @@ _EDITOR_PATH_KEYS = ("file_path", "notebook_path")
 _TOOL_USE_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _MODE_RE = re.compile(r"[A-Za-z]{1,40}")
 _NO_SESSION = "<no-session>"            # ai_budget.NO_SESSION, without importing it
+
+# What a priced create made (D149): the kinds, by the product code the ask
+# priced, and the form an id of each takes as the tool prints it.
+CREATED_MAX = 20
+ID_MAX = 256
+OUTPUT_MAX = 1024 * 1024
+KINDS = {"AmazonEC2": "ec2_instance", "AmazonRDS": "rds_instance",
+         "AmazonElastiCache": "cache_cluster"}
+# Compiled on first use (guard_ledger._LazyRe): only a priced create's
+# outcome reads them.
+_Lazy = guard_ledger._LazyRe
+ID_FORMS = {
+    "ec2_instance": _Lazy(r"i-(?:[0-9a-f]{8}|[0-9a-f]{17})"),
+    "rds_instance": _Lazy(r"arn:aws[a-z-]*:rds:[a-z0-9-]+:[0-9]{12}:db:"
+                          r"[A-Za-z][A-Za-z0-9-]{0,62}"),
+    "cache_cluster": _Lazy(r"arn:aws[a-z-]*:elasticache:[a-z0-9-]+:[0-9]{12}:cluster:"
+                           r"[A-Za-z][A-Za-z0-9-]{0,49}"),
+}
+# The aws CLI's JSON fields that name what a create made, and terraform's
+# line for a resource it created (a refresh or a modification names one that
+# was already there).
+_ID_FIELDS = _Lazy(r'"(?:InstanceId|DBInstanceArn|ARN)"\s*:\s*"([^"\\]{1,300})"')
+_TF_CREATED = _Lazy(r": Creation complete after [^\n\[]{0,40}\[id=([^\]\s]{1,300})\]")
 
 
 def tool_use_id(raw: Any) -> str | None:
@@ -139,7 +179,7 @@ def observed(payload: dict, harness: str | None = None) -> dict[str, Any] | None
         return {"harness": "claude-code", "event": event, "tool": tool,
                 "_session": payload.get("session_id"),
                 "tool_use_id": tool_use_id(payload.get("tool_use_id")),
-                "_command": command,
+                "_command": command, "_output": payload.get("tool_response"),
                 "permission_mode": mode if isinstance(mode, str)
                 and _MODE_RE.fullmatch(mode) else None}
     if harness in (None, "cursor") and (
@@ -155,7 +195,8 @@ def observed(payload: dict, harness: str | None = None) -> dict[str, Any] | None
         sid = (conv.strip() if isinstance(conv, str) and conv.strip()
                and os.getenv("CURSOR_ADMIN_API_KEY", "").strip() else _NO_SESSION)
         return {"harness": "cursor", "event": _CURSOR_EVENT, "tool": "shell",
-                "_session": sid, "tool_use_id": None, "_command": command}
+                "_session": sid, "tool_use_id": None, "_command": command,
+                "_output": payload.get("output")}
     if harness in (None, "copilot") and event is None and "toolName" in payload \
             and "toolArgs" in payload:
         tool = payload.get("toolName")
@@ -165,8 +206,53 @@ def observed(payload: dict, harness: str | None = None) -> dict[str, Any] | None
             return None
         return {"harness": "copilot", "event": "postToolUse", "tool": tool,
                 "_session": payload.get("sessionId"), "tool_use_id": None,
-                "_command": command}
+                "_command": command, "_output": payload.get("toolResult")}
     return None
+
+
+def _output(raw: Any) -> str | None:
+    """The text a post payload says the tool printed: a string, or the
+    stdout (Claude Code) or textResultForLlm (Copilot) of an object."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        for k in ("stdout", "textResultForLlm", "output"):
+            if isinstance(raw.get(k), str):
+                return raw[k]
+    return None
+
+
+def created_ids(text: Any, *, kinds: tuple[str, ...]) -> list[dict[str, str]]:
+    """The resource ids `text` says a create made, of `kinds`: each in its
+    believed form (ID_FORMS), raw, in the order printed, once, at most
+    CREATED_MAX. [] for anything else."""
+    if not isinstance(text, str) or not kinds:
+        return []
+    text = text[:OUTPUT_MAX]
+    found = [m.group(1) for m in _ID_FIELDS.finditer(text)]
+    found += [m.group(1) for m in _TF_CREATED.finditer(text)]
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in found:
+        if len(raw) > ID_MAX or raw in seen:
+            continue
+        kind = next((k for k in kinds if ID_FORMS[k].fullmatch(raw)), None)
+        if kind is None:
+            continue
+        seen.add(raw)
+        out.append({"kind": kind, "id": raw})
+        if len(out) >= CREATED_MAX:
+            break
+    return out
+
+
+def _priced_kinds(ask: dict[str, Any]) -> tuple[str, ...]:
+    """The kinds of resource the ask priced (contract 2's `priced`, one SKU
+    or a list of them), in KINDS' order; () when it priced none."""
+    p = ask.get("priced")
+    items = p if isinstance(p, list) else [p]
+    codes = {x.get("product_code") for x in items if isinstance(x, dict)}
+    return tuple(k for code, k in KINDS.items() if code in codes)
 
 
 def _same_session(obs: dict[str, Any], rec: dict[str, Any]) -> bool:
@@ -210,7 +296,13 @@ def find_ask(obs: dict[str, Any], recs: list[dict[str, Any]], *,
 
 
 def record(obs: dict[str, Any], ask: dict[str, Any], linked_by: str) -> bool:
-    """Append the `ran` outcome for `ask`. Never raises (guard_ledger.append)."""
+    """Append the `ran` outcome for `ask`, with the resource ids a priced
+    create printed (created_ids). Never raises (guard_ledger.append)."""
+    created: list[dict[str, str]] = []
+    with contextlib.suppress(Exception):
+        kinds = _priced_kinds(ask)
+        if kinds:
+            created = created_ids(_output(obs.get("_output")), kinds=kinds)
     return guard_ledger.append({
         "kind": guard_ledger.OUTCOME,
         "outcome": guard_ledger.RAN,
@@ -228,6 +320,8 @@ def record(obs: dict[str, Any], ask: dict[str, Any], linked_by: str) -> bool:
         # Claude Code's permission mode when the call ran: under
         # bypassPermissions nobody may have been asked (ask_outcomes).
         **({"permission_mode": obs["permission_mode"]} if obs.get("permission_mode") else {}),
+        # Contract 2: what an approved priced create made, as printed.
+        **({"created": created} if created else {}),
     })
 
 
