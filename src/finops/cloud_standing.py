@@ -57,6 +57,7 @@ import contextlib
 import json
 import os
 import re
+import stat
 import time
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -282,6 +283,9 @@ def _read_json(p: Path) -> tuple[Any, str | None]:
     except OSError as exc:
         return None, f"it could not be opened ({exc.strerror or type(exc).__name__})"
     with os.fdopen(fd, "rb") as fh:
+        # A FIFO, a socket or a device in its place is not read at all.
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            return None, "it is not a regular file"
         raw = fh.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         return None, f"it is over the {MAX_BYTES // 1024} KiB the guard reads"

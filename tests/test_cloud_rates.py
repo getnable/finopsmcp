@@ -318,14 +318,16 @@ def test_the_rates_file_is_a_guard_file(laptop):
 
 SKU = {"product_code": "AmazonEC2", "region": "us-east-1", "usage_type": "BoxUsage:m5.large",
        "quantity": 4, "unit": "Hrs", "hours": 730.0, "usd_hour": 0.096, "monthly_usd": 280.32,
-       "price_book": False}
+       "price_book": False, "list_exact": True}
 
 
 def test_effective_is_list_times_the_on_demand_factor(laptop):
     _bound_and_kept()
     got = cloud_rates.effective([SKU], judged_monthly=280.32)
     assert got["price_basis"] == "effective"
-    assert got["effective"] == {"monthly_usd": 257.89, "factor": "0.9200",
+    # 0.096 x 4 x 730 x 0.92 = 257.8944, rounded up to the cent: never below
+    # the exact list times the factor (D168, rule 15).
+    assert got["effective"] == {"monthly_usd": 257.9, "factor": "0.9200",
                                 "blended_factor": "0.7040", "as_of": "2026-10-18",
                                 "window": ["2026-09-19", "2026-10-18"], "workspace_ref": WS_A}
     assert got["priced"] == {k: SKU[k] for k in ("product_code", "region", "usage_type",
@@ -342,7 +344,7 @@ def test_what_the_bill_names_under_another_usage_type_stays_at_list(laptop):
     instance's own hours take the factor."""
     _bound_and_kept()
     got = cloud_rates.effective([SKU], judged_monthly=280.32 + 100)
-    assert got["effective"]["monthly_usd"] == 357.89
+    assert got["effective"]["monthly_usd"] == 357.9
 
 
 @pytest.mark.parametrize("case, why", [
@@ -379,13 +381,14 @@ def test_several_skus_are_priced_each_and_recorded_as_a_list(laptop):
     _bound_and_kept()
     rds = {"product_code": "AmazonRDS", "region": "eu-west-1",
            "usage_type": "InstanceUsage:db.r6g.large", "quantity": 1, "unit": "Hrs",
-           "hours": 730.0, "usd_hour": 0.24, "monthly_usd": 175.2, "price_book": False}
+           "hours": 730.0, "usd_hour": 0.24, "monthly_usd": 175.2, "price_book": False,
+           "list_exact": True}
     got = cloud_rates.effective([SKU, rds], judged_monthly=455.52)
     assert isinstance(got["priced"], list) and len(got["priced"]) == 2
     assert [p["factor"] for p in got["priced"]] == ["0.9200", "0.8000"]
     assert got["effective"]["factor"] is None
-    # 455.52 - 280.32 * 0.08 - 175.20 * 0.20 = 398.0544
-    assert got["effective"]["monthly_usd"] == 398.05
+    # 257.8944 rounded up to 257.90, and 175.20 x 0.80 = 140.16: 398.06
+    assert got["effective"]["monthly_usd"] == 398.06
 
 
 def test_the_module_names_no_network_client():

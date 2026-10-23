@@ -146,6 +146,12 @@ def _no_ambient_service_creds(monkeypatch):
     """
     for var in ("GITHUB_TOKEN", "GITHUB_ORGS"):
         monkeypatch.delenv(var, raising=False)
+    # Where gh or glab files a ticket, and which AWS account a command runs
+    # in, the guard reads from these too (guard_authority, guard_org): a
+    # developer's own must never decide a test.
+    for var in ("GH_REPO", "GH_HOST", "GITLAB_REPO", "GL_REPO", "REMOTE_ALIAS",
+                "GIT_REMOTE_URL_VAR", "GIT_DIR", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture(autouse=True)

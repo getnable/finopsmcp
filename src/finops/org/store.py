@@ -55,6 +55,7 @@ from .model import (
     FILE_FOR_KIND,
     HEADER,
     KNOWN_FILES,
+    NO_MONEY_CLASSES,
     Fact,
     FactError,
     OrgModel,
@@ -68,6 +69,23 @@ from .model import (
 )
 
 ORG_DIR_NAME = "nable.org"
+# The most the guard reads of one org model file, a git file or a cache:
+# far past any real one, so a larger file is not one nable wrote.
+_READ_MAX = 16 * 1024 * 1024
+
+
+def _read_text(path: Path, most: int = _READ_MAX, *, errors: str = "strict") -> str:
+    """The UTF-8 text of the regular file at `path`, read without waiting
+    (guard_paths.read_regular): the guard's hook reads the org model, and a
+    FIFO, a socket or a device in place of a file is an OSError, never a
+    read that blocks. A file over `most` bytes is an OSError too."""
+    import errno
+
+    from ..guard_paths import read_regular
+    raw = read_regular(path, most + 1)
+    if len(raw) > most:
+        raise OSError(errno.EFBIG, f"over the {most:,} bytes nable reads", str(path))
+    return raw.decode("utf-8", errors)
 ENV_DIR = "FINOPS_ORG_DIR"
 TRUST_FILE = "trusted-repos.json"
 DEFAULT_REVIEW_DAYS = 180
@@ -149,8 +167,8 @@ def _git_dir(root: Path) -> Path | None:
     if g.is_dir():
         return g
     try:
-        text = g.read_text(encoding="utf-8")
-    except OSError:
+        text = _read_text(g)
+    except (OSError, UnicodeDecodeError):
         return None
     for line in text.splitlines():
         if line.startswith("gitdir:"):
@@ -166,10 +184,10 @@ def remote_url(root: Path) -> str:
     if gd is None:
         return ""
     common = gd
-    with contextlib.suppress(OSError):
-        common = (gd / (gd / "commondir").read_text(encoding="utf-8").strip()).resolve()
+    with contextlib.suppress(OSError, UnicodeDecodeError):
+        common = (gd / _read_text(gd / "commondir").strip()).resolve()
     try:
-        text = (common / "config").read_text(encoding="utf-8", errors="replace")
+        text = _read_text(common / "config", errors="replace")
     except OSError:
         return ""
     remotes: dict[str, str] = {}
@@ -265,7 +283,7 @@ def trust_path() -> Path:
 
 def trusted_repos() -> list[dict[str, str]]:
     try:
-        doc = json.loads(trust_path().read_text(encoding="utf-8"))
+        doc = json.loads(_read_text(trust_path()))
     except (OSError, ValueError):
         return []
     rows = doc.get("repos") if isinstance(doc, dict) else None
@@ -463,7 +481,7 @@ class _File:
             return self
         import yaml
         try:
-            text = self.path.read_text(encoding="utf-8")
+            text = _read_text(self.path)
         except (OSError, UnicodeDecodeError) as e:
             self._unusable(f"could not be read ({type(e).__name__})",
                            "check that it is a readable UTF-8 file", warnings)
@@ -524,9 +542,10 @@ class _File:
                 self.why.append(reason)
                 if self.authority:
                     # Never only a warning: a refused entry holds its class
-                    # (or every class) at recommend (OrgModel.authority).
+                    # (or every class) where OrgModel.authority and
+                    # OrgModel.ladder say.
                     self.refusals.append(refusal(str(self.path), i, raw, e))
-                    reason += " (it holds " + self.refusals[-1]["holds"] + " at recommend)"
+                    reason += " (it holds " + _holds(self.refusals[-1]["holds"]) + ")"
                 skipped.append(f"{self.path.name}[{i}]: skipped, {reason}")
         for msg in skipped:
             _warn(warnings, msg)
@@ -576,6 +595,17 @@ class _File:
         return True
 
 
+def _holds(what: str) -> str:
+    """What a refused authority entry holds, and at which rung: a purchase
+    kind at recommend, a class that moves no money at approve_each."""
+    if what in NO_MONEY_CLASSES:
+        return f"{what} at approve_each"
+    if what == "every class":
+        return ("every purchase kind at recommend and every class that moves no money "
+                "at approve_each")
+    return f"{what} at recommend"
+
+
 # ── the parse cache ───────────────────────────────────────────────────────────
 #
 # Parsing YAML is most of what reading a model of thousands of facts costs.
@@ -587,7 +617,9 @@ _CACHE_DIR = "org-parse-cache"
 # 2: each entry's refusal in authority.yaml is kept beside its warning.
 # 3: authority.yaml refuses a value field it does not name, an approver that is
 #    not plain ASCII and a key twice, so a parse made before is not reused.
-_CACHE_VERSION = 3
+# 4: authority.yaml governs tag, ticket and offhours_schedule, which a parse
+#    made before refused (holding every purchase kind at recommend).
+_CACHE_VERSION = 4
 
 
 def _digest(text: str) -> str:
@@ -608,7 +640,7 @@ def _cache_get(path: Path, digest: str) -> dict[str, Any] | None:
     if p is None:
         return None
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = json.loads(_read_text(p))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("v") != _CACHE_VERSION \
@@ -854,7 +886,8 @@ def _locked(d: Path) -> Iterator[None]:
     fd = None
     try:
         import fcntl
-        fd = os.open(d, os.O_RDONLY)
+        fd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
         fcntl.flock(fd, fcntl.LOCK_EX)
     except (ImportError, OSError):
         if fd is not None:

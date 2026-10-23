@@ -146,10 +146,23 @@ def _compressed_in_window(since_epoch: float) -> int:
     return n
 
 
+def _open_text(path: Path) -> Any:
+    """`path` for reading as text, opened without waiting: the AI budget
+    gate reads these on the hook path, and a FIFO in a rollout's place is
+    OSError there (guard_paths.open_regular), never a read that blocks."""
+    from .guard_paths import open_regular
+    fd = open_regular(path)
+    try:
+        return os.fdopen(fd, "r", encoding="utf-8", errors="ignore")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _meta(path: Path) -> dict[str, Any] | None:
     """The rollout's own session_meta payload: its first line."""
     try:
-        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+        with _open_text(path) as fh:
             first = fh.readline()
         rec = json.loads(first)
     except (OSError, ValueError):
@@ -195,7 +208,7 @@ def _read_totals(path: Path) -> set[tuple[int, ...]]:
     """Every running total a rollout's token_count events carry."""
     seen: set[tuple[int, ...]] = set()
     try:
-        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+        with _open_text(path) as fh:
             for line in fh:
                 if '"token_count"' not in line:
                     continue
@@ -230,7 +243,7 @@ def _codex_file(path: Path, since_epoch: float, meta: dict[str, Any] | None,
     # record is counted by its records alone.
     deltas: dict[Any, dict[str, Any]] = {}
     try:
-        fh = path.open("r", encoding="utf-8", errors="ignore")
+        fh = _open_text(path)
     except OSError:
         return
     with fh:
@@ -393,6 +406,9 @@ _CURSOR_PAGE = 1000
 _CURSOR_MAX_PAGES = 20
 _CURSOR_SPAN_MS = 30 * 86400 * 1000
 _CURSOR_TIMEOUT = 5.0
+# The most of the cache the gate reads: 20 pages of 1,000 events is a few MB.
+# A larger file reads as no cache (not JSON), and the next refresh rewrites it.
+_CURSOR_CACHE_MAX = 64 * 1024 * 1024
 
 
 def cursor_enabled() -> bool:
@@ -534,8 +550,9 @@ def _cursor_write(cache: dict[str, Any]) -> None:
 
 
 def _cursor_read_cache() -> dict[str, Any]:
+    from .guard_paths import read_regular
     try:
-        cache = json.loads(_cursor_cache_path().read_text())
+        cache = json.loads(read_regular(_cursor_cache_path(), _CURSOR_CACHE_MAX).decode("utf-8"))
     except (OSError, ValueError):
         return {}
     return cache if isinstance(cache, dict) else {}

@@ -149,20 +149,34 @@ def parse_source(text: str) -> Source:
                     "reference such as io.github.getnable/startup-credits-runway")
 
 
+def _copy_regular(src: Path, target: Path) -> None:
+    """Copy one regular file, read without waiting (guard_paths.open_regular):
+    a FIFO in a pack's place is an OSError, never an install that waits."""
+    from ..guard_paths import open_regular
+    with os.fdopen(open_regular(src), "rb") as fh, open(target, "wb") as out:
+        shutil.copyfileobj(fh, out)
+
+
 def _copy_dir(src: Path, dest: Path) -> None:
     for rel in store.walk(src, skip_ignored=True):
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src / rel, target)
+        _copy_regular(src / rel, target)
 
 
 def extract_tarball(archive: Path, dest: Path) -> None:
     """Extract a pack archive into `dest`, refusing the whole archive on any
     absolute path, `..`, link or special file. Nothing is written until every
     member has passed. Raises PackError."""
+    from ..guard_paths import open_regular
     try:
-        tf = tarfile.open(archive, "r:*")  # noqa: SIM115 - closed by the `with tf` below
+        fh = os.fdopen(open_regular(archive), "rb")
+    except OSError as e:
+        raise PackError(f"{archive} is not a readable tarball ({e})") from None
+    try:
+        tf = tarfile.open(fileobj=fh, mode="r:*")  # noqa: SIM115 - closed by `with tf` below
     except (tarfile.TarError, OSError) as e:
+        fh.close()
         raise PackError(f"{archive} is not a readable tarball ({e})") from None
     problems: list[Problem] = []
     members: list[tuple[tuple[str, ...], tarfile.TarInfo]] = []
@@ -360,7 +374,7 @@ def _sidecar_sig(src: Source, root: Path, digest: str) -> None:
     if chosen is not None:
         if chosen.stat().st_size > signing.MAX_SIG_BYTES:
             raise IntegrityError(f"{chosen} is larger than {signing.MAX_SIG_BYTES} bytes")
-        shutil.copyfile(chosen, root / store.SIG_NAME)
+        _copy_regular(chosen, root / store.SIG_NAME)
 
 
 def _prepare(src: Source, work: Path, *, expected_digest: str | None = None,

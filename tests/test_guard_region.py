@@ -61,11 +61,42 @@ def test_a_region_cheaper_or_unknown_keeps_the_us_east_1_figure(region, says):
     assert says in est["basis"]
 
 
-def test_no_region_or_two_regions_is_us_east_1_as_before():
+def test_no_region_is_us_east_1_as_before():
     for cmd in ("aws ec2 run-instances --instance-type m5.4xlarge --image-id ami-1",
-                "aws ec2 run-instances --region us-west-2 --instance-type m5.4xlarge",
-                ("aws ec2 run-instances --region sa-east-1 --instance-type m5.4xlarge "
-                "--image-id ami-1 && aws ec2 run-instances --region eu-west-1 "
-                "--instance-type m5.4xlarge --image-id ami-1")):
+                "aws ec2 run-instances --region us-west-2 --instance-type m5.4xlarge"):
         est = g.estimate_command_monthly_cost(cmd)
         assert "region" not in est and "the least" not in est["basis"]
+
+
+def test_each_command_of_a_line_is_judged_in_the_region_it_names():
+    """A --region on one command is not where the next one runs: each is
+    judged at its own region's floor, never above that region's rate."""
+    est = g.estimate_command_monthly_cost(
+        "aws ec2 run-instances --region sa-east-1 --instance-type m5.4xlarge --image-id ami-1 "
+        "&& aws ec2 run-instances --region eu-west-1 --instance-type m5.4xlarge "
+        "--image-id ami-1")
+    assert [p["sku"]["region"] for p in est["parts"]] == ["sa-east-1", "eu-west-1"]
+    for p, most in zip(est["parts"], (1.529, 1.069), strict=True):
+        assert p["monthly_usd"] == pytest.approx(0.768 * most * H, abs=0.02)
+
+
+def test_a_region_another_command_names_is_not_this_ones():
+    """The review's case: the S3 copy names ap-south-1, the RDS create names
+    no region (so runs in the profile's), and was priced and recorded at
+    ap-south-1's listed rate, marked exact."""
+    alone = g.estimate_command_monthly_cost(
+        "aws rds create-db-instance --db-instance-class db.r6g.large --engine postgres "
+        "--db-instance-identifier x")
+    est = g.estimate_command_monthly_cost(
+        "aws s3 cp dump.sql s3://acme-dumps/ --region ap-south-1 && aws rds "
+        "create-db-instance --db-instance-class db.r6g.large --engine postgres "
+        "--db-instance-identifier x")
+    assert est["sku"] == alone["sku"]
+    assert est["sku"]["region"] is None and est["sku"]["list_exact"] is False
+
+
+def test_an_exported_region_is_where_the_next_command_runs():
+    est = g.estimate_command_monthly_cost(
+        "export AWS_REGION=ap-south-1 && aws rds create-db-instance --db-instance-class "
+        "db.r6g.large --engine postgres --db-instance-identifier x")
+    assert est["sku"]["region"] == "ap-south-1"

@@ -1,0 +1,362 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "offerCode": "AmazonElastiCache",
+ "version": "20261014221139",
+ "publicationDate": "2026-10-14T22:11:39Z",
+ "products": {
+  "FQHREBFZBQ25BR4G": {
+   "sku": "FQHREBFZBQ25BR4G",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "memory": "13.07 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Redis",
+    "usagetype": "EU-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:0002",
+    "normalizationSizeFactor": "4",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "5HFBQVVZ8GBVHSN2": {
+   "sku": "5HFBQVVZ8GBVHSN2",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "memory": "13.07 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Memcached",
+    "usagetype": "EU-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:0001",
+    "normalizationSizeFactor": "4",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "CW3MMD9P4QCM3VTV": {
+   "sku": "CW3MMD9P4QCM3VTV",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "2",
+    "memory": "13.07 GiB",
+    "networkPerformance": "Up to 10 Gigabit",
+    "cacheEngine": "Valkey",
+    "usagetype": "EU-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:Valkey",
+    "normalizationSizeFactor": "3.2",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "YAKAMGPHFZT2XHFZ": {
+   "sku": "YAKAMGPHFZT2XHFZ",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "cacheEngine": "Redis",
+    "usagetype": "EU-ExtendedSupportYr3-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:0002",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache",
+    "year_number": "Yr3"
+   }
+  },
+  "TWM4BG85S6FXBGPF": {
+   "sku": "TWM4BG85S6FXBGPF",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "cacheEngine": "Redis",
+    "usagetype": "EU-ExtendedSupportYr1_Yr2-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:0002",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache",
+    "year_number": "Yr1_Yr2"
+   }
+  },
+  "NQR5RTZWJDKHEBQR": {
+   "sku": "NQR5RTZWJDKHEBQR",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "instanceType": "cache.r6g.large",
+    "cacheEngine": "Valkey",
+    "usagetype": "EU-SyncDurability-NodeUsage:cache.r6g.large",
+    "operation": "CreateCacheCluster:Valkey",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "57KAHCS8MAWKPEY4": {
+   "sku": "57KAHCS8MAWKPEY4",
+   "productFamily": "Cache Instance",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Outposts",
+    "instanceType": "cache.r5.12xlarge",
+    "currentGeneration": "Yes",
+    "instanceFamily": "Memory optimized",
+    "vcpu": "48",
+    "memory": "317.77 GiB",
+    "networkPerformance": "10 Gigabit",
+    "cacheEngine": "Memcached",
+    "usagetype": "EU-Outpost-NodeUsage:cache.r5.12xlarge",
+    "operation": "CreateCacheCluster:0001",
+    "normalizationSizeFactor": "96",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "98XFCG5BTKBHMY58": {
+   "sku": "98XFCG5BTKBHMY58",
+   "productFamily": "ElastiCache Serverless",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "cacheEngine": "Memcached",
+    "usagetype": "EU-BackupUsage:Memcached",
+    "operation": "CreateServerlessCacheSnapshot",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  },
+  "B5G8M6Y6652B7J2T": {
+   "sku": "B5G8M6Y6652B7J2T",
+   "productFamily": "Storage Snapshot",
+   "attributes": {
+    "servicecode": "AmazonElastiCache",
+    "location": "EU (Ireland)",
+    "locationType": "AWS Region",
+    "cacheEngine": "Valkey",
+    "storageMedia": "Amazon S3",
+    "usagetype": "EU-ElastiCache:BackupUsage:Valkey",
+    "operation": "CreateCacheSnapshot",
+    "regionCode": "eu-west-1",
+    "servicename": "Amazon ElastiCache"
+   }
+  }
+ },
+ "terms": {
+  "OnDemand": {
+   "FQHREBFZBQ25BR4G": {
+    "FQHREBFZBQ25BR4G.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "FQHREBFZBQ25BR4G",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "FQHREBFZBQ25BR4G.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "FQHREBFZBQ25BR4G.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.229 per Memory optimized r6g.large node hour running Redis",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.2290000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "5HFBQVVZ8GBVHSN2": {
+    "5HFBQVVZ8GBVHSN2.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "5HFBQVVZ8GBVHSN2",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "5HFBQVVZ8GBVHSN2.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "5HFBQVVZ8GBVHSN2.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.229 per Memory optimized r6g.large node hour running Memcached",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.2290000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "CW3MMD9P4QCM3VTV": {
+    "CW3MMD9P4QCM3VTV.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "CW3MMD9P4QCM3VTV",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "CW3MMD9P4QCM3VTV.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "CW3MMD9P4QCM3VTV.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.1832 per Memory optimized r6g.large node hour running Valkey",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1832000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "YAKAMGPHFZT2XHFZ": {
+    "YAKAMGPHFZT2XHFZ.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "YAKAMGPHFZT2XHFZ",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "YAKAMGPHFZT2XHFZ.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "YAKAMGPHFZT2XHFZ.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.366 per Hr for ExtendedSupportYr3-NodeUsage:cache.r6g.large in EU (Ireland)",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.3660000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "TWM4BG85S6FXBGPF": {
+    "TWM4BG85S6FXBGPF.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "TWM4BG85S6FXBGPF",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "TWM4BG85S6FXBGPF.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "TWM4BG85S6FXBGPF.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.183 per Hr for ExtendedSupportYr1_Yr2-NodeUsage:cache.r6g.large in EU (Ireland)",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.1830000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "NQR5RTZWJDKHEBQR": {
+    "NQR5RTZWJDKHEBQR.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "NQR5RTZWJDKHEBQR",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "NQR5RTZWJDKHEBQR.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "NQR5RTZWJDKHEBQR.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.033 per Hr for SyncDurability-NodeUsage:cache.r6g.large in EU (Ireland)",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "0.0330000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "57KAHCS8MAWKPEY4": {
+    "57KAHCS8MAWKPEY4.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "57KAHCS8MAWKPEY4",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "57KAHCS8MAWKPEY4.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "57KAHCS8MAWKPEY4.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$2.391 per r5.12xlarge Cache node-hour (or partial hour) Running Memcached on Outposts",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "Hrs",
+       "pricePerUnit": {
+        "USD": "2.3910000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "98XFCG5BTKBHMY58": {
+    "98XFCG5BTKBHMY58.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "98XFCG5BTKBHMY58",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "98XFCG5BTKBHMY58.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "98XFCG5BTKBHMY58.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.085 per GB-month of snapshot storage for Memcached",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "GB-months",
+       "pricePerUnit": {
+        "USD": "0.0850000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   },
+   "B5G8M6Y6652B7J2T": {
+    "B5G8M6Y6652B7J2T.JRTCKXETXF": {
+     "offerTermCode": "JRTCKXETXF",
+     "sku": "B5G8M6Y6652B7J2T",
+     "effectiveDate": "2026-10-01T00:00:00Z",
+     "priceDimensions": {
+      "B5G8M6Y6652B7J2T.JRTCKXETXF.6YS6EN2CT7": {
+       "rateCode": "B5G8M6Y6652B7J2T.JRTCKXETXF.6YS6EN2CT7",
+       "description": "$0.085 per additional GB-month of backup storage exceeding free allocation running Valkey",
+       "beginRange": "0",
+       "endRange": "Inf",
+       "unit": "GB-Mo",
+       "pricePerUnit": {
+        "USD": "0.0850000000"
+       },
+       "appliesTo": []
+      }
+     },
+     "termAttributes": {}
+    }
+   }
+  }
+ }
+}

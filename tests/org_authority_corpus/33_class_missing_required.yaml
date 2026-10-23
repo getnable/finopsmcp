@@ -1,0 +1,27 @@
+# nable org model v1
+# A bounded entry names its class's bound, and approvers and expires at
+# approve_each and bounded; a missing one is refused naming it.
+- fact: authority
+  subject: {kind: action_class, id: ticket}
+  value: {rung: bounded, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: approve_each, expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: offhours_schedule}
+  value: {rung: bounded, environments: [nonprod], approvers: ["email:ana@acme.example"]}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: autonomous}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

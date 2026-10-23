@@ -351,6 +351,143 @@ coding-agent spend a person can carry into a paid workspace.
   receipt among the records in it). The guard's reason, the figure's age and
   `nable guard doctor` now use the compared figure's own as_of, and the
   answer's top-level as_of only for a box that sends none.
+- **RDS and ElastiCache at their region's listed rates.** An RDS instance
+  (a shell command, or an `aws_db_instance` in a saved plan) is shown at the
+  RDS table's rate for its region, Multi-AZ included, and an ElastiCache node
+  (`create-cache-cluster`, or an `aws_elasticache_cluster` in a saved plan) at
+  a new committed table, `price_data/elasticache_on_demand.json`: Redis,
+  Memcached and Valkey current-generation node-hour rates for the same 16
+  regions as the RDS table, built by `scripts/build_elasticache_price_tables.py`
+  from AWS's public Price List offer files (version 20261014221139, read
+  2026-10-22). Each region's own rate is shown and recorded, and the figure
+  the guard judges is never below us-east-1's: in a region that lists the
+  resource for less, the ask is judged at us-east-1's figure and the reason
+  says the region's own rate beside it, so no ask that 0.13.0 raised goes
+  away. A saved plan's basis names the regions its resources are priced in.
+  The tables are read without waiting, from the package, at most 16 MiB.
+- **An effective figure only on an exact list price.** The workspace's
+  effective rate applies only to a SKU whose list price is that region's
+  exact rate (an RDS or ElastiCache table row, or EC2 in us-east-1). An EC2
+  SKU priced at nable's floor for another region says "Priced at list price"
+  and why ("nable holds REGION's EC2 floor (the us-east-1 rate xF), not that
+  region's listed rate"); in a line of several SKUs only the exact ones are
+  priced at the workspace's rate. The effective figure is the exact list
+  times the factor, rounded up to the cent, never below it.
+- **Several SKUs, each with its path and planned name (contract 2).** Every
+  priced SKU in a ledger line now carries `path`: `cli` for a shell command,
+  `terraform` for a saved plan. An `aws_db_instance` or an
+  `aws_elasticache_cluster` that a saved plan creates (a create, never a
+  replace) carries `identifier`, the name the plan gives it, when the plan
+  knows it and it is in AWS's form; one from an `identifier_prefix`, or
+  computed at apply, carries none. A paid workspace finds it on its bill by
+  that name at day 30: matched by name, believed until seen on a real bill.
+  Older lines (a single `priced`, or a list without `path`) read as before in
+  `nable guard verify-log` and every reader. `nable estimate PLANFILE` reads
+  a plan file without waiting and refuses one that is not a regular file
+  ("pipe a plan to `finops estimate -` instead").
+- **`nable cloud connect` counts the planned names.** The dry run says how
+  many ledger lines name a planned identifier, and how many identifiers, beside
+  the created ids, and that a name is matched by name, believed until seen on
+  a real bill. What a send posts is byte for byte the payload the dry run
+  showed.
+- **The guard's reads never wait (D171).** Every file the guard and its post
+  hook read is opened without waiting and read only when it is a regular
+  file (`guard_paths.open_regular` and `read_regular`): the org model's files
+  and its git metadata, packs and their index, the ledger and its anchor,
+  `cloud-rates.json`, the box standing, `budgets.yaml` and the budget
+  summary, `nable.policy.yaml`, approvals, the AI budget tally and
+  transcripts, price data, adapter configs and settings, and the guard's own
+  reads. A FIFO or a device in place of any of them is reported as not read,
+  never as zero, and the hook returns inside its budget.
+  `tests/test_guard_reads_ratchet.py` walks the static import closure of
+  `finops.guard` and `finops.guard_outcome` (function-level imports included)
+  and fails on a read that could wait or a write not on its allow-list with
+  its reason. The AI budget gate's Codex rollout and Cursor cache readers,
+  the background refresh's state and the vault's machine id and key file
+  read through `guard_paths` too, so the ratchet lists no read as not yet
+  converted; a FIFO in place of a Codex rollout is not read, never waited on.
+- **Authority for classes that move no money.** authority.yaml now governs
+  `tag`, `ticket` and `offhours_schedule`, with the rungs off, recommend,
+  approve_each and, for these classes only, `bounded`: no ask within a bound
+  a person wrote (tag keys, tickets a UTC day and repositories, environments,
+  resources a call), an ask outside it. A purchase kind at bounded is refused
+  naming `value.rung`. Only a confirmed entry in a trusted org model holds
+  bounded; a proposal, an expired, refused or unreadable entry holds the
+  class at approve_each. `nable org set authority --class tag --rung bounded
+  --tag-key team ...`, `nable org authority` and `nable org status` show
+  them. `nable guard reverse [HASH] [--why]` records that a call in a class
+  was undone. On a machine that sends to a paid workspace, the workspace's
+  standing (`authority-standing.json`, from the bound box and workspace
+  only) can only narrow: a class the workspace demoted after a reversal asks
+  until an admin lifts it. Release 0.13.0 reads an entry for one of these
+  classes as unknown and holds every purchase kind at recommend, so upgrade
+  every machine before writing one. See `docs/AUTHORITY-CLASSES.md`.
+- **The guard asks the authority ladder.** After its own verdict, the guard
+  consults `finops.guard_authority.ladder_verdict` for shell commands and MCP
+  calls. The stricter of the two answers: the ladder never softens a verdict
+  or removes an ask, the guard's figures, rule and estimate stand, and when
+  both ask the ladder's sentence is added. The line carries
+  `authority_class`, `rung` and `within_bound`, and `authority`: what the
+  call acted on (op, resources, tag keys, repository, schedules, group,
+  environments), the class's rung in the file, its bound and why a call was
+  outside it, redacted like the command and at most 4,096 characters (past
+  that only its single values stay, with `trimmed`), without the approvers.
+  A call the guard would pass in silence that the ladder places in a class is
+  recorded as an allow line with its tool_use_id, also when no file names
+  the class (rung `none`), and those lines are what the ticket bound counts. A ladder that raises changes no decision and is
+  recorded as `authority_trouble`. `nable guard doctor` reports the ladder's
+  classes (`authority_classes` in `--json`). `nable cloud status` and
+  `connect --send` keep the box's authority block through
+  `finops.authority_standing` and print what it says.
+- **The ladder reads a class call however it is written.** A call inside a
+  loop, a conditional, a subshell, a group, a function, a case branch or
+  `eval` is in its class, as are `gh issue new`, `glab issue new` and
+  `gh issue -R OWNER/NAME create`. `aws scheduler create-schedule` or
+  `update-schedule` whose target is in a file, at a URL, in a variable or in
+  `--cli-input-json` is in `offhours_schedule` with its resources unread. A
+  command too long or too odd to split into words is matched by scans that
+  are linear in its length: a padded command with a hint word in it used to
+  take the ladder 34 s, past the hook's timeout, which fails open.
+- **Where a ticket goes.** A `gh` or `glab` ticket that names no `-R` goes
+  where the CLI would put it: `GH_REPO` (on the command or in the
+  environment), the remote `gh repo set-default` marked, or the repository's
+  one remote, with git's `insteadOf` rewrites applied. Several remotes and no
+  default, a `cd`, a git command or a variable it reads changed earlier in
+  the command, or an include in the repository's config leave the repository
+  unread, so a bound that names repositories asks. The line records the
+  repository judged at every rung, and `tickets`, how many the command
+  opens.
+- **max_per_day counts tickets.** Two tickets in one command count as two,
+  and a command that would pass the day's bound asks. A day whose ledger is
+  more than the guard reads at once (`guard_ledger.recent` now says when its
+  window did not fit) is not counted, so the bound asks, never counts low.
+- **A scheduled scale-up is a capacity change.** `aws autoscaling
+  put-scheduled-update-group-action` (and its batch form) that sets a
+  desired, minimum or maximum capacity above zero, or one the guard cannot
+  read, is judged as the same change made now (`asg-scheduled-capacity`,
+  infra_apply) and is never in `offhours_schedule`. A schedule to zero stays
+  in the class.
+- **A class call through an MCP server.** An AWS or shell MCP server's call
+  is judged on the ladder as the shell command it amounts to, so tag and
+  off-hours rungs hold there too.
+- **The account an off-hours stop runs in.** The org model's subjects read
+  `AWS_PROFILE` and `AWS_DEFAULT_PROFILE` set in the command, and the
+  environment's when the command names no profile. At bounded, every account
+  the stop runs in (the default profile's when none is named) must map to a
+  confirmed environment; keys or another AWS config file in the environment
+  or the command, or a profile that maps to no account, leave it outside the
+  bound.
+- **Each command is priced in its own region.** A command of a chained line
+  is priced and recorded in the region it names itself, or the one an
+  earlier `export AWS_REGION=` set; a `--region` on another command of the
+  line is not where it runs. When the guard cannot pair a line's commands
+  with what was written, it names no region for them.
+- **An older parse of authority.yaml is read again.** The org model's parse
+  cache moves to version 4, so a parse a machine kept while it ran a release
+  that refused these classes (and so held every purchase kind at recommend)
+  is not reused for an unchanged file. A refused entry's warning now says
+  what it holds at which rung: a purchase kind at recommend, a class that
+  moves no money at approve_each, and for a class it cannot read, both.
 
 ## 0.13.0 (2026-10-18)
 

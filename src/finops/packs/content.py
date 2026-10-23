@@ -996,7 +996,14 @@ def read_text(path: Path, rel: str, problems: list[Problem], *, limit: int) -> s
         if path.stat().st_size > limit:
             problems.append(Problem(rel, f"is larger than {limit} bytes"))
             return None
-        raw = path.read_bytes()
+        from ..guard_paths import read_regular
+        # Without waiting, and only a regular file: the guard's hook loads
+        # pack rules, and a FIFO swapped in after the check above is an
+        # OSError here, never a read that blocks.
+        raw = read_regular(path, limit + 1)
+        if len(raw) > limit:
+            problems.append(Problem(rel, f"is larger than {limit} bytes"))
+            return None
     except OSError as e:
         problems.append(Problem(rel, f"could not be read ({e.strerror or e})"))
         return None

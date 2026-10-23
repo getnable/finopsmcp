@@ -191,6 +191,47 @@ replaces objects, the meter spent) it asks whenever the repo holds org
 files. What git itself runs for you (a hook, a filter or a merge driver in
 its config) is not seen, and `nable guard doctor` says so.
 
+**Reads that never wait.** Every file the guard hook and its post hook read
+is opened without waiting (`O_NONBLOCK`) and read only when it is a regular
+file, at a size cap: the org model's files and its git metadata, packs and
+their index, the ledger and its anchor, `cloud-rates.json` and the box
+standing, `budgets.yaml` and the budget summary, `nable.policy.yaml`,
+approvals, the AI budget tally and the coding agents' transcripts, the
+committed price tables, adapter configs and settings. A FIFO, device or
+socket an agent puts in place of one is reported as not read, never as zero
+and never as a hook that runs out of time. `tests/test_guard_reads_ratchet.py`
+holds every module the guard can import (its static import closure, imports
+inside functions included) to that, and every write in it to an allow-list
+with its reason. That includes the AI budget gate's Codex session metadata,
+token totals and rollout files and its Cursor usage cache (`harness_usage`),
+the background refresh's state file (`background_refresh`) and the vault's
+machine id and key file (`security.vault`): no read on the hook path is left
+to convert.
+
+**Authority for classes that move no money.** `authority.yaml` can hold
+tagging, tickets and off-hours schedules at a rung a person wrote; `bounded`
+lets a call through without an ask only inside a bound the file names, only
+from a confirmed entry in a trusted org model, and never for a purchase kind.
+A paid workspace's standing (`authority-standing.json`) is kept only from the
+box and workspace this machine is bound to and only when it names that
+workspace, a block of at most 4 KiB written 0600 and atomically, and read
+through `read_regular`; it can only narrow a rung, and a standing that was not read
+holds `bounded` at approve_each. It is one of the guard's own files, so an
+agent's write of it asks. A class call's ledger line carries what the call
+acted on (`authority`), each string redacted like the command and the whole
+at most 4,096 characters, and never the approvers. A class call is read
+wherever the shell runs it (a loop, a conditional, a subshell, `eval`, an
+MCP server's shell form), and a command too long or too odd to split is
+matched by linear scans, so padding never runs the hook past its timeout. A
+bound is never read from what the guard cannot see: a ticket whose
+repository gh would pick from more than one remote, from `GH_REPO`, or after
+a `cd` or a remote change in the command is outside a bound that names
+repositories, and an off-hours stop whose AWS account (from `--profile`,
+`AWS_PROFILE`, `AWS_DEFAULT_PROFILE` or the default profile) cannot be
+pinned to a confirmed environment is outside its bound. A scheduled
+Auto Scaling action that sets a capacity above zero is a capacity change,
+never in a class.
+
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,
 the ledger, the guard's own files) uses the default directory instead, and

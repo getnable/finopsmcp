@@ -63,6 +63,8 @@ from .store import SIG_NAME
 SIG_FORMAT = 1
 ALGORITHM = "ed25519"
 MAX_SIG_BYTES = 4096
+# The most read of a PEM signing key file: far past any real one.
+_KEY_MAX_BYTES = 64 * 1024
 _DOMAIN = b"nable-pack-signature/v1\n"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -252,7 +254,10 @@ def read_sig_file(path: Path) -> dict[str, Any] | None:
     try:
         if p.stat().st_size > MAX_SIG_BYTES:
             raise ValueError(f"is larger than {MAX_SIG_BYTES} bytes")
-        data = p.read_bytes()
+        from ..guard_paths import read_regular
+        data = read_regular(p, MAX_SIG_BYTES + 1)
+        if len(data) > MAX_SIG_BYTES:
+            raise ValueError(f"is larger than {MAX_SIG_BYTES} bytes")
     except FileNotFoundError:
         return None
     except OSError as e:
@@ -309,8 +314,9 @@ def load_private_key(path: str | Path, passphrase: bytes | None = None):
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     p = Path(path).expanduser()
+    from ..guard_paths import read_regular
     try:
-        data = p.read_bytes()
+        data = read_regular(p, _KEY_MAX_BYTES)
     except OSError as e:
         raise SignatureError(f"the signing key {p} could not be read "
                              f"({e.strerror or type(e).__name__})") from None

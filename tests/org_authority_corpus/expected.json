@@ -34,6 +34,35 @@
      "rung": "approve_each"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:aea5e6645dd5f1c6fb2ff185458f25db151f29536468c385d8b5874bea01ff33"
   },
@@ -70,6 +99,35 @@
      "max_commitment_usd_per_plan": 20000.5,
      "nobody_may_approve": false,
      "rung": "approve_each"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [],
@@ -111,6 +169,35 @@
      "rung": "approve_each"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:531066b4642e5875188a882a2ed4efe4ba1cff46d340761100390852881559d9"
   },
@@ -150,6 +237,35 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:7766fc5a72adaea19339b7a68e8c38b7019cab49a8800f1ac1c0d99a4309306d"
   },
@@ -182,6 +298,35 @@
      "expires": null,
      "keys": [],
      "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
      "nobody_may_approve": false,
      "rung": null
     }
@@ -221,6 +366,44 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
     }
    },
    "refused": [
@@ -266,6 +449,35 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [
     {
      "entry": 0,
@@ -305,6 +517,35 @@
      "max_commitment_usd_per_plan": 0.0,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -364,6 +605,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -427,6 +697,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -493,6 +792,44 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
    "refused": [
     {
      "entry": null,
@@ -530,6 +867,44 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
     }
    },
    "refused": [
@@ -575,6 +950,44 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
    "refused": [
     {
      "entry": 0,
@@ -612,6 +1025,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -673,6 +1115,35 @@
      "rung": null
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:e6aed5feb728bcdf6897018a86e40807298ce0def67b0a322dc867b254bd2da8"
   },
@@ -711,6 +1182,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [],
@@ -754,6 +1254,35 @@
      "rung": "approve_each"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:a4d1a8fd4431dfa08c5242204bfa6f2a8eb5ce336124bc13c1db362f4db33d74"
   },
@@ -785,6 +1314,44 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
     }
    },
    "refused": [
@@ -840,6 +1407,35 @@
      "rung": "approve_each"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:2b18e7fa4505ccd9ccc212369711e3db217268ee0630eae6c1a49cbcd28ff78c"
   },
@@ -873,6 +1469,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -921,6 +1546,44 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
     }
    },
    "refused": [
@@ -1001,6 +1664,35 @@
      "rung": "approve_each"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:a2f0985ba80c0e5217439e5c0c7fa2d86f01232575ca8ee474d80b8fcad424d2"
   },
@@ -1036,6 +1728,35 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
     }
    },
    "refused": [
@@ -1075,6 +1796,44 @@
      "max_commitment_usd_per_plan": null,
      "nobody_may_approve": false,
      "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
     }
    },
    "refused": [
@@ -1128,6 +1887,35 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [],
    "sha256": "sha256:f306ee714e4814d715d192027e6f33637dee877c451050f731d982595026744a"
   },
@@ -1161,6 +1949,35 @@
      "rung": "recommend"
     }
    },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
    "refused": [
     {
      "entry": 0,
@@ -1169,6 +1986,724 @@
     }
    ],
    "sha256": "sha256:8ab9a20a708a66de250271d78ec59a719b2ae560e88696d8bde15bab90cfed7b"
+  },
+  "28_classes_each_rung.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:ceeeb1ed95"
+     ],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:f368961a75"
+     ],
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "tag": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_resources_per_call": 5,
+      "tag_keys": [
+       "env",
+       "team"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:3db0e2fd93"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    },
+    "ticket": {
+     "approvers": [
+      "email:ana@acme.example",
+      "email:bo@acme.example"
+     ],
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": "2027-03-31",
+     "keys": [
+      "key:aa28850d89"
+     ],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:18c6a4bda5dead3a7167a1bc650fd382223b2f6bbfb15711aa9e7090f200ac51"
+  },
+  "29_bounded_purchase_kind.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "tag": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": [
+       "team"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:fdfbd3364c"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.rung",
+     "holds": "rds_ri"
+    },
+    {
+     "entry": 1,
+     "field": "value.rung",
+     "holds": "elasticache_ri"
+    },
+    {
+     "entry": 2,
+     "field": "value.rung",
+     "holds": "database_savings_plan"
+    }
+   ],
+   "sha256": "sha256:44397ef5f45885e4668cf9cee163f71fa37351c81366e7b431698beef80a3392"
+  },
+  "30_class_bad_bounds.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.tag_keys",
+     "holds": "tag"
+    },
+    {
+     "entry": 1,
+     "field": "value.environments",
+     "holds": "offhours_schedule"
+    },
+    {
+     "entry": 2,
+     "field": "value.max_per_week",
+     "holds": "ticket"
+    },
+    {
+     "entry": 3,
+     "field": "value.max_commitment_usd_per_plan",
+     "holds": "tag"
+    },
+    {
+     "entry": 4,
+     "field": "value.max_per_day",
+     "holds": "ticket"
+    },
+    {
+     "entry": 5,
+     "field": "value.max_resources_per_call",
+     "holds": "offhours_schedule"
+    }
+   ],
+   "sha256": "sha256:7e9938e527b65809553d48cd914a2d1ca5e97fa1cb48b289eb2a4ee7f87e8c4b"
+  },
+  "31_class_expired_and_proposed.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": [
+      "email:bo@acme.example"
+     ],
+     "bound": {
+      "environments": [
+       "nonprod"
+      ],
+      "max_resources_per_call": 4
+     },
+     "expired_on": null,
+     "expires": "2027-05-31",
+     "keys": [
+      "key:e27d5d2f38",
+      "key:f85d5b9ac3"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    },
+    "tag": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": [
+       "team"
+      ]
+     },
+     "expired_on": "2026-10-31",
+     "expires": "2026-10-31",
+     "keys": [
+      "key:bdcfb5cf50"
+     ],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_per_day": 5,
+      "repos": [
+       "acme/infra",
+       "acme/payments"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:0383baf8a2"
+     ],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:093d2fe935f41df770eb67a1af4ac910418fbf1ae7f9290a3b5ed149c31d66fd"
+  },
+  "32_class_strictest.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "environments": [
+       "sandbox"
+      ],
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:bff7d213f3"
+     ],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_resources_per_call": 100,
+      "tag_keys": [
+       "Owner",
+       "team"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:0b9572e943",
+      "key:f8ff803271"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    },
+    "ticket": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_per_day": 10,
+      "repos": [
+       "acme/payments"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:741f994399",
+      "key:82b1208fb9"
+     ],
+     "nobody_may_approve": false,
+     "rung": "off"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:559ecabc4b0912433b33c03f38e9ccd5f22a95a568c78eafa59ce8b57c986549"
+  },
+  "33_class_missing_required.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    },
+    "ticket": {
+     "approvers": null,
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "nobody_may_approve": false,
+     "rung": "approve_each"
+    }
+   },
+   "refused": [
+    {
+     "entry": 0,
+     "field": "value.max_per_day",
+     "holds": "ticket"
+    },
+    {
+     "entry": 1,
+     "field": "value.approvers",
+     "holds": "tag"
+    },
+    {
+     "entry": 2,
+     "field": "value.expires",
+     "holds": "offhours_schedule"
+    },
+    {
+     "entry": 3,
+     "field": "value.rung",
+     "holds": "tag"
+    }
+   ],
+   "sha256": "sha256:56739595769a255e9ae720f41b533144e793d6f0e2a8eee852cc63ddef46fc1d"
+  },
+  "34_class_low_rungs.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": null,
+     "bound": {
+      "environments": null,
+      "max_resources_per_call": 10
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:22949d8873"
+     ],
+     "nobody_may_approve": false,
+     "rung": "off"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:f3bea5d8a9"
+     ],
+     "nobody_may_approve": false,
+     "rung": "off"
+    },
+    "ticket": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "max_per_day": 3,
+      "repos": [
+       "acme/payments"
+      ]
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:d67ae92e4c"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:46118d7289f3b415d9e0fcece1840f5e8a32ab0c4fc135cea284a3762f39b87f"
+  },
+  "35_class_recommend.yaml": {
+   "classes": {
+    "database_savings_plan": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "elasticache_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    },
+    "rds_ri": {
+     "approvers": null,
+     "expired_on": null,
+     "expires": null,
+     "keys": [],
+     "max_commitment_usd_per_plan": null,
+     "nobody_may_approve": false,
+     "rung": null
+    }
+   },
+   "ladder": {
+    "offhours_schedule": {
+     "approvers": [
+      "email:ana@acme.example"
+     ],
+     "bound": {
+      "environments": [
+       "dr",
+       "sandbox"
+      ],
+      "max_resources_per_call": 50
+     },
+     "expired_on": null,
+     "expires": "2027-06-30",
+     "keys": [
+      "key:b4b231a0ce"
+     ],
+     "nobody_may_approve": false,
+     "rung": "bounded"
+    },
+    "tag": {
+     "approvers": null,
+     "bound": {
+      "max_resources_per_call": 20,
+      "tag_keys": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:0405d0952b"
+     ],
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    },
+    "ticket": {
+     "approvers": [
+      "email:bo@acme.example"
+     ],
+     "bound": {
+      "max_per_day": null,
+      "repos": null
+     },
+     "expired_on": null,
+     "expires": null,
+     "keys": [
+      "key:0a9db25abb"
+     ],
+     "nobody_may_approve": false,
+     "rung": "recommend"
+    }
+   },
+   "refused": [],
+   "sha256": "sha256:c758ba6beda5b11f1faeef06e627af7d099d5437f80dcee12663c2e22473f714"
   }
  },
  "note": "Made by the open core's loader and read by hand; keys and sha256 values carry a prefix so no line is a bare hex string.",

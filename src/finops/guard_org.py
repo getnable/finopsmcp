@@ -47,8 +47,21 @@ from pathlib import Path
 from typing import Any
 
 # An AWS ARN names the account it lives in.
+# The most the guard reads of its org model cache or accounts.yaml.
+_CACHE_MAX_BYTES = 64 * 1024 * 1024
 _ARN_ACCOUNT_RE = re.compile(r"\barn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:(\d{12}):")
 _PROFILE_RE = re.compile(r"(?<!\S)--profile(?:=|\s+)([^\s;&|'\"]+)")
+# AWS_PROFILE and AWS_DEFAULT_PROFILE set in the command (`AWS_PROFILE=x aws
+# ...`, `export AWS_PROFILE=x; ...`): the profile the AWS CLI uses when no
+# --profile names one.
+_PROFILE_ENV_RE = re.compile(r"(?<![\w-])AWS_(?:DEFAULT_)?PROFILE=[\"']?([^\s;&|'\"]+)")
+_PROFILE_VARS = ("AWS_PROFILE", "AWS_DEFAULT_PROFILE")
+# What makes the AWS CLI use credentials or profiles other than the profile
+# named: keys in the environment, or another config or credentials file.
+_CREDS_VARS = ("AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN", "AWS_ROLE_ARN",
+               "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE",
+               "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI")
+_CREDS_RE = re.compile(r"(?<![\w-])(?:" + "|".join(_CREDS_VARS) + r")=")
 # -n / --namespace on a kubectl, helm or oc command, in the same shell segment.
 _K8S_RE = re.compile(r"\b(?:kubectl|helm|oc)\b[^;&|]*")
 _NAMESPACE_RE = re.compile(r"(?<!\S)(?:-n|--namespace)(?:=|\s+)([a-z0-9][a-z0-9.-]{0,62})(?!\S)")
@@ -125,7 +138,11 @@ def _cached(cwd: str | None):
     collecting = gc.isenabled()
     gc.disable()
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        from .guard_paths import read_regular
+        raw = read_regular(path, _CACHE_MAX_BYTES + 1)
+        if len(raw) > _CACHE_MAX_BYTES:
+            raise ValueError("the org model cache is over the size the guard reads")
+        doc = json.loads(raw.decode("utf-8"))
         if isinstance(doc, dict) and doc.get("key") == key:
             facts = []
             for o, meta, row in doc["facts"]:
@@ -171,7 +188,10 @@ def _profile_accounts(profile: str, model) -> list[str]:
     p = accounts_path()
     if p.is_file():
         import yaml
-        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+        from .guard_paths import read_regular
+        # Without waiting: a FIFO in its place raises, as an unreadable file did.
+        data = yaml.safe_load(read_regular(p, _CACHE_MAX_BYTES).decode("utf-8")) or {}
         for e in (data.get("accounts") or []) if isinstance(data, dict) else []:
             if isinstance(e, dict) and str(e.get("profile") or "") == profile \
                     and e.get("account_id"):
@@ -195,11 +215,23 @@ def _work_dir(command: str, cwd: str | None) -> Path:
     return base
 
 
+def _profiles(flat: str) -> list[str]:
+    """The AWS CLI profiles the command uses: each --profile, each
+    AWS_PROFILE or AWS_DEFAULT_PROFILE set in it, and, when it names none,
+    the environment's."""
+    named = list(dict.fromkeys(_PROFILE_RE.findall(flat) + _PROFILE_ENV_RE.findall(flat)))
+    if named:
+        return named
+    return list(dict.fromkeys(v for v in (os.getenv(n, "").strip() for n in _PROFILE_VARS)
+                              if v))
+
+
 def subjects(command: str, cwd: str | None, model) -> list[str]:
     """What the command touches, most specific first, as "kind:id": the
     Kubernetes namespaces it names, the AWS accounts in its ARNs, behind its
-    --profile or in FINOPS_GUARD_ACCOUNT, then the repo path it runs in
-    (with its repo named)."""
+    --profile, AWS_PROFILE or AWS_DEFAULT_PROFILE (set in the command, or
+    in the environment when it names none) or in FINOPS_GUARD_ACCOUNT, then
+    the repo path it runs in (with its repo named)."""
     from .org import repo_subject
     flat = " ".join(command.split())
     out: dict[str, None] = {}
@@ -208,7 +240,7 @@ def subjects(command: str, cwd: str | None, model) -> list[str]:
             out[f"k8s_namespace:{ns}"] = None
     for acct in _ARN_ACCOUNT_RE.findall(flat):
         out[f"aws_account:{acct}"] = None
-    for profile in _PROFILE_RE.findall(flat):
+    for profile in _profiles(flat):
         for acct in _profile_accounts(profile, model):
             out[f"aws_account:{acct}"] = None
     env_acct = os.getenv("FINOPS_GUARD_ACCOUNT", "").strip()
@@ -269,6 +301,35 @@ def team_scope(model, cwd: str | None) -> tuple[str | None, str | None]:
     if r is None or not r.confirmed or not r.team:
         return None, None
     return r.team, f"org model, {r.matched or subject}"
+
+
+def account_envs(model, command: str, subs: list[str]) -> list[str] | None:
+    """The confirmed environments of the AWS accounts an AWS command runs
+    in, or None when any of them cannot be pinned down: a profile that maps
+    to no account, keys or another config file in the environment or the
+    command (the AWS CLI then uses them, not the profile), no account at
+    all, or an account with no confirmed environment. A command that names
+    no profile runs in the default profile's account."""
+    flat = " ".join(command.split())
+    profiles = _profiles(flat)
+    explicit = bool(_PROFILE_RE.findall(flat))
+    if not explicit and (_CREDS_RE.search(flat) or any(os.getenv(n) for n in _CREDS_VARS)):
+        return None
+    accounts = [s.split(":", 1)[1] for s in subs if s.startswith("aws_account:")]
+    for profile in profiles or ["default"]:
+        mapped = _profile_accounts(profile, model)
+        if not mapped:
+            return None
+        accounts += mapped
+    if not accounts:
+        return None
+    out: dict[str, None] = {}
+    for acct in dict.fromkeys(accounts):
+        env, confirmed = model.environment_of(f"aws_account:{acct}", strict=True)
+        if not confirmed or env == "unknown":
+            return None
+        out[env] = None
+    return list(out)
 
 
 def confirmed_envs(model, subs: list[str]) -> list[str]:

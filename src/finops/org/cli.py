@@ -37,8 +37,20 @@
                                  approve and when it expires (authority.yaml). A paid
                                  workspace applies the stricter of this and its opt-in,
                                  so the file only narrows
-  nable org authority [--json]   what authority.yaml says of each purchase kind, the
-                                 strictest of every live entry, and each refused entry
+  nable org set authority --class tag|ticket|offhours_schedule [--rung RUNG]
+                          --approver email:ana@acme.com --expires 2027-06-30
+                          [--tag-key KEY]... [--max-resources N] [--max-per-day N]
+                          [--repo OWNER/NAME]... [--environment ENV]...
+                                 a class that moves no money: off, recommend,
+                                 approve_each (the default) or bounded, no ask within
+                                 the bound written here (tag keys and resources a call
+                                 for tag, tickets a UTC day and repos for ticket,
+                                 environments and resources a call for an off-hours
+                                 schedule). Only a confirmed entry in a trusted org model
+                                 holds bounded, and the workspace can only narrow it
+  nable org authority [--json]   what authority.yaml says of each purchase kind and each
+                                 class that moves no money, the strictest of every live
+                                 entry, and each refused entry
   nable org trust [--here] [--revoke]   trust this repo's nable.org/ (a person's call)
   nable org questions [--limit N] [--json]
                                  (init and questions first read the guard's
@@ -153,9 +165,27 @@ def add_parser(sub) -> None:
                                            "repeatable")
     x.add_argument("--class", dest="org_class", default=None, metavar="KIND",
                    help="authority: the purchase kind, rds_ri | elasticache_ri | "
-                        "database_savings_plan")
+                        "database_savings_plan, or a class that moves no money, tag | "
+                        "ticket | offhours_schedule")
     x.add_argument("--rung", dest="org_rung", default=None, metavar="RUNG",
-                   help="authority: off | recommend | approve_each")
+                   help="authority: off | recommend | approve_each, and bounded for a "
+                        "class that moves no money (whose default is approve_each)")
+    x.add_argument("--tag-key", dest="org_tag_keys", action="append", default=None,
+                   metavar="KEY", help="authority, tag: a tag key a bounded call may set "
+                                       "(repeatable, 1 to 20)")
+    x.add_argument("--max-resources", dest="org_max_resources", type=int, default=None,
+                   metavar="N", help="authority, tag or offhours_schedule: the most resources "
+                                     "one bounded call may touch (tag 1 to 100, default 20; "
+                                     "offhours_schedule 1 to 50, default 10)")
+    x.add_argument("--max-per-day", dest="org_max_per_day", type=int, default=None,
+                   metavar="N", help="authority, ticket: the most tickets this machine opens "
+                                     "unasked in a UTC day (1 to 50)")
+    x.add_argument("--repo", dest="org_bound_repos", action="append", default=None,
+                   metavar="OWNER/NAME", help="authority, ticket: a repository a bounded "
+                                              "ticket may be opened in (repeatable)")
+    x.add_argument("--environment", dest="org_environments", action="append", default=None,
+                   metavar="ENV", help="authority, offhours_schedule: nonprod, sandbox or dr, "
+                                       "where a bounded stop or start may run (repeatable)")
     x.add_argument("--max-commitment-usd", dest="org_max_commitment", type=float,
                    default=None, metavar="USD",
                    help="authority: the most one plan may commit to this kind, in US dollars "
@@ -193,8 +223,8 @@ def add_parser(sub) -> None:
     x.add_argument("--as", dest="org_as", default=None, metavar="WHO")
 
     x = osub.add_parser("authority", parents=[common],
-                        help="What authority.yaml says of each purchase kind, and each "
-                             "entry it refused")
+                        help="What authority.yaml says of each purchase kind and each class "
+                             "that moves no money, and each entry it refused")
     x.add_argument("--json", dest="org_json", action="store_true")
 
     x = osub.add_parser("trust", parents=[common],
@@ -331,8 +361,56 @@ def _authority_words(c: dict[str, Any]) -> str:
 
 
 def _refused_words(r: dict[str, Any]) -> str:
+    from .model import NO_MONEY_CLASSES
     where = f"{r['file']} entry {r['entry']}" if r.get("entry") is not None else str(r["file"])
-    return (f"{where}, {r['field']}: {r['message']} (holds {r['holds']} at recommend)")
+    holds = r["holds"]
+    if holds in NO_MONEY_CLASSES:
+        held = f"holds {holds} at approve_each"
+    elif holds == "every class":
+        held = ("holds every class: each purchase kind at recommend, each class that moves "
+                "no money at approve_each")
+    else:
+        held = f"holds {holds} at recommend"
+    return f"{where}, {r['field']}: {r['message']} ({held})"
+
+
+def _bound_words(cls: str, b: dict[str, Any] | None) -> str:
+    """A class's bound in words, as `nable org authority` prints it."""
+    b = b or {}
+    if cls == "tag":
+        keys = ", ".join(b.get("tag_keys") or []) or "none"
+        return f"tag keys {keys}, up to {b.get('max_resources_per_call')} resources a call"
+    if cls == "ticket":
+        repos = ", ".join(b.get("repos") or []) or "any repository"
+        return f"up to {b.get('max_per_day')} a UTC day on a machine, in {repos}"
+    envs = ", ".join(b.get("environments") or []) or "none"
+    return f"in {envs}, up to {b.get('max_resources_per_call')} resources a call"
+
+
+def _class_words(cls: str, c: dict[str, Any]) -> str:
+    """One class that moves no money, as `nable org authority` and status
+    print it."""
+    if c["rung"] is None:
+        return "not named: the guard judges it as before there was a file"
+    parts = [c["rung"]]
+    if c["rung"] == "bounded":
+        parts.append(_bound_words(cls, c.get("bound")))
+    if c["nobody_may_approve"]:
+        parts.append("nobody may approve (the entries name no approver in common)")
+    elif c["approvers"] is not None:
+        parts.append("approvers " + ", ".join(c["approvers"]))
+    if c["expired_on"]:
+        parts.append(f"expired on {c['expired_on']}")
+    elif c["expires"]:
+        parts.append(f"expires {c['expires']}")
+    for why in c["held"]:
+        parts.append(f"held at approve_each: {why}")
+    return ", ".join(parts)
+
+
+_LADDER_NARROWS = ("A class that moves no money is judged by the guard on this machine: "
+                   "approve_each asks each time, bounded lets a call within its bound through "
+                   "unasked, and a workspace this machine sends to can only narrow it.")
 
 
 _NARROWS = ("authority.yaml only narrows: a paid workspace applies the stricter of it and its "
@@ -347,8 +425,10 @@ def _authority(parsed, org) -> int:
 def _authority_report(parsed, org) -> int:
     m = org.load(parsed.org_dir)
     a = m.authority()
+    lad = m.ladder()
     if getattr(parsed, "org_json", False):
-        _print(json.dumps({"dir": str(m.dir), **a, "narrows_only": _NARROWS}, default=str))
+        _print(json.dumps({"dir": str(m.dir), **a, "narrows_only": _NARROWS, "ladder": lad,
+                           "ladder_note": _LADDER_NARROWS}, default=str))
         return 0
     _print(f"Purchase authority (authority.yaml), as of {a['today']} UTC")
     for f in a["files"]:
@@ -363,6 +443,12 @@ def _authority_report(parsed, org) -> int:
     for r in a["refused"]:
         _print(f"  refused: {_refused_words(r)}")
     _print(f"  {_NARROWS}")
+    _print(f"Classes that move no money (authority.yaml), as of {lad['today']} UTC")
+    for name, c in lad["classes"].items():
+        _print(f"  {name:<22} {_class_words(name, c)}")
+        if c["keys"]:
+            _print(f"  {'':<22} entries: {', '.join(c['keys'])}")
+    _print(f"  {_LADDER_NARROWS}")
     return 0
 
 
@@ -377,9 +463,10 @@ def _status_report(parsed, org) -> int:
     freezes = _freeze_rows(m)
     approvals = [f for f in m.by_kind("approval") if f.live]
     authority = m.authority()
+    ladder = m.ladder()
     if getattr(parsed, "org_json", False):
         _print(json.dumps({"dir": str(m.dir), "dir_source": m.dir_source, "exists": exists,
-                          "authority": authority,
+                          "authority": authority, "ladder": ladder,
                           "freezes": [{**f.summary(), "state": state, "applies_as": how}
                                       for f, state, how in freezes],
                           "approvals": [f.summary() for f in approvals],
@@ -433,6 +520,10 @@ def _status_report(parsed, org) -> int:
     else:
         _print("  authority: no authority.yaml, so a paid workspace's opt-in alone governs "
                "every purchase kind")
+    named = {n: c for n, c in ladder["classes"].items() if c["named"]}
+    if named:
+        _print("  classes that move no money: "
+               + "; ".join(f"{n} {_class_words(n, c)}" for n, c in named.items()))
     if cov["basis"] == "subjects" and cov["subjects"]["total"]:
         s = cov["subjects"]
         _print(f"    subjects: {s['confirmed_owner']} of {s['total']} with a confirmed owner, "
@@ -592,13 +683,24 @@ def _set(parsed, org) -> int:
             return built
         subject, value = parsed.org_subject, built
     elif kind == "authority":
-        if not getattr(parsed, "org_class", None) or not getattr(parsed, "org_rung", None):
+        from .model import NO_MONEY_CLASSES
+        cls = (getattr(parsed, "org_class", None) or "").strip().lower()
+        rung = getattr(parsed, "org_rung", None)
+        if cls in NO_MONEY_CLASSES and not rung:
+            rung = "approve_each"          # a named class defaults to approve_each (D173)
+        if not cls or not rung:
             print("set authority needs --class KIND (rds_ri, elasticache_ri or "
-                  "database_savings_plan) and --rung off|recommend|approve_each",
-                  file=sys.stderr)
+                  "database_savings_plan) and --rung off|recommend|approve_each, or --class "
+                  "tag|ticket|offhours_schedule", file=sys.stderr)
             return 2
-        subject = f"action_class:{parsed.org_class}"
-        value = {"rung": parsed.org_rung}
+        subject = f"action_class:{cls}"
+        value = {"rung": rung}
+        for name, attr in (("tag_keys", "org_tag_keys"),
+                           ("max_resources_per_call", "org_max_resources"),
+                           ("max_per_day", "org_max_per_day"), ("repos", "org_bound_repos"),
+                           ("environments", "org_environments")):
+            if getattr(parsed, attr, None) is not None:
+                value[name] = getattr(parsed, attr)
         if getattr(parsed, "org_max_commitment", None) is not None:
             value["max_commitment_usd_per_plan"] = parsed.org_max_commitment
         if parsed.org_approvers:
@@ -665,7 +767,10 @@ def _set(parsed, org) -> int:
         print(f"Not set: {e}", file=sys.stderr)
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
-    if f.fact == "authority":
+    from .model import NO_MONEY_CLASSES
+    if f.fact == "authority" and f.subject.id in NO_MONEY_CLASSES:
+        print(f"  {_LADDER_NARROWS}")
+    elif f.fact == "authority":
         print("  authority.yaml only narrows: a paid workspace applies the stricter of this and "
               "its opt-in, and a named person who signed in and holds the workspace's purchase "
               "grant still approves every purchase.")
