@@ -360,6 +360,7 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (rf"\baws\s+autoscaling\s+(?:set-desired-capacity|create-auto-scaling-group){_END}",
      "infra_apply"),
     ("asg-capacity-change", "infra_apply"),
+    ("asg-scheduled-capacity", "infra_apply"),
     (rf"\baws\s+eks\s+create-nodegroup{_END}", "infra_apply"),
     ("eks-nodegroup-scaling", "infra_apply"),
     (r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b", "infra_apply"),
@@ -1026,6 +1027,38 @@ class _VerbWithFlag:
         return None
 
 
+class _ScheduledCapacity(_VerbWithFlag):
+    """`aws autoscaling put-scheduled-update-group-action` (or its batch form)
+    that sets a capacity above zero, or one the guard cannot read (a value
+    in a variable, actions or input in a file or at a URL): a scale-up at a
+    time the agent picks, a bill like the same change made now
+    (asg-capacity-change). A schedule that sets every capacity it names to
+    zero stops what runs and moves no money: the authority ladder's
+    offhours_schedule class judges it."""
+
+    _value = re.compile(r"\s--(?:desired-capacity|min-size|max-size)(?:=|\s+)(\S*)"
+                        r"|(?i:desired_?capacity|min_?size|max_?size)\W{0,3}[=:]\W{0,3}"
+                        r"([^\s,}\]\"']*)")
+    _unread = re.compile(r"\s--(?:scheduled-update-group-actions|cli-input-(?:json|yaml))"
+                         r"(?:=|\s+)[\"']?(?:file|fileb|https?)://")
+
+    def __init__(self) -> None:
+        super().__init__("asg-scheduled-capacity", r"\baws\s+autoscaling\s",
+                         rf"(?<!\S)(?:batch-)?put-scheduled-update-group-action{_END}", r"$")
+
+    def _find(self, seg: str) -> re.Match[str] | None:
+        tool = self._tool.search(seg)
+        if tool is None:
+            return None
+        verb = self._verb.search(seg, tool.end())
+        if verb is None:
+            return None
+        for m in self._value.finditer(seg, verb.end()):
+            if (m.group(1) if m.group(1) is not None else m.group(2)).strip("'\"") != "0":
+                return m
+        return self._unread.search(seg, verb.end())
+
+
 class _TfCliArgsDestroy:
     """`TF_CLI_ARGS[_cmd]=...-destroy`: the flag passed through terraform's
     env hook. One scan per assignment token, never one per character."""
@@ -1313,6 +1346,7 @@ _SPECIAL_RULES = {r.pattern: r for r in (
     _VerbWithFlag("asg-capacity-change",
                   rf"\baws\s+autoscaling\s+update-auto-scaling-group{_END}", r"",
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
+    _ScheduledCapacity(),
     _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
     *(_VerbWithFlag(_conditional_rule(p),
@@ -3227,7 +3261,8 @@ def _price_form(form: str, cwd: str | None, command: str | None = None
     parts: list[dict[str, Any]] = []
     unpriced = 0
     excused = _excused(form, command)
-    for seg, at in _commands_in(form):
+    written = _as_written(form, command)
+    for i, (seg, at) in enumerate(_commands_in(form)):
         if at in excused:
             continue
         for pattern, pricer in _PRICERS:
@@ -3235,16 +3270,56 @@ def _price_form(form: str, cwd: str | None, command: str | None = None
                 if _repeated(seg):
                     unpriced += 1      # no figure rather than one read from a guess
                     break
+                # Each command is priced in the region it names itself (or one
+                # an earlier `export AWS_REGION=` set): a --region on another
+                # command of the line is not where this one runs.
+                own = written[i] if written is not None else None
+                token = _PRICING_REGION.set(_segment_region(written, i) if written is not None
+                                            else None)
                 try:
                     est = pricer(seg, cwd=cwd, whole=form, at=at)
                 except Exception:
                     est = None         # a pricing bug must not cost the verdict
+                finally:
+                    _PRICING_REGION.reset(token)
                 if est is None:
                     unpriced += 1
                 else:
-                    parts.append(est)
+                    parts.append(_with_region(est, own if own is not None else command or ""))
                 break
     return parts, unpriced
+
+
+def _as_written(form: str, command: str | None) -> list[str] | None:
+    """Each command of `form` as written in `command` (the same place in
+    the text it was read from, _excused), or None when they cannot be
+    paired. A command of one shell command is itself."""
+    if not command:
+        return None
+    n = len(_COMMAND_BREAK_RE.findall(form)) + 1
+    for split in (False, True):
+        raw = [seg for seg, _at in _commands_in(_price_rewrite(command, split))]
+        if len(raw) == n:
+            return raw
+    return [command] if n == 1 else None
+
+
+_EXPORTS_REGION_RE = re.compile(r"^\s*(?:export\s+)?(?:\w+=\S*\s+)*AWS_(?:DEFAULT_)?REGION="
+                                r"[\"']?[a-z0-9-]+[\"']?(?:\s+\w+=\S*)*\s*$")
+
+
+def _segment_region(written: list[str], i: int) -> str | None:
+    """The one AWS region command `i` names (its --region, or AWS_REGION or
+    AWS_DEFAULT_REGION set on it), else the one the last earlier command
+    that only sets it (`export AWS_REGION=...`) left; None for none or
+    several."""
+    own = _named_region(written[i])
+    if own is not None or _REGION_RE.search(written[i]):
+        return own
+    for prior in reversed(written[:i]):
+        if _EXPORTS_REGION_RE.match(prior):
+            return _named_region(prior)
+    return None
 
 
 def _added_up(parts: list[dict[str, Any]], unpriced: int) -> dict[str, Any] | None:
@@ -3352,19 +3427,18 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
     Anything unpriceable returns None: an unknown type must degrade to the
     guard's existing behaviour, never to an invented figure.
     """
-    token = None
     try:
         r = _readings(command)
         if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
             return None
-        token = _PRICING_REGION.set(_named_region(command))
         for forms in _pricing_forms(command):
             best: dict[str, Any] | None = None
             for form in forms:
+                # Each part is priced in its own command's region, and says on
+                # its own when its figure is us-east-1's for a command that
+                # names another region (_price_form).
                 parts, unpriced = _price_form(form, cwd, command)
-                # Each part says on its own when its figure is us-east-1's for
-                # a command that names another region.
-                est = _added_up([_with_region(p, command) for p in parts], unpriced)
+                est = _added_up(parts, unpriced)
                 if est is not None and (best is None or _size(est) > _size(best)):
                     best = est
             if best is not None:
@@ -3372,9 +3446,6 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
         return None
     except Exception:
         return None                    # a pricing bug must not cost the verdict
-    finally:
-        if token is not None:
-            _PRICING_REGION.reset(token)
 
 
 def _cost_line(est: dict[str, Any]) -> str:
@@ -4232,6 +4303,19 @@ class _OrgLens:
                 else None
         return self._get("envs", find, None)
 
+    def account_envs(self) -> tuple[str, ...] | None:
+        """The confirmed environments of the AWS accounts the command runs in
+        (guard_org.account_envs), or None when any cannot be pinned down or
+        the org model is not read."""
+        def find() -> tuple[str, ...] | None:
+            from . import guard_org
+            m = self._model()
+            if m is None:
+                return None
+            got = guard_org.account_envs(m, self.command, self._subjects())
+            return tuple(got) if got is not None else None
+        return self._get("account_envs", find, None)
+
     def freeze(self) -> dict[str, Any] | None:
         """The change freeze in force over this command's scope
         (guard_org.freeze), or None."""
@@ -5005,7 +5089,7 @@ _LADDER_REASON_MAX = 2000
 # most _LADDER_RECORD_ITEMS, and the whole at most _LADDER_RECORD_MAX
 # characters, past which the lists go and `trimmed` says so.
 _LADDER_RECORD_KEYS = ("file_rung", "entries", "op", "tool", "resources", "resources_n",
-                       "keys", "repo", "schedule", "group", "envs", "tickets_today",
+                       "keys", "repo", "schedule", "group", "envs", "tickets", "tickets_today",
                        "calls", "bound", "outside", "standing", "error")
 _LADDER_RECORD_ITEMS = 20
 _LADDER_RECORD_MAX = 4096
@@ -5026,9 +5110,16 @@ def _ladder_module() -> Any:
 def _ladder_scope(command: str, cwd: str | None, context: str):
     """scope() for the ladder: (the environments the org model resolves for
     the call or None, the production context in `context` or None). Read
-    only when the ladder asks for it."""
+    only when the ladder asks for it, for an off-hours stop or start, which
+    is an AWS call: the environments of the accounts it runs in are among
+    them, and when those cannot be pinned down (_OrgLens.account_envs) the
+    environments are not resolved, so the call is outside the bound."""
     def scope() -> tuple[tuple[str, ...] | None, str | None]:
-        return _OrgLens(command, cwd).envs(), _prod_context(context)
+        lens = _OrgLens(command, cwd)
+        envs, accounts = lens.envs(), lens.account_envs()
+        if envs is None or accounts is None:
+            return None, _prod_context(context)
+        return tuple(dict.fromkeys((*envs, *accounts))), _prod_context(context)
     return scope
 
 
@@ -5713,13 +5804,18 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                         worst, summary = floored, act.command
                     break
         # The authority ladder (seam S1), on the shell form the call amounts
-        # to, or '' when it amounts to none: it only ever tightens.
-        shell = next((act.command for act in actions if not act.unchecked
-                      and len(act.command) <= MAX_JUDGED_CHARS), "")
+        # to (every command line of it, one after another), or '' when it
+        # amounts to none: it only ever tightens.
+        lines = list(dict.fromkeys(act.command for act in actions if not act.unchecked
+                                   and len(act.command) <= MAX_JUDGED_CHARS))
+        shell = lines[0] if lines else ""
+        every = "\n".join(lines)
+        if len(every) > MAX_JUDGED_CHARS:
+            every = shell
         where = cwd if isinstance(cwd, str) else None
         ladder, trouble = _ladder(
-            shell, cwd=where, harness=harness,
-            scope=_ladder_scope(shell, where, f"{shell} {argument_text(arguments)}"),
+            every, cwd=where, harness=harness,
+            scope=_ladder_scope(every, where, f"{every} {argument_text(arguments)}"),
             mcp=(tool_name, arguments if isinstance(arguments, dict) else {}))
         if worst is None and ladder is not None and shell:
             summary = shell

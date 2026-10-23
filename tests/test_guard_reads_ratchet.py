@@ -90,26 +90,10 @@ NOT_ON_HOOK_PATH: dict[tuple[str, str], str] = {
 
 # Reads that are not yet non-waiting, in files this workstream does not own,
 # each with why it is still here and what would remove it. The ratchet fails
-# on any read not listed, and on an entry whose read is gone.
-NOT_YET: dict[tuple[str, str], str] = {
-    ("finops.harness_usage", "_meta"):
-        "Codex session metadata, read by the AI budget gate; harness_usage.py is not this "
-        "workstream's: proposed, open it with guard_paths.open_regular",
-    ("finops.harness_usage", "_read_totals"):
-        "Codex token totals, read by the AI budget gate; proposed as above",
-    ("finops.harness_usage", "_codex_file"):
-        "a Codex rollout file, read by the AI budget gate; proposed as above",
-    ("finops.harness_usage", "_cursor_read_cache"):
-        "the Cursor usage cache, read by the AI budget gate; proposed: read_regular",
-    ("finops.background_refresh", "read_state"):
-        "the refresh's state file, read only under FINOPS_GUARD_AUTO_REFRESH_BUDGET=1; "
-        "background_refresh.py is not this workstream's: proposed, read_regular",
-    ("finops.security.vault", "_machine_id"):
-        "/etc/machine-id for the vault's key; in the closure because the hook imports "
-        "child_env, which reads no file; proposed, read_regular",
-    ("finops.security.vault", "Vault._read_key_file"):
-        "the vault's key file, never read by child_env; proposed, read_regular",
-}
+# on any read not listed, and on an entry whose read is gone. Empty: the
+# Codex and Cursor readers of the AI budget gate, the background refresh's
+# state and the vault's files are read through guard_paths too.
+NOT_YET: dict[tuple[str, str], str] = {}
 
 # Every write in the closure, by function, with why it writes. Each of the
 # guard's own files is written 0600 beside the ledger, atomically where a
@@ -700,3 +684,31 @@ def test_a_fifo_in_place_of_a_guard_file_returns_the_hook_in_its_budget(tmp_path
         assert '"fail_open"' in lost, "the history checks' failed read was not said"
     if kind == "budget summary":
         assert '"within"' not in got["out"], "an unread summary was read as room in the budget"
+
+
+CODEX_READ = r"""
+import json, sys, time
+from finops import harness_usage
+t = time.monotonic()
+got = harness_usage.codex_responses(0.0)
+meta = harness_usage._meta(harness_usage._codex_files()[0])
+print(json.dumps({"s": time.monotonic() - t, "n": len(got), "meta": meta}))
+"""
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+def test_a_fifo_in_place_of_a_codex_rollout_never_holds_the_budget_gate(tmp_path):
+    """The AI budget gate reads Codex's rollouts on the hook path: one an
+    agent made a FIFO is not read, never waited on."""
+    codex = tmp_path / "codex"
+    day = codex / "sessions" / "2026" / "10" / "22"
+    day.mkdir(parents=True)
+    os.mkfifo(day / "rollout-2026-10-22T10-00-00-0199a213-81c0-7800-8aa1-bbab2a035a53.jsonl")
+    (tmp_path / "home").mkdir()
+    env = {**_env(tmp_path), "CODEX_HOME": str(codex)}
+    r = subprocess.run([sys.executable, "-c", CODEX_READ], env=env, capture_output=True,
+                       text=True, stdin=subprocess.DEVNULL, timeout=HOOK_BUDGET_S * 3,
+                       check=False)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got["s"] < HOOK_BUDGET_S and got["n"] == 0 and got["meta"] is None

@@ -402,8 +402,10 @@ coding-agent spend a person can carry into a paid workspace.
   `tests/test_guard_reads_ratchet.py` walks the static import closure of
   `finops.guard` and `finops.guard_outcome` (function-level imports included)
   and fails on a read that could wait or a write not on its allow-list with
-  its reason; a few reads in modules other workstreams own are listed there
-  as not yet converted, each a proposal to their owners.
+  its reason. The AI budget gate's Codex rollout and Cursor cache readers,
+  the background refresh's state and the vault's machine id and key file
+  read through `guard_paths` too, so the ratchet lists no read as not yet
+  converted; a FIFO in place of a Codex rollout is not read, never waited on.
 - **Authority for classes that move no money.** authority.yaml now governs
   `tag`, `ticket` and `offhours_schedule`, with the rungs off, recommend,
   approve_each and, for these classes only, `bounded`: no ask within a bound
@@ -437,6 +439,49 @@ coding-agent spend a person can carry into a paid workspace.
   classes (`authority_classes` in `--json`). `nable cloud status` and
   `connect --send` keep the box's authority block through
   `finops.authority_standing` and print what it says.
+- **The ladder reads a class call however it is written.** A call inside a
+  loop, a conditional, a subshell, a group, a function, a case branch or
+  `eval` is in its class, as are `gh issue new`, `glab issue new` and
+  `gh issue -R OWNER/NAME create`. `aws scheduler create-schedule` or
+  `update-schedule` whose target is in a file, at a URL, in a variable or in
+  `--cli-input-json` is in `offhours_schedule` with its resources unread. A
+  command too long or too odd to split into words is matched by scans that
+  are linear in its length: a padded command with a hint word in it used to
+  take the ladder 34 s, past the hook's timeout, which fails open.
+- **Where a ticket goes.** A `gh` or `glab` ticket that names no `-R` goes
+  where the CLI would put it: `GH_REPO` (on the command or in the
+  environment), the remote `gh repo set-default` marked, or the repository's
+  one remote, with git's `insteadOf` rewrites applied. Several remotes and no
+  default, a `cd`, a git command or a variable it reads changed earlier in
+  the command, or an include in the repository's config leave the repository
+  unread, so a bound that names repositories asks. The line records the
+  repository judged at every rung, and `tickets`, how many the command
+  opens.
+- **max_per_day counts tickets.** Two tickets in one command count as two,
+  and a command that would pass the day's bound asks. A day whose ledger is
+  more than the guard reads at once (`guard_ledger.recent` now says when its
+  window did not fit) is not counted, so the bound asks, never counts low.
+- **A scheduled scale-up is a capacity change.** `aws autoscaling
+  put-scheduled-update-group-action` (and its batch form) that sets a
+  desired, minimum or maximum capacity above zero, or one the guard cannot
+  read, is judged as the same change made now (`asg-scheduled-capacity`,
+  infra_apply) and is never in `offhours_schedule`. A schedule to zero stays
+  in the class.
+- **A class call through an MCP server.** An AWS or shell MCP server's call
+  is judged on the ladder as the shell command it amounts to, so tag and
+  off-hours rungs hold there too.
+- **The account an off-hours stop runs in.** The org model's subjects read
+  `AWS_PROFILE` and `AWS_DEFAULT_PROFILE` set in the command, and the
+  environment's when the command names no profile. At bounded, every account
+  the stop runs in (the default profile's when none is named) must map to a
+  confirmed environment; keys or another AWS config file in the environment
+  or the command, or a profile that maps to no account, leave it outside the
+  bound.
+- **Each command is priced in its own region.** A command of a chained line
+  is priced and recorded in the region it names itself, or the one an
+  earlier `export AWS_REGION=` set; a `--region` on another command of the
+  line is not where it runs. When the guard cannot pair a line's commands
+  with what was written, it names no region for them.
 - **An older parse of authority.yaml is read again.** The org model's parse
   cache moves to version 4, so a parse a machine kept while it ran a release
   that refused these classes (and so held every purchase kind at recommend)

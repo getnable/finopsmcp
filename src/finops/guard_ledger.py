@@ -578,7 +578,7 @@ def check(path: Path | None = None) -> dict[str, Any]:
 
 def recent(minutes: float, *, path: Path | None = None, now: datetime | None = None,
            max_bytes: int = _RECENT_MAX_BYTES, outcomes: bool = False,
-           hashes: bool = False) -> list[dict[str, Any]]:
+           hashes: bool = False, stats: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Records from the last `minutes`, oldest first, read from the END of the file.
 
     This is the hook's read (the velocity cap and loop detection in guard.py,
@@ -591,9 +591,13 @@ def recent(minutes: float, *, path: Path | None = None, now: datetime | None = N
     the caller decides what a failed read means.
 
     Verdicts only, unless `outcomes`. `hashes` adds `_hash` to each record:
-    the sha256 of its line, what an outcome's `verdict` names."""
+    the sha256 of its line, what an outcome's `verdict` names. `stats`, when
+    given, gets "complete": False when `max_bytes` cut the window short (a
+    caller that counts must not count a part as the whole), else True."""
     path = path or ledger_path()
     since = (now or datetime.now(UTC)) - timedelta(minutes=minutes)
+    if stats is not None:
+        stats["complete"] = True
     if _symlink_target(path) is not None:
         # What append() refuses to write, the history checks must not trust.
         raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
@@ -629,6 +633,8 @@ def recent(minutes: float, *, path: Path | None = None, now: datetime | None = N
                     rec[1]["_hash"] = _sha(raw)
                 out.append(rec[1])
     # A line cut off by max_bytes is left unread rather than guessed at.
+    if stats is not None and pos > 0:
+        stats["complete"] = False
     out.reverse()
     return out
 

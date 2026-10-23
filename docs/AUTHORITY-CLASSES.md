@@ -15,8 +15,16 @@ denies or lets a call through that the agent was going to make anyway.
 | Class | Calls in it | Removals (in the class, never within a bound) |
 |---|---|---|
 | `tag` | `aws ec2 create-tags`, `aws resourcegroupstaggingapi tag-resources`, `aws rds add-tags-to-resource`, `aws elasticache add-tags-to-resource`, any `aws SERVICE tag-resource`, `aws s3api put-bucket-tagging` (it replaces the whole tag set, so it is never within a bound), `kubectl label` | `aws ec2 delete-tags`, `untag-resources`, `remove-tags-from-resource`, `untag-resource`, `kubectl label NAME KEY-` |
-| `ticket` | `gh issue create`, `glab issue create`, `jira issue create`, and an MCP tool whose name says create with issue or ticket (the GitHub server's create_issue, Atlassian's createJiraIssue, and issue_write with method `create`) | none: a reversal of a ticket is recorded by hand |
-| `offhours_schedule` | `aws ec2 stop-instances` and `start-instances`; `aws rds stop-db-instance`, `start-db-instance`, `stop-db-cluster`, `start-db-cluster`; `aws autoscaling put-scheduled-update-group-action` and its batch form; `aws scheduler create-schedule` and `update-schedule` whose target is an EC2 or RDS stop or start | `aws autoscaling delete-scheduled-action` and its batch form, `aws scheduler delete-schedule`, and a schedule updated to `--state DISABLED` |
+| `ticket` | `gh issue create` and `glab issue create` (and their alias `issue new`, with `-R` before or after the subcommand), `jira issue create`, and an MCP tool whose name says create with issue or ticket (the GitHub server's create_issue, Atlassian's createJiraIssue, and issue_write with method `create`) | none: a reversal of a ticket is recorded by hand |
+| `offhours_schedule` | `aws ec2 stop-instances` and `start-instances`; `aws rds stop-db-instance`, `start-db-instance`, `stop-db-cluster`, `start-db-cluster`; `aws autoscaling put-scheduled-update-group-action` and its batch form that set every capacity they name to zero; `aws scheduler create-schedule` and `update-schedule` whose target is an EC2 or RDS stop or start, or whose target or input is in a file, at a URL or in a variable (its resources unread) | `aws autoscaling delete-scheduled-action` and its batch form, `aws scheduler delete-schedule`, and a schedule updated to `--state DISABLED` |
+
+A call is in its class wherever the shell runs it: inside a loop, a
+conditional, a subshell, a group, a function, a case branch, `bash -c` or
+`eval`, and through an AWS or shell MCP server, judged as the command it
+amounts to. A scheduled Auto Scaling action that sets a desired, minimum or
+maximum capacity above zero (or one the guard cannot read) is a scale-up at a
+time the agent picks: the guard judges it as the same change made now, a
+capacity change, and it is never in a class.
 
 Tagging in IAM, Organizations, SSO and KMS stays out of the `tag` class: a
 tag there can grant access, so the guard judges it as it always has.
@@ -47,13 +55,29 @@ naming `value.rung`, and holds that kind at recommend.
 | Class | Bound fields |
 |---|---|
 | `tag` | `tag_keys` (1 to 20 keys, required at bounded; AWS tag keys are case-sensitive and so is the match), `max_resources_per_call` (1 to 100, default 20) |
-| `ticket` | `max_per_day` (1 to 50, required at bounded; counted on this machine, by UTC day, from its own ledger), `repos` (optional, `OWNER/NAME`; a ticket whose repository cannot be read is outside a bound that names repos) |
+| `ticket` | `max_per_day` (1 to 50, required at bounded; counted on this machine, by UTC day, from its own ledger, each ticket of a command counted; a day the guard cannot read whole is not counted, so the call asks), `repos` (optional, `OWNER/NAME`; a ticket whose repository cannot be read is outside a bound that names repos) |
 | `offhours_schedule` | `environments` (a non-empty subset of `nonprod`, `sandbox` and `dr`, required at bounded; `prod`, `shared` and `unknown` are refused), `max_resources_per_call` (1 to 50, default 10) |
 
 For an off-hours call at bounded, every environment the org model resolves
 for the call must be in the bound, and no production context may be seen.
-A call whose environment cannot be resolved asks. A call whose resources
-cannot be counted (a selector, a file, a substitution, `xargs`) asks.
+The AWS account it runs in must be pinned to a confirmed environment: the
+account of its `--profile`, else of `AWS_PROFILE` or `AWS_DEFAULT_PROFILE`
+(set in the command, or in the environment), else of the default profile.
+Keys or another AWS config file in the environment or the command, or a
+profile that maps to no account, leave it unpinned. A call whose environment
+cannot be resolved asks. A call whose resources cannot be counted (a
+selector, a file, a substitution, `xargs`) asks.
+
+A ticket that names no repository with `-R` goes where `gh` or `glab` would
+put it: `GH_REPO` (set on the command or in the environment), the remote
+`gh repo set-default` marked (`gh-resolved`, or `glab-resolved`), or the
+repository's one remote, with git's `insteadOf` rewrites applied. With
+several remotes and none marked, the CLI's choice depends on which hosts it
+is signed in to, which the guard does not read: the repository is unread.
+So is it after a `cd`, a git command, `gh repo` or a change to a variable
+the CLI reads earlier in the command, or when the repository's config
+includes another file. The ledger line records the repository judged, at
+every rung.
 
 Any other field in an entry is refused, never kept, and the refusal names
 it: a misspelt bound must never be ignored.

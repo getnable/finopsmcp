@@ -171,9 +171,12 @@ def _derive_key(passphrase: str, salt: bytes) -> bytes:
 
 
 def _machine_id() -> str:
+    from ..guard_paths import read_regular
     for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
         try:
-            return Path(path).read_text().strip()
+            # Without waiting, and a regular file only, as every read the
+            # guard's hook can reach.
+            return read_regular(path, 4096).decode("utf-8", "replace").strip()
         except OSError:
             pass
     import uuid
@@ -377,9 +380,10 @@ class Vault:
     def _read_key_file(cls, key_path: Path) -> bytes | None:
         """Read the local key file; None if missing or not a plausible Fernet key
         (44 urlsafe-base64 bytes), so a corrupt file falls through to recovery."""
+        from ..guard_paths import read_regular
         try:
             if key_path.exists():
-                raw = key_path.read_bytes().strip()
+                raw = read_regular(key_path, 4096).strip()
                 if len(raw) == 44:
                     return raw
                 log.warning("Vault: ignoring malformed key file at %s", key_path)

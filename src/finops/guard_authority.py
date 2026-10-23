@@ -85,18 +85,27 @@ _HINT = re.compile(
     r"|(?<![\w-])label(?![\w-])|(?<![\w-])issues?(?![\w-])"
     r"|(?:stop|start)-(?:instances|db-instance|db-cluster)|scheduled-|-schedule(?![\w-])",
     re.IGNORECASE)
-# The same verbs, for a command too odd to split into words: any of these is
-# a call in a class whose bound cannot be read.
+# The same verbs, for a command too long or too odd to split into words: any
+# of these is a call in a class whose bound cannot be read. Each is a program
+# word, then a verb word anywhere after it, searched as two scans (_in_order):
+# one pattern `\baws\b.*VERB` rescanned the rest of the command from every
+# `aws` in it, quadratic in a padded command, and ran the hook past its
+# timeout. A ticket's words are read a few at a time after each program
+# (_raw_ticket), never by a pattern that can backtrack.
 _RAW = (
-    ("tag", re.compile(r"\baws\b.*\b(?:create-tags|delete-tags|(?:un)?tag-resources?|"
-                       r"(?:add|remove)-tags-(?:to|from)-resource|put-bucket-tagging)\b"
-                       r"|\bkubectl\b.*\blabel\b", re.DOTALL)),
-    ("ticket", re.compile(r"\b(?:gh|glab|jira)\s+issues?\s+create\b")),
-    ("offhours_schedule", re.compile(
-        r"\baws\b.*\b(?:(?:stop|start)-(?:instances|db-instance|db-cluster)|"
+    ("tag", ((re.compile(r"\baws\b"), re.compile(
+        r"\b(?:create-tags|delete-tags|(?:un)?tag-resources?|"
+        r"(?:add|remove)-tags-(?:to|from)-resource|put-bucket-tagging)\b")),
+             (re.compile(r"\bkubectl\b"), re.compile(r"\blabel\b")))),
+    ("offhours_schedule", ((re.compile(r"\baws\b"), re.compile(
+        r"\b(?:(?:stop|start)-(?:instances|db-instance|db-cluster)|"
         r"(?:batch-)?(?:put|delete)-scheduled-(?:update-group-)?actions?|"
-        r"scheduler\s+(?:create|update|delete)-schedule)\b", re.DOTALL)),
+        r"(?:create|update|delete)-schedule)\b")),)),
 )
+_RAW_WORD = re.compile(r"[^\s;&|()`'\"]+")
+_ISSUE_WORDS = frozenset({"issue", "issues"})
+_CREATE_WORDS = frozenset({"create", "new"})
+_TICKET_PROGRAMS = frozenset({"gh", "glab", "jira"})
 # Tagging these can grant access (an IAM or KMS condition on a tag), so it is
 # judged as before, never in the class.
 _ACCESS_SERVICES = frozenset({"iam", "kms", "organizations", "sso", "sso-admin", "sso-oidc",
@@ -136,7 +145,6 @@ _RDS_ID = re.compile(r"Db(?:Instance|Cluster)Identifier\W{1,6}([A-Za-z][A-Za-z0-
 _ACTION_NAME = re.compile(r"ScheduledActionName\W{1,6}([\w.-]{1,255})")
 _DYNAMIC = re.compile(r"\$|`|^(?:file|fileb|https?)://|<\(")
 _MCP_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
-_REMOTE = re.compile(r"^\s*url\s*=\s*(\S+)\s*$", re.MULTILINE)
 _SLUG = re.compile(r"(?:^[a-z][a-z0-9+.-]*://[^/]+/|^[^@/:\s]+@[^:/\s]+:|^[^:/\s]+:)"
                    r"([^\s]+?)(?:\.git)?/?$", re.IGNORECASE)
 
@@ -161,6 +169,7 @@ class _Call:
     schedule: list[str] = field(default_factory=list)
     group: str | None = None
     counted: bool = True                    # False: a substitution or a feeder in it
+    repo_why: str | None = None             # why the repository cannot be read
 
     def view(self) -> dict[str, Any]:
         out: dict[str, Any] = {"op": self.op, "tool": self.tool}
@@ -361,7 +370,17 @@ def _aws(args: list[str], counted: bool) -> list[_Call]:
         target = " ".join(f.get("--target") or [])
         m = _SCHED_TARGET.search(target)
         if m is None:
-            return []                   # not a stop or a start: in no class
+            # A target in a file, at a URL or in a variable, or one the
+            # --cli-input flags give, may be a stop or a start: in the class,
+            # its resources unread. A target the command spells out that is
+            # neither is in no class.
+            unread = (_dynamic(target.strip()) if target else
+                      any(k in f for k in ("--cli-input-json", "--cli-input-yaml")))
+            if not unread:
+                return []
+            return call("offhours_schedule", "schedule", None,
+                        schedule=list(f.get("--name") or []),
+                        group=" ".join(f.get("--group-name") or []) or "default")
         state = " ".join(f.get("--state") or []).strip().upper()
         if m.group(1) == "ec2":
             ids = _INSTANCE_ID.findall(target)
@@ -406,12 +425,39 @@ def _kubectl(args: list[str], counted: bool) -> list[_Call]:
                   keys=keys or None, counted=counted and not many)]
 
 
-def _issue(prog: str, args: list[str]) -> list[_Call]:
-    """gh, glab or jira `issue create`, and the repository it names."""
-    pos = [a for a in args if not a.startswith("-")]
-    if len(pos) < 2 or pos[0] not in ("issue", "issues") or pos[1] != "create":
+# gh's and glab's -R (a persistent flag of `issue`, so it may sit before the
+# subcommand) and jira's -p and -c take a value: read past it to the
+# subcommand.
+_ISSUE_VALUE = frozenset({"-R", "--repo", "-p", "--project", "-c", "--config"})
+# Where gh and glab look for the repository, when the command names none: a
+# value of one of these in the command, or a change of directory or of git's
+# remotes before it, leaves the repository unread (_ticket_repo).
+_REPO_ENV = frozenset({"GH_REPO", "GH_HOST", "GITLAB_REPO", "GL_REPO", "GITLAB_HOST",
+                       "GL_HOST", "REMOTE_ALIAS", "GIT_REMOTE_URL_VAR", "HOME",
+                       "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GLAB_CONFIG_DIR"})
+_MOVERS = frozenset({"cd", "pushd", "popd", "git", "export", "declare", "typeset", "readonly",
+                     "local", "unset", "source", ".", "set"})
+
+
+def _issue(prog: str, args: list[str], assigned: dict[str, str], odd_env: bool
+           ) -> list[_Call]:
+    """gh, glab or jira `issue create` (or `issue new`, gh's and glab's
+    alias), and the repository it names: -R or --repo anywhere, else a
+    GH_REPO set on the command itself."""
+    pos: list[str] = []
+    i = 0
+    while i < len(args) and len(pos) < 2:
+        a = args[i]
+        if a in _ISSUE_VALUE:
+            i += 2
+            continue
+        if not a.startswith("-"):
+            pos.append(a)
+        i += 1
+    if len(pos) < 2 or pos[0] not in _ISSUE_WORDS or pos[1] not in _CREATE_WORDS:
         return []
     repo: str | None = None
+    why: str | None = None
     if prog in ("gh", "glab"):
         for i, a in enumerate(args):
             if a in ("-R", "--repo") and i + 1 < len(args):
@@ -420,22 +466,88 @@ def _issue(prog: str, args: list[str]) -> list[_Call]:
                 repo = a.split("=", 1)[1]
             elif a.startswith("-R") and len(a) > 2:
                 repo = a[2:]
-        if repo is not None and _dynamic(repo):
-            repo = None
-    return [_Call("ticket", "create", f"{prog} issue create", ["1"],
-                  repo=repo.strip().lower() if repo else None)]
+        if repo is None:
+            mine = {k: v for k, v in assigned.items() if k in _REPO_ENV or k.startswith("GIT_")}
+            if prog == "gh" and set(mine) == {"GH_REPO"}:
+                repo = mine["GH_REPO"]
+            elif mine:
+                why = f"the command sets {', '.join(sorted(mine))} for it"
+            elif odd_env:
+                why = "env changes its environment or directory"
+        if repo is not None and (_dynamic(repo) or not _slug_of(repo)):
+            why, repo = f"its repository is given as {repo[:60]!r}", None
+    c = _Call("ticket", "create", f"{prog} issue create", ["1"],
+              repo=_slug_of(repo) if repo else None)
+    c.repo_why = why
+    return [c]
 
 
-def _unwrap(words: list[str]) -> tuple[list[str], bool]:
-    """The words after leading assignments and wrappers (sudo, env, nice,
-    timeout, ...), and whether a feeder (xargs, parallel) hands it more
-    arguments than the command shows."""
+def _slug_of(text: str) -> str | None:
+    """OWNER/NAME (a GitLab group path too) from -R's or GH_REPO's forms:
+    OWNER/NAME, HOST/OWNER/NAME or a URL; None when it is none of them."""
+    t = text.strip().lower()
+    if "://" in t or t.startswith("git@"):
+        m = _SLUG.match(t)
+        t = m.group(1) if m else ""
+    elif t.count("/") >= 2 and "." in t.split("/", 1)[0]:
+        t = t.split("/", 1)[1]
+    t = t.strip("/").removesuffix(".git")
+    return t if re.fullmatch(r"[\w.-]+(?:/[\w.-]+)+", t) else None
+
+
+# Words that open a loop, a conditional, a group or a pipeline's negation:
+# the simple command is after them (`for r in ...; do aws ...; done`).
+_KEYWORDS = frozenset({"do", "then", "else", "elif", "if", "while", "until", "!", "{", "time",
+                       "coproc"})
+_FUNCTION = re.compile(r"^[\w.:-]+\(\)$")
+
+
+def _strip_shell(words: list[str]) -> list[str]:
+    """The simple command inside a loop, a conditional, a subshell, a group,
+    a function's body or a case branch: its words without the keywords,
+    parentheses and patterns in front of it."""
+    for _ in range(16):
+        if not words:
+            return words
+        w = words[0]
+        if w in _KEYWORDS or _FUNCTION.match(w):
+            words = words[1:]
+        elif w == "case":
+            words = words[words.index("in") + 1:] if "in" in words else []
+        elif w.startswith("(") and not w.startswith("$("):
+            opened = len(w) - len(w.lstrip("("))
+            rest = [w[opened:]] if w[opened:] else []
+            words = rest + words[1:]
+            if words:
+                last = words[-1]
+                closed = min(opened, len(last) - len(last.rstrip(")")))
+                words[-1] = last[:len(last) - closed]
+                if not words[-1]:
+                    words = words[:-1]
+        elif w.endswith(")") and len(w) > 1 and "(" not in w:
+            words = words[1:]           # a case branch's pattern, `x)`
+        else:
+            return words
+    return words
+
+
+def _unwrap(words: list[str]) -> tuple[list[str], bool, dict[str, str], bool]:
+    """The words after the shell's keywords, leading assignments and wrappers
+    (sudo, env, nice, timeout, ...); whether a feeder (xargs, parallel) hands
+    it more arguments than the command shows; the variables set on it; and
+    whether env changes its environment or directory past that (-i, -u,
+    -C, --chdir, -S)."""
     counted = True
+    assigned: dict[str, str] = {}
+    odd_env = False
     for _ in range(8):
+        words = _strip_shell(words)
         while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+            name, _eq, val = words[0].partition("=")
+            assigned[name] = val
             words = words[1:]
         if not words:
-            return words, counted
+            return words, counted, assigned, odd_env
         prog = os.path.basename(words[0]).lower()
         if prog in _WRAPPERS or prog in _FEEDERS:
             if prog in _FEEDERS:
@@ -443,17 +555,19 @@ def _unwrap(words: list[str]) -> tuple[list[str], bool]:
             i = 1
             takes = _FEEDER_VALUE if prog in _FEEDERS else _WRAPPER_VALUE
             while i < len(words) and words[i].startswith("-"):
+                if prog == "env":
+                    odd_env = True
                 i += 2 if (words[i] in takes and "=" not in words[i]) else 1
             if prog == "timeout" and i < len(words):
                 i += 1
             words = words[i:]
             continue
         break
-    return words, counted
+    return words, counted, assigned, odd_env
 
 
 def _segment_calls(words: list[str], depth: int) -> list[_Call]:
-    words, counted = _unwrap(words)
+    words, counted, assigned, odd_env = _unwrap(words)
     if not words:
         return []
     prog = os.path.basename(words[0]).lower()
@@ -463,15 +577,38 @@ def _segment_calls(words: list[str], depth: int) -> list[_Call]:
                     and i + 1 < len(words):
                 return _calls_in(words[i + 1], depth + 1)
         return []
+    if prog == "eval" and depth < _DEPTH_MAX:
+        return _calls_in(" ".join(words[1:]), depth + 1)
     if re.match(r"^python[\d.]*$", prog) and words[1:3] == ["-m", "awscli"]:
         words, prog = ["aws", *words[3:]], "aws"
     if prog == "aws":
         return _aws(words[1:], counted)
     if prog in ("kubectl", "oc"):
         return _kubectl(words[1:], counted)
-    if prog in ("gh", "glab", "jira"):
-        return _issue(prog, words[1:])
+    if prog in _TICKET_PROGRAMS:
+        return _issue(prog, words[1:], assigned, odd_env)
     return []
+
+
+def _moves_repo(seg: list[str]) -> str | None:
+    """Why this simple command may change where gh or glab finds the
+    repository for a command after it, or None: a change of directory, of
+    git's remotes or config, of the default repository, or of a variable
+    they read."""
+    words, _counted, assigned, odd_env = _unwrap(seg)
+    named = sorted(k for k in assigned if k in _REPO_ENV or k.startswith("GIT_"))
+    if named:
+        return f"the command sets {', '.join(named)}"
+    if not words:
+        return None
+    prog = os.path.basename(words[0]).lower()
+    if prog in _MOVERS:
+        return f"the command runs {prog} before it"
+    if prog in ("gh", "glab") and "repo" in words[1:3]:
+        return f"the command runs {prog} repo before it"
+    if odd_env:
+        return "env changes the environment or the directory in it"
+    return None
 
 
 def _segments(command: str) -> list[list[str]]:
@@ -495,11 +632,40 @@ def _segments(command: str) -> list[list[str]]:
     return out
 
 
+def _in_order(command: str, pats: tuple[re.Pattern[str], ...]) -> bool:
+    """Each of `pats` found after the one before it: one scan each."""
+    pos = 0
+    for p in pats:
+        m = p.search(command, pos)
+        if m is None:
+            return False
+        pos = m.end()
+    return True
+
+
+def _raw_ticket(command: str) -> bool:
+    """gh, glab or jira, then `issue` and `create` or `new` among the next
+    few words: each word is looked at a bounded number of times."""
+    words = [w.lower() for w in _RAW_WORD.findall(command)]
+    for i, w in enumerate(words):
+        if os.path.basename(w) not in _TICKET_PROGRAMS:
+            continue
+        near = words[i + 1:i + 8]
+        at = next((j for j, x in enumerate(near) if x in _ISSUE_WORDS), None)
+        if at is not None and any(x in _CREATE_WORDS for x in near[at + 1:]):
+            return True
+    return False
+
+
 def _raw_calls(command: str) -> list[_Call]:
     """A command that cannot be split into words: each class whose verb it
     names, none of its bound readable."""
-    return [_Call(cls, "unread", "unread", None, counted=False)
-            for cls, rule in _RAW if rule.search(command)]
+    found = {cls for cls, rules in _RAW if any(_in_order(command, r) for r in rules)}
+    if _raw_ticket(command):
+        found.add("ticket")
+    return [_Call(cls, "unread", "unread", None, counted=False,
+                  repo_why="the command could not be read word by word")
+            for cls in CLASSES if cls in found]
 
 
 def _calls_in(command: str, depth: int = 0) -> list[_Call]:
@@ -512,6 +678,11 @@ def _calls_in(command: str, depth: int = 0) -> list[_Call]:
         out += _segment_calls(seg, depth)
     if not out and any(s in command for s in ("$(", "`", "<(")):
         out = _raw_calls(command)
+    tickets = [c for c in out if c.cls == "ticket" and not c.repo and not c.repo_why]
+    if tickets and len(segs) > 1:
+        moved = next((why for seg in segs if (why := _moves_repo(seg))), None)
+        for c in tickets:
+            c.repo_why = moved
     return out
 
 
@@ -674,30 +845,105 @@ def _apply_standing(cls: str, rung: str, standing: dict[str, Any] | None
     return out, why, note
 
 
-def _cwd_repo(cwd: str | None) -> str | None:
-    """OWNER/NAME of the origin remote of the repo holding `cwd` (else its
-    first remote), as gh and glab pick it, from .git/config read through
-    guard_paths.read_regular; None when it cannot be told."""
+# A git config file's section heads and keys, one line each. [ \t] and a
+# greedy rest of the line, never \s or a lazy one: those rescan a long line
+# or a run of blank lines from every start, quadratic in the file.
+_SECTION = re.compile(r'^[ \t]*\[[ \t]*([A-Za-z][\w.-]*)(?:[ \t]+"((?:[^"\\\n]|\\.)*)")?[ \t]*\]',
+                      re.MULTILINE)
+_KEY = re.compile(r"^[ \t]*([A-Za-z][\w-]*)[ \t]*=([^\n]*)", re.MULTILINE)
+# gh, run with no terminal, files in the remote `gh repo set-default` marked,
+# else in its one remote. Among several it orders them upstream, github,
+# origin and keeps those on a host it is signed in to; that is not read
+# here, so several remotes and no mark leave the repository unread.
+_RESOLVED = {"gh": "gh-resolved", "glab": "glab-resolved"}
+_TICKET_ENV = {"gh": ("GH_REPO",), "glab": ("GITLAB_REPO", "GL_REPO", "REMOTE_ALIAS",
+                                             "GIT_REMOTE_URL_VAR")}
+
+
+def _git_sections(text: str) -> list[tuple[str, str | None, dict[str, list[str]]]]:
+    """[(section, subsection, {key: [values]})] of a git config file, keys
+    lowercased as git reads them."""
+    out: list[tuple[str, str | None, dict[str, list[str]]]] = []
+    heads = list(_SECTION.finditer(text))
+    for i, h in enumerate(heads):
+        body = text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+        keys: dict[str, list[str]] = {}
+        for k in _KEY.finditer(body):
+            keys.setdefault(k.group(1).lower(), []).append(k.group(2).strip().strip('"'))
+        out.append((h.group(1).lower(), h.group(2), keys))
+    return out
+
+
+def _cwd_repo(cwd: str | None, prog: str) -> tuple[str | None, str | None]:
+    """(OWNER/NAME of the repository gh or glab files a ticket in from
+    `cwd`, None) or (None, why it cannot be told), read from git's config
+    files through guard_paths.read_regular and git's url rewrites applied."""
     from . import guard_paths
     root = guard_paths.git_root(cwd)
     if root is None:
-        return None
-    for cfg in guard_paths.git_config_files(root)[::-1]:
-        if cfg.name != "config" or cfg.parent.name in ("git",):
-            continue
+        return None, "the working directory is in no git repository"
+    remotes: dict[str, dict[str, list[str]]] = {}
+    rewrites: list[tuple[str, str]] = []
+    machine = set(guard_paths.git_config_files(None))
+    for cfg in guard_paths.git_config_files(root):
         try:
             text = guard_paths.read_regular(cfg, 256 * 1024).decode("utf-8", "replace")
         except OSError:
             continue
-        sections = re.split(r"^\s*\[", text, flags=re.MULTILINE)
-        remotes = [sec for sec in sections if sec.startswith("remote ")]
-        remotes.sort(key=lambda sec: not sec.startswith('remote "origin"'))
-        for sec in remotes:
-            m = _REMOTE.search(sec)
-            slug = _SLUG.match(m.group(1)) if m else None
-            if slug:
-                return slug.group(1).strip("/").lower()
-    return None
+        local = cfg not in machine
+        for sec, sub, keys in _git_sections(text):
+            if sec in ("include", "includeif") and local:
+                return None, "the repository's git config includes another file"
+            if sec == "url" and sub:
+                rewrites += [(prefix, sub) for prefix in keys.get("insteadof", [])]
+            if sec == "remote" and sub and local:
+                for k, vals in keys.items():
+                    remotes.setdefault(sub, {}).setdefault(k, []).extend(vals)
+    remotes = {n: r for n, r in remotes.items() if r.get("url")}
+    if not remotes:
+        return None, "the repository has no remote"
+    marker = _RESOLVED.get(prog, "gh-resolved")
+    marked = [n for n, r in remotes.items() if r.get(marker)]
+    if len(marked) > 1:
+        return None, f"several remotes are marked {marker}"
+    if marked:
+        value = remotes[marked[0]][marker][-1]
+        if value != "base":
+            slug = _slug_of(value)
+            return (slug, None) if slug else (None, f"{marker} is {value[:60]!r}")
+        name = marked[0]
+    elif len(remotes) == 1:
+        name = next(iter(remotes))
+    else:
+        return None, (f"the repository has {len(remotes)} remotes and none is marked as "
+                      f"{prog}'s default")
+    url = remotes[name]["url"][0]
+    best = max((r for r in rewrites if url.startswith(r[0])), key=lambda r: len(r[0]),
+               default=None)
+    if best is not None:
+        url = best[1] + url[len(best[0]):]
+    m = _SLUG.match(url)
+    slug = _slug_of(m.group(1)) if m else None
+    return (slug, None) if slug else (None, f"remote {name}'s url could not be read")
+
+
+def _ticket_repo(c: _Call, cwd: str | None) -> None:
+    """Fill in where a gh or glab ticket that names no repository goes: the
+    environment's GH_REPO for gh, else the working directory's repository
+    (_cwd_repo). Why not, on the call, when that cannot be told."""
+    if c.repo or c.repo_why or c.tool not in ("gh issue create", "glab issue create"):
+        return
+    prog = c.tool.split()[0]
+    env = {k: os.environ[k] for k in _TICKET_ENV[prog] if os.environ.get(k)}
+    if os.environ.get("GIT_DIR"):
+        c.repo_why = "GIT_DIR is set in the environment"
+    elif prog == "gh" and env:
+        c.repo = _slug_of(env["GH_REPO"])
+        c.repo_why = None if c.repo else "GH_REPO in the environment could not be read"
+    elif env:
+        c.repo_why = f"{', '.join(sorted(env))} is set in the environment"
+    else:
+        c.repo, c.repo_why = _cwd_repo(cwd, prog)
 
 
 def _outside(cls: str, calls: list[_Call], bound: dict[str, Any], *, multi: bool,
@@ -738,10 +984,9 @@ def _outside(cls: str, calls: list[_Call], bound: dict[str, Any], *, multi: bool
         repos = bound.get("repos")
         if repos is not None:
             for c in calls:
-                if not c.repo and c.tool in ("gh issue create", "glab issue create"):
-                    c.repo = _cwd_repo(cwd)
                 if not c.repo:
-                    why.append("its repository could not be read, and the bound names "
+                    said = f" ({c.repo_why})" if c.repo_why else ""
+                    why.append(f"its repository could not be read{said}, and the bound names "
                                f"{', '.join(repos)}")
                 elif c.repo not in repos:
                     why.append(f"its repository {c.repo} is not one the bound names")
@@ -750,7 +995,7 @@ def _outside(cls: str, calls: list[_Call], bound: dict[str, Any], *, multi: bool
         extra["tickets_today"] = today
         if today is None:
             why.append("this machine's tickets today could not be counted (its ledger was not "
-                       "read)")
+                       "read, or today's part of it was more than the guard reads)")
         elif today + len(calls) > most:
             why.append(f"it would be ticket {today + len(calls)} of today (UTC) on this "
                        f"machine, over the bound's {most} a day")
@@ -784,17 +1029,32 @@ def _outside(cls: str, calls: list[_Call], bound: dict[str, Any], *, multi: bool
 
 
 def _tickets_today(now: datetime) -> int | None:
-    """Tickets this machine let through unasked today (UTC): ticket lines of
-    the ledger that were allowed. None when the ledger cannot be read."""
+    """Tickets this machine let through unasked today (UTC): on each ticket
+    line of the ledger that was allowed, the tickets its command made (a
+    line from before that was said counts its calls, else one). None when
+    the ledger cannot be read, or today's part of it is more than the read
+    holds: a day not read whole is not counted, never counted low."""
     try:
         from . import guard_ledger
         midnight = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         minutes = (now - midnight).total_seconds() / 60 + 1
-        recs = guard_ledger.recent(minutes, now=now)
+        stats: dict[str, Any] = {}
+        recs = guard_ledger.recent(minutes, now=now, stats=stats)
+        if not stats.get("complete"):
+            return None
         day = midnight.date().isoformat()
-        return sum(1 for r in recs if r.get("authority_class") == "ticket"
-                   and r.get("decision") in ("allow", "warn")
-                   and str(r.get("ts", ""))[:10] == day)
+        n = 0
+        for r in recs:
+            if r.get("authority_class") != "ticket" or r.get("decision") not in ("allow", "warn") \
+                    or str(r.get("ts", ""))[:10] != day:
+                continue
+            a = r.get("authority") if isinstance(r.get("authority"), dict) else {}
+            said = a.get("tickets")
+            if isinstance(said, int) and not isinstance(said, bool) and said > 0:
+                n += said
+            else:
+                n += max(1, len(a["calls"]) if isinstance(a.get("calls"), list) else 1)
+        return n
     except Exception:  # noqa: BLE001 - not counted, never zero
         return None
 
@@ -815,6 +1075,12 @@ def _judge(cls: str, calls: list[_Call], *, multi: bool, cwd: str | None,
     file_rung = c["rung"] if c["named"] else None
     rung, narrowed, st_note = _apply_standing(cls, file_rung or "none", standing)
     record: dict[str, Any] = {"file_rung": file_rung, "entries": c["keys"][:10]}
+    if cls == "ticket":
+        # Where each ticket goes is read before anything is recorded, at
+        # every rung, so the line says the repository that was judged.
+        for x in calls:
+            _ticket_repo(x, cwd)
+        record["tickets"] = len(calls)
     if len(calls) == 1:
         record.update(calls[0].view())
     else:
@@ -876,14 +1142,19 @@ def ladder_verdict(command: str, *, cwd: str | None, harness: str,
     line records}. `scope()` gives (the environments the org model resolves
     for the call, a production context or None) and is called only for an
     offhours_schedule call whose class is at bounded. `harness` is the
-    caller's, as the guard records it. The guard merges this with its own
+    caller's, as the guard records it. For an MCP call (`mcp`, the tool and
+    its arguments) a tool that creates an issue or a ticket is a ticket;
+    any other is judged as `command`, the shell form the guard translated
+    it to, would be through the shell. The guard merges this with its own
     verdict, the more severe answering. Never raises."""
     del harness                         # every harness is judged alike here
+    shell = mcp is None
     try:
-        if mcp is not None:
-            calls = _mcp_call(*mcp)
-        else:
-            calls = classify(command)
+        calls = _mcp_call(*mcp) if mcp is not None else []
+        if not calls:
+            # An MCP call that amounts to a shell command (an AWS or a shell
+            # server) is judged as that command would be through the shell.
+            calls, shell = classify(command), True
     except Exception:  # noqa: BLE001 - not classified is judged as before
         return None
     if not calls:
@@ -893,7 +1164,7 @@ def ladder_verdict(command: str, *, cwd: str | None, harness: str,
         by_class.setdefault(c.cls, []).append(c)
     first = next(iter(by_class))
     try:
-        if mcp is None:
+        if shell:
             excluded = _excluded(command, calls, cwd)
             if excluded:
                 return None

@@ -202,13 +202,11 @@ socket an agent puts in place of one is reported as not read, never as zero
 and never as a hook that runs out of time. `tests/test_guard_reads_ratchet.py`
 holds every module the guard can import (its static import closure, imports
 inside functions included) to that, and every write in it to an allow-list
-with its reason. A few reads in modules this change does not own still open
-the plain way and are listed there by name, each a proposal to convert: the
-Codex session metadata, token totals and rollout files and the Cursor usage
-cache (`harness_usage`), the background refresh's state file, read only under
-`FINOPS_GUARD_AUTO_REFRESH_BUDGET=1` (`background_refresh`), and the vault's
-machine id and key file (`security.vault`, which the hook imports and never
-calls to read either).
+with its reason. That includes the AI budget gate's Codex session metadata,
+token totals and rollout files and its Cursor usage cache (`harness_usage`),
+the background refresh's state file (`background_refresh`) and the vault's
+machine id and key file (`security.vault`): no read on the hook path is left
+to convert.
 
 **Authority for classes that move no money.** `authority.yaml` can hold
 tagging, tickets and off-hours schedules at a rung a person wrote; `bounded`
@@ -221,7 +219,18 @@ through `read_regular`; it can only narrow a rung, and a standing that was not r
 holds `bounded` at approve_each. It is one of the guard's own files, so an
 agent's write of it asks. A class call's ledger line carries what the call
 acted on (`authority`), each string redacted like the command and the whole
-at most 4,096 characters, and never the approvers.
+at most 4,096 characters, and never the approvers. A class call is read
+wherever the shell runs it (a loop, a conditional, a subshell, `eval`, an
+MCP server's shell form), and a command too long or too odd to split is
+matched by linear scans, so padding never runs the hook past its timeout. A
+bound is never read from what the guard cannot see: a ticket whose
+repository gh would pick from more than one remote, from `GH_REPO`, or after
+a `cd` or a remote change in the command is outside a bound that names
+repositories, and an off-hours stop whose AWS account (from `--profile`,
+`AWS_PROFILE`, `AWS_DEFAULT_PROFILE` or the default profile) cannot be
+pinned to a confirmed environment is outside its bound. A scheduled
+Auto Scaling action that sets a capacity above zero is a capacity change,
+never in a class.
 
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,

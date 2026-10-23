@@ -98,8 +98,10 @@ def _state_path(job: str) -> Path:
 def read_state(job: str) -> dict[str, Any]:
     """The job's last recorded outcome: {"at", "retry_at", "error" or "note"},
     or {} when its last run succeeded or none has run."""
+    from .guard_paths import read_regular
     try:
-        doc = json.loads(_state_path(job).read_text())
+        # Without waiting: the guard's budget gate reads this on the hook path.
+        doc = json.loads(read_regular(_state_path(job), 64 * 1024).decode("utf-8"))
     except (OSError, ValueError):
         return {}
     return doc if isinstance(doc, dict) else {}
