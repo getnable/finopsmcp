@@ -437,7 +437,10 @@ def test_set_a_class_defaults_to_approve_each(cli_dir, capsys):
     assert code == 0, err
     (f,) = _live("tag")
     assert f.value == {"rung": "approve_each", "approvers": [APPROVER], "expires": "2027-06-30"}
-    assert f.status == "confirmed" and "only narrows" in out
+    # A class moves no money: the guard judges it here and a workspace only
+    # narrows it, and the purchase sentence is not said for it.
+    assert f.status == "confirmed" and "can only narrow it" in out
+    assert "approves every purchase" not in out
 
 
 @pytest.mark.parametrize("argv,cls,value", [

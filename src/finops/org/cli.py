@@ -767,7 +767,10 @@ def _set(parsed, org) -> int:
         print(f"Not set: {e}", file=sys.stderr)
         return 1
     print(f"  {f.key}  confirmed by {who}: {f.fact} {f.subject} {f.value}")
-    if f.fact == "authority":
+    from .model import NO_MONEY_CLASSES
+    if f.fact == "authority" and f.subject.id in NO_MONEY_CLASSES:
+        print(f"  {_LADDER_NARROWS}")
+    elif f.fact == "authority":
         print("  authority.yaml only narrows: a paid workspace applies the stricter of this and "
               "its opt-in, and a named person who signed in and holds the workspace's purchase "
               "grant still approves every purchase.")
