@@ -1,0 +1,26 @@
+# nable org model v1
+# The classes that move no money beside a purchase kind, one rung each.
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: bounded, tag_keys: [team, env], max_resources_per_call: 5, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: ticket}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example", "email:bo@acme.example"], expires: 2027-03-31}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: offhours_schedule}
+  value: {rung: recommend}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: approve_each, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

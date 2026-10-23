@@ -2465,6 +2465,12 @@ def _run_guard(parsed) -> None:
             raise SystemExit(code)
         return
 
+    if action == "reverse":
+        code = _guard_reverse(parsed)
+        if code:
+            raise SystemExit(code)
+        return
+
     if action == "install" and not getattr(parsed, "guard_force", False):
         # The nable Claude Code plugin already runs the guard. A settings hook
         # as well would only stand aside for it (or it for the settings hook),
@@ -2973,6 +2979,95 @@ def _guard_approve(parsed) -> int:
     print(f"  {green('✓')} Approved once, by {who}: {r.get('call')}")
     print(dim(f"    {r.get('harness')}, in {r.get('cwd') or '(no directory given)'}; the "
               f"identical call is allowed once until {r['expires_at']}."))
+    print()
+    return 0
+
+
+_REVERSE_LISTED = 20
+_REVERSE_WHY_MAX = 300
+
+
+def _guard_reverse(parsed) -> int:
+    """`nable guard reverse LINE_HASH [--why TEXT]` (D174): a call in a class
+    that moves no money (tag, ticket, offhours_schedule) was undone. Appends
+    an outcome line, `reversed`, naming that verdict line by its sha256
+    (or a unique prefix of 12 or more), through guard_ledger.append, so the
+    chain stays whole. It only narrows, so anyone may record one, an agent
+    included: once the ledger is sent, the workspace demotes the class at
+    once. Refuses a hash not in this machine's ledger, a line in no class,
+    and a line that never ran. With no hash, the class lines that ran."""
+    from . import guard_ledger
+    from .welcome import cyan, dim, green
+
+    target = (getattr(parsed, "guard_target", None) or "").strip().lower()
+    try:
+        recs = guard_ledger.read(outcomes=True)
+    except OSError as e:
+        print(f"nable guard reverse: the ledger could not be read ({e.strerror or e})",
+              file=sys.stderr)
+        return 1
+    ran = {r.get("verdict") for r in recs
+           if guard_ledger.is_outcome(r) and r.get("outcome") == guard_ledger.RAN}
+    reversed_ = {r.get("verdict"): r for r in recs
+                 if guard_ledger.is_outcome(r) and r.get("outcome") == "reversed"}
+    if not target:
+        rows = [r for r in recs if not guard_ledger.is_outcome(r)
+                and r.get("authority_class") and r.get("_hash") in ran]
+        print()
+        if not rows:
+            print("  No call in a class that moves no money (tag, ticket, offhours_schedule) "
+                  "has run on this machine.\n")
+            return 0
+        for r in rows[-_REVERSE_LISTED:]:
+            state = " (reversed)" if r["_hash"] in reversed_ else ""
+            print(f"  {cyan(r['_hash'][:12])}  {str(r.get('ts', ''))[:16]}  "
+                  f"{r['authority_class']}{state}  {str(r.get('command') or '')[:70]}")
+        print(dim("\n  nable guard reverse HASH --why TEXT   records that one was undone\n"))
+        return 0
+    if len(target) < 12 or not all(c in "0123456789abcdef" for c in target):
+        print("nable guard reverse: give the line's sha256, or 12 or more of its first hex "
+              "characters (`nable guard reverse` lists them)", file=sys.stderr)
+        return 2
+    lines = [r for r in recs if str(r.get("_hash", "")).startswith(target)]
+    if not lines:
+        print(f"nable guard reverse: {target[:16]} is not in this machine's ledger",
+              file=sys.stderr)
+        return 1
+    if len(lines) > 1:
+        print(f"nable guard reverse: {target} names more than one line; give more of the hash",
+              file=sys.stderr)
+        return 1
+    line = lines[0]
+    cls = line.get("authority_class")
+    if guard_ledger.is_outcome(line) or not isinstance(cls, str) or not cls:
+        print("nable guard reverse: that line is in no class that moves no money (tag, ticket, "
+              "offhours_schedule), so there is nothing a reversal counts against",
+              file=sys.stderr)
+        return 1
+    h = line["_hash"]
+    if h not in ran:
+        print("nable guard reverse: that call never ran (no `ran` outcome names it), so it "
+              "was not done and cannot be undone", file=sys.stderr)
+        return 1
+    if h in reversed_:
+        print(f"nable guard reverse: that line was already reversed at "
+              f"{reversed_[h].get('ts')}", file=sys.stderr)
+        return 1
+    why = getattr(parsed, "guard_why", None)
+    entry = {"kind": guard_ledger.OUTCOME, "outcome": "reversed", "verdict": h,
+             "authority_class": cls,
+             **({"why": guard_ledger.redact(str(why), limit=_REVERSE_WHY_MAX)}
+                if why else {})}
+    if not guard_ledger.append(entry):
+        print("nable guard reverse: the ledger could not be written (`nable guard doctor` "
+              "says why)", file=sys.stderr)
+        return 1
+    print()
+    print(f"  {green('✓')} Recorded: the {cls} call at {str(line.get('ts', ''))[:16]} UTC was "
+          "reversed.")
+    print(dim(f"    Once this machine's ledger is sent (`nable cloud connect --send`), the "
+              f"workspace demotes {cls} to approve_each at once, and its count toward bounded "
+              "starts again. A reversal only narrows."))
     print()
     return 0
 
@@ -4117,11 +4212,14 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
                                                   "try", "report", "verify-log", "doctor",
                                                   "reconcile", "export", "on", "off",
-                                                  "approve"],
+                                                  "approve", "reverse"],
                          nargs="?", default="status")
     guard_p.add_argument("guard_target", nargs="?", default=None, metavar="ID",
                          help="With 'approve': the approval id a deny showed (none: list "
-                              "the approvals waiting)")
+                              "the approvals waiting). With 'reverse': the sha256 of the "
+                              "ledger line whose call was undone (none: list them)")
+    guard_p.add_argument("--why", dest="guard_why", default=None, metavar="TEXT",
+                         help="With 'reverse': why the call was undone, kept in the ledger")
     guard_p.add_argument("--as", dest="guard_as", default=None, metavar="WHO",
                          help="With 'approve': who approves (default on a terminal: git "
                               "user.email, then $USER). Without a terminal it is required")

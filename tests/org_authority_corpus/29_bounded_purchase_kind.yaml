@@ -1,0 +1,27 @@
+# nable org model v1
+# bounded is for a class that moves no money: on a purchase kind it is refused
+# naming value.rung, and holds that kind at recommend.
+- fact: authority
+  subject: {kind: action_class, id: rds_ri}
+  value: {rung: bounded, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: action_class:elasticache_ri
+  value: {rung: bounded, approvers: ["email:ana@acme.example"], expires: 2027-06-30, max_commitment_usd_per_plan: 100}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: database_savings_plan}
+  value: {rung: bounded}
+  source: a-pull-request
+  status: proposed
+  proposed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: bounded, tag_keys: [team], approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

@@ -1,0 +1,21 @@
+# nable org model v1
+# off and recommend for each class (off unquoted, as YAML reads it, is off),
+# and a ticket bound with its repos.
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: off}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: ticket}
+  value: {rung: bounded, max_per_day: 3, repos: [Acme/Payments], approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: offhours_schedule}
+  value: {rung: "off"}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01

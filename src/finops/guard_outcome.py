@@ -41,6 +41,13 @@ The outcome names the ask by the sha256 of its line, the hash the chain
 already uses, and an ask already answered is not answered twice (the plugin's
 hook and a settings hook can both run).
 
+A class that moves no money (D175, D177). A verdict line that carries
+authority_class (tag, ticket or offhours_schedule, guard_authority) gets a
+`ran` whether it was an allow or an ask: a call let through within its
+bound, or at rung none, is an allow, and the box counts executions and
+approval latency per class from these lines. Its `ran` names the class. Any
+other allow still gets none, and a deny gets none.
+
 What a priced create made (D149). When the ask the outcome answers priced
 an EC2 instance, an RDS instance or an ElastiCache node (its `priced`,
 contract 2), the outcome also records the resource ids the tool printed, as
@@ -264,9 +271,23 @@ def _same_session(obs: dict[str, Any], rec: dict[str, Any]) -> bool:
     return have == raw or have == _redacted(obs, "session")
 
 
+# What a line in a class that moves no money is answered for: let through
+# (allow, warn) or asked about. A deny never ran.
+_CLASS_ANSWERED = ("allow", "warn", "ask")
+
+
+def _answerable(r: dict[str, Any]) -> bool:
+    """An ask, or a line in a class that moves no money the guard let
+    through or asked about."""
+    if r.get("decision") == "ask":
+        return True
+    return bool(r.get("authority_class")) and r.get("decision") in _CLASS_ANSWERED
+
+
 def find_ask(obs: dict[str, Any], recs: list[dict[str, Any]], *,
              now: datetime | None = None) -> tuple[dict[str, Any], str] | None:
-    """(the ask this tool call answers, how it was linked) or None.
+    """(the ask this tool call answers, how it was linked) or None. A line
+    in a class that moves no money is answered too, allow or ask.
 
     `recs` is recent(..., outcomes=True, hashes=True), oldest first. The
     newest unanswered ask wins: an agent that retried after a "no" asked
@@ -274,7 +295,7 @@ def find_ask(obs: dict[str, Any], recs: list[dict[str, Any]], *,
     now = now or datetime.now(UTC)
     answered = {r.get("verdict") for r in recs if guard_ledger.is_outcome(r)}
     for r in reversed(recs):
-        if (guard_ledger.is_outcome(r) or r.get("decision") != "ask"
+        if (guard_ledger.is_outcome(r) or not _answerable(r)
                 or r.get("harness") != obs["harness"]):
             continue
         if obs["tool_use_id"] and r.get("tool_use_id"):
@@ -317,6 +338,9 @@ def record(obs: dict[str, Any], ask: dict[str, Any], linked_by: str) -> bool:
         "verdict_ts": ask.get("ts"),
         "linked_by": linked_by,
         "action_type": ask.get("action_type"),
+        # The class that moves no money the line was judged in (D175).
+        **({"authority_class": ask["authority_class"]}
+           if isinstance(ask.get("authority_class"), str) else {}),
         # Claude Code's permission mode when the call ran: under
         # bypassPermissions nobody may have been asked (ask_outcomes).
         **({"permission_mode": obs["permission_mode"]} if obs.get("permission_mode") else {}),

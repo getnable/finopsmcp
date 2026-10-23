@@ -63,6 +63,23 @@ mapping that holds a key twice. Only an authority fact may be about an
 action_class, and authority facts are authority.yaml's alone, as the
 workspace reads that file and no other.
 
+Classes that move no money (D172 to D179) sit in the same file beside the
+purchase kinds: tag, ticket and offhours_schedule (NO_MONEY_CLASSES), what
+an agent may do with less asking, a rung at a time. They take one rung more,
+bounded: no ask within a bound a person wrote (tag_keys and
+max_resources_per_call for tag, max_per_day and repos for ticket,
+environments and max_resources_per_call for offhours_schedule), an ask
+outside it. A purchase kind never takes bounded: that is refused naming
+value.rung. Per class the strictest live entry answers (OrgModel.ladder),
+and only a confirmed entry in a trusted org model can hold bounded, so a
+proposal or a cloned repo's entry only narrows. An expired, dated-ahead or
+refused entry, or a file that cannot be read, holds such a class at
+approve_each, never bounded. Nothing about one ever changes a purchase
+kind's answer: OrgModel.authority reads the purchase kinds alone, as
+before. A reader older than these classes (0.13.0, and a box before them)
+refuses such an entry as a class it does not know, which holds every
+purchase kind at recommend: the safe side.
+
 Nothing here imports more than the standard library. The guard hook will read
 this model on every agent tool call, and its budget is about 100 ms.
 """
@@ -85,7 +102,8 @@ FACT_KINDS = ("owner", "team", "environment", "tag_key", "tag_alias", "account",
               "freeze", "approval", "ai_budget", "authority")
 # "environment" is a subject too, so a threshold can be scoped to one (policy.yaml).
 # "person" is an ai_budget's alone (an email or github:login).
-# "action_class" is an authority fact's alone (a purchase kind, AUTHORITY_CLASSES).
+# "action_class" is an authority fact's alone (a purchase kind, AUTHORITY_CLASSES,
+# or a class that moves no money, NO_MONEY_CLASSES).
 SUBJECT_KINDS = ("aws_account", "gcp_project", "azure_subscription", "k8s_namespace",
                  "repo_path", "service", "tag_value", "resource", "team", "org",
                  "environment", "person", "action_class")
@@ -125,6 +143,36 @@ AUTHORITY_VALUE_KEYS = ("rung", "max_commitment_usd_per_plan", "approvers", "exp
 # it a day early.
 AUTHORITY_DATED_AHEAD_DAYS = 1
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Classes that move no money (D172): an agent's tagging, tickets and off-hours
+# stops and starts. Their own tuple: AUTHORITY_CLASSES stays the purchase
+# kinds, and the two never share a name (tests hold them disjoint).
+NO_MONEY_CLASSES = ("tag", "ticket", "offhours_schedule")
+# Every subject an authority entry may be about.
+ACTION_CLASSES = (*AUTHORITY_CLASSES, *NO_MONEY_CLASSES)
+# The rung only a class that moves no money takes: no ask within its bound.
+BOUNDED = "bounded"
+CLASS_RUNGS = (*RUNGS, BOUNDED)
+# Each class's bound fields, and the one a bounded entry must name.
+BOUND_KEYS = {"tag": ("tag_keys", "max_resources_per_call"),
+              "ticket": ("max_per_day", "repos"),
+              "offhours_schedule": ("environments", "max_resources_per_call")}
+BOUND_REQUIRED = {"tag": "tag_keys", "ticket": "max_per_day",
+                  "offhours_schedule": "environments"}
+# The fields an entry for each class may hold: any other is refused, as for
+# a purchase kind.
+CLASS_VALUE_KEYS = {c: ("rung", "approvers", "expires", *BOUND_KEYS[c])
+                    for c in NO_MONEY_CLASSES}
+TAG_KEYS_MAX = 20
+TAG_KEY_MAX_CHARS = 128
+# (the most, the default when no entry names one) resources one call may touch.
+RESOURCES_PER_CALL = {"tag": (100, 20), "offhours_schedule": (50, 10)}
+TICKETS_PER_DAY_MAX = 50
+REPOS_MAX = 20
+# The environments an off-hours schedule may run in unasked. prod, shared and
+# unknown are refused: a stop there is somebody's outage.
+BOUND_ENVIRONMENTS = ("nonprod", "sandbox", "dr")
+_REPO_RE = re.compile(r"^[a-z0-9_.-]+(?:/[a-z0-9_.-]+){1,4}$")
 
 # One file per fact kind, so a diff reads as "ownership changed" or "a tag
 # alias was added" and never both at once.
@@ -268,9 +316,9 @@ def subject_of(x: Subject | dict | str) -> Subject:
                             "github:LOGIN")
     if kind == "action_class":
         ident = ident.lower()
-        if ident not in AUTHORITY_CLASSES:
-            raise FactError(f"subject.id {ident[:80]!r} is not a purchase kind authority.yaml "
-                            f"governs ({', '.join(AUTHORITY_CLASSES)})")
+        if ident not in ACTION_CLASSES:
+            raise FactError(f"subject.id {ident[:80]!r} is not a class authority.yaml "
+                            f"governs ({', '.join(ACTION_CLASSES)})")
     return Subject(kind, ident)
 
 
@@ -318,6 +366,12 @@ def core_value(fact: str, value: dict[str, Any]) -> tuple:
                 bool(v.get("change_ticket")))
     if fact == "ai_budget":
         return tuple(v.get(n) for n in ("monthly_usd", "per_person_usd"))
+    if fact == "authority" and any(k in v for k in ("tag_keys", "max_resources_per_call",
+                                                    "max_per_day", "repos", "environments")):
+        return (_low(v.get("rung")), many("approvers"), _low(v.get("expires")),
+                tuple(sorted(str(k) for k in v.get("tag_keys") or [])),
+                v.get("max_resources_per_call"), v.get("max_per_day"), many("repos"),
+                many("environments"))
     if fact == "authority":
         return (_low(v.get("rung")), v.get("max_commitment_usd_per_plan"), many("approvers"),
                 _low(v.get("expires")))
@@ -600,10 +654,13 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
                 raise FactError("value.per_person_usd is a team's alone (subject.kind team): "
                                 "what each of its people may spend a month")
             v["per_person_usd"] = _usd_above_zero(v["per_person_usd"], "value.per_person_usd")
+    elif kind == "authority" and subject.kind == "action_class" \
+            and subject.id in NO_MONEY_CLASSES:
+        _class_value(subject.id, v)
     elif kind == "authority":
         if subject.kind != "action_class":
             raise FactError("subject.kind of an authority fact must be action_class (one of "
-                            f"{', '.join(AUTHORITY_CLASSES)})", field="subject.kind")
+                            f"{', '.join(ACTION_CLASSES)})", field="subject.kind")
         unknown = sorted(str(k) for k in v if k not in AUTHORITY_VALUE_KEYS)
         if unknown:
             # Unlike other facts' values, nothing unknown is kept: a misspelt
@@ -616,6 +673,10 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
             # `rung: off` unquoted, which YAML reads as false: the strictest
             # rung either way, so it is taken as written.
             v["rung"] = "off"
+        if v.get("rung") == BOUNDED:
+            raise FactError(f"value.rung bounded is for a class that moves no money "
+                            f"({', '.join(NO_MONEY_CLASSES)}), never a purchase kind: "
+                            f"{subject.id} takes {', '.join(RUNGS)}", field="value.rung")
         if v.get("rung") not in RUNGS:
             raise FactError(f"value.rung must be one of {', '.join(RUNGS)}", field="value.rung")
         if v.get("max_commitment_usd_per_plan") is not None:
@@ -637,6 +698,118 @@ def validate_value(kind: str, subject: Subject, value: Any) -> dict[str, Any]:
     else:
         raise FactError(f"fact {kind!r} is not one of {', '.join(FACT_KINDS)}")
     return v
+
+
+def _whole(v: Any, name: str, most: int) -> int:
+    """A whole number from 1 to `most`, as YAML reads one (not a bool, not
+    3.0): a count a person writes."""
+    if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= most:
+        raise FactError(f"{name} must be a whole number from 1 to {most}", field=name)
+    return v
+
+
+def _tag_keys(v: Any) -> list[str]:
+    """value.tag_keys: 1 to TAG_KEYS_MAX tag keys, each as written (AWS tag
+    keys are case-sensitive), once."""
+    name = "value.tag_keys"
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list) or not 1 <= len(v) <= TAG_KEYS_MAX:
+        raise FactError(f"{name} must name 1 to {TAG_KEYS_MAX} tag keys", field=name)
+    out: list[str] = []
+    for k in v:
+        if not isinstance(k, str) or not k.strip() or len(k.strip()) > TAG_KEY_MAX_CHARS \
+                or any(ord(c) < 0x20 or ord(c) == 0x7f for c in k):
+            raise FactError(f"{name}: {str(k)[:40]!r} is not a tag key of 1 to "
+                            f"{TAG_KEY_MAX_CHARS} characters", field=name)
+        out.append(k.strip())
+    return list(dict.fromkeys(out))
+
+
+def _repos(v: Any) -> list[str]:
+    """value.repos: 1 to REPOS_MAX repository slugs (OWNER/NAME, or a
+    GitLab group path), lowercased, once."""
+    name = "value.repos"
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list) or not 1 <= len(v) <= REPOS_MAX:
+        raise FactError(f"{name} must name 1 to {REPOS_MAX} repositories as OWNER/NAME",
+                        field=name)
+    out: list[str] = []
+    for r in v:
+        slug = r.strip().lower() if isinstance(r, str) else ""
+        if not _REPO_RE.match(slug):
+            raise FactError(f"{name}: {str(r)[:60]!r} is not a repository as OWNER/NAME",
+                            field=name)
+        out.append(slug)
+    return list(dict.fromkeys(out))
+
+
+def _environments(v: Any) -> list[str]:
+    """value.environments: a non-empty subset of BOUND_ENVIRONMENTS."""
+    name = "value.environments"
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, list) or not v:
+        raise FactError(f"{name} must name one or more of {', '.join(BOUND_ENVIRONMENTS)}",
+                        field=name)
+    out: list[str] = []
+    for e in v:
+        env = e.strip().lower() if isinstance(e, str) else ""
+        if env in ("prod", "shared", "unknown"):
+            raise FactError(f"{name}: {env} is refused: an off-hours stop there is somebody's "
+                            f"outage, so only {', '.join(BOUND_ENVIRONMENTS)} may be named",
+                            field=name)
+        if env not in BOUND_ENVIRONMENTS:
+            raise FactError(f"{name}: {str(e)[:40]!r} is not one of "
+                            f"{', '.join(BOUND_ENVIRONMENTS)}", field=name)
+        out.append(env)
+    return list(dict.fromkeys(out))
+
+
+def _class_value(cls: str, v: dict[str, Any]) -> None:
+    """validate_value for an entry about a class that moves no money, in
+    place. The checks run in this order, so a refusal names the same field
+    on the workspace (its own reader keeps the order)."""
+    unknown = sorted(str(k) for k in v if k not in CLASS_VALUE_KEYS[cls])
+    if unknown:
+        field_name = f"value.{unknown[0][:64]}"
+        raise FactError(f"{field_name} is not a field of a {cls} entry, which takes "
+                        f"{', '.join(CLASS_VALUE_KEYS[cls])}: it is refused, never ignored",
+                        field=field_name)
+    if v.get("rung") is False:
+        v["rung"] = "off"
+    if v.get("rung") not in CLASS_RUNGS:
+        raise FactError(f"value.rung must be one of {', '.join(CLASS_RUNGS)}",
+                        field="value.rung")
+    if v.get("approvers") is not None:
+        v["approvers"] = _authority_approvers(v["approvers"])
+    if v.get("expires") is not None:
+        v["expires"] = _authority_day(v["expires"])
+    if v.get("tag_keys") is not None:
+        v["tag_keys"] = _tag_keys(v["tag_keys"])
+    if v.get("max_resources_per_call") is not None:
+        v["max_resources_per_call"] = _whole(v["max_resources_per_call"],
+                                             "value.max_resources_per_call",
+                                             RESOURCES_PER_CALL[cls][0])
+    if v.get("max_per_day") is not None:
+        v["max_per_day"] = _whole(v["max_per_day"], "value.max_per_day", TICKETS_PER_DAY_MAX)
+    if v.get("repos") is not None:
+        v["repos"] = _repos(v["repos"])
+    if v.get("environments") is not None:
+        v["environments"] = _environments(v["environments"])
+    if v["rung"] in ("approve_each", BOUNDED):
+        if not v.get("approvers"):
+            raise FactError(f"value.approvers is required at {v['rung']}: the people, as "
+                            "email:ADDRESS, who answer for this class", field="value.approvers")
+        if v.get("expires") is None:
+            raise FactError(f"value.expires is required at {v['rung']}: the date, within "
+                            f"{AUTHORITY_MAX_DAYS} days of its confirmation, it lapses to "
+                            "approve_each", field="value.expires")
+    if v["rung"] == BOUNDED and v.get(BOUND_REQUIRED[cls]) is None:
+        need = BOUND_REQUIRED[cls]
+        raise FactError(f"value.{need} is required at bounded: the bound a {cls} call is "
+                        "let through within", field=f"value.{need}")
 
 
 def _iso_date(v: Any, name: str) -> str | None:
@@ -1656,8 +1829,126 @@ class OrgModel:
         return {"today": day.isoformat(), "classes": classes, "refused": refused,
                 "files": files}
 
+    # ── classes that move no money ────────────────────────────────────────────
+
+    def ladder(self, *, today: date | None = None) -> dict[str, Any]:
+        """What authority.yaml says of each class that moves no money
+        (NO_MONEY_CLASSES), the strictest of every live entry: the lowest
+        rung, the narrowest bound (the tag keys, repos and environments
+        every entry names, the smallest count), the approvers every entry
+        names and the earliest expiry.
+
+        Every live entry counts, a proposal and a cloned repo's included,
+        and only narrows: an entry holds bounded only when it is confirmed
+        and its org model is trusted, otherwise at most approve_each. An
+        entry past its expires, or dated more than AUTHORITY_DATED_AHEAD_DAYS
+        after today, holds its class at approve_each; so does a refused
+        entry whose class can be read, and a refused entry whose class
+        cannot, or a file that could not be read, holds every class there.
+        A class the file does not name has rung None: the guard judges it
+        exactly as before there was a file.
+
+        {"today", "classes": {class: {...}}, "refused": the refusals that
+        hold one of these classes, "files"}. Each class: named, rung, bound
+        ({field: value}, with each class's default), approvers,
+        nobody_may_approve, expires, expired_on, keys, files, held."""
+        day = today or utc_today()
+        refused = [dict(r) for r in self.refused]
+        everywhere = [r for r in refused if r.get("holds") == "every class"]
+        live = [f for f in self.by_kind("authority") if f.live
+                and f.subject.id in NO_MONEY_CLASSES]
+        classes: dict[str, dict[str, Any]] = {}
+        for c in NO_MONEY_CLASSES:
+            mine = [f for f in live if f.subject.id == c]
+            held_by = [r for r in refused if r.get("holds") == c] + everywhere
+            classes[c] = _strictest_class(c, mine, held_by, day)
+        mine_refused = [r for r in refused
+                        if r.get("holds") in (*NO_MONEY_CLASSES, "every class")]
+        files = sorted({f.file for f in live if f.file}
+                       | {str(r["file"]) for r in mine_refused if r.get("file")})
+        return {"today": day.isoformat(), "classes": classes, "refused": mine_refused,
+                "files": files}
+
 
 _RANK = {r: i for i, r in enumerate(RUNGS)}
+_CLASS_RANK = {r: i for i, r in enumerate(CLASS_RUNGS)}
+
+
+def _strictest_class(cls: str, entries: list[Fact], held_by: list[dict[str, Any]],
+                     day: date) -> dict[str, Any]:
+    """One class that moves no money: its answer from its live entries and
+    the refusals that hold it (OrgModel.ladder)."""
+    out: dict[str, Any] = {"class": cls, "named": bool(entries or held_by), "rung": None,
+                           "bound": None, "approvers": None, "nobody_may_approve": False,
+                           "expires": None, "expired_on": None,
+                           "keys": sorted(f.key for f in entries),
+                           "files": sorted({f.file for f in entries if f.file}), "held": []}
+    if not out["named"]:
+        return out
+    each = _CLASS_RANK["approve_each"]
+    rank = len(CLASS_RUNGS) - 1
+    approvers: set[str] | None = None
+    sets: dict[str, set[str] | None] = {"tag_keys": None, "repos": None, "environments": None}
+    counts: dict[str, int | None] = {"max_resources_per_call": None, "max_per_day": None}
+    for f in sorted(entries, key=lambda f: f.key):
+        v = f.value
+        r = _CLASS_RANK[v["rung"]]
+        if r > each and not (f.confirmed and f.trusted):
+            out["held"].append(f"entry {f.key} is " + (
+                "a proposal" if not f.confirmed else "from an org model nobody trusted")
+                + ", so it holds at most approve_each: only a confirmed entry in a trusted "
+                  "org model holds bounded")
+            r = each
+        which, dated = (("confirmed_at", f.confirmed_at) if f.confirmed_at
+                        else ("proposed_at", f.proposed_at))
+        if dated and date.fromisoformat(dated) > day + timedelta(
+                days=AUTHORITY_DATED_AHEAD_DAYS):
+            if r > each:
+                out["held"].append(f"entry {f.key} is dated {dated} ({which}), after today, "
+                                   "so it is not in force before then")
+            r = min(r, each)
+        expires = v.get("expires")
+        if expires is not None and day >= date.fromisoformat(expires):
+            if r > each:
+                out["held"].append(f"entry {f.key} expired on {expires}")
+            r = min(r, each)
+            out["expired_on"] = min(filter(None, (out["expired_on"], expires)))
+        rank = min(rank, r)
+        for name, have in sets.items():
+            if v.get(name) is not None:
+                got = {str(x) for x in v[name]}
+                sets[name] = got if have is None else have & got
+        for name, least in counts.items():
+            if v.get(name) is not None:
+                counts[name] = int(v[name]) if least is None else min(least, int(v[name]))
+        if v.get("approvers") is not None:
+            named = {str(a).lower() for a in v["approvers"]}
+            approvers = named if approvers is None else approvers & named
+        if expires is not None:
+            out["expires"] = min(filter(None, (out["expires"], expires)))
+    for r in held_by:
+        out["held"].append(f"{r['file']} entry {r['entry']} was refused ({r['field']})"
+                           if r.get("entry") is not None else
+                           f"{r['file']} could not be read")
+        rank = min(rank, each)
+    if not entries:
+        rank = each
+    out["rung"] = CLASS_RUNGS[rank]
+    bound: dict[str, Any] = {}
+    for name in BOUND_KEYS[cls]:
+        if name in sets:
+            bound[name] = sorted(sets[name]) if sets[name] is not None else None
+        elif counts[name] is not None:
+            bound[name] = counts[name]
+        elif name == "max_resources_per_call":
+            bound[name] = RESOURCES_PER_CALL[cls][1]
+        else:
+            bound[name] = None
+    out["bound"] = bound
+    if approvers is not None:
+        out["approvers"] = sorted(approvers)
+        out["nobody_may_approve"] = not approvers
+    return out
 
 
 def _strictest(cls: str, entries: list[Fact], held_by: list[dict[str, Any]],
@@ -1718,7 +2009,8 @@ def refusal(file: str, entry: int | None, raw: Any, exc: BaseException | str) ->
     """An authority entry the loader refused, as OrgModel.authority shows it:
     {file, entry (its index, None for the whole file), field, message,
     class (when its subject can still be read), holds (that class, or
-    "every class")}."""
+    "every class")}. A purchase kind it holds is held at recommend, a class
+    that moves no money at approve_each (OrgModel.ladder)."""
     if isinstance(exc, FactError):
         field_name, message = exc.field, str(exc)
     elif isinstance(exc, BaseException):
@@ -1731,8 +2023,8 @@ def refusal(file: str, entry: int | None, raw: Any, exc: BaseException | str) ->
 
 
 def _readable_class(raw: Any) -> str | None:
-    """The purchase kind a refused authority entry is about, when that much
-    of it can still be read: fact authority, subject action_class:<a kind>."""
+    """The class a refused authority entry is about, when that much of it
+    can still be read: fact authority, subject action_class:<a class>."""
     if not isinstance(raw, dict) or raw.get("fact") != "authority":
         return None
     sub = raw.get("subject")
@@ -1745,4 +2037,4 @@ def _readable_class(raw: Any) -> str | None:
     if str(kind or "").strip() != "action_class" or not isinstance(ident, str):
         return None
     ident = ident.strip().lower()
-    return ident if ident in AUTHORITY_CLASSES else None
+    return ident if ident in ACTION_CLASSES else None

@@ -65,6 +65,11 @@ _LEDGER_FILES = (
     # ask's price at. Rewritten, an ask would show a person a price the
     # workspace's bill never gave.
     ("cloud-rates.json", "the workspace's effective rates the guard shows prices at"),
+    # authority_standing.FILE_NAME: the workspace's standing on the authority
+    # ladder (a demotion after a reversal). Removed or rewritten, the guard
+    # would let a demoted class through within its bound again.
+    ("authority-standing.json", ("the workspace's standing on the authority ladder, which "
+                                 "holds a demoted class at approve_each")),
 )
 # Beside ai-budget.json (ai_budget._data_dir): the month's priced responses
 # the AI budget gate totals (ai_budget.MONTH_CACHE, MONTH_TOTAL, MONTH_SHARDS)

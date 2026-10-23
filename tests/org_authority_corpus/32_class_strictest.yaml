@@ -1,0 +1,34 @@
+# nable org model v1
+# Per class the strictest live entry answers: a proposal at off holds a
+# confirmed bounded entry at off; the tag keys every entry names; an entry
+# dated after today holds at approve_each.
+- fact: authority
+  subject: {kind: action_class, id: ticket}
+  value: {rung: bounded, max_per_day: 10, repos: [acme/payments], approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: ticket}
+  value: {rung: "off"}
+  source: a-pull-request
+  status: proposed
+  proposed_at: 2026-10-10
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: bounded, tag_keys: [team, Owner, env], max_resources_per_call: 100, approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-01
+- fact: authority
+  subject: {kind: action_class, id: tag}
+  value: {rung: bounded, tag_keys: [Owner, team], approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-10-05
+- fact: authority
+  subject: {kind: action_class, id: offhours_schedule}
+  value: {rung: bounded, environments: [sandbox], approvers: ["email:ana@acme.example"], expires: 2027-06-30}
+  source: human
+  status: confirmed
+  confirmed_at: 2026-11-20
