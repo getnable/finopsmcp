@@ -68,6 +68,23 @@ from .model import (
 )
 
 ORG_DIR_NAME = "nable.org"
+# The most the guard reads of one org model file, a git file or a cache:
+# far past any real one, so a larger file is not one nable wrote.
+_READ_MAX = 16 * 1024 * 1024
+
+
+def _read_text(path: Path, most: int = _READ_MAX, *, errors: str = "strict") -> str:
+    """The UTF-8 text of the regular file at `path`, read without waiting
+    (guard_paths.read_regular): the guard's hook reads the org model, and a
+    FIFO, a socket or a device in place of a file is an OSError, never a
+    read that blocks. A file over `most` bytes is an OSError too."""
+    import errno
+
+    from ..guard_paths import read_regular
+    raw = read_regular(path, most + 1)
+    if len(raw) > most:
+        raise OSError(errno.EFBIG, f"over the {most:,} bytes nable reads", str(path))
+    return raw.decode("utf-8", errors)
 ENV_DIR = "FINOPS_ORG_DIR"
 TRUST_FILE = "trusted-repos.json"
 DEFAULT_REVIEW_DAYS = 180
@@ -149,8 +166,8 @@ def _git_dir(root: Path) -> Path | None:
     if g.is_dir():
         return g
     try:
-        text = g.read_text(encoding="utf-8")
-    except OSError:
+        text = _read_text(g)
+    except (OSError, UnicodeDecodeError):
         return None
     for line in text.splitlines():
         if line.startswith("gitdir:"):
@@ -166,10 +183,10 @@ def remote_url(root: Path) -> str:
     if gd is None:
         return ""
     common = gd
-    with contextlib.suppress(OSError):
-        common = (gd / (gd / "commondir").read_text(encoding="utf-8").strip()).resolve()
+    with contextlib.suppress(OSError, UnicodeDecodeError):
+        common = (gd / _read_text(gd / "commondir").strip()).resolve()
     try:
-        text = (common / "config").read_text(encoding="utf-8", errors="replace")
+        text = _read_text(common / "config", errors="replace")
     except OSError:
         return ""
     remotes: dict[str, str] = {}
@@ -265,7 +282,7 @@ def trust_path() -> Path:
 
 def trusted_repos() -> list[dict[str, str]]:
     try:
-        doc = json.loads(trust_path().read_text(encoding="utf-8"))
+        doc = json.loads(_read_text(trust_path()))
     except (OSError, ValueError):
         return []
     rows = doc.get("repos") if isinstance(doc, dict) else None
@@ -463,7 +480,7 @@ class _File:
             return self
         import yaml
         try:
-            text = self.path.read_text(encoding="utf-8")
+            text = _read_text(self.path)
         except (OSError, UnicodeDecodeError) as e:
             self._unusable(f"could not be read ({type(e).__name__})",
                            "check that it is a readable UTF-8 file", warnings)
@@ -608,7 +625,7 @@ def _cache_get(path: Path, digest: str) -> dict[str, Any] | None:
     if p is None:
         return None
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = json.loads(_read_text(p))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("v") != _CACHE_VERSION \
@@ -854,7 +871,8 @@ def _locked(d: Path) -> Iterator[None]:
     fd = None
     try:
         import fcntl
-        fd = os.open(d, os.O_RDONLY)
+        fd = os.open(d, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
         fcntl.flock(fd, fcntl.LOCK_EX)
     except (ImportError, OSError):
         if fd is not None:

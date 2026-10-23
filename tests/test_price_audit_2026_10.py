@@ -74,12 +74,13 @@ def test_guard_says_when_a_us_east_1_figure_is_for_another_region(cmd, region, p
     # guard audit's regional pricing): $0.096 x 1.149 = $0.1103/hr there, the
     # least ap-southeast-1 charges over us-east-1, at or under its $0.12 list,
     # and the figure no longer calls itself the us-east-1 rate. eu-west-1: $0.096
-    # x 1.069 = $0.1026/hr. A figure that has no regional rates (RDS) stays the
-    # us-east-1 one and says so.
+    # x 1.069 = $0.1026/hr. RDS is priced at the region's own listed row
+    # (AmazonRDS us-west-2 offer 20261006224050, D168), and its basis names it.
     est = estimate_command_monthly_cost(cmd)
     assert est["region"] == region
     if premium is None:
-        assert f"targets {region}" in est["line"] and "often higher" in est["basis"]
+        assert f"on-demand {region} list price" in est["basis"] and "AmazonRDS" in est["basis"]
+        assert f"in {region}" in est["line"] and "often higher" not in est["line"]
     else:
         assert est["hourly_usd"] == pytest.approx(0.096 * premium)
         assert f"in {region}" in est["line"] and "the least" in est["basis"]

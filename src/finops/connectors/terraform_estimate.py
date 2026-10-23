@@ -16,12 +16,18 @@ What it prices:
     ALB/NLB, ECS Fargate, Lambda, S3, EBS volumes,
     OpenSearch domains, MSK clusters, Redshift nodes.
 
-Prices: AWS on-demand list, us-east-1. EC2, RDS, EBS, load balancers and NAT
-come from finops.aws_prices; the ElastiCache, OpenSearch, MSK and Redshift
-tables below were compared with the AWS Price List on 2026-10-13 (PRICE_SOURCES
-names each offer file and SKU). Other regions often list higher, so a figure
-here is a us-east-1 floor. For multi-region pricing, use INFRACOST_API_KEY
-(optional).
+Prices: AWS on-demand list. EC2, RDS, EBS, load balancers and NAT come from
+finops.aws_prices; the ElastiCache, OpenSearch, MSK and Redshift tables below
+were compared with the AWS Price List on 2026-10-13 (PRICE_SOURCES names each
+offer file and SKU). They are us-east-1's. An EC2 instance, an RDS instance
+and an ElastiCache node are priced in the region of the provider the plan
+makes them through, when that is a constant (D168): RDS and ElastiCache at
+that region's own listed rate (aws_prices.rds_rate, aws_prices.elasticache_rate,
+sixteen regions), EC2 at the region's floor (aws_prices.ec2_hourly_in_region).
+What a gate judges (gate_monthly_delta_usd) is never below the us-east-1
+figure: a region that lists a resource under us-east-1 is judged at
+us-east-1's. Everything else is a us-east-1 figure, which other regions often
+list higher. For multi-region pricing, use INFRACOST_API_KEY (optional).
 """
 from __future__ import annotations
 
@@ -39,7 +45,8 @@ from typing import Any
 
 from ..aws_prices import (
     CLB_HOURLY, EBS_PER_GB_MONTH, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY,
-    NAT_GATEWAY_PER_GB, RDS_HOURLY, as_number, ebs_volume_monthly, lb_hourly, rds_hourly,
+    NAT_GATEWAY_PER_GB, RDS_HOURLY, as_number, ebs_volume_monthly, ec2_hourly_in_region,
+    elasticache_rate, lb_hourly, rds_hourly, rds_rate,
 )
 
 log = logging.getLogger(__name__)
@@ -267,6 +274,24 @@ def _book_hourly(sku: str) -> tuple[float, str] | None:
 # lower one.
 _JUDGING: contextvars.ContextVar[bool] = contextvars.ContextVar("price_book_judging",
                                                                 default=False)
+# The region the resource being priced is made in (_plan_region), or None:
+# set by _price_changes for each resource, read by the EC2, RDS and
+# ElastiCache estimators.
+_REGION: contextvars.ContextVar[str | None] = contextvars.ContextVar("plan_region",
+                                                                     default=None)
+
+
+def _in_region(use1: float | None, regional: float | None, side: int = 1) -> float | None:
+    """The rate a resource is priced at: its region's listed rate where one
+    is held, else the us-east-1 rate. Judged (_JUDGING), never below the
+    us-east-1 figure for a cost added and never above it for a cost
+    removed, so a region that lists it under us-east-1 cannot lower the
+    figure a gate judges (D168)."""
+    if regional is None:
+        return use1
+    if use1 is None or not _JUDGING.get():
+        return regional
+    return max(use1, regional) if side > 0 else min(use1, regional)
 
 
 def _priced(sku: str, listed: float | None, side: int = 1) -> tuple[float | None, str]:
@@ -286,8 +311,13 @@ def _priced(sku: str, listed: float | None, side: int = 1) -> tuple[float | None
 
 
 def _ec2_hourly(instance_type: str, side: int = 1) -> tuple[float | None, str]:
-    """(hourly rate or None, the pack whose price book gave it, "" for list)."""
-    return _priced(instance_type, _EC2_HOURLY.get(instance_type), side)
+    """(hourly rate or None, the pack whose price book gave it, "" for list),
+    in the resource's region: its floor there, at or above us-east-1's."""
+    use1 = _EC2_HOURLY.get(instance_type)
+    region = _REGION.get()
+    regional = (ec2_hourly_in_region(use1, region)[0]
+                if use1 is not None and region and region != "us-east-1" else None)
+    return _priced(instance_type, _in_region(use1, regional, side), side)
 
 
 def _estimate_ec2(rc: ResourceChange) -> CostLine | None:
@@ -309,8 +339,9 @@ def _estimate_ec2(rc: ResourceChange) -> CostLine | None:
                         + (f" (at your price book rate, {packs})" if packs else ""), "high",
                         price_book=packs)
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
+    where = f" in {_REGION.get()}" if _REGION.get() else ""
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{instance_type} @ ${hourly:.4f}/hr"
+                    f"{instance_type}{where} @ ${hourly:.4f}/hr"
                     + (f" (your price book rate, {pack})" if pack else ""), "high",
                     price_book=pack)
 
@@ -326,7 +357,16 @@ def _rds_rate(cfg: dict, default_engine: str = "", side: int = 1) -> tuple[float
     class_ = cfg.get("instance_class") or ""
     engine = str(cfg.get("engine") or default_engine).strip().lower()
     listed = rds_hourly(class_, engine) if engine else _RDS_HOURLY.get(class_)
-    return _priced(class_, listed, side)[0], engine
+    region = _REGION.get()
+    regional = None
+    if region and engine and isinstance(class_, str):
+        # Its region's row, per instance hour: a Multi-AZ row is listed on its
+        # own and the callers double the hour, so it is halved here.
+        maz = bool(cfg.get("multi_az", False))
+        row = rds_rate(class_, engine, region, multi_az=maz)
+        if row is not None:
+            regional = float(row.hourly_usd) / (2 if maz else 1)
+    return _priced(class_, _in_region(listed, regional, side), side)[0], engine
 
 
 def _rds_unpriced(rc: ResourceChange, action: str, what: str) -> CostLine:
@@ -368,8 +408,9 @@ def _estimate_rds(rc: ResourceChange, default_engine: str = "") -> CostLine | No
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     az_note = " (Multi-AZ)" if multi_az else ""
     engine_note = "" if engine or book else " (engine not in the plan, MySQL rate)"
+    where = f" in {_REGION.get()}" if _REGION.get() else ""
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{class_}{az_note} @ ${hourly:.4f}/hr{engine_note}{booked}",
+                    f"{class_}{az_note}{where} @ ${hourly:.4f}/hr{engine_note}{booked}",
                     "high" if engine or book else "medium", price_book=book[1] if book else "")
 
 
@@ -407,17 +448,31 @@ def _unpriced(rc: ResourceChange, what: str) -> CostLine:
                     f"{what}: not in nable's price table, not priced", "low")
 
 
+def elasticache_regional(node_type: str, engine: str | None,
+                         region: str | None) -> float | None:
+    """The node-hour rate `region` lists for an ElastiCache node type
+    (aws_prices.elasticache_rate), or None where nable holds none."""
+    if not region or not isinstance(node_type, str):
+        return None
+    row = elasticache_rate(node_type, str(engine or "redis"), region)
+    return float(row.hourly_usd) if row is not None else None
+
+
 def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:
     cfg = rc.net_config
     node_type = cfg.get("node_type") or ""
     engine = str(cfg.get("engine") or "redis").lower()
     num_nodes = elasticache_node_count(rc.type, cfg)
-    hourly = elasticache_hourly(node_type, engine)
+    region = _REGION.get()
+    hourly = _in_region(elasticache_hourly(node_type, engine),
+                        elasticache_regional(node_type, engine, region), _sign(rc) or 1)
     if hourly is None:
         return _unpriced(rc, f"{num_nodes}× {node_type or 'no node_type'} ({engine})")
     monthly = hourly * num_nodes * HOURS_PER_MONTH * _sign(rc)
+    where = f" in {region}" if region else ""
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{num_nodes}× {node_type} ({engine}) @ ${hourly:.4f}/hr each", "high")
+                    f"{num_nodes}× {node_type} ({engine}){where} @ ${hourly:.4f}/hr each",
+                    "high")
 
 
 def _estimate_ebs(rc: ResourceChange) -> CostLine | None:
@@ -645,6 +700,53 @@ def _plan_region(plan_data: dict, rc: ResourceChange, default: str | None,
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+# A planned identifier the box can tie a bill line to by name (D167): an RDS
+# DB instance identifier or an ElastiCache cluster id, as AWS forms them.
+_IDENTIFIER_FORMS = {
+    "aws_db_instance": re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,62}$"),
+    "aws_elasticache_cluster": re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,49}$"),
+}
+_IDENTIFIER_ATTR = {"aws_db_instance": "identifier", "aws_elasticache_cluster": "cluster_id"}
+
+
+def planned_identifier(rc: ResourceChange) -> str | None:
+    """The identifier (an aws_db_instance's) or cluster_id (an
+    aws_elasticache_cluster's) a plan creates the resource with, when the
+    plan knows it: a create only, never a replace, and a value that is not
+    computed at apply (identifier_prefix, or no identifier given, leaves it
+    null in the plan) and is in AWS's form. None otherwise."""
+    form = _IDENTIFIER_FORMS.get(rc.type)
+    if form is None or rc.actions != ["create"]:
+        return None
+    value = (rc.after or {}).get(_IDENTIFIER_ATTR[rc.type])
+    if not isinstance(value, str) or not form.match(value):
+        return None
+    return value
+
+
+def _sku_line(product: str, usage_type: str, qty: int, use1: float | None,
+              regional: float | None, region: str | None, *, exact_region: bool,
+              why: str | None, book: bool) -> dict[str, Any] | None:
+    """One SKU as the guard records it (guard._sku), priced at `regional`
+    where the region lists it, else at `use1`; its judged share is never
+    below the us-east-1 figure (D168)."""
+    shown = regional if regional is not None else use1
+    if shown is None:
+        return None
+    judged = max(shown, use1) if use1 is not None else shown
+    exact = region is not None and exact_region and not book
+    out = {"product_code": product, "region": region, "usage_type": usage_type,
+           "quantity": qty, "unit": "Hrs", "hours": HOURS_PER_MONTH,
+           "usd_hour": round(float(shown), 6),
+           "monthly_usd": round(float(shown) * qty * HOURS_PER_MONTH, 2),
+           "price_book": book, "path": "terraform", "list_exact": exact}
+    if not exact and region is not None and why:
+        out["list_why"] = why
+    if round(judged, 6) != round(shown, 6):
+        out["judged_monthly_usd"] = round(float(judged) * qty * HOURS_PER_MONTH, 2)
+    return out
+
+
 def priced_skus(plan_data: dict, *, default_region: str | None = None
                 ) -> list[dict[str, Any]]:
     """What a saved plan creates that the workspace's effective rates can
@@ -652,53 +754,86 @@ def priced_skus(plan_data: dict, *, default_region: str | None = None
     PostgreSQL) and aws_elasticache_cluster it creates, as the guard's SKU
     (guard._sku): product code, the region of the provider it is made
     through (_plan_region; `default_region` where that provider names none),
-    the usage type as the bill names it, the quantity, the list hourly rate
-    one unit is priced at, and that unit's monthly figure. A resource a price
-    book prices is marked, so its book figure stands. Nothing here changes a
+    the usage type as the bill names it, the quantity, the hourly rate one
+    unit lists at there and that unit's monthly figure, whether that rate is
+    the region's own listed rate (list_exact, D168), the path ("terraform",
+    D169) and, for an RDS instance or an ElastiCache cluster created with a
+    name the plan knows, that identifier (D167). A resource a price book
+    prices is marked, so its book figure stands. Nothing here changes a
     figure the plan's estimate judges."""
+    from ..aws_prices import EC2_REGION_RANGE
+
     keys = _provider_keys(plan_data)
     out: list[dict[str, Any]] = []
     for rc in parse_plan(plan_data):
         if not rc.is_create or rc.is_delete:
             continue
         cfg = rc.after or {}
+        region = _plan_region(plan_data, rc, default_region, keys)
         if rc.type == "aws_instance":
             itype = str(cfg.get("instance_type") or "")
-            hourly = _EC2_HOURLY.get(itype)
-            sku = ("AmazonEC2", f"BoxUsage:{itype}", 1, hourly, itype)
+            use1 = _EC2_HOURLY.get(itype)
+            regional, exact, why = None, region == "us-east-1", None
+            if use1 is not None and region and region != "us-east-1":
+                regional = ec2_hourly_in_region(use1, region)[0]
+                span = EC2_REGION_RANGE.get(region)
+                exact = span == (1.0, 1.0)
+                why = (f"nable holds no {region} EC2 list price, so it is priced at us-east-1's"
+                       if span is None else
+                       f"nable holds {region}'s EC2 floor (the us-east-1 rate x{span[0]:g}), "
+                       "not that region's listed rate" if span[0] > 1.0 else
+                       f"nable holds no {region} EC2 list price for each type ({region} lists "
+                       f"{span[0]:g}x to {span[1]:g}x us-east-1), so it is priced at "
+                       "us-east-1's")
+            sku = _sku_line("AmazonEC2", f"BoxUsage:{itype}", 1, use1, regional, region,
+                            exact_region=exact, why=why,
+                            book=_book_hourly(itype) is not None) if itype else None
         elif rc.type == "aws_db_instance":
             cls = str(cfg.get("instance_class") or "")
             engine = str(cfg.get("engine") or "").strip().lower()
             hourly = rds_hourly(cls, engine) if engine else None
             maz = bool(cfg.get("multi_az", False))
-            sku = ("AmazonRDS", f"{'Multi-AZUsage' if maz else 'InstanceUsage'}:{cls}", 1,
-                   hourly * 2 if hourly is not None and maz else hourly, cls)
+            use1 = hourly * 2 if hourly is not None and maz else hourly
+            row = rds_rate(cls, engine, region, multi_az=maz) if region and engine else None
+            usage = f"{'Multi-AZUsage' if maz else 'InstanceUsage'}:{cls}"
+            sku = _sku_line("AmazonRDS", usage, 1, use1,
+                            float(row.hourly_usd) if row is not None else None, region,
+                            exact_region=row is not None or region == "us-east-1",
+                            why=(f"nable holds no {region} RDS list price for {cls}, so it is "
+                                 "priced at us-east-1's"),
+                            book=_book_hourly(cls) is not None) if cls else None
         elif rc.type == "aws_elasticache_cluster":
             node = str(cfg.get("node_type") or "")
+            engine = str(cfg.get("engine") or "redis")
             nodes = elasticache_node_count(rc.type, cfg)
-            sku = ("AmazonElastiCache", f"NodeUsage:{node}", nodes,
-                   elasticache_hourly(node, str(cfg.get("engine") or "redis")), node)
+            regional = elasticache_regional(node, engine, region)
+            sku = _sku_line("AmazonElastiCache", f"NodeUsage:{node}", nodes,
+                            elasticache_hourly(node, engine), regional, region,
+                            exact_region=regional is not None,
+                            why=(f"nable holds no {region} ElastiCache list price for {node}, "
+                                 "so it is priced at us-east-1's"),
+                            book=_book_hourly(node) is not None) if node else None
         else:
             continue
-        product, usage_type, qty, hourly, name = sku
-        if hourly is None or not name:
+        if sku is None:
             continue
-        out.append({"product_code": product,
-                    "region": _plan_region(plan_data, rc, default_region, keys),
-                    "usage_type": usage_type,
-                    "quantity": qty, "unit": "Hrs", "hours": HOURS_PER_MONTH,
-                    "usd_hour": round(float(hourly), 6),
-                    "monthly_usd": round(float(hourly) * qty * HOURS_PER_MONTH, 2),
-                    "price_book": _book_hourly(name) is not None})
+        name = planned_identifier(rc)
+        if name is not None:
+            sku["identifier"] = name
+        out.append(sku)
     return out[:20]
 
 
-def _price_changes(changes: list[ResourceChange]) -> tuple[list[CostLine], list[dict]]:
+def _price_changes(changes: list[ResourceChange], regions: dict[str, str | None] | None = None
+                   ) -> tuple[list[CostLine], list[dict]]:
+    """Each change priced by its type's estimator, in its region where
+    `regions` names one (the plan's provider for it, _plan_regions)."""
     lines: list[CostLine] = []
     unpriced: list[dict] = []
     for rc in changes:
         estimator = _ESTIMATORS.get(rc.type)
         if estimator:
+            token = _REGION.set((regions or {}).get(rc.address))
             try:
                 line = estimator(rc)
                 if line is not None:
@@ -706,9 +841,18 @@ def _price_changes(changes: list[ResourceChange]) -> tuple[list[CostLine], list[
             except Exception as exc:
                 log.debug("estimator failed for %s: %s", rc.address, exc)
                 unpriced.append({"address": rc.address, "type": rc.type})
+            finally:
+                _REGION.reset(token)
         else:
             unpriced.append({"address": rc.address, "type": rc.type})
     return lines, unpriced
+
+
+def _plan_regions(plan_data: dict, changes: list[ResourceChange],
+                  default_region: str | None = None) -> dict[str, str | None]:
+    """{address: the region its provider names as a constant, or None}."""
+    keys = _provider_keys(plan_data)
+    return {rc.address: _plan_region(plan_data, rc, default_region, keys) for rc in changes}
 
 
 def _net(lines: list[CostLine]) -> tuple[float, float, float, float]:
@@ -748,7 +892,8 @@ def estimate_plan(plan_data: dict) -> dict[str, Any]:
     the lower for what is removed).
     """
     changes = parse_plan(plan_data)
-    lines, unpriced = _price_changes(changes)
+    regions = _plan_regions(plan_data, changes)
+    lines, unpriced = _price_changes(changes, regions)
     adds, removes, chg, total = _net(lines)
 
     # Confidence: low if many unpriced, high if everything covered
@@ -797,12 +942,19 @@ def estimate_plan(plan_data: dict) -> dict[str, Any]:
             "packs": list(dict.fromkeys(p.strip() for l in booked
                                         for p in l.price_book.split(","))),
             "resources": len(booked)}
+    if booked or any(regions.values()):
+        # What a gate judges: a price book can only raise a cost, and a
+        # region that lists a resource under us-east-1 is judged at
+        # us-east-1's (D168). Given only where it differs from the figure
+        # shown, or a book priced a line.
         token = _JUDGING.set(True)
         try:
-            judged, _ = _price_changes(changes)
+            judged, _ = _price_changes(changes, regions)
         finally:
             _JUDGING.reset(token)
-        out["gate_monthly_delta_usd"] = round(_net(judged)[3], 2)
+        gate = round(_net(judged)[3], 2)
+        if booked or gate != out["monthly_delta_usd"]:
+            out["gate_monthly_delta_usd"] = gate
     if untagged:
         out["untagged_resources"] = untagged[:10]
         out["untagged_note"] = (
@@ -853,13 +1005,29 @@ def _untagged_creates(changes: list[ResourceChange]) -> list[dict]:
     return flagged
 
 
+# The most read of a plan JSON file named on the command line.
+_PLAN_FILE_MAX_BYTES = 512 * 1024 * 1024
+
+
 def estimate_from_file(path: str) -> dict[str, Any]:
-    """Load a plan JSON file (or '-' for stdin) and estimate."""
+    """Load a plan JSON file (or '-' for stdin) and estimate. A named file is
+    read without waiting and only when it is a regular file
+    (guard_paths.read_regular), as everything in the guard's import closure
+    reads: a pipe is read from stdin, with '-'."""
     if path == "-":
         data = json.load(sys.stdin)
     else:
-        with open(path) as f:
-            data = json.load(f)
+        from ..guard_paths import read_regular
+        try:
+            raw = read_regular(path, _PLAN_FILE_MAX_BYTES + 1)
+        except OSError as exc:
+            if os.path.exists(path) and not os.path.isfile(path):
+                raise ValueError(f"{path} is not a regular file; pipe a plan to "
+                                 "`finops estimate -` instead") from None
+            raise exc
+        if len(raw) > _PLAN_FILE_MAX_BYTES:
+            raise ValueError(f"{path} is over {_PLAN_FILE_MAX_BYTES:,} bytes")
+        data = json.loads(raw)
     return estimate_plan(data)
 
 
@@ -949,7 +1117,8 @@ def format_estimate(result: dict, color: bool = True) -> str:
         f"  Monthly delta:  {colour}{BOLD}{'+' if total > 0 else ''}${total:,.2f}{RESET}",
         f"  Annual delta:   {colour}{BOLD}{'+' if total > 0 else ''}${total_annual:,.2f}{RESET}",
         f"  Confidence:     {result['confidence']}",
-        f"  {DIM}Prices: AWS on-demand us-east-1. Actual costs may vary.{RESET}",
+        f"  {DIM}Prices: AWS on-demand list; EC2, RDS and ElastiCache in their provider's "
+        f"region where nable holds it, the rest us-east-1. Actual costs may vary.{RESET}",
         "",
     ]
     return "\n".join(lines)

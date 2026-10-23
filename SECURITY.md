@@ -191,6 +191,25 @@ replaces objects, the meter spent) it asks whenever the repo holds org
 files. What git itself runs for you (a hook, a filter or a merge driver in
 its config) is not seen, and `nable guard doctor` says so.
 
+**Reads that never wait.** Every file the guard hook and its post hook read
+is opened without waiting (`O_NONBLOCK`) and read only when it is a regular
+file, at a size cap: the org model's files and its git metadata, packs and
+their index, the ledger and its anchor, `cloud-rates.json` and the box
+standing, `budgets.yaml` and the budget summary, `nable.policy.yaml`,
+approvals, the AI budget tally and the coding agents' transcripts, the
+committed price tables, adapter configs and settings. A FIFO, device or
+socket an agent puts in place of one is reported as not read, never as zero
+and never as a hook that runs out of time. `tests/test_guard_reads_ratchet.py`
+holds every module the guard can import (its static import closure, imports
+inside functions included) to that, and every write in it to an allow-list
+with its reason. A few reads in modules this change does not own still open
+the plain way and are listed there by name, each a proposal to convert: the
+Codex session metadata, token totals and rollout files and the Cursor usage
+cache (`harness_usage`), the background refresh's state file, read only under
+`FINOPS_GUARD_AUTO_REFRESH_BUDGET=1` (`background_refresh`), and the vault's
+machine id and key file (`security.vault`, which the hook imports and never
+calls to read either).
+
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,
 the ledger, the guard's own files) uses the default directory instead, and

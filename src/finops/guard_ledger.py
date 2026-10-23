@@ -52,7 +52,7 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 LEDGER_NAME = "guard-ledger.jsonl"
 # Verdicts answered but not recorded (the ledger was locked or not a file).
@@ -362,11 +362,13 @@ def _note_unrecorded(entry: dict[str, Any], why: str) -> None:
 
 
 def unrecorded(path: Path | None = None) -> dict[str, Any]:
-    """{count, last, why} for verdicts answered but never recorded."""
+    """{count, last, why} for verdicts answered but never recorded; with
+    read False and the error, never a count of 0, when the file is there and
+    cannot be read (a FIFO in its place included)."""
     path = path or ledger_path().with_name(UNRECORDED_NAME)
     out: dict[str, Any] = {"count": 0, "last": None, "why": {}, "path": str(path)}
     try:
-        with path.open("rb") as fh:
+        with _open_read(path) as fh:
             for raw in fh:
                 try:
                     rec = json.loads(raw)
@@ -376,8 +378,10 @@ def unrecorded(path: Path | None = None) -> dict[str, Any]:
                 out["last"] = rec.get("ts")
                 why = str(rec.get("why"))
                 out["why"][why] = out["why"].get(why, 0) + 1
-    except OSError:
+    except FileNotFoundError:
         pass
+    except OSError as exc:
+        out.update(read=False, error=errno.errorcode.get(exc.errno or 0, "os_error"))
     return out
 
 
@@ -439,6 +443,15 @@ def _ends_with_newline(fd: int) -> bool:
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
+def _open_read(path: Path) -> BinaryIO:
+    """The file at `path` for reading, opened without waiting and only when
+    it is a regular file (guard_paths.open_regular): the hook reads the
+    ledger, and a FIFO, a socket or a device in its place is an OSError,
+    never a read that blocks. FileNotFoundError when there is none."""
+    from .guard_paths import open_regular
+    return os.fdopen(open_regular(path), "rb")
+
+
 def _symlink_target(path: Path) -> str | None:
     """Where the ledger points when it is a symlink, else None. append() never
     writes through one (O_NOFOLLOW), so a ledger swapped for a link to a
@@ -464,7 +477,7 @@ def verify(path: Path | None = None, *, at_line: int | None = None) -> dict[str,
     if not path.exists():
         return out
     prev = GENESIS
-    with path.open("rb") as fh:
+    with _open_read(path) as fh:
         for n, raw in enumerate(fh, start=1):
             if n - 1 == at_line:
                 out["hash_at"] = prev
@@ -502,6 +515,8 @@ def verify(path: Path | None = None, *, at_line: int | None = None) -> dict[str,
 # the agent cannot write (a ticket, a commit, a log shipper).
 
 ANCHOR_NAME = "guard-ledger.anchor.json"
+# The most read of the anchor: a few hashes and counts.
+_ANCHOR_MAX_BYTES = 64 * 1024
 
 
 def anchor_path() -> Path:
@@ -510,7 +525,8 @@ def anchor_path() -> Path:
 
 def read_anchor() -> dict[str, Any] | None:
     try:
-        a = json.loads(anchor_path().read_text())
+        with _open_read(anchor_path()) as fh:
+            a = json.loads(fh.read(_ANCHOR_MAX_BYTES + 1))
     except (OSError, ValueError):
         return None
     if not isinstance(a, dict) or not isinstance(a.get("records"), int):
@@ -582,7 +598,7 @@ def recent(minutes: float, *, path: Path | None = None, now: datetime | None = N
         # What append() refuses to write, the history checks must not trust.
         raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
     try:
-        fh = path.open("rb")
+        fh = _open_read(path)
     except FileNotFoundError:
         return []
     out: list[dict[str, Any]] = []
@@ -645,7 +661,7 @@ def read(days: float | None = None, path: Path | None = None, *,
         return []
     since = datetime.now(UTC) - timedelta(days=days) if days else None
     out = []
-    with path.open("rb") as fh:
+    with _open_read(path) as fh:
         for raw in fh:
             try:
                 rec = json.loads(raw)
@@ -693,7 +709,7 @@ def count_asks(action_type: str, *, after: dict[str, Any] | None = None,
     if _symlink_target(path) is not None:
         raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
     try:
-        fh = path.open("rb")
+        fh = _open_read(path)
     except FileNotFoundError:
         return None
     mark = after if isinstance(after, dict) else {}
@@ -766,7 +782,7 @@ def stored_lines(path: Path | None = None) -> dict[str, Any]:
         return {"lines": [], "chain": chain_of([]), "partial": False, "path": str(path)}
     if not stat.S_ISREG(st.st_mode):
         raise OSError(errno.EINVAL, "the ledger is not a regular file", str(path))
-    with path.open("rb") as fh:
+    with _open_read(path) as fh:
         raw = fh.read()
     body, _, tail = raw.rpartition(b"\n")
     lines = body.split(b"\n") if body or raw.startswith(b"\n") else []
@@ -943,7 +959,7 @@ def export_records(since: datetime | None = None,
     if not path.exists():
         return out
     prev = GENESIS
-    with path.open("rb") as fh:
+    with _open_read(path) as fh:
         for n, raw in enumerate(fh, start=1):
             line = raw.rstrip(b"\n")
             digest = _sha(line)

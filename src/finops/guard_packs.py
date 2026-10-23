@@ -43,6 +43,8 @@ CACHE_NAME = "packs-guard-cache.json"
 # 2: packs validated with the regex, pricing and control-character checks.
 # 3: guard rules carry `during` (a rule that applies only during a freeze).
 _CACHE_VERSION = 3
+# The most the guard reads of the packs index or its cache: far past any real one.
+_READ_MAX_BYTES = 64 * 1024 * 1024
 # The content types the guard reads. A pack that provides one of them and is
 # not loaded is a pack the guard is judging without.
 GUARD_KINDS = ("guard_rules", "price_books")
@@ -101,7 +103,7 @@ def _key() -> tuple[str | None, dict[str, Any]]:
     from .packs import store
     from .policy import policy_file_path
     try:
-        doc = json.loads(index.read_text(encoding="utf-8"))
+        doc = json.loads(_read_json_text(index))
         packs = doc.get("packs") if isinstance(doc, dict) else None
     except (OSError, ValueError):
         packs = None
@@ -143,9 +145,21 @@ def _build(index: dict[str, Any]) -> dict[str, Any]:
             "guard_problems": guard_problems}
 
 
+def _read_json_text(path: Path) -> str:
+    """A file the guard keeps or reads beside its packs, without waiting and
+    only when it is a regular file (guard_paths.read_regular): a FIFO in its
+    place is an OSError, never a hook that waits. ValueError past
+    _READ_MAX_BYTES."""
+    from .guard_paths import read_regular
+    raw = read_regular(path, _READ_MAX_BYTES + 1)
+    if len(raw) > _READ_MAX_BYTES:
+        raise ValueError(f"{path.name} is over the {_READ_MAX_BYTES:,} bytes the guard reads")
+    return raw.decode("utf-8")
+
+
 def _read_cache(key: str) -> dict[str, Any] | None:
     try:
-        doc = json.loads(_cache_path().read_text(encoding="utf-8"))
+        doc = json.loads(_read_json_text(_cache_path()))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("key") != key or not isinstance(doc.get("state"),

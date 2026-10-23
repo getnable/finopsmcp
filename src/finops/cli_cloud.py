@@ -332,13 +332,19 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
             return _fail("refused", EXIT_REFUSED, str(exc), as_json=as_json, out=out, err=err)
         got = _standing(box, k, st, who, opener=opener, now=now)
         rates = _rates(box, st, now=now)
+        from datetime import UTC
+        authority = cc.keep_authority(st, box=box, fetched_at=now or datetime.now(UTC))
         if as_json:
-            print(json.dumps({**st, "standing": got, "rates_kept": rates}, indent=2,
-                             default=str), file=out)
+            print(json.dumps({**st, "standing": got, "rates_kept": rates,
+                              **({"authority_kept": authority} if authority is not None
+                                 else {})}, indent=2, default=str), file=out)
         else:
             print(_status_text(box, st), file=out)
             print(_standing_text(got), file=out)
             print(_rates_text(rates, st), file=out)
+            said = cc.authority_text(authority, st) if authority is not None else None
+            if said:
+                print(said, file=out)
         failed = got["read"] is False and got.get("asked") and not got.get("plan")
         return EXIT_REFUSED if failed else EXIT_OK
 
@@ -429,6 +435,10 @@ def run(args: argparse.Namespace, *, opener: cc.Opener | None = None,
         print(_status_text(box, result.get("status") or {}), file=out)
         if isinstance(result.get("rates"), Mapping):
             print(_rates_text(result["rates"], result.get("status") or {}), file=out)
+        if isinstance(result.get("authority"), Mapping):
+            said = cc.authority_text(result["authority"], result.get("status") or {})
+            if said:
+                print(said, file=out)
     return EXIT_OK
 
 

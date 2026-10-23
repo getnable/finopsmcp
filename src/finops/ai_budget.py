@@ -37,6 +37,29 @@ from typing import Any
 
 from . import cloud_standing, harness_usage, llm_prices, token_budget
 
+# The most read of one of the guard's own AI budget files (ai-budget.json,
+# guard-person.json, a tally or month cache): far past any real one.
+_JSON_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _open_rb(path: Path | str) -> Any:
+    """A transcript or one of the guard's files for reading, opened without
+    waiting and only when it is a regular file (guard_paths.open_regular):
+    the AI budget gate runs on every call, and a FIFO an agent leaves in
+    place of a transcript is an OSError, never a hook that waits."""
+    from .guard_paths import open_regular
+    return os.fdopen(open_regular(path), "rb")
+
+
+def _read_json(path: Path | str) -> Any:
+    """The JSON document at `path`, read as _open_rb opens it; ValueError
+    past _JSON_MAX_BYTES or when it does not parse."""
+    with _open_rb(path) as fh:
+        raw = fh.read(_JSON_MAX_BYTES + 1)
+    if len(raw) > _JSON_MAX_BYTES:
+        raise ValueError(f"{Path(path).name} is over {_JSON_MAX_BYTES:,} bytes")
+    return json.loads(raw)
+
 # ── Verdicts (mirror policy.py's vocabulary) ─────────────────────────────────
 BUDGET_OK = "ok"        # comfortably under budget
 BUDGET_WARN = "warn"    # crossed the warn threshold (default 80%)
@@ -123,7 +146,7 @@ def get_budget() -> dict[str, Any]:
                "monthly_tokens": 0, "plan_label": "", "set_at": 0.0,
                "on_breach": "notify", "session_cap": 0.0, "session_caps": {}}
     try:
-        data = json.loads(_budget_path().read_text())
+        data = _read_json(_budget_path())
         if isinstance(data, dict):
             default.update({k: data[k] for k in default if k in data})
     except (OSError, ValueError):
@@ -298,7 +321,7 @@ def _responses(proj: Path, since_epoch: float,
     """
     seen: dict[Any, dict[str, Any]] = {}
     paths = _transcripts(proj, session_id)
-    cache = _TallyCache.open()
+    cache = _TallyCache.at_hand()
     for path in paths:
         try:
             st = path.stat()
@@ -379,7 +402,7 @@ def _file_responses(path: Path, st: os.stat_result,
             out, offset, lines = dict(entry.responses), entry.offset, entry.lines
     tail = b""
     try:
-        with path.open("rb") as fh:
+        with _open_rb(path) as fh:
             fh.seek(offset)
             for line in fh:
                 if not line.endswith(b"\n"):
@@ -404,7 +427,7 @@ def _tail_in_place(path: Path, offset: int, tail: bytes) -> bool:
     if not tail:
         return True
     try:
-        with path.open("rb") as fh:
+        with _open_rb(path) as fh:
             fh.seek(offset - len(tail))
             return fh.read(len(tail)) == tail
     except (OSError, ValueError):
@@ -455,7 +478,7 @@ class _TallyCache:
         self.root = root
 
     @classmethod
-    def open(cls) -> _TallyCache | None:
+    def at_hand(cls) -> _TallyCache | None:
         try:
             root = _data_dir() / "ai-budget-tally"
             root.mkdir(exist_ok=True)
@@ -474,7 +497,7 @@ class _TallyCache:
 
     def get(self, path: Path) -> _TallyEntry | None:
         try:
-            data = json.loads((self.root / f"{self._name(path)}.json").read_text())
+            data = _read_json(self.root / f"{self._name(path)}.json")
             if data.get("v") != self.VERSION or data.get("path") != str(path):
                 return None
             return _TallyEntry(data)
@@ -1112,7 +1135,7 @@ def _month_key() -> str:
 def _read_person_cache() -> tuple[Path, dict[str, Any]]:
     path = _person_cache_path()
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = _read_json(path)
         entries = doc.get("entries") if isinstance(doc, dict) and doc.get("v") == 1 else None
     except (OSError, ValueError):
         entries = None
@@ -1395,7 +1418,7 @@ class _MonthTally:
     def _load(self, path: Path) -> dict[str, Any]:
         """The file's document when it is this month's cache, else {}."""
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = _read_json(path)
         except (OSError, ValueError):
             return {}
         if not isinstance(doc, dict) or any(doc.get(k) != v for k, v in self.header.items()):
@@ -1442,7 +1465,7 @@ class _MonthTally:
             responses = dict(entry["r"])
             offset, lines = was, int(entry.get("lines") or 0)
         last = b""
-        with open(path, "rb") as fh:
+        with _open_rb(path) as fh:
             fh.seek(offset)
             for line in fh:
                 if not line.endswith(b"\n"):

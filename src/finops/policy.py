@@ -74,6 +74,8 @@ DEFAULT_POLICY: dict[str, Any] = {
 
 BUDGET_BREACH_ACTIONS = ("ask", "deny")
 POLICY_FILE_NAME = "nable.policy.yaml"
+# The most the guard reads of nable.policy.yaml: far past any real one.
+_POLICY_FILE_MAX = 1024 * 1024
 
 
 VELOCITY_CAP_MULTIPLE = 4.0
@@ -173,8 +175,14 @@ def _read_policy_file() -> tuple[dict[str, Any], list[str]]:
     problems: list[str] = []
     try:
         import yaml
-        with open(path, encoding="utf-8") as f:
-            doc = yaml.safe_load(f)
+
+        from .guard_paths import read_regular
+        # Without waiting, and only a regular file: the guard's hook reads
+        # it, and a FIFO in its place is "could not be read", never a hang.
+        raw = read_regular(path, _POLICY_FILE_MAX + 1)
+        if len(raw) > _POLICY_FILE_MAX:
+            raise ValueError(f"it is over {_POLICY_FILE_MAX:,} bytes")
+        doc = yaml.safe_load(raw.decode("utf-8"))
     except Exception as e:  # noqa: BLE001 - an unreadable file is no file
         doc = None
         mark = getattr(e, "problem_mark", None)

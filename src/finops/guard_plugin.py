@@ -62,6 +62,8 @@ OFF_FLAG_NAME = "guard-off"
 _OFF_VALUES = ("off", "0", "false", "no", "disabled")
 _VIA_PLUGIN_RE = re.compile(r"--via(?:=|\s+)plugin\b")
 _HARNESSES = ("claude", "cursor", "codex", "copilot", "gemini", "cline")
+# The most read of one Claude Code settings file: far past any real one.
+_SETTINGS_MAX_BYTES = 16 * 1024 * 1024
 
 # Tests point these at throwaway directories (tests/conftest.py), so a
 # developer's own `nable guard off` or installed plugin never reaches the
@@ -137,8 +139,14 @@ def settings_files(project_dir: str | os.PathLike | None = None) -> list[Path]:
 
 
 def _read(path: Path) -> dict | None:
+    from .guard_paths import read_regular
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Without waiting, and only a regular file: a FIFO in place of a
+        # settings file is no settings, never an editor call that hangs.
+        raw = read_regular(path, _SETTINGS_MAX_BYTES + 1)
+        if len(raw) > _SETTINGS_MAX_BYTES:
+            return None
+        data = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return None
     return data if isinstance(data, dict) else None

@@ -1695,8 +1695,9 @@ def _book_field(book: dict[str, Any], judged: bool = True,
 # What an estimate priced, for the workspace's effective rate (cloud_rates,
 # D146) and for the ledger (contract 2's `priced`): the product code, the
 # region the command names (the one its list price is figured in), the usage
-# type as the bill names it without its region prefix, the quantity, and the
-# hourly rate one unit was priced at. A command that names no region is
+# type as the bill names it without its region prefix, the quantity, the
+# hourly rate one unit was priced at, and the path it came by ("cli" here,
+# "terraform" for a saved plan, D169). A command that names no region is
 # priced at us-east-1's list price while the AWS CLI launches it in the
 # environment's or the profile's region, so it records no region and no
 # factor is applied to it; nothing on this path reads the environment's AWS
@@ -1704,12 +1705,55 @@ def _book_field(book: dict[str, Any], judged: bool = True,
 # (EC2 run-instances, RDS create-db-instance, ElastiCache create-cache-cluster,
 # and the same resources in a saved Terraform plan). Nothing here changes a
 # figure the guard judges.
+#
+# `exact` says whether usd_hour is that region's own listed rate (D168): an
+# RDS or ElastiCache row of the regional tables, or an EC2 rate in a region
+# that lists EC2 at exactly the us-east-1 rate. A region's EC2 floor, a size
+# scaled from its family, or a us-east-1 rate standing in for a region nable
+# holds no rate for is not, and `why` says which; cloud_rates.effective then
+# applies no factor to it. `judged_monthly` is the SKU's share of the figure
+# the guard judged when that is above its listed figure (a region that lists
+# it under us-east-1 is judged at us-east-1's).
 def _sku(product: str, usage_type: str, quantity: float, hourly: float, monthly: float,
-         book: dict[str, Any] | None) -> dict[str, Any]:
-    return {"product_code": product, "region": _PRICING_REGION.get(),
-            "usage_type": usage_type, "quantity": quantity, "unit": "Hrs",
-            "hours": _hours_per_month(), "usd_hour": round(hourly, 6),
-            "monthly_usd": round(monthly, 2), "price_book": book is not None}
+         book: dict[str, Any] | None, *, exact: bool = False, why: str | None = None,
+         judged_monthly: float | None = None) -> dict[str, Any]:
+    region = _PRICING_REGION.get()
+    if region is None:
+        exact, why = False, None
+    out = {"product_code": product, "region": region,
+           "usage_type": usage_type, "quantity": quantity, "unit": "Hrs",
+           "hours": _hours_per_month(), "usd_hour": round(hourly, 6),
+           "monthly_usd": round(monthly, 2), "price_book": book is not None,
+           "path": "cli", "list_exact": bool(exact)}
+    if not exact and why:
+        out["list_why"] = why
+    if judged_monthly is not None and round(judged_monthly, 2) != out["monthly_usd"]:
+        out["judged_monthly_usd"] = round(judged_monthly, 2)
+    return out
+
+
+def _ec2_list_exact(region: str | None, family: str = "") -> tuple[bool, str | None]:
+    """(whether an EC2 list rate in `region` is that region's own listed
+    rate, why not). Only us-east-1's table is held: it is exact there and in
+    a region that lists every type at exactly the us-east-1 rate."""
+    if region is None:
+        return False, None
+    if family:
+        return False, (f"its list price is scaled from the {family} sizes nable lists, not "
+                       "a listed rate")
+    if region == "us-east-1":
+        return True, None
+    from .aws_prices import EC2_REGION_RANGE
+    span = EC2_REGION_RANGE.get(region)
+    if span == (1.0, 1.0):
+        return True, None
+    if span is None:
+        return False, f"nable holds no {region} EC2 list price, so it is priced at us-east-1's"
+    if span[0] > 1.0:
+        return False, (f"nable holds {region}'s EC2 floor (the us-east-1 rate x{span[0]:g}), "
+                       "not that region's listed rate")
+    return False, (f"nable holds no {region} EC2 list price for each type ({region} lists "
+                   f"{span[0]:g}x to {span[1]:g}x us-east-1), so it is priced at us-east-1's")
 
 
 # A size the tables do not list, in a family they do: `c6i.32xlarge`,
@@ -1823,6 +1867,7 @@ class _Ec2Rate(NamedTuple):
     where: str                  # " in REGION" for the line, or ""
     book: dict[str, Any] | None
     judged: bool                # whether `hourly` is the book's
+    family: str = ""            # the family a size not listed was scaled from
 
 
 def _ec2_rate(itype: str | None, basis: str = _ON_DEMAND_BASIS, *,
@@ -1844,7 +1889,7 @@ def _ec2_rate(itype: str | None, basis: str = _ON_DEMAND_BASIS, *,
     if hourly is None:
         return None
     return _Ec2Rate(hourly, _book_basis(basis, book) if book and judged else regional_basis,
-                    where, book, judged)
+                    where, book, judged, family)
 
 
 def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
@@ -1854,7 +1899,7 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
     rate = _ec2_rate(itype, basis)
     if rate is None:
         return None
-    hourly, basis, where, book, judged = rate
+    hourly, basis, where, book, judged, family = rate
     count = max(count, 1)
     hours = count * _hours_per_month()
     monthly = hourly * hours
@@ -1867,6 +1912,7 @@ def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
         "basis": basis,
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
         **({"region": where[4:]} if where else {}),
+        **({"scaled_from": family} if family else {}),
         "line": (f"{lead}{count}x {itype}{where} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
@@ -1930,8 +1976,9 @@ def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     est = _price_ec2(m.group(1), count or 1, basis=basis)
     if est is not None:
         book = est.get("price_book")
+        exact, why = _ec2_list_exact(_PRICING_REGION.get(), est.get("scaled_from", ""))
         est["sku"] = _sku("AmazonEC2", f"BoxUsage:{est['instance_type']}", est["count"],
-                          est["hourly_usd"], est["monthly_usd"], book)
+                          est["hourly_usd"], est["monthly_usd"], book, exact=exact, why=why)
     if est is None or not per_instance:
         return est
     n = est["count"]
@@ -2026,41 +2073,105 @@ def _rds_list_rate(cls: str, engine: str) -> tuple[float | None, str]:
     return _scaled(table, cls) if table else (None, "")
 
 
+# RDS and ElastiCache in the region a command names (D168): the region's own
+# listed rate from the regional tables (aws_prices.rds_rate,
+# aws_prices.elasticache_rate), shown and recorded as what one unit costs
+# there. The figure the guard judges is never below the us-east-1 figure it
+# judged before, so a region that lists a class under us-east-1 cannot remove
+# an ask: it is judged at the higher of the two, and the line says both. A
+# region or a class the tables do not hold is priced at us-east-1's list, as
+# before, and said.
+class _Listed(NamedTuple):
+    judged: float | None        # the rate the guard judges one unit at, before a price book
+    shown: float | None         # the rate one unit lists at where it runs (the SKU's)
+    exact: bool                 # whether `shown` is that region's own listed rate
+    why: str | None             # why it is not, when it is not
+    basis: str                  # the list basis the line names
+    region: str | None          # the region it was priced in, when that is not us-east-1's table
+
+
+def _list_rate(use1: float | None, regional: Any, family: str, what: str,
+               service: str) -> _Listed:
+    """The list rate for one unit: `use1` the us-east-1 figure the guard
+    judged before (scaled from `family` when that is not ""), `regional` the
+    command's region's row (an RdsRate or CacheRate) or None."""
+    region = _PRICING_REGION.get()
+    if regional is not None:
+        shown = float(regional.hourly_usd)
+        cited = f"{regional.source}, read {regional.as_of}"
+        if use1 is not None and use1 > shown:
+            # Judged at us-east-1's: a region's lower list price never removes an ask.
+            basis = (f"{_ON_DEMAND_BASIS}, the least the guard judges a region at; "
+                     f"{regional.region} lists it at {_rate(shown)}/hr ({cited})")
+            return _Listed(use1, shown, True, None, basis, regional.region)
+        basis = f"on-demand {regional.region} list price ({cited})"
+        return _Listed(shown, shown, True, None, basis, regional.region)
+    if use1 is None:
+        return _Listed(None, None, False, None, _ON_DEMAND_BASIS, None)
+    if region is None:
+        return _Listed(use1, use1, False, None, _ON_DEMAND_BASIS, None)
+    if family:
+        why = (f"its list price is scaled from the {family} sizes nable lists, not a listed "
+               "rate")
+    elif region == "us-east-1":
+        return _Listed(use1, use1, True, None, _ON_DEMAND_BASIS, None)
+    else:
+        why = (f"nable holds no {region} {service} list price for {what}, so it is priced at "
+               "us-east-1's")
+    return _Listed(use1, use1, False, why, _ON_DEMAND_BASIS, None)
+
+
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     cls = _flag(cmd, "db-instance-class")
     engine = (_flag(cmd, "engine") or "").lower()
     if not cls:
         return None
+    # Multi-AZ runs a standby of the same class. The regional table lists it
+    # as its own row (aws_prices.rds_rate); the us-east-1 figure is twice the
+    # Single-AZ hour, the same rule the Terraform estimator applies.
+    multi_az = _has_flag(cmd, "multi-az")
+    n = 2 if multi_az else 1
+    use1, family = (_rds_list_rate(cls, engine) if engine in _RDS_TABLE_ENGINES
+                    else (None, ""))
+    region = _PRICING_REGION.get()
+    regional = None
+    if region and engine in _RDS_TABLE_ENGINES:
+        from .aws_prices import rds_rate
+        regional = rds_rate(cls, engine, region, multi_az=multi_az)
+    lst = _list_rate(use1 * n if use1 is not None else None, regional, family, cls, "RDS")
+    if regional is not None and lst.judged == lst.shown:
+        family = ""                    # the region lists the class: nothing was scaled
     # A price book's rate for the class stands for whatever engine the org
     # priced it on, so it also prices an engine the list tables do not hold.
-    listed, family = _rds_list_rate(cls, engine) if engine in _RDS_TABLE_ENGINES else (None, "")
+    listed = lst.judged / n if lst.judged is not None else None
     hourly, book, judged = _gated("aws", cls, listed)
     if hourly is None:
         return None
-    # Multi-AZ runs a standby of the same class: twice the instance hours,
-    # the same rule the Terraform estimator applies to aws_db_instance.
-    multi_az = _has_flag(cmd, "multi-az")
-    hours = (2 if multi_az else 1) * _hours_per_month()
+    hours = n * _hours_per_month()
     monthly = hourly * hours
-    basis = f"{_ON_DEMAND_BASIS}, instance hours only; storage and I/O not included"
+    basis = f"{lst.basis}, instance hours only; storage and I/O not included"
     if book and judged:
-        basis = _book_basis(basis, book)
+        basis = _book_basis(basis, book, lst.basis)
     elif family:
         basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
     # The bill names a Multi-AZ instance's hours as one Multi-AZUsage line,
     # its rate the standby's included.
+    shown = lst.shown if lst.shown is not None and not (book and judged) else hourly * n
     sku = _sku("AmazonRDS", f"{'Multi-AZUsage' if multi_az else 'InstanceUsage'}:{cls}", 1,
-               hourly * (2 if multi_az else 1), monthly, book)
+               shown, shown * _hours_per_month(), book, exact=lst.exact and not book,
+               why=lst.why, judged_monthly=monthly)
+    where = f" in {lst.region}" if lst.region else ""
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": cls,
-        "count": 2 if multi_az else 1,
+        "count": n,
         "basis": basis,
         "sku": sku,
+        **({"region": lst.region} if lst.region else {}),
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
-        "line": (f"{cls} {engine or 'RDS'}{' Multi-AZ' if multi_az else ''} {at}"
+        "line": (f"{cls} {engine or 'RDS'}{' Multi-AZ' if multi_az else ''}{where} {at}"
                  f"{_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
@@ -2073,10 +2184,13 @@ _CACHE_BASIS = (f"{_ON_DEMAND_BASIS}, node hours only; a replication group's oth
 
 
 def _price_cache_cluster(cmd: str, **_: Any) -> dict[str, Any] | None:
-    """create-cache-cluster: its nodes at the ElastiCache table's node-hour
-    rate for the engine (the Terraform estimator's, which names its offer and
-    SKUs), scaled from the family's listed sizes when the size is not listed,
-    or the org's price book rate. No --cache-node-type, no figure."""
+    """create-cache-cluster: its nodes at the node-hour rate the command's
+    region lists for the engine (aws_prices.elasticache_rate), judged at no
+    less than the us-east-1 figure (the Terraform estimator's table, which
+    names its offer and SKUs, else the regional table's us-east-1 row),
+    scaled from the family's listed sizes when the size is not listed, or
+    the org's price book rate. No --cache-node-type, no figure."""
+    from .aws_prices import elasticache_rate
     from .connectors.terraform_estimate import (
         _ELASTICACHE_HOURLY,
         _ELASTICACHE_VALKEY_HOURLY,
@@ -2089,30 +2203,42 @@ def _price_cache_cluster(cmd: str, **_: Any) -> dict[str, Any] | None:
     if engine not in ("redis", "memcached", "valkey"):
         return None
     nodes = _int_flag(cmd, "num-cache-nodes") or 1
-    listed, family = elasticache_hourly(node, engine), ""
-    if listed is None:
-        listed, family = _scaled(_ELASTICACHE_VALKEY_HOURLY if engine == "valkey"
-                                 else _ELASTICACHE_HOURLY, node)
-    hourly, book, judged = _gated("aws", node, listed)
+    use1, family = elasticache_hourly(node, engine), ""
+    if use1 is None:
+        row = elasticache_rate(node, engine, "us-east-1")
+        use1 = float(row.hourly_usd) if row is not None else None
+    if use1 is None:
+        use1, family = _scaled(_ELASTICACHE_VALKEY_HOURLY if engine == "valkey"
+                               else _ELASTICACHE_HOURLY, node)
+    region = _PRICING_REGION.get()
+    regional = elasticache_rate(node, engine, region) if region else None
+    lst = _list_rate(use1, regional, family, node, "ElastiCache")
+    if regional is not None and lst.judged == lst.shown:
+        family = ""                    # the region lists the node type: nothing was scaled
+    hourly, book, judged = _gated("aws", node, lst.judged)
     if hourly is None:
         return None
     hours = nodes * _hours_per_month()
     monthly = hourly * hours
-    basis = _CACHE_BASIS
+    basis = _CACHE_BASIS.replace(_ON_DEMAND_BASIS, lst.basis, 1)
     if book and judged:
-        basis = _book_basis(basis, book)
+        basis = _book_basis(basis, book, lst.basis)
     elif family:
         basis = _scaled_basis(basis, family)
     at = "at your price book rate of " if judged else "at "
+    shown = lst.shown if lst.shown is not None and not (book and judged) else hourly
+    where = f" in {lst.region}" if lst.region else ""
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": node,
         "count": nodes,
         "basis": basis,
-        "sku": _sku("AmazonElastiCache", f"NodeUsage:{node}", nodes, hourly, monthly, book),
+        "sku": _sku("AmazonElastiCache", f"NodeUsage:{node}", nodes, shown, shown * hours,
+                    book, exact=lst.exact and not book, why=lst.why, judged_monthly=monthly),
+        **({"region": lst.region} if lst.region else {}),
         **({"price_book": _book_field(book, judged, book["usd"] * hours)} if book else {}),
-        "line": (f"{nodes}x {node} {engine} {at}{_rate(hourly)}/hr ({basis}) "
+        "line": (f"{nodes}x {node} {engine}{where} {at}{_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"
                  + (_below_list(book, hours) if book and not judged else "")),
     }
@@ -2766,7 +2892,20 @@ class _IacRead:
         if path.stat().st_size > _IAC_SCAN_MAX_FILE_BYTES:
             self.why = f"{self._name(path)} is too large to read"
             return None
-        text = path.read_text(encoding="utf-8", errors="replace")
+        from .guard_paths import read_regular
+        # Without waiting, and only a regular file: a FIFO an agent left in
+        # the repo is a file the scan could not read, never a hook that waits.
+        try:
+            raw = read_regular(path, _IAC_SCAN_MAX_FILE_BYTES + 1)
+        except OSError as exc:
+            import errno
+            self.why = (f"{self._name(path)} could not be read "
+                        f"({errno.errorcode.get(exc.errno or 0, 'os error')})")
+            return None
+        if len(raw) > _IAC_SCAN_MAX_FILE_BYTES:
+            self.why = f"{self._name(path)} is too large to read"
+            return None
+        text = raw.decode("utf-8", "replace")
         hit = self.pattern.search(text)
         if hit is not None:
             self.found.append(f"{hit.group(0)} ({self._name(path)})")
@@ -2942,11 +3081,21 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = Non
         booked += (f", which would make it {'+' if shown >= 0 else '-'}${abs(shown):,.0f}/mo; "
                    "a price book can only raise the figure the guard judges by, so the "
                    "list price stands where it is higher")
-    basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}{booked}"
-             + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
-                if unpriced else ""))
     from .connectors.terraform_estimate import priced_skus
     skus = priced_skus(doc)
+    elsewhere = sorted({str(x["region"]) for x in skus
+                        if x.get("region") not in (None, "us-east-1")})
+    listed = _ON_DEMAND_BASIS
+    if elsewhere:
+        # D168: each EC2, RDS and ElastiCache resource at its provider's
+        # region's list (EC2 at the region's floor), judged at no less than
+        # us-east-1's.
+        listed = (f"on-demand list price in {', '.join(elsewhere)} for its EC2 (the region's "
+                  "floor), RDS and ElastiCache resources where nable holds that region's "
+                  "rates, us-east-1's for the rest, each judged at no less than us-east-1's")
+    basis = (f"`{tool} show -json {plan}`, {listed}{booked}"
+             + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
+                if unpriced else ""))
     return {
         "monthly_usd": round(monthly, 2),
         "plan": plan,
@@ -3501,6 +3650,10 @@ def _org_budget_figure(st: dict[str, Any]) -> dict[str, Any]:
 # How often the "close to your AI budget" note may show in one session. Every
 # tool call would be noise that teaches people to ignore the guard.
 _BUDGET_NOTE_EVERY_MIN = 30
+# The most read of one of the guard's small state files beside the ledger,
+# and of a Claude Code settings file: far past any real one.
+_SMALL_FILE_MAX = 1024 * 1024
+_SETTINGS_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _budget_note_due(session_id: str | None) -> bool:
@@ -3514,7 +3667,8 @@ def _budget_note_due(session_id: str | None) -> bool:
     key = session_id or "*"
     now = datetime.now(UTC)
     try:
-        seen = json.loads(path.read_text())
+        from .guard_paths import read_regular
+        seen = json.loads(read_regular(path, _SMALL_FILE_MAX))
         seen = seen if isinstance(seen, dict) else {}
     except (OSError, ValueError):
         seen = {}
@@ -4067,6 +4221,16 @@ class _OrgLens:
             m = self._model()
             return guard_org.owner(m, self._subjects()) if m is not None else None
         return self._get("owner", find, None)
+
+    def envs(self) -> tuple[str, ...] | None:
+        """The environments the command's subjects are confirmed to be in
+        (guard_org.confirmed_envs), or None when the org model is not read."""
+        def find() -> tuple[str, ...] | None:
+            from . import guard_org
+            m = self._model()
+            return tuple(guard_org.confirmed_envs(m, self._subjects())) if m is not None \
+                else None
+        return self._get("envs", find, None)
 
     def freeze(self) -> dict[str, Any] | None:
         """The change freeze in force over this command's scope
@@ -4815,6 +4979,97 @@ def _velocity_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, new: fl
             "Confirm to proceed, or raise FINOPS_POLICY_VELOCITY_CAP_USD.")
 
 
+# ── the authority ladder (D172 to D177, seam S1) ─────────────────────────────
+# Classes that move no money (tag, ticket, offhours_schedule), each at a rung
+# a person wrote in the repo's authority.yaml, judged by
+# finops.guard_authority.ladder_verdict, which this module calls after its
+# own verdict on a shell command or an MCP call. The ladder only ever
+# tightens: the stricter decision answers (_SEVERITY), the guard's figures,
+# rule and estimate stand, and when both ask (or both deny) the ladder's
+# sentence follows the guard's. Its class, rung and whether the call was
+# within its bound go onto the verdict and its ledger line. A call the guard
+# would pass in silence that the ladder places in a class is recorded as an
+# allow line, so the post hook can link its outcome (tool_use_id). An absent
+# module is no ladder; one that raises, or answers out of shape, is no ladder
+# and its exception's name (authority_trouble) on the line.
+_LADDER_MODULE = "finops.guard_authority"
+_LADDER_FIELDS = ("authority_class", "rung", "within_bound")
+_LADDER_CLASSES = ("tag", "ticket", "offhours_schedule")
+_LADDER_RUNGS = ("none", "off", "recommend", "approve_each", "bounded")
+_LADDER_REASON_MAX = 2000
+
+
+def _ladder_module() -> Any:
+    """finops.guard_authority, or None when it is not installed. Any other
+    failure to import it is raised (the caller records it as trouble)."""
+    import importlib
+    try:
+        return importlib.import_module(_LADDER_MODULE)
+    except ModuleNotFoundError as exc:
+        if exc.name in (_LADDER_MODULE, "finops"):
+            return None
+        raise
+
+
+def _ladder_scope(command: str, cwd: str | None, context: str):
+    """scope() for the ladder: (the environments the org model resolves for
+    the call or None, the production context in `context` or None). Read
+    only when the ladder asks for it."""
+    def scope() -> tuple[tuple[str, ...] | None, str | None]:
+        return _OrgLens(command, cwd).envs(), _prod_context(context)
+    return scope
+
+
+def _ladder(command: str, *, cwd: str | None, harness: str, scope: Any,
+            mcp: tuple[str, dict[str, Any]] | None = None
+            ) -> tuple[dict[str, Any] | None, BaseException | None]:
+    """(the ladder's answer, None), (None, None) with no ladder or no class,
+    or (None, the exception) when it raised or answered out of shape."""
+    try:
+        mod = _ladder_module()
+        if mod is None:
+            return None, None
+        got = mod.ladder_verdict(command, cwd=cwd, harness=harness, scope=scope, mcp=mcp)
+        if got is None:
+            return None, None
+        if not isinstance(got, dict) or got.get("decision") not in ("allow", "ask", "deny") \
+                or got.get("action_type") != "authority_class" \
+                or got.get("authority_class") not in _LADDER_CLASSES \
+                or got.get("rung") not in _LADDER_RUNGS \
+                or got.get("within_bound") not in (True, False, None):
+            raise ValueError("the authority ladder answered out of shape")
+        if got["decision"] != "allow":
+            reason = got.get("reason")
+            if not isinstance(reason, str) or not reason.startswith("nable guard") \
+                    or len(reason) > _LADDER_REASON_MAX:
+                raise ValueError("the authority ladder's reason is out of shape")
+        return got, None
+    except Exception as exc:  # noqa: BLE001 - no ladder, said on the line
+        return None, exc
+
+
+def _with_ladder(v: dict[str, Any] | None, ladder: dict[str, Any] | None,
+                 trouble: BaseException | None) -> dict[str, Any] | None:
+    """`v` after the ladder: never softer, never without an ask it had."""
+    if trouble is not None:
+        return {**v, "authority_trouble": type(trouble).__name__} if v is not None else None
+    if ladder is None:
+        return v
+    fields = {k: ladder.get(k) for k in _LADDER_FIELDS}
+    extra = {"authority": ladder["authority"]} if isinstance(ladder.get("authority"),
+                                                             dict) else {}
+    said = {"reason": ladder["reason"]} if ladder["decision"] != "allow" else {}
+    if v is None:
+        return {"decision": ladder["decision"], "action_type": "authority_class",
+                "door": None, **fields, **extra, **said}
+    out = {**v, **fields, **extra}
+    if _SEVERITY[ladder["decision"]] > _SEVERITY[v["decision"]]:
+        return _with_reason_of({**out, "decision": ladder["decision"], **said}, v)
+    if ladder["decision"] == v["decision"] and said:
+        return _with_reason_of(out, said)
+    return out
+
+
 def gate_command(command: str, session_id: str | None = None, *, harness: str = "claude-code",
                  cwd: str | None = None, tool: str = "shell",
                  record: bool = True) -> dict[str, Any] | None:
@@ -4881,7 +5136,16 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
             via = _iac_floor(command, cwd)
             if via:
                 v, buys = _commitment_floor(v, command, via=via), True
+        # The authority ladder (seam S1): it only ever tightens what is above.
+        trouble = None
+        if not forms:
+            ladder, trouble = _ladder(command, cwd=cwd, harness=harness,
+                                      scope=_ladder_scope(command, cwd, command))
+            v = _with_ladder(v, ladder, trouble)
         if record:
+            if trouble is not None and v is None and stop is None:
+                _record_fail_open(trouble, harness=harness, tool=tool, command=command,
+                                  check="authority", session_id=session_id)
             _record_pack_trouble(pack_error, pack_problem, judged=v is not None or stop is not None,
                                  harness=harness, tool=tool, command=command,
                                  session_id=session_id)
@@ -5398,7 +5662,22 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                     if floored is not worst:
                         worst, summary = floored, act.command
                     break
+        # The authority ladder (seam S1), on the shell form the call amounts
+        # to, or '' when it amounts to none: it only ever tightens.
+        shell = next((act.command for act in actions if not act.unchecked
+                      and len(act.command) <= MAX_JUDGED_CHARS), "")
+        where = cwd if isinstance(cwd, str) else None
+        ladder, trouble = _ladder(
+            shell, cwd=where, harness=harness,
+            scope=_ladder_scope(shell, where, f"{shell} {argument_text(arguments)}"),
+            mcp=(tool_name, arguments if isinstance(arguments, dict) else {}))
+        if worst is None and ladder is not None and shell:
+            summary = shell
+        worst = _with_ladder(worst, ladder, trouble)
         if record:
+            if trouble is not None and worst is None and stop is None:
+                _record_fail_open(trouble, harness=harness, tool=tool_name, command=summary,
+                                  check="authority", session_id=session_id)
             _record_pack_trouble(pack_error, pack_problem,
                                  judged=worst is not None or stop is not None, harness=harness,
                                  tool=tool_name, command=summary, session_id=session_id)
@@ -7204,6 +7483,11 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
                                    for e in v["scope"].get("envs") or []]}}
                if isinstance(v.get("scope"), dict) else {}),
             **({"tool_use_id": _TOOL_USE_ID.get()} if _TOOL_USE_ID.get() else {}),
+            # The authority ladder's class, rung and whether the call was
+            # within its bound (seam S1), or why the ladder was not read.
+            **({k: v.get(k) for k in _LADDER_FIELDS} if v.get("authority_class") else {}),
+            **({"authority_trouble": v["authority_trouble"]}
+               if v.get("authority_trouble") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
@@ -7230,6 +7514,7 @@ def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: A
             "decision": "fail_open",
             "error": type(exc).__name__,
             **({"check": check} if check else {}),
+            **({"authority_trouble": type(exc).__name__} if check == "authority" else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             "outcome": None,
@@ -7504,8 +7789,15 @@ def _refuse(path: Path, what: str):
 
 def _load_settings(path: Path) -> dict:
     if path.exists():
+        from .guard_paths import read_regular
         try:
-            data = json.loads(path.read_text())
+            raw = read_regular(path, _SETTINGS_MAX_BYTES + 1)
+        except OSError:
+            raise _refuse(path, "exists but is not a regular file nable can read") from None
+        try:
+            if len(raw) > _SETTINGS_MAX_BYTES:
+                raise ValueError("too large")
+            data = json.loads(raw)
         except Exception:
             raise _refuse(path, "exists but is not valid JSON")
         # Valid JSON is not the same as the shape we expect. A top-level array or
@@ -7562,7 +7854,8 @@ def _our_hooks(pre: Any):
 def _read_our_hooks(path: Path) -> list[tuple[dict, dict]]:
     """Read-only view of our hooks in a settings file; [] on anything odd."""
     try:
-        s = json.loads(path.read_text())
+        from .guard_paths import read_regular
+        s = json.loads(read_regular(path, _SETTINGS_MAX_BYTES))
         return list(_our_hooks(((s.get("hooks") or {}).get("PreToolUse")) or []))
     except Exception:
         return []
@@ -8017,6 +8310,9 @@ def doctor() -> dict[str, Any]:
         guard_ledger.save_anchor(ledger)
     lost = guard_ledger.unrecorded()
     ledger["unrecorded"] = lost
+    if lost.get("read") is False:
+        gaps.append(f"the count of verdicts answered but not recorded: {lost['path']} could "
+                    f"not be read ({lost.get('error')}), so it is not known")
     if lost["count"]:
         gaps.append(f"{lost['count']} verdict(s) answered but not recorded, last at "
                     f"{lost['last']}: the ledger file was locked by another process, "
@@ -8067,6 +8363,7 @@ def doctor() -> dict[str, Any]:
     ai_budgets = _doctor_ai_budgets(covered, gaps, fix)
     data_dir = _doctor_data_dir(gaps, fix)
     authority = _doctor_authority(covered, gaps, fix)
+    classes = _doctor_ladder(covered, gaps, fix)
     try:
         from . import guard_paths
         protected = [e.as_dict() for e in guard_paths.protected()]
@@ -8095,6 +8392,7 @@ def doctor() -> dict[str, Any]:
         "ai_budgets": ai_budgets,
         "data_dir": data_dir,
         "authority": authority,
+        **({"authority_classes": classes} if classes is not None else {}),
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,
@@ -8250,6 +8548,22 @@ def _doctor_authority(covered: list[str], gaps: list[str], fix: Any, *,
                     "a paid workspace")
         fix("nable org authority", "shows each refused entry with its file, entry and field")
     return {"present": True, "files": files, "refused": len(refused)}
+
+
+def _doctor_ladder(covered: list[str], gaps: list[str], fix: Any) -> dict[str, Any] | None:
+    """The authority ladder's word for the doctor (seam S1,
+    guard_authority.doctor), or None when it is not installed. A ladder that
+    raises is said as a gap, never raised."""
+    try:
+        mod = _ladder_module()
+        if mod is None:
+            return None
+        got = mod.doctor(covered, gaps, fix)
+    except Exception as exc:  # noqa: BLE001 - said, never raised
+        gaps.append(f"the authority ladder's classes: they could not be read "
+                    f"({type(exc).__name__}), so the guard judges those calls as before")
+        return {"read": False, "error": type(exc).__name__}
+    return got if isinstance(got, dict) else {"read": False, "error": "not a mapping"}
 
 
 def _doctor_packs(covered: list[str], gaps: list[str], fix: Any) -> dict[str, Any]:

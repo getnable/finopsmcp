@@ -1,0 +1,19 @@
+{
+ "formatVersion": "v1.0",
+ "disclaimer": "This pricing list is for informational purposes only. All prices are subject to the additional terms included in the pricing pages on http://aws.amazon.com. All Free Tier prices are also subject to the terms included at https://aws.amazon.com/free/",
+ "publicationDate": "2026-10-14T22:11:39Z",
+ "regions": {
+  "eu-west-1": {
+   "regionCode": "eu-west-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonElastiCache/20261014221139/eu-west-1/index.json"
+  },
+  "us-east-1": {
+   "regionCode": "us-east-1",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonElastiCache/20261014221139/us-east-1/index.json"
+  },
+  "eu-west-3": {
+   "regionCode": "eu-west-3",
+   "currentVersionUrl": "/offers/v1.0/aws/AmazonElastiCache/20261014221139/eu-west-3/index.json"
+  }
+ }
+}

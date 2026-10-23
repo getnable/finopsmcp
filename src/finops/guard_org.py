@@ -47,6 +47,8 @@ from pathlib import Path
 from typing import Any
 
 # An AWS ARN names the account it lives in.
+# The most the guard reads of its org model cache or accounts.yaml.
+_CACHE_MAX_BYTES = 64 * 1024 * 1024
 _ARN_ACCOUNT_RE = re.compile(r"\barn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:(\d{12}):")
 _PROFILE_RE = re.compile(r"(?<!\S)--profile(?:=|\s+)([^\s;&|'\"]+)")
 # -n / --namespace on a kubectl, helm or oc command, in the same shell segment.
@@ -125,7 +127,11 @@ def _cached(cwd: str | None):
     collecting = gc.isenabled()
     gc.disable()
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        from .guard_paths import read_regular
+        raw = read_regular(path, _CACHE_MAX_BYTES + 1)
+        if len(raw) > _CACHE_MAX_BYTES:
+            raise ValueError("the org model cache is over the size the guard reads")
+        doc = json.loads(raw.decode("utf-8"))
         if isinstance(doc, dict) and doc.get("key") == key:
             facts = []
             for o, meta, row in doc["facts"]:
@@ -171,7 +177,10 @@ def _profile_accounts(profile: str, model) -> list[str]:
     p = accounts_path()
     if p.is_file():
         import yaml
-        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+        from .guard_paths import read_regular
+        # Without waiting: a FIFO in its place raises, as an unreadable file did.
+        data = yaml.safe_load(read_regular(p, _CACHE_MAX_BYTES).decode("utf-8")) or {}
         for e in (data.get("accounts") or []) if isinstance(data, dict) else []:
             if isinstance(e, dict) and str(e.get("profile") or "") == profile \
                     and e.get("account_id"):

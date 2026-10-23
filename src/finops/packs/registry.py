@@ -113,7 +113,12 @@ def _fetch(loc: str) -> tuple[bytes, Path | None]:
             if local.stat().st_size > MAX_INDEX_BYTES:
                 raise RegistryError(f"The pack registry at {loc} is larger than "
                                     f"{MAX_INDEX_BYTES} bytes")
-            return local.read_bytes(), local.parent
+            from ..guard_paths import read_regular
+            raw = read_regular(local, MAX_INDEX_BYTES + 1)
+            if len(raw) > MAX_INDEX_BYTES:
+                raise RegistryError(f"The pack registry at {loc} is larger than "
+                                    f"{MAX_INDEX_BYTES} bytes")
+            return raw, local.parent
         except OSError as e:
             raise RegistryError(unreachable.format(loc=loc, why=e.strerror or e)) from None
     if not loc.startswith("https://"):

@@ -45,8 +45,9 @@ import contextlib
 import json
 import os
 import re
+import stat
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -284,6 +285,9 @@ def read() -> tuple[dict[str, Any] | None, str | None]:
     except OSError as exc:
         return None, f"{FILE_NAME} could not be opened ({exc.strerror or type(exc).__name__})"
     with os.fdopen(fd, "rb") as fh:
+        # A FIFO, a socket or a device in its place is not read at all.
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            return None, f"{FILE_NAME} is not a regular file"
         raw = fh.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         return None, f"{FILE_NAME} is over the {MAX_BYTES // 1024} KiB the guard reads"
@@ -351,10 +355,42 @@ def _public(s: dict[str, Any]) -> dict[str, Any]:
     usage type, quantity, unit and the hours a month it was priced over, and
     the hourly rate one unit was priced at (usd_hour), so the box reconciles
     the usage type like for like when the line's monthly_usd also holds what
-    the bill names under another one (an instance's EBS volumes)."""
-    return {"product_code": s["product_code"], "region": s.get("region"),
-            "usage_type": s["usage_type"], "quantity": s["quantity"], "unit": s["unit"],
-            "hours": s["hours"], "usd_hour": s["usd_hour"]}
+    the bill names under another one (an instance's EBS volumes). D169 adds
+    the path it came by ("cli" or "terraform") and, for an RDS instance or
+    an ElastiCache cluster a saved plan creates, the identifier it plans
+    (D167): optional, so a reader of iteration 8's lines reads these too."""
+    out = {"product_code": s["product_code"], "region": s.get("region"),
+           "usage_type": s["usage_type"], "quantity": s["quantity"], "unit": s["unit"],
+           "hours": s["hours"], "usd_hour": s["usd_hour"]}
+    if s.get("path") in PATHS:
+        out["path"] = s["path"]
+    if isinstance(s.get("identifier"), str) and s["identifier"]:
+        out["identifier"] = s["identifier"]
+    return out
+
+
+# The paths a priced SKU came by (D169).
+PATHS = ("cli", "terraform")
+_CENT = Decimal("0.01")
+
+
+def _not_exact(s: dict[str, Any]) -> str | None:
+    """Why a SKU's list price is not its region's own listed rate (D168), so
+    no factor may be applied to it; None when it is."""
+    if s.get("list_exact") is True:
+        return None
+    why = s.get("list_why")
+    return (why if isinstance(why, str) and why
+            else "nable cannot say its list price is that region's listed rate")
+
+
+def sku_effective(s: dict[str, Any], factor: str) -> Decimal:
+    """What one SKU comes to a month at an on-demand factor: its exact list
+    figure (usd_hour x quantity x hours) times the factor, rounded up to the
+    cent, so it is never below the exact list times the factor (rule 15)."""
+    exact = (Decimal(str(s["usd_hour"])) * Decimal(str(s["quantity"]))
+             * Decimal(str(s["hours"])) * Decimal(factor))
+    return exact.quantize(_CENT, rounding=ROUND_CEILING)
 
 
 def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
@@ -364,11 +400,15 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
     "note"}. None when nothing priced is one the rates could cover.
 
     `judged_monthly` is the estimate's own monthly figure, the one the guard
-    judged: the effective figure is it with each matched SKU's list monthly
-    replaced by that times its on-demand factor, so what the bill names
-    under another usage type (EBS volumes, storage) stays at list. A SKU a
-    price book prices keeps the book's figure. Reads cloud-rates.json, never
-    the network."""
+    judged: the effective figure is it with each matched SKU's judged share
+    (its judged_monthly_usd, else its listed monthly) replaced by its exact
+    list figure times its on-demand factor (sku_effective), so what the bill
+    names under another usage type (EBS volumes, storage) stays as judged. A
+    factor is applied only to a SKU whose list price is its region's own
+    listed rate (D168): a region's EC2 floor, a scaled size or a us-east-1
+    rate standing in for another region is at list price, said with why. A
+    SKU a price book prices keeps the book's figure. Reads cloud-rates.json,
+    never the network."""
     skus = [s for s in skus if isinstance(s, dict) and s.get("product_code") in PRODUCTS]
     if not skus:
         return None
@@ -395,6 +435,10 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
                                   "may launch elsewhere, and no rate of your workspace's is "
                                   "matched")))
             continue
+        inexact = _not_exact(s)
+        if inexact:
+            unmatched.append((s, inexact))
+            continue
         row = lookup(doc, s["product_code"], s["region"], s["usage_type"])
         if row is None or row["on_demand_factor"] is None:
             unmatched.append((s, (f"your workspace's rates hold no on-demand factor for "
@@ -407,18 +451,20 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
         return {"priced": priced, "price_basis": "list", "effective": None,
                 "note": " ".join(x for x in (note, book_note) if x)}
     block = doc["block"]
+
+    def judged_share(s: dict[str, Any]) -> Decimal:
+        return Decimal(str(s.get("judged_monthly_usd", s["monthly_usd"])))
+
     listed = Decimal(str(judged_monthly)) if judged_monthly is not None else sum(
-        (Decimal(str(s["monthly_usd"])) for s in skus), Decimal(0))
+        (judged_share(s) for s in skus), Decimal(0))
     total = listed
     parts = []
     for s, row in matched:
-        f = Decimal(row["on_demand_factor"])
-        sku_list = Decimal(str(s["monthly_usd"]))
-        total -= sku_list - sku_list * f
+        total += sku_effective(s, row["on_demand_factor"]) - judged_share(s)
         share = Decimal(row["covered_share"]) * 100
         parts.append(f"on-demand factor {row['on_demand_factor']} for {_sku_words(s)}, "
                      f"{share:.0f}% of whose usage ran on commitments")
-    total = max(total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), Decimal(0))
+    total = max(total.quantize(_CENT, rounding=ROUND_HALF_UP), Decimal(0))
     single = len(skus) == 1 and len(matched) == 1
     first = matched[0][1]
     eff = {"monthly_usd": float(total),
@@ -427,9 +473,9 @@ def effective(skus: list[dict[str, Any]], *, judged_monthly: float | None = None
            "as_of": block["as_of"], "window": [block["window"]["start"], block["window"]["end"]],
            "workspace_ref": block["workspace_ref"]}
     if not single and isinstance(priced, list):
-        rows = {(s["product_code"], s["usage_type"], s.get("region")): r for s, r in matched}
-        for p in priced:
-            r = rows.get((p["product_code"], p["usage_type"], p.get("region")))
+        rows = {id(s): r for s, r in matched}
+        for p, s in zip(priced, skus[:20], strict=False):
+            r = rows.get(id(s))
             p["factor"] = r["on_demand_factor"] if r else None
             p["blended_factor"] = r["blended_factor"] if r else None
     rest = ""
