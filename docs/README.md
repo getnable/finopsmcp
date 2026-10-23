@@ -8,6 +8,7 @@ or [getnable.com/docs](https://getnable.com/docs) for the quickstart.
 - [SLACK.md](SLACK.md): Slack alerts and reports from this package; the two-way bot is hosted nable
 - [RECOMMENDATIONS.md](RECOMMENDATIONS.md) — how the savings and rightsizing engine works
 - [DEPLOY.md](DEPLOY.md) — running nable in shared / team mode
+- [AUTHORITY-CLASSES.md](AUTHORITY-CLASSES.md): authority.yaml for tagging, tickets and off-hours schedules, the rungs and bounds, and what the guard does at each
 - [RELEASING.md](RELEASING.md): cutting a release, in order; what each workflow publishes; how to verify
 
 ## Reference artifacts

@@ -251,12 +251,14 @@ def test_the_budget_stop_covers_unknown_mcp_tools_too(monkeypatch):
 
 
 def test_a_budget_stop_on_an_unknown_tool_is_recorded(monkeypatch):
+    # A tool no rule and no authority class knows (create_issue is in the
+    # ticket class now: tests/test_guard_authority_seam.py).
     _over_budget(monkeypatch)
-    g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    g.gate_mcp_call("mcp__slack__post_message", {"text": "x"})
     import finops.guard_ledger as gl
     [r] = [json.loads(line) for line in gl.ledger_path().read_text().splitlines()]
     assert (r["decision"], r["action_type"], r["tool"]) == \
-        ("ask", "ai_budget", "mcp__github__create_issue")
+        ("ask", "ai_budget", "mcp__slack__post_message")
 
 
 def test_the_hook_stops_an_unknown_mcp_tool_when_over_budget(monkeypatch):
@@ -268,7 +270,7 @@ def test_the_hook_stops_an_unknown_mcp_tool_when_over_budget(monkeypatch):
 
 
 def test_under_budget_an_unknown_tool_is_still_silent_and_unrecorded():
-    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+    assert g.gate_mcp_call("mcp__slack__post_message", {"text": "x"}) is None
     import finops.guard_ledger as gl
     assert not gl.ledger_path().exists()
 

@@ -55,6 +55,7 @@ from .model import (
     FILE_FOR_KIND,
     HEADER,
     KNOWN_FILES,
+    NO_MONEY_CLASSES,
     Fact,
     FactError,
     OrgModel,
@@ -541,9 +542,10 @@ class _File:
                 self.why.append(reason)
                 if self.authority:
                     # Never only a warning: a refused entry holds its class
-                    # (or every class) at recommend (OrgModel.authority).
+                    # (or every class) where OrgModel.authority and
+                    # OrgModel.ladder say.
                     self.refusals.append(refusal(str(self.path), i, raw, e))
-                    reason += " (it holds " + self.refusals[-1]["holds"] + " at recommend)"
+                    reason += " (it holds " + _holds(self.refusals[-1]["holds"]) + ")"
                 skipped.append(f"{self.path.name}[{i}]: skipped, {reason}")
         for msg in skipped:
             _warn(warnings, msg)
@@ -593,6 +595,17 @@ class _File:
         return True
 
 
+def _holds(what: str) -> str:
+    """What a refused authority entry holds, and at which rung: a purchase
+    kind at recommend, a class that moves no money at approve_each."""
+    if what in NO_MONEY_CLASSES:
+        return f"{what} at approve_each"
+    if what == "every class":
+        return ("every purchase kind at recommend and every class that moves no money "
+                "at approve_each")
+    return f"{what} at recommend"
+
+
 # ── the parse cache ───────────────────────────────────────────────────────────
 #
 # Parsing YAML is most of what reading a model of thousands of facts costs.
@@ -604,7 +617,9 @@ _CACHE_DIR = "org-parse-cache"
 # 2: each entry's refusal in authority.yaml is kept beside its warning.
 # 3: authority.yaml refuses a value field it does not name, an approver that is
 #    not plain ASCII and a key twice, so a parse made before is not reused.
-_CACHE_VERSION = 3
+# 4: authority.yaml governs tag, ticket and offhours_schedule, which a parse
+#    made before refused (holding every purchase kind at recommend).
+_CACHE_VERSION = 4
 
 
 def _digest(text: str) -> str:

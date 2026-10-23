@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -406,8 +407,8 @@ def test_a_refused_entry_is_surfaced_in_the_warning_as_holding_its_class(tmp_pat
     d.mkdir()
     shutil.copy(CORPUS / "06_typo_class.yaml", d / "authority.yaml")
     m = store.load(d, legacy=False)
-    assert any("authority.yaml[0]" in w and "holds every class at recommend" in w
-               for w in m.warnings)
+    assert any(re.match(r"^authority\.yaml\[0\]: skipped, ", w)
+               and "holds every purchase kind at recommend" in w for w in m.warnings)
     assert m.refused and m.refused[0]["field"] == "subject.id"
 
 

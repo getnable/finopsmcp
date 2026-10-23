@@ -404,19 +404,45 @@ coding-agent spend a person can carry into a paid workspace.
   and fails on a read that could wait or a write not on its allow-list with
   its reason; a few reads in modules other workstreams own are listed there
   as not yet converted, each a proposal to their owners.
-- **The guard asks the authority ladder when it is installed.** After its own
-  verdict, the guard consults `finops.guard_authority.ladder_verdict` for
-  shell commands and MCP calls, when that module is installed. The stricter
-  of the two answers: the ladder never softens a verdict or removes an ask,
-  the guard's figures, rule and estimate stand, and when both ask the
-  ladder's sentence is added. The line carries `authority_class`, `rung` and
-  `within_bound`; a call the guard would pass in silence that the ladder
-  places in a class is recorded as an allow line with its tool_use_id. A
-  ladder that raises changes no decision and is recorded as
-  `authority_trouble`. `nable guard doctor` reports the ladder's classes
-  (`authority_classes` in `--json`). `nable cloud status` and `connect
-  --send` keep the box's authority block through `finops.authority_standing`
-  and print what it says. Without those modules nothing changes.
+- **Authority for classes that move no money.** authority.yaml now governs
+  `tag`, `ticket` and `offhours_schedule`, with the rungs off, recommend,
+  approve_each and, for these classes only, `bounded`: no ask within a bound
+  a person wrote (tag keys, tickets a UTC day and repositories, environments,
+  resources a call), an ask outside it. A purchase kind at bounded is refused
+  naming `value.rung`. Only a confirmed entry in a trusted org model holds
+  bounded; a proposal, an expired, refused or unreadable entry holds the
+  class at approve_each. `nable org set authority --class tag --rung bounded
+  --tag-key team ...`, `nable org authority` and `nable org status` show
+  them. `nable guard reverse [HASH] [--why]` records that a call in a class
+  was undone. On a machine that sends to a paid workspace, the workspace's
+  standing (`authority-standing.json`, from the bound box and workspace
+  only) can only narrow: a class the workspace demoted after a reversal asks
+  until an admin lifts it. Release 0.13.0 reads an entry for one of these
+  classes as unknown and holds every purchase kind at recommend, so upgrade
+  every machine before writing one. See `docs/AUTHORITY-CLASSES.md`.
+- **The guard asks the authority ladder.** After its own verdict, the guard
+  consults `finops.guard_authority.ladder_verdict` for shell commands and MCP
+  calls. The stricter of the two answers: the ladder never softens a verdict
+  or removes an ask, the guard's figures, rule and estimate stand, and when
+  both ask the ladder's sentence is added. The line carries
+  `authority_class`, `rung` and `within_bound`, and `authority`: what the
+  call acted on (op, resources, tag keys, repository, schedules, group,
+  environments), the class's rung in the file, its bound and why a call was
+  outside it, redacted like the command and at most 4,096 characters (past
+  that only its single values stay, with `trimmed`), without the approvers.
+  A call the guard would pass in silence that the ladder places in a class is
+  recorded as an allow line with its tool_use_id, also when no file names
+  the class (rung `none`), and those lines are what the ticket bound counts. A ladder that raises changes no decision and is
+  recorded as `authority_trouble`. `nable guard doctor` reports the ladder's
+  classes (`authority_classes` in `--json`). `nable cloud status` and
+  `connect --send` keep the box's authority block through
+  `finops.authority_standing` and print what it says.
+- **An older parse of authority.yaml is read again.** The org model's parse
+  cache moves to version 4, so a parse a machine kept while it ran a release
+  that refused these classes (and so held every purchase kind at recommend)
+  is not reused for an unchanged file. A refused entry's warning now says
+  what it holds at which rung: a purchase kind at recommend, a class that
+  moves no money at approve_each, and for a class it cannot read, both.
 
 ## 0.13.0 (2026-10-18)
 

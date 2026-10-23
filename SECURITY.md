@@ -210,6 +210,19 @@ cache (`harness_usage`), the background refresh's state file, read only under
 machine id and key file (`security.vault`, which the hook imports and never
 calls to read either).
 
+**Authority for classes that move no money.** `authority.yaml` can hold
+tagging, tickets and off-hours schedules at a rung a person wrote; `bounded`
+lets a call through without an ask only inside a bound the file names, only
+from a confirmed entry in a trusted org model, and never for a purchase kind.
+A paid workspace's standing (`authority-standing.json`) is kept only from the
+box and workspace this machine is bound to and only when it names that
+workspace, a block of at most 4 KiB written 0600 and atomically, and read
+through `read_regular`; it can only narrow a rung, and a standing that was not read
+holds `bounded` at approve_each. It is one of the guard's own files, so an
+agent's write of it asks. A class call's ledger line carries what the call
+acted on (`authority`), each string redacted like the command and the whole
+at most 4,096 characters, and never the approvers.
+
 **Data directory.** `FINOPS_DATA_DIR` is read by one helper: a leading `~`
 expands, and a relative path is refused, so every part of nable (the vault,
 the ledger, the guard's own files) uses the default directory instead, and

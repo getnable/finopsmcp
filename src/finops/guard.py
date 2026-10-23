@@ -4997,6 +4997,18 @@ _LADDER_FIELDS = ("authority_class", "rung", "within_bound")
 _LADDER_CLASSES = ("tag", "ticket", "offhours_schedule")
 _LADDER_RUNGS = ("none", "off", "recommend", "approve_each", "bounded")
 _LADDER_REASON_MAX = 2000
+# What the ladder's answer records of the call it judged (its `authority`),
+# as the workspace's evidence reads it to tie a later removal to it: the op,
+# tool, resources, tag keys, repository, schedules, group and environments,
+# the class's rung in the file, its bound and why a call was outside it. The
+# approvers stay in authority.yaml. Strings are redacted, a list holds at
+# most _LADDER_RECORD_ITEMS, and the whole at most _LADDER_RECORD_MAX
+# characters, past which the lists go and `trimmed` says so.
+_LADDER_RECORD_KEYS = ("file_rung", "entries", "op", "tool", "resources", "resources_n",
+                       "keys", "repo", "schedule", "group", "envs", "tickets_today",
+                       "calls", "bound", "outside", "standing", "error")
+_LADDER_RECORD_ITEMS = 20
+_LADDER_RECORD_MAX = 4096
 
 
 def _ladder_module() -> Any:
@@ -5046,6 +5058,44 @@ def _ladder(command: str, *, cwd: str | None, harness: str, scope: Any,
         return got, None
     except Exception as exc:  # noqa: BLE001 - no ladder, said on the line
         return None, exc
+
+
+def _ladder_record(a: Any) -> dict[str, Any] | None:
+    """The ladder's `authority` as its ledger line keeps it, or None when it
+    is not a mapping."""
+    from . import guard_ledger
+
+    def clean(x: Any, depth: int, items: int) -> Any:
+        if x is None or isinstance(x, (bool, int, float)):
+            return x
+        if isinstance(x, str):
+            return guard_ledger.redact(x, limit=200)
+        if depth > 4:
+            return None
+        if isinstance(x, (list, tuple)):
+            return [clean(i, depth + 1, items) for i in list(x)[:items]]
+        if isinstance(x, dict):
+            keys = _LADDER_RECORD_KEYS if depth == 1 else None
+            return {guard_ledger.redact(str(k), limit=60): clean(x[k], depth + 1, items)
+                    for k in list(x)[:_LADDER_RECORD_ITEMS]
+                    if keys is None or k in keys}
+        return guard_ledger.redact(str(x), limit=200)
+
+    def top(items: int) -> dict[str, Any]:
+        out = clean(a, 1, items)
+        if isinstance(out.get("calls"), list):
+            out["calls"] = [{k: c[k] for k in _LADDER_RECORD_KEYS if k in c}
+                            for c in out["calls"] if isinstance(c, dict)]
+        return out
+
+    if not isinstance(a, dict):
+        return None
+    for items in (_LADDER_RECORD_ITEMS, 5):
+        out = top(items)
+        if len(json.dumps(out, default=str)) <= _LADDER_RECORD_MAX:
+            return out
+    out = {k: x for k, x in top(1).items() if not isinstance(x, (list, dict))}
+    return {**out, "trimmed": True}
 
 
 def _with_ladder(v: dict[str, Any] | None, ladder: dict[str, Any] | None,
@@ -7486,6 +7536,10 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             # The authority ladder's class, rung and whether the call was
             # within its bound (seam S1), or why the ladder was not read.
             **({k: v.get(k) for k in _LADDER_FIELDS} if v.get("authority_class") else {}),
+            # What the ladder judged of the call (_ladder_record), which the
+            # workspace's evidence reads to tie a later removal to it.
+            **({"authority": rec} if v.get("authority_class")
+               and (rec := _ladder_record(v.get("authority"))) else {}),
             **({"authority_trouble": v["authority_trouble"]}
                if v.get("authority_trouble") else {}),
             "policy_version": _policy_version(),

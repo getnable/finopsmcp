@@ -124,6 +124,21 @@ of the same schedule within 30 days. Tickets are reversed by hand only.
 The ledger's verify-log still verifies the chain with a reversed line in it,
 and an ask's outcome (approved, declined, unknown) reads exactly as before.
 
+## What the ledger line records
+
+A verdict line in one of these classes carries `authority_class`, `rung` and
+`within_bound`, and `authority`: what the call acted on (its op and tool,
+the resources and tag keys, the repository, the schedules and group, the
+environments), the class's rung in the file, its bound and why the call was
+outside it. That is what a workspace reads to tie a later removal to the
+call. Each string in it is redacted like the command, and the whole is at
+most 4,096 characters: past that only its single values stay, and
+`trimmed` says so. The approvers stay in `authority.yaml`. A call the guard
+would have let through in silence is recorded as an allow line, so the
+post hook can link its outcome, even when no file names its class (rung
+`none`): it is judged exactly as before, and `nable guard reverse` can
+still name it.
+
 ## What the post hook records
 
 A verdict line in one of these classes gets a `ran` outcome whether it was
@@ -149,3 +164,7 @@ the safe side: nothing an older reader does with the file is wider than
 what it says. Upgrade every machine that reads the file before adding an
 entry for one of these classes, or keep purchase authority in a layer those
 machines read on its own.
+
+A machine that read the file while it ran an older release kept a parse of
+it that refused these entries. This release does not reuse that parse: it
+reads the file again, so an unchanged file is not held to the older answer.

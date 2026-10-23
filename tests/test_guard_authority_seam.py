@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import sys
 import types
 from datetime import UTC, datetime
@@ -217,6 +218,64 @@ def test_a_silent_call_in_a_class_is_recorded_as_an_allow_with_its_tool_use_id(l
     assert (rec["authority_class"], rec["rung"], rec["within_bound"]) == ("tag", "bounded",
                                                                          True)
     assert gl.verify()["ok"] is True
+
+
+AKIA_SHAPED = "AKIA" + "Q" * 16
+
+
+def _judged(**extra):
+    """What the real ladder records of a tag call it judged (its `authority`)."""
+    return {"file_rung": "bounded", "entries": ["authority:action_class:tag:k1"],
+            "op": "add", "tool": "aws ec2 create-tags",
+            "resources": ["i-0123456789abcdef0"], "resources_n": 1, "keys": ["team"],
+            "approvers": ["email:lead@acme.example"],
+            "bound": {"tag_keys": ["team"], "max_resources_per_call": 20}, **extra}
+
+
+def test_what_the_ladder_judged_goes_onto_the_line_for_the_box(ladder):
+    """The workspace's evidence reads a class line's `authority` (its op,
+    resources, tag keys, schedules, group, repo and environments) to tie a
+    later removal to it as a reversal. The line keeps those, redacted, and
+    not the approvers, which authority.yaml already holds."""
+    ladder({**_answer("allow", rung="bounded", within=True),
+            "authority": _judged(group=f"nightly {AKIA_SHAPED}")})
+    assert g.gate_command(TAG) is None
+    rec = _records()[-1]
+    a = rec["authority"]
+    assert (a["op"], a["resources"], a["keys"], a["file_rung"]) == (
+        "add", ["i-0123456789abcdef0"], ["team"], "bounded")
+    assert a["bound"] == {"tag_keys": ["team"], "max_resources_per_call": 20}
+    assert "approvers" not in a
+    assert re.search(r"(?<![\w.@-])lead@acme\.example(?![\w-])", json.dumps(rec)) is None
+    assert AKIA_SHAPED not in json.dumps(rec) and a["group"].startswith("nightly ")
+    assert gl.verify()["ok"] is True
+
+
+def test_the_ladders_record_on_the_line_is_bounded(ladder):
+    arns = [f"arn:aws:ec2:us-east-1:123456789012:instance/i-{n:017x}" for n in range(20)]
+    ladder({**_answer("ask", rung="bounded", within=False),
+            "authority": {**_judged(resources=arns, resources_n=20),
+                          "calls": [_judged(resources=arns[:2])],
+                          "unknown_field": "y" * 5000}})
+    assert g.gate_command(TAG)["decision"] == "ask"
+    a = _records()[-1]["authority"]
+    assert a["resources"] == arns and a["calls"][0]["resources"] == arns[:2]
+    assert "unknown_field" not in a and "approvers" not in a["calls"][0]
+    long = [f"{arn}/{'z' * 150}" for arn in arns]
+    ladder({**_answer("ask", rung="bounded", within=False),
+            "authority": {"file_rung": "bounded", "outside": ["x" * 5000],
+                          "calls": [_judged(resources=long, resources_n=20)] * 5}})
+    assert g.gate_command(TAG)["decision"] == "ask"
+    a = _records()[-1]["authority"]
+    assert len(json.dumps(a)) <= g._LADDER_RECORD_MAX
+    assert a == {"file_rung": "bounded", "trimmed": True}
+
+
+def test_an_authority_record_out_of_shape_leaves_the_line_without_it(ladder):
+    ladder({**_answer("allow", rung="bounded", within=True), "authority": ["not", "a", "map"]})
+    assert g.gate_command(TAG) is None
+    rec = _records()[-1]
+    assert rec["authority_class"] == "tag" and "authority" not in rec
 
 
 def test_a_call_in_no_class_records_nothing_new(ladder):
@@ -442,3 +501,66 @@ def test_a_raising_standing_is_said_as_not_kept(laptop, monkeypatch):
     write_ledger(records(2))
     result = cc.send(cc.build(agent_usage=False), BOX, KEY, opener=AuthorityBox())
     assert result["authority"] == {"kept": False, "why": "not kept (ValueError)"}
+
+
+# ── S1 with the ladder this checkout ships ───────────────────────────────────
+
+@pytest.fixture
+def real_ladder(tmp_path, monkeypatch):
+    """finops.guard_authority as installed, judging the authority.yaml that
+    write() puts in FINOPS_ORG_DIR, at the ladder test's fixed time."""
+    from finops import guard_authority
+    from tests.test_guard_authority_ladder import NOW, _Fixed
+    d = tmp_path / "org"
+    d.mkdir()
+    monkeypatch.setenv("FINOPS_ORG_DIR", str(d))
+    monkeypatch.setattr(guard_authority, "_now", lambda: NOW)
+    monkeypatch.setattr(gl, "datetime", _Fixed)
+
+    def write(*entries):
+        (d / "authority.yaml").write_text("# nable org model v1\n" + "".join(entries))
+    return write
+
+
+def test_the_guard_records_what_the_real_ladder_judged(real_ladder):
+    from tests.test_guard_authority_ladder import entry
+    real_ladder(entry("tag", "bounded", tag_keys=["team"]))
+    assert g.gate_command(TAG) is None
+    rec = _records()[-1]
+    assert (rec["decision"], rec["authority_class"], rec["rung"], rec["within_bound"]) == (
+        "allow", "tag", "bounded", True)
+    assert rec["authority"]["op"] == "add" and rec["authority"]["keys"] == ["team"]
+    assert rec["authority"]["resources"] == ["i-0123456789abcdef0"]
+    owner = TAG.replace("Key=team", "Key=owner")
+    v = g.gate_command(owner)
+    assert (v["decision"], v["within_bound"]) == ("ask", False)
+    assert _records()[-1]["authority"]["outside"]
+
+
+def test_the_real_ladder_counts_the_tickets_the_guard_recorded(real_ladder):
+    from tests.test_guard_authority_ladder import TICKET, entry
+    real_ladder(entry("ticket", "bounded", max_per_day=2, repos=["acme/payments"]))
+    assert g.gate_command(TICKET) is None
+    assert g.gate_command(TICKET) is None
+    v = g.gate_command(TICKET)
+    assert (v["decision"], v["authority_class"], v["within_bound"]) == ("ask", "ticket", False)
+    assert [r["decision"] for r in _records() if r.get("authority_class") == "ticket"] == [
+        "allow", "allow", "ask"]
+
+
+def test_with_no_authority_yaml_a_ticket_tool_is_let_through_and_recorded(real_ladder,
+                                                                           monkeypatch):
+    """No file names the class: the call is let through in silence, as
+    before, and recorded as an allow line at rung none, so `nable guard
+    reverse` can name it and a reversal can reach the workspace."""
+    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+    [rec] = _records()
+    assert (rec["decision"], rec["authority_class"], rec["rung"]) == ("allow", "ticket",
+                                                                     "none")
+    monkeypatch.setattr(ai_budget, "status", lambda **_: {
+        "verdict": ai_budget.BUDGET_OVER, "verdict_basis": "tokens", "pct_of_budget": 1.5,
+        "billable_tokens_mtd": 15, "budget": {"monthly_tokens": 10}})
+    v = g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    assert (v["decision"], v["action_type"]) == ("ask", "ai_budget")
+    stop, line = _records()[1:]
+    assert (stop["action_type"], line["authority_class"]) == ("ai_budget", "ticket")

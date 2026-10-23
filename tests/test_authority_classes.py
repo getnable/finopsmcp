@@ -24,6 +24,7 @@ purchase kind's answer. What has to hold:
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -321,6 +322,68 @@ def test_the_core_reads_each_corpus_file_ladder_as_expected(tmp_path, monkeypatc
     got = store.load(d, legacy=False).ladder(today=date.fromisoformat(doc["today"]))
     view = {c: {k: v[k] for k in LADDER_KEEP} for c, v in got["classes"].items()}
     assert view == doc["files"][name]["ladder"]
+
+
+def _older_parse(path: Path) -> None:
+    """Rewrite the parse cache entry for `path` as code from before the
+    classes kept it: every class entry refused by subject.id, holding every
+    class (its class unreadable to that code), with the version it wrote."""
+    import yaml
+    raw = json.loads(json.dumps(yaml.safe_load(path.read_text()), default=str))
+    cached = store._cache_file(path)
+    doc = json.loads(cached.read_text())
+    keep = [i for i, r in enumerate(raw) if r["subject"]["id"] not in model.NO_MONEY_CLASSES]
+    gone = [i for i in range(len(raw)) if i not in keep]
+    why = ["subject.id: not one of the purchase kinds"] * len(gone)
+    doc.update(v=3, facts=[doc["facts"][i] for i in keep],
+               unparsed=[["raw", raw[i], []] for i in gone], why=why,
+               warnings=[f"authority.yaml[{i}]: skipped, {w} (it holds every class at recommend)"
+                         for i, w in zip(gone, why, strict=True)],
+               refusals=[{"file": str(path), "entry": i, "field": "subject.id",
+                          "message": why[0], "class": None, "holds": "every class"}
+                         for i in gone])
+    cached.write_text(json.dumps(doc))
+
+
+def test_a_parse_made_before_the_classes_is_not_reused(tmp_path, monkeypatch):
+    """A machine that read a teammate's authority.yaml before it knew the
+    classes kept a parse that refused them, and so held every purchase kind
+    at recommend. After the upgrade the same file must be read again, not
+    answered from that parse."""
+    monkeypatch.delenv("FINOPS_ORG_DIR", raising=False)
+    d = tmp_path / "org"
+    d.mkdir()
+    shutil.copy(CORPUS / "28_classes_each_rung.yaml", d / "authority.yaml")
+    assert not store.load(d, legacy=False).refused
+    _older_parse(d / "authority.yaml")
+    m = store.load(d, legacy=False)
+    assert m.refused == []
+    assert m.authority(today=TODAY)["classes"]["rds_ri"]["rung"] == "approve_each"
+    assert m.ladder(today=TODAY)["classes"]["ticket"]["rung"] == "approve_each"
+
+
+_FIRST_ENTRY = re.compile(r"^authority\.yaml\[0\]: skipped, ")
+
+
+def test_a_refused_class_entry_warns_that_it_holds_approve_each(tmp_path, monkeypatch):
+    monkeypatch.delenv("FINOPS_ORG_DIR", raising=False)
+    d = tmp_path / "org"
+    d.mkdir()
+    shutil.copy(CORPUS / "30_class_bad_bounds.yaml", d / "authority.yaml")
+    warned = [w for w in store.load(d, legacy=False).warnings if _FIRST_ENTRY.match(w)]
+    assert len(warned) == 1 and warned[0].endswith("(it holds tag at approve_each)")
+    assert not [w for w in store.load(d, legacy=False).warnings if "tag at recommend" in w]
+
+
+def test_a_typo_class_warns_what_it_holds_for_each_kind_of_class(tmp_path, monkeypatch):
+    monkeypatch.delenv("FINOPS_ORG_DIR", raising=False)
+    d = tmp_path / "org"
+    d.mkdir()
+    shutil.copy(CORPUS / "06_typo_class.yaml", d / "authority.yaml")
+    warned = [w for w in store.load(d, legacy=False).warnings if _FIRST_ENTRY.match(w)]
+    assert len(warned) == 1 and warned[0].endswith(
+        "(it holds every purchase kind at recommend and every class that moves no money "
+        "at approve_each)")
 
 
 def test_the_corpus_covers_each_class_at_each_rung_and_each_refusal():
