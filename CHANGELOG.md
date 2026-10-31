@@ -4,6 +4,13 @@ All notable changes to finops-mcp (nable).
 
 ## Unreleased
 
+- **`nable lens`.** It hands over to nable-lens, a separate open-source package built on
+  this one. nable-lens draws what your agents talk to (models, MCP servers, tools, the
+  programs their shell runs, hosts and cloud changes) and what each line costs, and puts
+  a budget on any line. Without the package, `nable lens` says how to install it. It
+  answers before the welcome banner and telemetry, because `nable lens hook` prints JSON
+  that a harness reads.
+
 Coding-agent budgets a team writes down, held at the agent's next call, and
 coding-agent spend a person can carry into a paid workspace.
 

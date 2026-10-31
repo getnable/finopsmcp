@@ -3827,12 +3827,31 @@ def _explains_refusals(fn):
     return run
 
 
+def _lens(args: list[str]) -> int:
+    """Hand `nable lens ...` to nable-lens when it is installed; otherwise say
+    how to get it. Never imported unless asked for."""
+    try:
+        from nable_lens.cli import main as lens_main
+    except ImportError:
+        print("nable lens is a separate package: install it with "
+              "`uv tool install nable-lens` (or `pipx install nable-lens`), "
+              "or run it once with `uvx --from nable-lens nable-lens ui`.",
+              file=__import__("sys").stderr)
+        return 2
+    return int(lens_main(args) or 0)
+
+
 @_explains_refusals
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
         args = _sys.argv[1:]
 
+    # `nable lens ...` is nable-lens's command line (the agent graph and its
+    # budgets, a separate package built on this one). Its hook prints JSON a
+    # harness reads, so it answers before any banner, telemetry or parsing.
+    if args[:1] == ["lens"]:
+        raise SystemExit(_lens(args[1:]))
     # The guard hook (`guard hook`, and the plugin's `guard hook --via
     # plugin`) runs on every Bash, MCP and file-edit tool call, and is often
     # done before it judges anything: the guard is off, a settings hook judges
@@ -3955,7 +3974,7 @@ def main(args: list[str] | None = None) -> None:
             ("saas & observability", ["datadog", "newrelic", "databricks", "snowflake",
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
-            ("editor & agents", ["claude", "guard", "agents"]),
+            ("editor & agents", ["claude", "guard", "agents", "lens"]),
             ("account & billing", ["login", "logout", "license", "license-status", "whoami",
                                    "plan", "credits", "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra", "pack"]),
@@ -4192,6 +4211,9 @@ def main(args: list[str] | None = None) -> None:
     connect_p.add_argument("--scopes", action="store_true",
                            help="Print the tightest credential each provider can be given, and what nable calls with it")
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
+    # Answered in main() before parsing; registered so help lists it.
+    sub.add_parser("lens", help="What your agents talk to and what it costs, with a budget on any "
+                                "line (needs nable-lens)", add_help=False)
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     doctor_p = sub.add_parser("doctor", help="Check all connectors and credentials (alias for finops-doctor)")
